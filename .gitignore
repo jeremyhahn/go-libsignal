@@ -1,0 +1,17 @@
+# Go build artifacts
+*.test
+*.prof
+*.exe
+
+# Coverage
+coverage/
+*.out
+
+# Build and test logs
+*.log
+
+# AI tooling
+.serena
+CLAUDE.md
+go.work
+go.work.sum

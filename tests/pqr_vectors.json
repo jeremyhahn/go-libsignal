@@ -1,0 +1,55 @@
+{
+  "description": "SPQR session integration test vectors: MessageKeys HKDF derivation with and without PQR salt",
+  "vectors": [
+    {
+      "description": "MessageKeys derivation with no PQR salt (V0/pre-PQR session)",
+      "chain_key_seed": "8ab72d6f4cc5ac0d387eaf463378ddb28edd07385b1cb01250c715982e7ad48f",
+      "pqr_key": null,
+      "counter": 0,
+      "cipher_key": "bf51e9d75e0e31031051f82a2491ffc084fa298b7793bd9db620056febf45217",
+      "mac_key": "c6c77d6a73a354337a56435e34607dfe48e3ace14e77314dc6abc172e7a7030b",
+      "iv": "afa8207986b692a116d4b40bbff72d6c",
+      "input_key_material": "fae95235beda3d2e00b41cf2e655dada2405b4388cae0d251a51bcd2ebdd2e40"
+    },
+    {
+      "description": "MessageKeys derivation with PQR salt (32 bytes of 0x41)",
+      "chain_key_seed": "8ab72d6f4cc5ac0d387eaf463378ddb28edd07385b1cb01250c715982e7ad48f",
+      "pqr_key": "4141414141414141414141414141414141414141414141414141414141414141",
+      "counter": 0,
+      "cipher_key": "d290939f26843f51dbc6a90d0a8ae7a9f5c91aec64af6f1a83722aba69c4096c",
+      "mac_key": "a4ffd830869a26217e3a97973a96498a094e78cbcafab7df44ca11d6f2383662",
+      "iv": "11e55b475452d1f29c22b7c5ab76cee9",
+      "input_key_material": "fae95235beda3d2e00b41cf2e655dada2405b4388cae0d251a51bcd2ebdd2e40"
+    },
+    {
+      "description": "MessageKeys derivation with realistic PQR salt",
+      "chain_key_seed": "8ab72d6f4cc5ac0d387eaf463378ddb28edd07385b1cb01250c715982e7ad48f",
+      "pqr_key": "a3b5c7d9e1f20314a5b6c8d0e2f40516a7b9cbddeeff0112a3b5c7d9e1f20314",
+      "counter": 0,
+      "cipher_key": "44232df99a7613ac98644861b292858bb2cacc99af72ab620c53cb1dd2bbce2d",
+      "mac_key": "39096e228f767d3bb03af3e28d0ecb7d3e8f84133f5868a98c6ceaa015f251d6",
+      "iv": "19836c7754af8ef5e14abff4a95f2a11",
+      "input_key_material": "fae95235beda3d2e00b41cf2e655dada2405b4388cae0d251a51bcd2ebdd2e40"
+    },
+    {
+      "description": "MessageKeys derivation with different chain key, counter=5, PQR salt",
+      "chain_key_seed": "ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00",
+      "pqr_key": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "counter": 5,
+      "cipher_key": "9e353c920f93137358e2dd4a57cb1fc99a4866e510ebed120adbfbeb700dd021",
+      "mac_key": "75747a693f2ae1d7b0c0d0e9ceb9d3de3b2b8f6bda5760cad47985ef73fccf34",
+      "iv": "ed23b9cfa9461a692d3f3aa7d8f391e2",
+      "input_key_material": "2ee3c84fe1dc25873fc018aeb1f4814fca861e7ea6ad722670767ba1c86ea323"
+    },
+    {
+      "description": "MessageKeys derivation with empty PQR salt (empty slice vs nil)",
+      "chain_key_seed": "8ab72d6f4cc5ac0d387eaf463378ddb28edd07385b1cb01250c715982e7ad48f",
+      "pqr_key": "",
+      "counter": 0,
+      "cipher_key": "bf51e9d75e0e31031051f82a2491ffc084fa298b7793bd9db620056febf45217",
+      "mac_key": "c6c77d6a73a354337a56435e34607dfe48e3ace14e77314dc6abc172e7a7030b",
+      "iv": "afa8207986b692a116d4b40bbff72d6c",
+      "input_key_material": "fae95235beda3d2e00b41cf2e655dada2405b4388cae0d251a51bcd2ebdd2e40"
+    }
+  ]
+}
