@@ -4,7 +4,39 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/gtank/ristretto255"
 )
+
+// TestCreateProof_MismatchedHashReturnsError ensures that createProof returns a
+// typed *CryptoError (rather than panicking) when the underlying poksho proof
+// fails self-verification. This happens when the supplied hashPoint does not
+// correspond to the provided scalars, so the freshly created proof cannot
+// verify against it and Prove reports an error.
+func TestCreateProof_MismatchedHashReturnsError(t *testing.T) {
+	u, err := New("alice.42")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// A hashPoint that does not match u.scalars (the basepoint generator).
+	mismatched := ristretto255.NewGeneratorElement()
+	var randomness [32]byte
+
+	_, err = createProof(u.scalars, mismatched, mismatched.Bytes(), randomness)
+	if err == nil {
+		t.Fatal("expected error from createProof with mismatched hashPoint")
+	}
+	var ce *CryptoError
+	if !errors.As(err, &ce) {
+		t.Fatalf("expected *CryptoError, got %T: %v", err, err)
+	}
+	if !strings.Contains(ce.Error(), "failed to create proof") {
+		t.Errorf("Error() = %q must mention proof creation failure", ce.Error())
+	}
+	if ce.Unwrap() == nil {
+		t.Error("CryptoError must wrap the underlying poksho error")
+	}
+}
 
 // TestCryptoError_Error exercises the CryptoError.Error() method with and
 // without a wrapped inner error.

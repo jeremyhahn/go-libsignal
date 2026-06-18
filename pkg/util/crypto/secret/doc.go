@@ -27,8 +27,8 @@
 //
 // Or in /etc/security/limits.conf:
 //
-//	*  hard  memlock  unlimited
-//	*  soft  memlock  unlimited
+//   - hard  memlock  unlimited
+//   - soft  memlock  unlimited
 //
 // # Panic recovery
 //

@@ -346,3 +346,110 @@ func TestSeedMaterial_RoundTrip(t *testing.T) {
 		t.Fatalf("Index round-trip mismatch: got %d", reconstructed.Index())
 	}
 }
+
+// TestNewSeedOnlyKeys verifies that NewSeedOnlyKeys creates a Keys with
+// seed material set and nil cipher/mac/iv, matching Rust's
+// MessageKeyGenerator::Seed variant at rust/protocol/src/ratchet/keys.rs:29.
+func TestNewSeedOnlyKeys(t *testing.T) {
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i + 1)
+	}
+	keys := NewSeedOnlyKeys(7, seed)
+	if keys == nil {
+		t.Fatal("expected non-nil Keys")
+	}
+	if keys.Index() != 7 {
+		t.Fatalf("expected index 7, got %d", keys.Index())
+	}
+	if !bytes.Equal(keys.SeedMaterial(), seed) {
+		t.Fatal("SeedMaterial mismatch in NewSeedOnlyKeys")
+	}
+	// cipher/mac/iv must be nil in seed-only form.
+	if keys.cipherKey != nil {
+		t.Fatal("cipherKey must be nil for seed-only key")
+	}
+	if keys.macKey != nil {
+		t.Fatal("macKey must be nil for seed-only key")
+	}
+	if keys.iv != nil {
+		t.Fatal("iv must be nil for seed-only key")
+	}
+}
+
+// TestNewSeedOnlyKeys_NilInput verifies that NewSeedOnlyKeys with nil seed
+// produces a key with empty (but non-nil) seed material, since
+// make([]byte, 0) is non-nil and secret.New accepts empty slices.
+func TestNewSeedOnlyKeys_NilInput(t *testing.T) {
+	// nil seed is silently treated as empty seed (len 0) because of the copy.
+	keys := NewSeedOnlyKeys(0, nil)
+	if keys == nil {
+		t.Fatal("expected non-nil Keys even for nil seed input")
+	}
+	// SeedMaterial returns the guarded empty slice; len should be 0.
+	if len(keys.SeedMaterial()) != 0 {
+		t.Fatalf("expected empty SeedMaterial for nil seed input, got %v", keys.SeedMaterial())
+	}
+}
+
+// TestNewStructFromKeys_SeedOnlyForm verifies that NewStructFromKeys writes
+// seed-only form (cipher/mac/iv empty) when seed material is present.
+// Matches Rust MessageKeyGenerator::into_pb Seed variant at
+// rust/protocol/src/ratchet/keys.rs:54-60.
+func TestNewStructFromKeys_SeedOnlyForm(t *testing.T) {
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i + 10)
+	}
+	keys := NewSeedOnlyKeys(3, seed)
+	structure := NewStructFromKeys(keys)
+
+	if len(structure.CipherKey) != 0 {
+		t.Fatalf("expected empty CipherKey in seed-only form, got %v", structure.CipherKey)
+	}
+	if len(structure.MacKey) != 0 {
+		t.Fatalf("expected empty MacKey in seed-only form, got %v", structure.MacKey)
+	}
+	if len(structure.IV) != 0 {
+		t.Fatalf("expected empty IV in seed-only form, got %v", structure.IV)
+	}
+	if !bytes.Equal(structure.SeedMaterial, seed) {
+		t.Fatal("SeedMaterial mismatch in seed-only structure")
+	}
+	if structure.Index != 3 {
+		t.Fatalf("expected index 3, got %d", structure.Index)
+	}
+}
+
+// TestNewKeysFromStruct_SeedOnlyBranch verifies that NewKeysFromStruct returns
+// a seed-only Keys (nil cipher/mac/iv) when SeedMaterial is non-empty and
+// cipher/mac/iv are absent. Matches Rust MessageKeyGenerator::from_pb Seed branch
+// at rust/protocol/src/ratchet/keys.rs:85-86.
+func TestNewKeysFromStruct_SeedOnlyBranch(t *testing.T) {
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i + 20)
+	}
+	structure := &KeysStructure{
+		Index:        9,
+		SeedMaterial: append([]byte(nil), seed...),
+		// CipherKey, MacKey, IV intentionally absent (seed-only form).
+	}
+	keys := NewKeysFromStruct(structure)
+
+	if keys.cipherKey != nil {
+		t.Fatal("cipherKey must be nil in seed-only branch of NewKeysFromStruct")
+	}
+	if keys.macKey != nil {
+		t.Fatal("macKey must be nil in seed-only branch of NewKeysFromStruct")
+	}
+	if keys.iv != nil {
+		t.Fatal("iv must be nil in seed-only branch of NewKeysFromStruct")
+	}
+	if !bytes.Equal(keys.SeedMaterial(), seed) {
+		t.Fatal("SeedMaterial mismatch from seed-only branch")
+	}
+	if keys.Index() != 9 {
+		t.Fatalf("expected index 9, got %d", keys.Index())
+	}
+}

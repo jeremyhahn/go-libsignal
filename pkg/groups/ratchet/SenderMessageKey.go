@@ -36,12 +36,16 @@ func NewSenderMessageKey(iteration uint32, seed []byte) (*SenderMessageKey, erro
 
 	ivSecret, err := secret.New(ivCopy)
 	if err != nil {
+		// coverage-exempt: defensive OOM panic-recovery for memguard.NewBufferFromBytes;
+		// cannot be unit-tested without modifying the host (see CLAUDE.md).
 		return nil, err
 	}
 
 	cipherKeySecret, err := secret.New(cipherKeyCopy)
 	if err != nil {
 		ivSecret.Destroy()
+		// coverage-exempt: defensive OOM panic-recovery for memguard.NewBufferFromBytes;
+		// cannot be unit-tested without modifying the host (see CLAUDE.md).
 		return nil, err
 	}
 
@@ -49,6 +53,8 @@ func NewSenderMessageKey(iteration uint32, seed []byte) (*SenderMessageKey, erro
 	if err != nil {
 		ivSecret.Destroy()
 		cipherKeySecret.Destroy()
+		// coverage-exempt: defensive OOM panic-recovery for memguard.NewBufferFromBytes;
+		// cannot be unit-tested without modifying the host (see CLAUDE.md).
 		return nil, err
 	}
 
@@ -77,6 +83,8 @@ func NewSenderMessageKeyFromStruct(structure *SenderMessageKeyStructure) *Sender
 		copy(cp, structure.IV)
 		s, err := secret.New(cp)
 		if err != nil {
+			// coverage-exempt: defensive OOM panic-recovery for memguard.NewBufferFromBytes;
+			// cannot be unit-tested without modifying the host (see CLAUDE.md).
 			panic("ratchet: failed to allocate guarded memory for IV: " + err.Error())
 		}
 		mk.iv = s
@@ -88,6 +96,8 @@ func NewSenderMessageKeyFromStruct(structure *SenderMessageKeyStructure) *Sender
 		s, err := secret.New(cp)
 		if err != nil {
 			mk.Zeroize()
+			// coverage-exempt: defensive OOM panic-recovery for memguard.NewBufferFromBytes;
+			// cannot be unit-tested without modifying the host (see CLAUDE.md).
 			panic("ratchet: failed to allocate guarded memory for cipher key: " + err.Error())
 		}
 		mk.cipherKey = s
@@ -99,6 +109,8 @@ func NewSenderMessageKeyFromStruct(structure *SenderMessageKeyStructure) *Sender
 		s, err := secret.New(cp)
 		if err != nil {
 			mk.Zeroize()
+			// coverage-exempt: defensive OOM panic-recovery for memguard.NewBufferFromBytes;
+			// cannot be unit-tested without modifying the host (see CLAUDE.md).
 			panic("ratchet: failed to allocate guarded memory for seed: " + err.Error())
 		}
 		mk.seed = s

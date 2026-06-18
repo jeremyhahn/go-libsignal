@@ -645,3 +645,99 @@ func TestEncryptFramesOnlyIVWriteSucceeds(t *testing.T) {
 		t.Fatal("expected error on ciphertext write")
 	}
 }
+
+// TestSkipProtoField exercises all branches of skipProtoField.
+func TestSkipProtoField(t *testing.T) {
+	t.Run("varint success", func(t *testing.T) {
+		// Single-byte varint 0x01.
+		got, err := skipProtoField([]byte{0x01, 0xAA, 0xBB}, 0)
+		if err != nil {
+			t.Fatalf("expected success for varint wire type, got: %v", err)
+		}
+		if len(got) != 2 {
+			t.Errorf("remaining bytes = %d, want 2", len(got))
+		}
+	})
+
+	t.Run("varint overflow (empty buffer)", func(t *testing.T) {
+		_, err := skipProtoField([]byte{}, 0)
+		if err == nil {
+			t.Fatal("expected error for empty buffer with varint type")
+		}
+	})
+
+	t.Run("64-bit success", func(t *testing.T) {
+		buf := make([]byte, 10)
+		got, err := skipProtoField(buf, 1)
+		if err != nil {
+			t.Fatalf("expected success for 64-bit wire type, got: %v", err)
+		}
+		if len(got) != 2 {
+			t.Errorf("remaining bytes = %d, want 2", len(got))
+		}
+	})
+
+	t.Run("64-bit too short", func(t *testing.T) {
+		_, err := skipProtoField([]byte{0x01, 0x02}, 1)
+		if err == nil {
+			t.Fatal("expected error for 64-bit with only 2 bytes")
+		}
+	})
+
+	t.Run("length-delimited success", func(t *testing.T) {
+		// Varint length=2, followed by 2 payload bytes, then 1 extra byte.
+		buf := []byte{0x02, 0xAA, 0xBB, 0xCC}
+		got, err := skipProtoField(buf, 2)
+		if err != nil {
+			t.Fatalf("expected success for length-delimited wire type, got: %v", err)
+		}
+		if len(got) != 1 {
+			t.Errorf("remaining bytes = %d, want 1", len(got))
+		}
+	})
+
+	t.Run("length-delimited varint overflow", func(t *testing.T) {
+		_, err := skipProtoField([]byte{}, 2)
+		if err == nil {
+			t.Fatal("expected error for empty buffer with length-delimited type")
+		}
+	})
+
+	t.Run("length-delimited payload too short", func(t *testing.T) {
+		// Varint says 10 bytes but only 3 follow.
+		buf := []byte{0x0A, 0x01, 0x02, 0x03}
+		_, err := skipProtoField(buf, 2)
+		if err == nil {
+			t.Fatal("expected error when payload shorter than declared length")
+		}
+	})
+
+	t.Run("32-bit success", func(t *testing.T) {
+		buf := make([]byte, 6)
+		got, err := skipProtoField(buf, 5)
+		if err != nil {
+			t.Fatalf("expected success for 32-bit wire type, got: %v", err)
+		}
+		if len(got) != 2 {
+			t.Errorf("remaining bytes = %d, want 2", len(got))
+		}
+	})
+
+	t.Run("32-bit too short", func(t *testing.T) {
+		_, err := skipProtoField([]byte{0x01, 0x02}, 5)
+		if err == nil {
+			t.Fatal("expected error for 32-bit with only 2 bytes")
+		}
+	})
+
+	t.Run("unknown wire type", func(t *testing.T) {
+		original := []byte{0x01, 0x02, 0x03}
+		got, err := skipProtoField(original, 99)
+		if err == nil {
+			t.Fatal("expected error for unknown wire type")
+		}
+		if len(got) != len(original) {
+			t.Error("original bytes should be returned unchanged for unknown wire type")
+		}
+	})
+}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gtank/ristretto255"
 	"github.com/jeremyhahn/go-libsignal/pkg/crypto/elligator"
+	"github.com/jeremyhahn/go-libsignal/pkg/poksho"
 	"github.com/jeremyhahn/go-libsignal/pkg/zkcredential"
 )
 
@@ -34,12 +35,12 @@ type LegacyCredentialConfig struct {
 // credential type draws a specific number of y-scalars from the SHO
 // and uses a specific number of Gy points.
 var (
-	LegacyAuthCredentialConfig              = LegacyCredentialConfig{StorageLen: 4, NumAttrs: 3}
-	LegacyProfileKeyCredentialConfig        = LegacyCredentialConfig{StorageLen: 4, NumAttrs: 4}
-	LegacyReceiptCredentialConfig           = LegacyCredentialConfig{StorageLen: 4, NumAttrs: 2}
-	LegacyPNICredentialConfig               = LegacyCredentialConfig{StorageLen: 6, NumAttrs: 6}
+	LegacyAuthCredentialConfig               = LegacyCredentialConfig{StorageLen: 4, NumAttrs: 3}
+	LegacyProfileKeyCredentialConfig         = LegacyCredentialConfig{StorageLen: 4, NumAttrs: 4}
+	LegacyReceiptCredentialConfig            = LegacyCredentialConfig{StorageLen: 4, NumAttrs: 2}
+	LegacyPNICredentialConfig                = LegacyCredentialConfig{StorageLen: 6, NumAttrs: 6}
 	LegacyExpiringProfileKeyCredentialConfig = LegacyCredentialConfig{StorageLen: 5, NumAttrs: 5}
-	LegacyAuthWithPNICredentialConfig       = LegacyCredentialConfig{StorageLen: 5, NumAttrs: 5}
+	LegacyAuthWithPNICredentialConfig        = LegacyCredentialConfig{StorageLen: 5, NumAttrs: 5}
 )
 
 // SignatureKeyPair is a key pair for Schnorr-like signatures.
@@ -74,9 +75,29 @@ func (kp *SignatureKeyPair) GetPublicKey() *SignaturePublicKey {
 	return &SignaturePublicKey{PublicKey: kp.PublicKey}
 }
 
+// Sign produces a Schnorr-style signature over message using the
+// supplied 32-byte synthetic randomness. The output is binding to both
+// message and the keypair's public key.
+//
+// Mirrors Rust libsignal's zkgroup::SignatureKeyPair::sign at
+// rust/zkgroup/src/crypto/signature.rs. Output bytes are byte-identical
+// for the same inputs.
+func (kp *SignatureKeyPair) Sign(message, randomness []byte) ([]byte, error) {
+	return poksho.Sign(kp.SigningKey, kp.PublicKey, message, randomness)
+}
+
 // SignaturePublicKey is a public key used to verify signatures.
 type SignaturePublicKey struct {
 	PublicKey *ristretto255.Element
+}
+
+// Verify checks a Schnorr-style signature produced by SignatureKeyPair.Sign.
+// Returns nil on success, a typed proof error otherwise.
+//
+// Mirrors Rust libsignal's zkgroup::PublicKey::verify_signature at
+// rust/zkgroup/src/crypto/signature.rs.
+func (pk *SignaturePublicKey) Verify(message, signature []byte) error {
+	return poksho.Verify(signature, pk.PublicKey, message)
 }
 
 // TimestampStruct wraps a Timestamp for use in credential attribute computations.
@@ -183,9 +204,17 @@ type ProfileKeyEncryptionCiphertext = zkcredential.Ciphertext
 
 // UIDStruct represents a user identifier as ristretto255 points for
 // attribute-based credential operations.
+//
+// Mirrors Rust's UidStruct in zkgroup/src/crypto/uid_struct.rs. The
+// raw_uuid_bytes field is serialized as the first 16 bytes of the 80-byte
+// bincode wire format: bytes:16 ‖ M1:32 ‖ M2:32.
 type UIDStruct struct {
-	M1 *ristretto255.Element
-	M2 *ristretto255.Element
+	// RawUUIDBytes holds the raw 16-byte UUID from the ServiceID.
+	// This field is serialized first in the bincode wire format, matching
+	// the Rust #[serde(rename = "bytes")] raw_uuid_bytes field.
+	RawUUIDBytes [16]byte
+	M1           *ristretto255.Element
+	M2           *ristretto255.Element
 }
 
 // NewUIDStructFromServiceID creates a UIDStruct from a ServiceID.
@@ -195,6 +224,8 @@ type UIDStruct struct {
 //
 // M2 is derived via Lizard encoding of the raw UUID bytes, which provides
 // a reversible mapping from 16-byte data to a Ristretto255 point.
+//
+// Mirrors Rust's UidStruct::from_service_id in zkgroup/src/crypto/uid_struct.rs.
 func NewUIDStructFromServiceID(sid ServiceID) *UIDStruct {
 	// ZK-C1: Use correct SHO label matching Rust uid_struct.rs:46
 	sho := zkcredential.NewShoHmacSha256Ext("Signal_ZKGroup_20200424_UID_CalcM1")
@@ -203,7 +234,52 @@ func NewUIDStructFromServiceID(sid ServiceID) *UIDStruct {
 	m1 := sho.MustGetPoint()
 	// ZK-C2: M2 uses Lizard encoding of the raw UUID bytes
 	m2 := LizardEncode(sid.RawUUID)
-	return &UIDStruct{M1: m1, M2: m2}
+	return &UIDStruct{
+		RawUUIDBytes: sid.RawUUID,
+		M1:           m1,
+		M2:           m2,
+	}
+}
+
+// UIDStructLen is the byte length of a serialized UIDStruct:
+// 16 (raw UUID bytes) + 32 (M1) + 32 (M2).
+const UIDStructLen = 80
+
+// Serialize encodes the UIDStruct into 80 bytes:
+// bytes:16 ‖ M1:32 ‖ M2:32.
+//
+// This matches the Rust bincode wire format for UidStruct with
+// serde field order: raw_uuid_bytes, M1, M2.
+func (u *UIDStruct) Serialize() []byte {
+	out := make([]byte, 0, UIDStructLen)
+	out = append(out, u.RawUUIDBytes[:]...)
+	out = append(out, u.M1.Bytes()...)
+	out = append(out, u.M2.Bytes()...)
+	return out
+}
+
+// DeserializeUIDStruct decodes a UIDStruct from exactly 80 bytes.
+// The layout is: bytes:16 ‖ M1:32 ‖ M2:32.
+func DeserializeUIDStruct(data []byte) (*UIDStruct, error) {
+	if len(data) != UIDStructLen {
+		return nil, &ErrInvalidCredentialLength{Got: len(data), Want: UIDStructLen}
+	}
+	var rawUUID [16]byte
+	copy(rawUUID[:], data[:16])
+
+	m1 := ristretto255.NewIdentityElement()
+	if _, err := m1.SetCanonicalBytes(data[16:48]); err != nil {
+		return nil, &ZkGroupDeserializationFailure{TypeName: "UIDStruct M1"}
+	}
+	m2 := ristretto255.NewIdentityElement()
+	if _, err := m2.SetCanonicalBytes(data[48:80]); err != nil {
+		return nil, &ZkGroupDeserializationFailure{TypeName: "UIDStruct M2"}
+	}
+	return &UIDStruct{
+		RawUUIDBytes: rawUUID,
+		M1:           m1,
+		M2:           m2,
+	}, nil
 }
 
 // LizardEncode maps 16 bytes of data to a Ristretto255 point using the Lizard
@@ -414,9 +490,9 @@ type ProfileKeyCommitmentInternal struct {
 
 // ProfileKeyCommitmentWithSecretNonce includes the secret nonce.
 type ProfileKeyCommitmentWithSecretNonce struct {
-	J1 *ristretto255.Element
-	J2 *ristretto255.Element
-	J3 *ristretto255.Element
+	J1  *ristretto255.Element
+	J2  *ristretto255.Element
+	J3  *ristretto255.Element
 	J3s *ristretto255.Scalar
 }
 
@@ -467,9 +543,9 @@ func calcJ3(profileKeyBytes ProfileKeyBytes, uidBytes UIDBytes) *ristretto255.Sc
 
 // ReceiptStruct holds the components of a receipt credential.
 type ReceiptStruct struct {
-	ReceiptSerialBytes   ReceiptSerialBytes
+	ReceiptSerialBytes    ReceiptSerialBytes
 	ReceiptExpirationTime Timestamp
-	ReceiptLevel         ReceiptLevel
+	ReceiptLevel          ReceiptLevel
 }
 
 // NewReceiptStruct creates a new ReceiptStruct.
@@ -479,9 +555,9 @@ func NewReceiptStruct(
 	level ReceiptLevel,
 ) *ReceiptStruct {
 	return &ReceiptStruct{
-		ReceiptSerialBytes:   serialBytes,
+		ReceiptSerialBytes:    serialBytes,
 		ReceiptExpirationTime: expirationTime,
-		ReceiptLevel:         level,
+		ReceiptLevel:          level,
 	}
 }
 

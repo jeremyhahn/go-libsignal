@@ -43,8 +43,8 @@ func TestGroupCipherEncryptNilPrivateKey(t *testing.T) {
 	// sets the signing key pair with only the public component (no private key).
 	rec.AddSenderKeyState(
 		protocol.SenderKeyCurrentVersion,
-		1,       // key ID
-		0,       // iteration
+		1, // key ID
+		0, // iteration
 		chainSeed,
 		signingKey.PublicKey(), // public key only
 	)

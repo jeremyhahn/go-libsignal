@@ -12,8 +12,10 @@ func TestValidKeyType(t *testing.T) {
 		keyType  KeyType
 		expected bool
 	}{
-		{"Kyber768", KeyTypeKyber768, true},
+		// Kyber768 (0x07) is explicitly unsupported: no backend in go-libsignal.
+		{"Kyber768 rejected", KeyTypeKyber768, false},
 		{"Kyber1024", KeyTypeKyber1024, true},
+		{"MLKEM768", KeyTypeMLKEM768, true},
 		{"MLKEM1024", KeyTypeMLKEM1024, true},
 		{"invalid zero", KeyType(0x00), false},
 		{"invalid 0xFF", KeyType(0xFF), false},
@@ -85,10 +87,10 @@ func TestDeserializePublicKey(t *testing.T) {
 			wantKT:  KeyTypeKyber1024,
 		},
 		{
-			name:    "valid Kyber768",
+			// Kyber768 (0x07) is rejected: no backend in go-libsignal.
+			name:    "Kyber768 unsupported",
 			input:   append([]byte{byte(KeyTypeKyber768)}, make([]byte, 1184)...),
-			wantErr: false,
-			wantKT:  KeyTypeKyber768,
+			wantErr: true,
 		},
 		{
 			name:    "valid MLKEM1024",
@@ -334,9 +336,6 @@ func TestDeserializePublicKeyBadLength(t *testing.T) {
 		dataSize int
 		expected int
 	}{
-		{"Kyber768 too short", KeyTypeKyber768, 100, 1184},
-		{"Kyber768 too long", KeyTypeKyber768, 1185, 1184},
-		{"Kyber768 off by one short", KeyTypeKyber768, 1183, 1184},
 		{"Kyber1024 too short", KeyTypeKyber1024, 100, 1568},
 		{"Kyber1024 too long", KeyTypeKyber1024, 1569, 1568},
 		{"Kyber1024 off by one short", KeyTypeKyber1024, 1567, 1568},
@@ -372,6 +371,19 @@ func TestDeserializePublicKeyBadLength(t *testing.T) {
 	}
 }
 
+// TestDeserializePublicKeyKyber768Rejected verifies that Kyber-768 (0x07) is
+// explicitly rejected with ErrKeyTypeKyber768Unsupported, not ErrInvalidKeyType.
+func TestDeserializePublicKeyKyber768Rejected(t *testing.T) {
+	input := append([]byte{byte(KeyTypeKyber768)}, make([]byte, 1184)...)
+	_, err := DeserializePublicKey(input)
+	if err == nil {
+		t.Fatal("DeserializePublicKey with Kyber768 should return error")
+	}
+	if !errors.Is(err, ErrKeyTypeKyber768Unsupported) {
+		t.Errorf("expected ErrKeyTypeKyber768Unsupported, got: %T: %v", err, err)
+	}
+}
+
 func TestDeserializeCiphertextBadLength(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -379,9 +391,6 @@ func TestDeserializeCiphertextBadLength(t *testing.T) {
 		dataSize int
 		expected int
 	}{
-		{"Kyber768 too short", KeyTypeKyber768, 100, 1088},
-		{"Kyber768 too long", KeyTypeKyber768, 1089, 1088},
-		{"Kyber768 off by one short", KeyTypeKyber768, 1087, 1088},
 		{"Kyber1024 too short", KeyTypeKyber1024, 100, 1568},
 		{"Kyber1024 too long", KeyTypeKyber1024, 1569, 1568},
 		{"Kyber1024 off by one short", KeyTypeKyber1024, 1567, 1568},
@@ -400,20 +409,33 @@ func TestDeserializeCiphertextBadLength(t *testing.T) {
 				t.Fatal("DeserializeCiphertext() should return error for wrong-sized data")
 			}
 
-			var badLen *BadKeyLengthError
+			var badLen *BadCiphertextLengthError
 			if !errors.As(err, &badLen) {
-				t.Fatalf("expected BadKeyLengthError, got %T: %v", err, err)
+				t.Fatalf("expected BadCiphertextLengthError, got %T: %v", err, err)
 			}
 			if badLen.KeyType != tt.keyType {
-				t.Errorf("BadKeyLengthError.KeyType = 0x%02x, want 0x%02x", badLen.KeyType, tt.keyType)
+				t.Errorf("BadCiphertextLengthError.KeyType = 0x%02x, want 0x%02x", badLen.KeyType, tt.keyType)
 			}
 			if badLen.Expected != tt.expected {
-				t.Errorf("BadKeyLengthError.Expected = %d, want %d", badLen.Expected, tt.expected)
+				t.Errorf("BadCiphertextLengthError.Expected = %d, want %d", badLen.Expected, tt.expected)
 			}
 			if badLen.Actual != tt.dataSize {
-				t.Errorf("BadKeyLengthError.Actual = %d, want %d", badLen.Actual, tt.dataSize)
+				t.Errorf("BadCiphertextLengthError.Actual = %d, want %d", badLen.Actual, tt.dataSize)
 			}
 		})
+	}
+}
+
+// TestDeserializeCiphertextKyber768Rejected verifies that Kyber-768 (0x07) is
+// explicitly rejected with ErrKeyTypeKyber768Unsupported, not ErrInvalidKeyType.
+func TestDeserializeCiphertextKyber768Rejected(t *testing.T) {
+	input := append([]byte{byte(KeyTypeKyber768)}, make([]byte, 1088)...)
+	_, err := DeserializeCiphertext(input)
+	if err == nil {
+		t.Fatal("DeserializeCiphertext with Kyber768 should return error")
+	}
+	if !errors.Is(err, ErrKeyTypeKyber768Unsupported) {
+		t.Errorf("expected ErrKeyTypeKyber768Unsupported, got: %T: %v", err, err)
 	}
 }
 
@@ -435,14 +457,185 @@ func TestBadKeyLengthErrorMessage(t *testing.T) {
 	}
 }
 
+// TestDeserializePublicKeyEmptyInput verifies the Rust NoKeyTypeIdentifier
+// mapping: completely empty input returns ErrNoKeyTypeIdentifier.
+func TestDeserializePublicKeyEmptyInput(t *testing.T) {
+	_, err := DeserializePublicKey([]byte{})
+	if err == nil {
+		t.Fatal("DeserializePublicKey(empty) should return error")
+	}
+	if !errors.Is(err, ErrNoKeyTypeIdentifier) {
+		t.Errorf("empty input: want ErrNoKeyTypeIdentifier, got %T: %v", err, err)
+	}
+}
+
+// TestDeserializePublicKeyTagOnly verifies that a 1-byte input (type tag only,
+// no key material) returns ErrEmptyInput.
+func TestDeserializePublicKeyTagOnly(t *testing.T) {
+	_, err := DeserializePublicKey([]byte{byte(KeyTypeKyber1024)})
+	if err == nil {
+		t.Fatal("DeserializePublicKey([tag]) should return error")
+	}
+	if !errors.Is(err, ErrEmptyInput) {
+		t.Errorf("tag-only input: want ErrEmptyInput, got %T: %v", err, err)
+	}
+}
+
+// TestDeserializePublicKeyUnknownTag verifies that an unrecognized tag byte
+// returns BadKEMKeyTypeError carrying the offending byte value.
+// Rust reference: SignalProtocolError::BadKEMKeyType(u8) (error.rs:99).
+func TestDeserializePublicKeyUnknownTag(t *testing.T) {
+	const badTag byte = 0xEE
+	input := make([]byte, 1+1568) // plausible length so we reach the tag check
+	input[0] = badTag
+	_, err := DeserializePublicKey(input)
+	if err == nil {
+		t.Fatal("DeserializePublicKey(unknown tag) should return error")
+	}
+	var badType *BadKEMKeyTypeError
+	if !errors.As(err, &badType) {
+		t.Fatalf("want BadKEMKeyTypeError, got %T: %v", err, err)
+	}
+	if badType.Value != badTag {
+		t.Errorf("BadKEMKeyTypeError.Value = 0x%02x, want 0x%02x", badType.Value, badTag)
+	}
+	// ErrInvalidKeyType sentinel must also match via errors.Is.
+	if !errors.Is(err, ErrInvalidKeyType) {
+		t.Error("BadKEMKeyTypeError should match ErrInvalidKeyType via errors.Is")
+	}
+}
+
+// TestDeserializeCiphertextEmptyInput verifies the Rust NoKeyTypeIdentifier
+// mapping for ciphertexts: completely empty input returns ErrNoKeyTypeIdentifier.
+func TestDeserializeCiphertextEmptyInput(t *testing.T) {
+	_, err := DeserializeCiphertext([]byte{})
+	if err == nil {
+		t.Fatal("DeserializeCiphertext(empty) should return error")
+	}
+	if !errors.Is(err, ErrNoKeyTypeIdentifier) {
+		t.Errorf("empty input: want ErrNoKeyTypeIdentifier, got %T: %v", err, err)
+	}
+}
+
+// TestDeserializeCiphertextTagOnly verifies that a 1-byte ciphertext input
+// returns ErrEmptyInput.
+func TestDeserializeCiphertextTagOnly(t *testing.T) {
+	_, err := DeserializeCiphertext([]byte{byte(KeyTypeKyber1024)})
+	if err == nil {
+		t.Fatal("DeserializeCiphertext([tag]) should return error")
+	}
+	if !errors.Is(err, ErrEmptyInput) {
+		t.Errorf("tag-only input: want ErrEmptyInput, got %T: %v", err, err)
+	}
+}
+
+// TestDeserializeCiphertextUnknownTag verifies that an unrecognized ciphertext
+// tag byte returns BadKEMKeyTypeError.
+func TestDeserializeCiphertextUnknownTag(t *testing.T) {
+	const badTag byte = 0xEE
+	input := make([]byte, 1+1568)
+	input[0] = badTag
+	_, err := DeserializeCiphertext(input)
+	if err == nil {
+		t.Fatal("DeserializeCiphertext(unknown tag) should return error")
+	}
+	var badType *BadKEMKeyTypeError
+	if !errors.As(err, &badType) {
+		t.Fatalf("want BadKEMKeyTypeError, got %T: %v", err, err)
+	}
+	if badType.Value != badTag {
+		t.Errorf("BadKEMKeyTypeError.Value = 0x%02x, want 0x%02x", badType.Value, badTag)
+	}
+}
+
+// TestBadCiphertextLengthError verifies BadCiphertextLengthError message content.
+func TestBadCiphertextLengthError(t *testing.T) {
+	err := &BadCiphertextLengthError{
+		KeyType:  KeyTypeKyber1024,
+		Expected: 1568,
+		Actual:   100,
+	}
+	msg := err.Error()
+	if msg == "" {
+		t.Fatal("BadCiphertextLengthError.Error() should not be empty")
+	}
+	if !bytes.Contains([]byte(msg), []byte("1568")) {
+		t.Errorf("error message should contain expected size, got: %s", msg)
+	}
+	if !bytes.Contains([]byte(msg), []byte("100")) {
+		t.Errorf("error message should contain actual size, got: %s", msg)
+	}
+}
+
+// TestFromPublicAndPrivate verifies the Rust KeyPair::from_public_and_private
+// helper: matching algorithm tags assemble correctly; mismatched tags fail.
+func TestFromPublicAndPrivate(t *testing.T) {
+	k := NewKyber1024KEM()
+	kp, err := k.Generate()
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	pkSerialized := kp.Public.Serialize()
+	skData := kp.Secret.Data()
+
+	t.Run("matching types round-trip", func(t *testing.T) {
+		assembled, err := FromPublicAndPrivate(pkSerialized, skData)
+		if err != nil {
+			t.Fatalf("FromPublicAndPrivate: %v", err)
+		}
+		if assembled.Public.Type() != KeyTypeKyber1024 {
+			t.Errorf("Public.Type() = 0x%02x, want 0x%02x", assembled.Public.Type(), KeyTypeKyber1024)
+		}
+		if assembled.Secret.Type() != KeyTypeKyber1024 {
+			t.Errorf("Secret.Type() = 0x%02x, want 0x%02x", assembled.Secret.Type(), KeyTypeKyber1024)
+		}
+	})
+
+	t.Run("bad public key serialization", func(t *testing.T) {
+		_, err := FromPublicAndPrivate([]byte{}, skData)
+		if err == nil {
+			t.Fatal("FromPublicAndPrivate with empty pk should return error")
+		}
+		if !errors.Is(err, ErrNoKeyTypeIdentifier) {
+			t.Errorf("want ErrNoKeyTypeIdentifier, got %T: %v", err, err)
+		}
+	})
+
+	t.Run("bad secret key length", func(t *testing.T) {
+		_, err := FromPublicAndPrivate(pkSerialized, make([]byte, 10))
+		if err == nil {
+			t.Fatal("FromPublicAndPrivate with wrong sk length should return error")
+		}
+		var badLen *BadKeyLengthError
+		if !errors.As(err, &badLen) {
+			t.Errorf("want BadKeyLengthError, got %T: %v", err, err)
+		}
+	})
+}
+
+// TestErrNoKeyTypeIdentifier verifies the new sentinel is non-nil and matches
+// its own type.
+func TestErrNoKeyTypeIdentifier(t *testing.T) {
+	if ErrNoKeyTypeIdentifier == nil {
+		t.Fatal("ErrNoKeyTypeIdentifier must not be nil")
+	}
+	var e *ErrNoKeyTypeIdentifierError
+	if !errors.As(ErrNoKeyTypeIdentifier, &e) {
+		t.Error("ErrNoKeyTypeIdentifier should be of type *ErrNoKeyTypeIdentifierError")
+	}
+}
+
 func TestExpectedPublicKeySizeValues(t *testing.T) {
 	tests := []struct {
 		name    string
 		keyType KeyType
 		want    int
 	}{
-		{"Kyber768", KeyTypeKyber768, 1184},
+		// Kyber768 (0x07) has no backend; expectedPublicKeySize returns -1 for it.
+		{"Kyber768 no backend", KeyTypeKyber768, -1},
 		{"Kyber1024", KeyTypeKyber1024, 1568},
+		{"MLKEM768", KeyTypeMLKEM768, 1184},
 		{"MLKEM1024", KeyTypeMLKEM1024, 1568},
 		{"unknown", KeyType(0xFF), -1},
 	}
@@ -461,8 +654,10 @@ func TestExpectedCiphertextSizeValues(t *testing.T) {
 		keyType KeyType
 		want    int
 	}{
-		{"Kyber768", KeyTypeKyber768, 1088},
+		// Kyber768 (0x07) has no backend; expectedCiphertextSize returns -1 for it.
+		{"Kyber768 no backend", KeyTypeKyber768, -1},
 		{"Kyber1024", KeyTypeKyber1024, 1568},
+		{"MLKEM768", KeyTypeMLKEM768, 1088},
 		{"MLKEM1024", KeyTypeMLKEM1024, 1568},
 		{"unknown", KeyType(0xFF), -1},
 	}
@@ -481,8 +676,8 @@ func TestDeserializePublicKeyCorrectSizeAccepted(t *testing.T) {
 		keyType KeyType
 		size    int
 	}{
-		{"Kyber768", KeyTypeKyber768, 1184},
 		{"Kyber1024", KeyTypeKyber1024, 1568},
+		{"MLKEM768", KeyTypeMLKEM768, 1184},
 		{"MLKEM1024", KeyTypeMLKEM1024, 1568},
 	}
 	for _, tt := range tests {
@@ -509,8 +704,8 @@ func TestDeserializeCiphertextCorrectSizeAccepted(t *testing.T) {
 		keyType KeyType
 		size    int
 	}{
-		{"Kyber768", KeyTypeKyber768, 1088},
 		{"Kyber1024", KeyTypeKyber1024, 1568},
+		{"MLKEM768", KeyTypeMLKEM768, 1088},
 		{"MLKEM1024", KeyTypeMLKEM1024, 1568},
 	}
 	for _, tt := range tests {
@@ -526,6 +721,42 @@ func TestDeserializeCiphertextCorrectSizeAccepted(t *testing.T) {
 			}
 			if len(ct.Data()) != tt.size {
 				t.Errorf("Data() length = %d, want %d", len(ct.Data()), tt.size)
+			}
+		})
+	}
+}
+
+// TestKEMErrorMessages exercises the Error() method on all KEM error types
+// that are sentinel-only (not returned by path-covered functions).
+func TestKEMErrorMessages(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"ErrNoKeyTypeIdentifierError", &ErrNoKeyTypeIdentifierError{}, "empty"},
+		{"ErrEmptyInputError", &ErrEmptyInputError{}, "too short"},
+		{"ErrKeyTypeMismatchError", &ErrKeyTypeMismatchError{}, "mismatch"},
+		{"ErrKeyTypeKyber768UnsupportedError", &ErrKeyTypeKyber768UnsupportedError{}, "Kyber-768"},
+		{"BadKEMKeyTypeError", &BadKEMKeyTypeError{Value: 0xAB}, "0xab"},
+		{"ErrGuardedKeyDestroyedType", &ErrGuardedKeyDestroyedType{}, "destroyed"},
+		{"UnsupportedKeyTypeError", &UnsupportedKeyTypeError{KeyType: 0x42}, "0x42"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := tc.err.Error()
+			if msg == "" {
+				t.Fatal("Error() returned empty string")
+			}
+			if !func(s, sub string) bool {
+				for i := 0; i <= len(s)-len(sub); i++ {
+					if s[i:i+len(sub)] == sub {
+						return true
+					}
+				}
+				return false
+			}(msg, tc.want) {
+				t.Errorf("Error() = %q, want to contain %q", msg, tc.want)
 			}
 		})
 	}

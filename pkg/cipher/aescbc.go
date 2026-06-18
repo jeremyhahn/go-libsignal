@@ -49,6 +49,14 @@ func AESCBCEncrypt(key, iv, plaintext []byte) ([]byte, error) {
 // multiple of the AES block size (16 bytes).
 //
 // Returns the decrypted plaintext with PKCS7 padding removed.
+//
+// IMPORTANT: Callers MUST collapse all decrypt errors into a single opaque
+// "decryption failed" result before returning to network peers. Returning
+// distinct errors (e.g. ErrInvalidPKCS7Padding vs. ErrAESCBCInvalidKey)
+// creates an oracle that can be exploited for chosen-ciphertext attacks.
+// The Rust reference deliberately maps both "bad key" and "bad padding" to
+// the single variant DecryptionError::BadCiphertext("failed to decrypt").
+// Rust source: rust/crypto/src/aes_cbc.rs:23,52
 func AESCBCDecrypt(key, iv, ciphertext []byte) ([]byte, error) {
 	if err := validateAESCBCParams(key, iv); err != nil {
 		return nil, err

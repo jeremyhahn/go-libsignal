@@ -3,8 +3,8 @@ package serialize
 import (
 	"fmt"
 
-	groupRecord "github.com/jeremyhahn/go-libsignal/pkg/groups/state/record"
 	"github.com/jeremyhahn/go-libsignal/pkg/groups/ratchet"
+	groupRecord "github.com/jeremyhahn/go-libsignal/pkg/groups/state/record"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/chain"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/message"
 	"github.com/jeremyhahn/go-libsignal/pkg/logger"
@@ -59,6 +59,10 @@ func (s *ProtobufSignalMessageSerializer) Serialize(signalMessage *protocol.Sign
 	if len(signalMessage.PqRatchetKey) > 0 {
 		pb.PqRatchet = signalMessage.PqRatchetKey
 	}
+	// Only set addresses if non-nil (proto field 6).
+	if len(signalMessage.Addresses) > 0 {
+		pb.Addresses = signalMessage.Addresses
+	}
 	serialized, err := proto.Marshal(pb)
 	if err != nil {
 		return nil, err
@@ -110,6 +114,7 @@ func (s *ProtobufSignalMessageSerializer) Deserialize(serialized []byte) (*proto
 		PreviousCounter: pb.GetPreviousCounter(),
 		CipherText:      pb.GetCiphertext(),
 		PqRatchetKey:    pb.GetPqRatchet(),
+		Addresses:       pb.GetAddresses(),
 		Mac:             mac,
 	}, nil
 }
@@ -275,10 +280,22 @@ func (s *ProtobufSenderKeyMessageSerializer) Deserialize(serialized []byte) (*pr
 		return nil, err
 	}
 
-	var distributionID [16]byte
-	if distUUID := pb.GetDistributionUuid(); len(distUUID) == 16 {
-		copy(distributionID[:], distUUID)
+	// Enforce required fields. Proto3 optional fields use pointer accessors;
+	// nil pointer means the field was absent in the serialized bytes.
+	// Mirrors Rust InvalidProtobufEncoding (rust/protocol/src/protocol.rs:614-657).
+	if pb.ChainId == nil {
+		return nil, &ErrInvalidProtobufEncoding{MessageType: "senderkey message", Field: "chain_id"}
 	}
+	if pb.Iteration == nil {
+		return nil, &ErrInvalidProtobufEncoding{MessageType: "senderkey message", Field: "iteration"}
+	}
+	distUUID := pb.GetDistributionUuid()
+	if len(distUUID) != 16 {
+		return nil, &ErrInvalidProtobufEncoding{MessageType: "senderkey message", Field: "distribution_uuid"}
+	}
+
+	var distributionID [16]byte
+	copy(distributionID[:], distUUID)
 
 	return &protocol.SenderKeyMessageStructure{
 		DistributionID: distributionID,
@@ -309,7 +326,7 @@ func (s *ProtobufSenderKeyDistributionMessageSerializer) Serialize(msg *protocol
 		ChainId:          &chainID,
 		Iteration:        &iteration,
 		ChainKey:         msg.ChainKey,
-		SigningKey:        msg.SigningKey,
+		SigningKey:       msg.SigningKey,
 	}
 	serialized, err := proto.Marshal(pb)
 	if err != nil {
@@ -344,22 +361,36 @@ func (s *ProtobufSenderKeyDistributionMessageSerializer) Deserialize(serialized 
 		return nil, err
 	}
 
-	// Validate chain_key length (must be 32 bytes).
-	chainKey := pb.GetChainKey()
-	if len(chainKey) != 32 {
-		return nil, &FieldLengthError{MessageType: "senderkey distribution message", Field: "chain_key", Expected: 32, Actual: len(chainKey)}
+	// Enforce required fields. Proto3 optional fields use pointer accessors;
+	// nil pointer means the field was absent in the serialized bytes.
+	// Bytes fields (chain_key, signing_key, distribution_uuid) are nil when absent.
+	// Mirrors Rust InvalidProtobufEncoding (rust/protocol/src/protocol.rs:748-800).
+	if pb.ChainId == nil {
+		return nil, &ErrInvalidProtobufEncoding{MessageType: "senderkey distribution message", Field: "chain_id"}
+	}
+	if pb.Iteration == nil {
+		return nil, &ErrInvalidProtobufEncoding{MessageType: "senderkey distribution message", Field: "iteration"}
 	}
 
-	// Validate signing_key length (must be 33 bytes: 0x05 prefix + 32 bytes).
+	// Validate chain_key presence and length (must be 32 bytes).
+	chainKey := pb.GetChainKey()
+	if len(chainKey) != 32 {
+		return nil, &ErrInvalidProtobufEncoding{MessageType: "senderkey distribution message", Field: "chain_key"}
+	}
+
+	// Validate signing_key presence and length (must be 33 bytes: 0x05 prefix + 32 bytes).
 	signingKey := pb.GetSigningKey()
 	if len(signingKey) != 33 {
-		return nil, &FieldLengthError{MessageType: "senderkey distribution message", Field: "signing_key", Expected: 33, Actual: len(signingKey)}
+		return nil, &ErrInvalidProtobufEncoding{MessageType: "senderkey distribution message", Field: "signing_key"}
+	}
+
+	distUUID := pb.GetDistributionUuid()
+	if len(distUUID) != 16 {
+		return nil, &ErrInvalidProtobufEncoding{MessageType: "senderkey distribution message", Field: "distribution_uuid"}
 	}
 
 	var distributionID [16]byte
-	if distUUID := pb.GetDistributionUuid(); len(distUUID) == 16 {
-		copy(distributionID[:], distUUID)
-	}
+	copy(distributionID[:], distUUID)
 
 	return &protocol.SenderKeyDistributionMessageStructure{
 		DistributionID: distributionID,
@@ -367,7 +398,7 @@ func (s *ProtobufSenderKeyDistributionMessageSerializer) Deserialize(serialized 
 		ID:             pb.GetChainId(),
 		Iteration:      pb.GetIteration(),
 		ChainKey:       chainKey,
-		SigningKey:      signingKey,
+		SigningKey:     signingKey,
 	}, nil
 }
 

@@ -33,6 +33,7 @@ type SignalMessage struct {
 	PreviousCounter *uint32                `protobuf:"varint,3,opt,name=previous_counter,json=previousCounter" json:"previous_counter,omitempty"`
 	Ciphertext      []byte                 `protobuf:"bytes,4,opt,name=ciphertext" json:"ciphertext,omitempty"`
 	PqRatchet       []byte                 `protobuf:"bytes,5,opt,name=pq_ratchet,json=pqRatchet" json:"pq_ratchet,omitempty"`
+	Addresses       []byte                 `protobuf:"bytes,6,opt,name=addresses" json:"addresses,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -98,6 +99,13 @@ func (x *SignalMessage) GetCiphertext() []byte {
 func (x *SignalMessage) GetPqRatchet() []byte {
 	if x != nil {
 		return x.PqRatchet
+	}
+	return nil
+}
+
+func (x *SignalMessage) GetAddresses() []byte {
+	if x != nil {
+		return x.Addresses
 	}
 	return nil
 }
@@ -351,7 +359,7 @@ var File_wire_proto protoreflect.FileDescriptor
 const file_wire_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"wire.proto\x12\x11signal.proto.wire\"\xb4\x01\n" +
+	"wire.proto\x12\x11signal.proto.wire\"\xd2\x01\n" +
 	"\rSignalMessage\x12\x1f\n" +
 	"\vratchet_key\x18\x01 \x01(\fR\n" +
 	"ratchetKey\x12\x18\n" +
@@ -361,7 +369,8 @@ const file_wire_proto_rawDesc = "" +
 	"ciphertext\x18\x04 \x01(\fR\n" +
 	"ciphertext\x12\x1d\n" +
 	"\n" +
-	"pq_ratchet\x18\x05 \x01(\fR\tpqRatchet\"\xb3\x02\n" +
+	"pq_ratchet\x18\x05 \x01(\fR\tpqRatchet\x12\x1c\n" +
+	"\taddresses\x18\x06 \x01(\fR\taddresses\"\xb3\x02\n" +
 	"\x13PreKeySignalMessage\x12'\n" +
 	"\x0fregistration_id\x18\x05 \x01(\rR\x0eregistrationId\x12\x1c\n" +
 	"\n" +
@@ -385,7 +394,7 @@ const file_wire_proto_rawDesc = "" +
 	"\titeration\x18\x03 \x01(\rR\titeration\x12\x1b\n" +
 	"\tchain_key\x18\x04 \x01(\fR\bchainKey\x12\x1f\n" +
 	"\vsigning_key\x18\x05 \x01(\fR\n" +
-	"signingKeyB1Z/github.com/jeremyhahn/go-libsignal/proto/wirepb"
+	"signingKeyB5Z3github.com/jeremyhahn/go-libsignal/pkg/proto/wirepb"
 
 var (
 	file_wire_proto_rawDescOnce sync.Once

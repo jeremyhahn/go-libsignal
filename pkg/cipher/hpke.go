@@ -3,8 +3,8 @@
 // X25519 + HKDF-SHA256 + AES-256-GCM in Base mode, matching the Rust
 // libsignal implementation.
 //
-// The implementation follows RFC 9180 and uses the cloudflare/circl library
-// for the HPKE primitives.
+// The implementation follows RFC 9180 and uses the Go standard library
+// crypto/hpke package.
 //
 // The wire format prepends a type byte to the ciphertext:
 //
@@ -13,13 +13,13 @@
 // Currently only one ciphertext type is defined:
 //
 //	0x01 = Base_X25519_HkdfSha256_Aes256Gcm
+//
+// Rust source: rust/crypto/src/hpke.rs — SignalHpkeCiphertextType::Base_X25519_HkdfSha256_Aes256Gcm = 1.
 package cipher
 
 import (
-	"crypto/rand"
-
-	"github.com/cloudflare/circl/hpke"
-	"github.com/cloudflare/circl/kem"
+	"crypto/ecdh"
+	"crypto/hpke"
 
 	crypto "github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 )
@@ -65,7 +65,7 @@ var (
 type hpkeErrKind int
 
 const (
-	hpkeErrInvalidPublicKey  hpkeErrKind = iota + 1
+	hpkeErrInvalidPublicKey hpkeErrKind = iota + 1
 	hpkeErrInvalidPrivateKey
 	hpkeErrSealFailed
 	hpkeErrOpenFailed
@@ -127,39 +127,28 @@ type HPKEReceiver interface {
 	Zeroize()
 }
 
+// newKEM returns the HPKE KEM for X25519 + HKDF-SHA256.
+func newKEM() hpke.KEM {
+	return hpke.DHKEM(ecdh.X25519())
+}
+
 // hpkeSender holds a parsed recipient public key for sealing.
 type hpkeSender struct {
-	publicKey kem.PublicKey
+	publicKey hpke.PublicKey
 }
 
 // hpkeReceiver holds a parsed recipient private key for opening.
 // Call Zeroize when the receiver is no longer needed to clear private key
 // material from memory.
 type hpkeReceiver struct {
-	privateKey    kem.PrivateKey
-	privKeyBytes  []byte
-}
-
-// newSuite returns the HPKE suite matching the Rust libsignal configuration:
-// X25519 + HKDF-SHA256 + AES-256-GCM.
-func newSuite() hpke.Suite {
-	return hpke.NewSuite(
-		hpke.KEM_X25519_HKDF_SHA256,
-		hpke.KDF_HKDF_SHA256,
-		hpke.AEAD_AES256GCM,
-	)
-}
-
-// kemScheme returns the KEM scheme for X25519.
-func kemScheme() kem.Scheme {
-	return hpke.KEM_X25519_HKDF_SHA256.Scheme()
+	privateKey   hpke.PrivateKey
+	privKeyBytes []byte
 }
 
 // NewHPKESender creates an HPKESender for the given recipient public key.
 // The recipientPub must be a 32-byte X25519 public key.
 func NewHPKESender(recipientPub []byte) (HPKESender, error) {
-	scheme := kemScheme()
-	pk, err := scheme.UnmarshalBinaryPublicKey(recipientPub)
+	pk, err := newKEM().NewPublicKey(recipientPub)
 	if err != nil {
 		return nil, ErrHPKEInvalidPublicKey
 	}
@@ -175,18 +164,12 @@ func NewHPKESender(recipientPub []byte) (HPKESender, error) {
 // where enc is the encapsulated key and AEAD_ciphertext is the AES-256-GCM
 // encrypted plaintext with authentication tag.
 func (s *hpkeSender) Seal(info, aad, plaintext []byte) ([]byte, error) {
-	suite := newSuite()
-	sender, err := suite.NewSender(s.publicKey, info)
+	enc, sender, err := hpke.NewSender(s.publicKey, hpke.HKDFSHA256(), hpke.AES256GCM(), info)
 	if err != nil {
 		return nil, ErrHPKESealFailed
 	}
 
-	enc, sealer, err := sender.Setup(rand.Reader)
-	if err != nil {
-		return nil, ErrHPKESealFailed
-	}
-
-	ct, err := sealer.Seal(plaintext, aad)
+	ct, err := sender.Seal(aad, plaintext)
 	if err != nil {
 		return nil, ErrHPKESealFailed
 	}
@@ -205,13 +188,11 @@ func (s *hpkeSender) Seal(info, aad, plaintext []byte) ([]byte, error) {
 // copied; the caller remains responsible for zeroizing the original slice.
 // Call Zeroize on the returned receiver when it is no longer needed.
 func NewHPKEReceiver(recipientPriv []byte) (HPKEReceiver, error) {
-	scheme := kemScheme()
-
 	// Copy the private key bytes so we own the memory for zeroization.
 	privCopy := make([]byte, len(recipientPriv))
 	copy(privCopy, recipientPriv)
 
-	sk, err := scheme.UnmarshalBinaryPrivateKey(privCopy)
+	sk, err := newKEM().NewPrivateKey(privCopy)
 	if err != nil {
 		crypto.Zeroize(privCopy)
 		return nil, ErrHPKEInvalidPrivateKey
@@ -242,18 +223,12 @@ func (r *hpkeReceiver) Open(info, aad, ciphertext []byte) ([]byte, error) {
 	enc := ciphertext[1 : 1+x25519EncapsulatedKeySize]
 	ct := ciphertext[1+x25519EncapsulatedKeySize:]
 
-	suite := newSuite()
-	receiver, err := suite.NewReceiver(r.privateKey, info)
+	rec, err := hpke.NewRecipient(enc, r.privateKey, hpke.HKDFSHA256(), hpke.AES256GCM(), info)
 	if err != nil {
 		return nil, ErrHPKEOpenFailed
 	}
 
-	opener, err := receiver.Setup(enc)
-	if err != nil {
-		return nil, ErrHPKEOpenFailed
-	}
-
-	plaintext, err := opener.Open(ct, aad)
+	plaintext, err := rec.Open(aad, ct)
 	if err != nil {
 		return nil, ErrHPKEOpenFailed
 	}
@@ -263,12 +238,6 @@ func (r *hpkeReceiver) Open(info, aad, ciphertext []byte) ([]byte, error) {
 
 // Zeroize overwrites the stored private key material with zeros. After calling
 // Zeroize, any subsequent Open calls will fail. This method is idempotent.
-//
-// Note: The circl library's kem.PrivateKey may retain an internal copy of
-// the key material that we cannot zeroize from outside the library. We clear
-// our own copy (privKeyBytes) and nil out the reference, but the circl object
-// itself may still hold key bytes in memory until garbage collected. This is a
-// known limitation of the circl HPKE implementation.
 func (r *hpkeReceiver) Zeroize() {
 	if r.privKeyBytes != nil {
 		crypto.Zeroize(r.privKeyBytes)
@@ -286,24 +255,17 @@ func (r *hpkeReceiver) Zeroize() {
 // To produce the wire format used by Signal (with type byte prefix), use
 // NewHPKESender instead.
 func HPKESeal(recipientPub []byte, info, aad, plaintext []byte) (enc, ciphertext []byte, err error) {
-	scheme := kemScheme()
-	pk, err := scheme.UnmarshalBinaryPublicKey(recipientPub)
+	pk, err := newKEM().NewPublicKey(recipientPub)
 	if err != nil {
 		return nil, nil, ErrHPKEInvalidPublicKey
 	}
 
-	suite := newSuite()
-	sender, err := suite.NewSender(pk, info)
+	enc, sender, err := hpke.NewSender(pk, hpke.HKDFSHA256(), hpke.AES256GCM(), info)
 	if err != nil {
 		return nil, nil, ErrHPKESealFailed
 	}
 
-	enc, sealer, err := sender.Setup(rand.Reader)
-	if err != nil {
-		return nil, nil, ErrHPKESealFailed
-	}
-
-	ct, err := sealer.Seal(plaintext, aad)
+	ct, err := sender.Seal(aad, plaintext)
 	if err != nil {
 		return nil, nil, ErrHPKESealFailed
 	}
@@ -323,24 +285,17 @@ func HPKEOpen(recipientPriv, enc []byte, info, aad, ciphertext []byte) ([]byte, 
 	copy(privCopy, recipientPriv)
 	defer crypto.Zeroize(privCopy)
 
-	scheme := kemScheme()
-	sk, err := scheme.UnmarshalBinaryPrivateKey(privCopy)
+	sk, err := newKEM().NewPrivateKey(privCopy)
 	if err != nil {
 		return nil, ErrHPKEInvalidPrivateKey
 	}
 
-	suite := newSuite()
-	receiver, err := suite.NewReceiver(sk, info)
+	rec, err := hpke.NewRecipient(enc, sk, hpke.HKDFSHA256(), hpke.AES256GCM(), info)
 	if err != nil {
 		return nil, ErrHPKEOpenFailed
 	}
 
-	opener, err := receiver.Setup(enc)
-	if err != nil {
-		return nil, ErrHPKEOpenFailed
-	}
-
-	plaintext, err := opener.Open(ciphertext, aad)
+	plaintext, err := rec.Open(aad, ciphertext)
 	if err != nil {
 		return nil, ErrHPKEOpenFailed
 	}
@@ -353,29 +308,17 @@ func HPKEOpen(recipientPriv, enc []byte, info, aad, ciphertext []byte) ([]byte, 
 //
 // The caller is responsible for zeroizing the returned privateKey slice
 // (e.g., via crypto.Zeroize) when it is no longer needed.
-//
-// Note: the circl kem.PrivateKey object produced internally during key
-// generation cannot be zeroized externally. Callers must zeroize the
-// returned privateKey slice to clear their copy of the key material.
-// The internal circl object will persist in memory until garbage collected.
-// This is a known limitation of the circl HPKE implementation; see also
-// the Zeroize method on hpkeReceiver for the same constraint.
 func HPKEGenerateKeyPair() (privateKey, publicKey []byte, err error) {
-	scheme := kemScheme()
-	pk, sk, err := scheme.GenerateKeyPair()
+	sk, err := newKEM().GenerateKey()
 	if err != nil {
 		return nil, nil, err
 	}
 
-	skBytes, err := sk.MarshalBinary()
+	skBytes, err := sk.Bytes()
 	if err != nil {
-		return nil, nil, err
-	}
-	pkBytes, err := pk.MarshalBinary()
-	if err != nil {
-		crypto.Zeroize(skBytes)
 		return nil, nil, err
 	}
 
+	pkBytes := sk.PublicKey().Bytes()
 	return skBytes, pkBytes, nil
 }

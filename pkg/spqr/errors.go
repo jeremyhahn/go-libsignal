@@ -159,3 +159,57 @@ func (e *ErrVersionNegotiationFailed) Error() string {
 	return fmt.Sprintf("spqr: version negotiation failed: minimum %s, got %s",
 		e.MinVersion, e.GotVersion)
 }
+
+// ErrInvalidPrevEncoding is returned when the proto Chain.Epoch.recv.prev
+// field contains bytes whose length is not a multiple of 36 (the Rust
+// KeyHistory record size: 4-byte BE index + 32-byte key). This indicates a
+// corrupt or foreign-format state buffer.
+//
+// Rust reference: spqr/src/chain.rs KeyHistory::KEY_SIZE = 36.
+type ErrInvalidPrevEncoding struct {
+	Len int
+}
+
+func (e *ErrInvalidPrevEncoding) Error() string {
+	return fmt.Sprintf("spqr: invalid prev encoding: length %d is not a multiple of 36", e.Len)
+}
+
+// ErrMacVerifyFailed is returned when MAC verification of a received message
+// fails. Matches Rust's Error::MacVerifyFailed (lib.rs).
+type ErrMacVerifyFailed struct{}
+
+func (e *ErrMacVerifyFailed) Error() string {
+	return "spqr: MAC verification failed"
+}
+
+// ErrVersionMismatch is returned when the received message version does not
+// match the current state version and no negotiation is in progress. Matches
+// Rust's Error::VersionMismatch (lib.rs recv:383).
+type ErrVersionMismatch struct {
+	State   Version
+	Message Version
+}
+
+func (e *ErrVersionMismatch) Error() string {
+	return fmt.Sprintf("spqr: version mismatch: state is %s, message is %s", e.State, e.Message)
+}
+
+// ErrErroneousDataReceived is returned when a message contains data that is
+// structurally valid but semantically erroneous (e.g., unexpected payload for
+// the current state). Matches Rust's Error::ErroneousDataReceived (lib.rs).
+type ErrErroneousDataReceived struct {
+	Reason string
+}
+
+func (e *ErrErroneousDataReceived) Error() string {
+	return fmt.Sprintf("spqr: erroneous data received: %s", e.Reason)
+}
+
+// ErrChainNotAvailable is returned when a chain key is needed but no chain
+// has been established (e.g., sending before negotiation completes with
+// MinVersion > V0). Matches Rust's Error::ChainNotAvailable (lib.rs:283).
+type ErrChainNotAvailable struct{}
+
+func (e *ErrChainNotAvailable) Error() string {
+	return "spqr: chain not available"
+}

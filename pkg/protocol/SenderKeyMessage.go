@@ -78,16 +78,21 @@ func NewSenderKeyMessageWithVersion(version uint32, distributionID [16]byte, key
 		return nil, newIncompleteMessageError("SenderKeyMessage", "signature key is nil")
 	}
 
-	// Build our SenderKeyMessage. The struct's version field always uses
-	// SenderKeyCurrentVersion, matching the Rust reference SenderKeyMessage::new
-	// which sets message_version: SENDERKEY_MESSAGE_CURRENT_VERSION regardless
-	// of the version parameter (used only in the serialized wire format byte).
+	// Build our SenderKeyMessage. The struct's version field stores the
+	// supplied version parameter so the wire byte high nibble encodes it
+	// correctly: ((version & 0xF) << 4) | SenderKeyCurrentVersion.
+	// This matches the Rust reference SenderKeyMessage::new which encodes
+	// message_version in the high nibble of the wire byte while storing
+	// SENDERKEY_MESSAGE_CURRENT_VERSION in the struct's message_version field
+	// (rust/protocol/src/protocol.rs:551,558). Both are currently 3, making
+	// the distinction latent; storing the parameter keeps the API honest for
+	// future version bumps.
 	senderKeyMessage := &SenderKeyMessage{
 		distributionID: distributionID,
 		keyID:          keyID,
 		iteration:      iteration,
 		ciphertext:     ciphertext,
-		version:        SenderKeyCurrentVersion,
+		version:        version,
 		serializer:     serializer,
 	}
 

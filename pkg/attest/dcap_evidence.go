@@ -56,15 +56,15 @@ type sgxQuoteBody struct {
 
 // sgxReportBody is a parsed SGX report body.
 type sgxReportBody struct {
-	rawBytes            []byte
-	cpusvn              [16]byte
-	miscselect          uint32
-	sgxAttributes       [16]byte
-	mrenclave           MREnclave
-	mrsigner            [32]byte
-	isvprodid           uint16
-	isvsvn              uint16
-	sgxReportDataBytes  [64]byte
+	rawBytes           []byte
+	cpusvn             [16]byte
+	miscselect         uint32
+	sgxAttributes      [16]byte
+	mrenclave          MREnclave
+	mrsigner           [32]byte
+	isvprodid          uint16
+	isvsvn             uint16
+	sgxReportDataBytes [64]byte
 }
 
 func (r *sgxReportBody) hasFlag(flag uint64) bool {

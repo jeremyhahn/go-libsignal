@@ -160,6 +160,40 @@ func (e *ErrAESCTRKeySize) Error() string {
 	return "cipher: AES-CTR key must be 32 bytes"
 }
 
+// ErrInvalidKeyLength indicates the provided key is not the required length.
+// Mirrors Rust signal_crypto::Error::InvalidKeySize.
+type ErrInvalidKeyLength struct {
+	Got      int
+	Expected int
+}
+
+func (e *ErrInvalidKeyLength) Error() string {
+	return fmt.Sprintf("cipher: key must be %d bytes, got %d", e.Expected, e.Got)
+}
+
+// Is implements errors.Is matching by type, ignoring field values.
+func (e *ErrInvalidKeyLength) Is(target error) bool {
+	_, ok := target.(*ErrInvalidKeyLength)
+	return ok
+}
+
+// ErrInvalidNonceLength indicates the provided nonce is not the required length.
+// Mirrors Rust signal_crypto::Error::InvalidNonceSize.
+type ErrInvalidNonceLength struct {
+	Got      int
+	Expected int
+}
+
+func (e *ErrInvalidNonceLength) Error() string {
+	return fmt.Sprintf("cipher: nonce must be %d bytes, got %d", e.Expected, e.Got)
+}
+
+// Is implements errors.Is matching by type, ignoring field values.
+func (e *ErrInvalidNonceLength) Is(target error) bool {
+	_, ok := target.(*ErrInvalidNonceLength)
+	return ok
+}
+
 // ErrAESCTRInputTooLong indicates the input exceeds the maximum safe length
 // for AES-CTR with a 32-bit counter ((2^32 - 1) * 16 bytes).
 type ErrAESCTRInputTooLong struct {
@@ -206,4 +240,16 @@ type ErrAESCBCCiphertextEmpty struct{}
 
 func (e *ErrAESCBCCiphertextEmpty) Error() string {
 	return "aescbc: ciphertext is empty"
+}
+
+// ErrAESGCMSIVPlaintextTooLong indicates the plaintext exceeds the RFC 8452
+// maximum of 2^36 - 32 bytes for AES-GCM-SIV.
+// Rust source: aes-gcm-siv crate enforces this limit per RFC 8452 §6.
+type ErrAESGCMSIVPlaintextTooLong struct {
+	Length int
+}
+
+func (e *ErrAESGCMSIVPlaintextTooLong) Error() string {
+	return fmt.Sprintf("aesgcmsiv: plaintext length %d exceeds RFC 8452 §6 maximum of %d bytes",
+		e.Length, aesGCMSIVMaxPlaintextLen)
 }

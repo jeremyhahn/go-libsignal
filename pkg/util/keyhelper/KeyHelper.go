@@ -101,8 +101,16 @@ func GenerateSenderKey() ([]byte, error) {
 	return randBytes, nil
 }
 
+// GenerateSenderKeyID generates a random sender key chain ID.
+// Rust uses `(csprng.random::<u32>()) >> 1`, producing a 31-bit value
+// (~2 billion possible values). This is intentionally different from
+// GenerateRegistrationID (14-bit), which serves a distinct protocol concept.
 func GenerateSenderKeyID() uint32 {
-	return GenerateRegistrationID()
+	var n uint32
+	if err := binary.Read(rand.Reader, binary.LittleEndian, &n); err != nil {
+		panic("keyhelper: failed to read random bytes for sender key ID: " + err.Error())
+	}
+	return n >> 1
 }
 
 //---------- End Group Stuff --------------

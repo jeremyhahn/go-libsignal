@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/aes"
 	"encoding/binary"
+	"errors"
+	"math"
 	"testing"
 )
 
@@ -202,6 +204,221 @@ func TestAESCTR32BitCounterWrap(t *testing.T) {
 	// Also verify that counterPre != counterPost (different keystream).
 	if bytes.Equal(ksPre[:], ksPost[:]) {
 		t.Error("counter 0xFFFFFFFF and 0x00000000 should produce different keystream")
+	}
+}
+
+// TestNewAES256CTR_RoundTrip verifies that NewAES256CTR encrypts and
+// decrypts (second Process call) correctly.
+func TestNewAES256CTR_RoundTrip(t *testing.T) {
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	nonce := make([]byte, AES256CTRNonceSize)
+	for i := range nonce {
+		nonce[i] = byte(i + 100)
+	}
+	plaintext := []byte("NewAES256CTR round-trip test data!")
+
+	ctr1, err := NewAES256CTR(key, nonce, 0)
+	if err != nil {
+		t.Fatalf("NewAES256CTR: %v", err)
+	}
+	ct := make([]byte, len(plaintext))
+	copy(ct, plaintext)
+	if err := ctr1.Process(ct); err != nil {
+		t.Fatalf("Process (encrypt): %v", err)
+	}
+	if bytes.Equal(ct, plaintext) {
+		t.Fatal("ciphertext should differ from plaintext")
+	}
+
+	ctr2, err := NewAES256CTR(key, nonce, 0)
+	if err != nil {
+		t.Fatalf("NewAES256CTR (decrypt): %v", err)
+	}
+	if err := ctr2.Process(ct); err != nil {
+		t.Fatalf("Process (decrypt): %v", err)
+	}
+	if !bytes.Equal(ct, plaintext) {
+		t.Errorf("round-trip failed: got %q", ct)
+	}
+}
+
+// TestNewAES256CTR_InitCtr verifies that a non-zero initCtr produces
+// different keystream from initCtr=0, matching Rust Aes256Ctr32::from_key
+// seek behaviour.
+func TestNewAES256CTR_InitCtr(t *testing.T) {
+	key := make([]byte, 32)
+	nonce := make([]byte, AES256CTRNonceSize)
+	plaintext := make([]byte, 32)
+
+	ctr0, err := NewAES256CTR(key, nonce, 0)
+	if err != nil {
+		t.Fatalf("NewAES256CTR(0): %v", err)
+	}
+	ct0 := make([]byte, len(plaintext))
+	copy(ct0, plaintext)
+	if err := ctr0.Process(ct0); err != nil {
+		t.Fatalf("Process(ctr0): %v", err)
+	}
+
+	ctr1, err := NewAES256CTR(key, nonce, 1)
+	if err != nil {
+		t.Fatalf("NewAES256CTR(1): %v", err)
+	}
+	ct1 := make([]byte, len(plaintext))
+	copy(ct1, plaintext)
+	if err := ctr1.Process(ct1); err != nil {
+		t.Fatalf("Process(ctr1): %v", err)
+	}
+
+	if bytes.Equal(ct0, ct1) {
+		t.Error("initCtr=0 and initCtr=1 should produce different ciphertext")
+	}
+}
+
+// TestNewAES256CTR_InvalidKeyLength verifies ErrInvalidKeyLength is returned.
+func TestNewAES256CTR_InvalidKeyLength(t *testing.T) {
+	nonce := make([]byte, AES256CTRNonceSize)
+	_, err := NewAES256CTR(make([]byte, 16), nonce, 0)
+	if err == nil {
+		t.Fatal("expected error for 16-byte key")
+	}
+	if !errors.Is(err, &ErrInvalidKeyLength{}) {
+		t.Errorf("expected ErrInvalidKeyLength, got %T: %v", err, err)
+	}
+}
+
+// TestNewAES256CTR_InvalidNonceLength verifies ErrInvalidNonceLength is returned.
+func TestNewAES256CTR_InvalidNonceLength(t *testing.T) {
+	key := make([]byte, 32)
+	_, err := NewAES256CTR(key, make([]byte, 8), 0)
+	if err == nil {
+		t.Fatal("expected error for 8-byte nonce")
+	}
+	if !errors.Is(err, &ErrInvalidNonceLength{}) {
+		t.Errorf("expected ErrInvalidNonceLength, got %T: %v", err, err)
+	}
+	// Zero-length nonce.
+	_, err = NewAES256CTR(key, nil, 0)
+	if err == nil {
+		t.Fatal("expected error for nil nonce")
+	}
+}
+
+// TestNewAES256CTR_NISTVector verifies against the NIST SP 800-38A vector
+// also used by Rust's aes_ctr_smoke_test. This is a partial check since the
+// full interop fixture drives the same test in tests/interop.
+// Key: 603DEB10...  Nonce: F0F1F2F3F4F5F6F7F8F9FAFB  InitCtr: 0xFCFDFEFF
+func TestNewAES256CTR_NISTVector(t *testing.T) {
+	key, err := hexDecode("603DEB1015CA71BE2B73AEF0857D77811F352C073B6108D72D9810A30914DFF4")
+	if err != nil {
+		t.Fatalf("hexDecode key: %v", err)
+	}
+	nonce, err := hexDecode("F0F1F2F3F4F5F6F7F8F9FAFB")
+	if err != nil {
+		t.Fatalf("hexDecode nonce: %v", err)
+	}
+	input, err := hexDecode("6BC1BEE22E409F96E93D7E117393172AAE2D8A571E03AC9C9EB76FAC45AF8E5130C81C46A35CE411E5FBC1191A0A52EFF69F2445DF4F9B17AD2B417BE66C3710")
+	if err != nil {
+		t.Fatalf("hexDecode input: %v", err)
+	}
+	want, err := hexDecode("601EC313775789A5B7A7F504BBF3D228F443E3CA4D62B59ACA84E990CACAF5C52B0930DAA23DE94CE87017BA2D84988DDFC9C58DB67AADA613C2DD08457941A6")
+	if err != nil {
+		t.Fatalf("hexDecode want: %v", err)
+	}
+
+	ctr, err := NewAES256CTR(key, nonce, 0xFCFDFEFF)
+	if err != nil {
+		t.Fatalf("NewAES256CTR: %v", err)
+	}
+	got := make([]byte, len(input))
+	copy(got, input)
+	if err := ctr.Process(got); err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+
+	if !bytes.Equal(got, want) {
+		t.Errorf("NIST vector mismatch:\n  got  %x\n  want %x", got, want)
+	}
+}
+
+func hexDecode(s string) ([]byte, error) {
+	b := make([]byte, len(s)/2)
+	for i := 0; i < len(s); i += 2 {
+		hi := hexNibble(s[i])
+		lo := hexNibble(s[i+1])
+		b[i/2] = (hi << 4) | lo
+	}
+	return b, nil
+}
+
+func hexNibble(c byte) byte {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0'
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10
+	}
+	return 0
+}
+
+// TestNewAES256CTR_BoundEnforcement verifies that Process returns
+// ErrAESCTRInputTooLong when the cumulative bytes across calls would
+// exceed the 32-bit counter capacity. The test uses initCtr=MaxUint32 so
+// only one block (16 bytes) is valid, avoiding multi-gigabyte allocations.
+func TestNewAES256CTR_BoundEnforcement(t *testing.T) {
+	key := make([]byte, 32)
+	nonce := make([]byte, AES256CTRNonceSize)
+
+	// With initCtr = MaxUint32 exactly one block (16 bytes) remains.
+	ctr, err := NewAES256CTR(key, nonce, math.MaxUint32)
+	if err != nil {
+		t.Fatalf("NewAES256CTR: %v", err)
+	}
+
+	// First call: exactly 16 bytes — must succeed.
+	buf := make([]byte, aes.BlockSize)
+	if err := ctr.Process(buf); err != nil {
+		t.Fatalf("first Process (16 bytes) should succeed: %v", err)
+	}
+
+	// Second call: 1 byte — must fail with ErrAESCTRInputTooLong.
+	err = ctr.Process(make([]byte, 1))
+	if err == nil {
+		t.Fatal("second Process after exhausting counter should return error")
+	}
+	var tooLong *ErrAESCTRInputTooLong
+	if !errors.As(err, &tooLong) {
+		t.Errorf("expected *ErrAESCTRInputTooLong, got %T: %v", err, err)
+	}
+}
+
+// TestNewAES256CTR_BoundCumulativeMultiCall verifies the bound is tracked
+// cumulatively: multiple small calls that together exceed the limit fail.
+func TestNewAES256CTR_BoundCumulativeMultiCall(t *testing.T) {
+	key := make([]byte, 32)
+	nonce := make([]byte, AES256CTRNonceSize)
+
+	// initCtr = MaxUint32 - 1 leaves 2 blocks (32 bytes) available.
+	ctr, err := NewAES256CTR(key, nonce, math.MaxUint32-1)
+	if err != nil {
+		t.Fatalf("NewAES256CTR: %v", err)
+	}
+
+	// Process 16 bytes twice — both succeed (2 blocks consumed).
+	for i := 0; i < 2; i++ {
+		if err := ctr.Process(make([]byte, aes.BlockSize)); err != nil {
+			t.Fatalf("Process call %d should succeed: %v", i+1, err)
+		}
+	}
+
+	// Third call must fail: no capacity remains.
+	if err := ctr.Process(make([]byte, 1)); err == nil {
+		t.Fatal("Process after exhausting 2-block capacity should return error")
 	}
 }
 

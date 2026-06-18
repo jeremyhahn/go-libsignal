@@ -1,0 +1,18 @@
+{
+  "_provenance": {
+    "source": "rust/crypto/tests/aes_ctr.rs",
+    "tests": ["aes_ctr_smoke_test", "aes_ctr_long_test"],
+    "rust_rev_pin": "/RUST_REV (root of go-libsignal repo)",
+    "note": "Hand-extracted hex constants from inline Rust AES-256-CTR-32-BE KATs. The drift detector greps the upstream source for every hex literal."
+  },
+  "vectors": [
+    {
+      "name": "smoke",
+      "key_hex": "603DEB1015CA71BE2B73AEF0857D77811F352C073B6108D72D9810A30914DFF4",
+      "nonce_hex": "F0F1F2F3F4F5F6F7F8F9FAFB",
+      "init_counter_hex": "FCFDFEFF",
+      "input_hex": "6BC1BEE22E409F96E93D7E117393172AAE2D8A571E03AC9C9EB76FAC45AF8E5130C81C46A35CE411E5FBC1191A0A52EFF69F2445DF4F9B17AD2B417BE66C3710",
+      "output_hex": "601EC313775789A5B7A7F504BBF3D228F443E3CA4D62B59ACA84E990CACAF5C52B0930DAA23DE94CE87017BA2D84988DDFC9C58DB67AADA613C2DD08457941A6"
+    }
+  ]
+}

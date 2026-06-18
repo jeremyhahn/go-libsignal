@@ -1,0 +1,12 @@
+{
+  "_provenance": {
+    "source": "rust/zkgroup/src/crypto/profile_key_encryption.rs::tests::test_profile_key_encryption",
+    "rust_rev_pin": "/RUST_REV (root of go-libsignal repo)",
+    "note": "Hand-extracted profile-key encryption KAT. Drift detector greps the upstream source for byte literals."
+  },
+  "sho_label": "Test_Profile_Key_Encryption",
+  "master_key_seed":   "test_array_32_1",
+  "profile_key_seed":  "test_array_32_1",
+  "uid_seed":          "test_array_16_1",
+  "expected_ciphertext_hex": "5618cb4c7d721e012b22f077ef1264f6b143bb597a1d665a70aa84245f246d20badb97474a56f4b5361aeca9d118b7004e1409 71990aab2af2432d3f8f7d213a"
+}

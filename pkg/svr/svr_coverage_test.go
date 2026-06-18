@@ -127,49 +127,6 @@ func TestNewBackup4_ZeroMaxTries(t *testing.T) {
 	}
 }
 
-// --- MasterKey empty PIN ---
-
-func TestMasterKey_EmptyPIN(t *testing.T) {
-	var secret Secret
-	_, err := MasterKey("", secret)
-	if err == nil {
-		t.Fatal("expected error for empty PIN")
-	}
-}
-
-// --- DeriveStorageKey nil input ---
-
-func TestDeriveStorageKey_NilInput(t *testing.T) {
-	_, err := DeriveStorageKey(nil)
-	if err == nil {
-		t.Fatal("expected error for nil input")
-	}
-}
-
-// --- DeriveStorageKey valid ---
-
-func TestDeriveStorageKey_ValidInput(t *testing.T) {
-	key1, err := DeriveStorageKey([]byte("master-secret"))
-	if err != nil {
-		t.Fatalf("DeriveStorageKey failed: %v", err)
-	}
-	key2, err := DeriveStorageKey([]byte("master-secret"))
-	if err != nil {
-		t.Fatalf("DeriveStorageKey failed: %v", err)
-	}
-	if key1 != key2 {
-		t.Error("DeriveStorageKey should be deterministic")
-	}
-
-	key3, err := DeriveStorageKey([]byte("different-secret"))
-	if err != nil {
-		t.Fatalf("DeriveStorageKey failed: %v", err)
-	}
-	if key1 == key3 {
-		t.Error("different inputs should produce different keys")
-	}
-}
-
 // --- NewBackup4 success ---
 
 func TestNewBackup4_Success(t *testing.T) {
@@ -347,20 +304,6 @@ func TestEncryptDecryptSecret_Roundtrip(t *testing.T) {
 	}
 	if got != secret {
 		t.Error("decrypted secret does not match original")
-	}
-}
-
-// --- MasterKey same PIN different secrets ---
-
-func TestMasterKey_SamePINDifferentSecrets(t *testing.T) {
-	var s1, s2 Secret
-	s1[0] = 1
-	s2[0] = 2
-
-	k1, _ := MasterKey("pin", s1)
-	k2, _ := MasterKey("pin", s2)
-	if k1 == k2 {
-		t.Error("same PIN with different secrets should produce different keys")
 	}
 }
 

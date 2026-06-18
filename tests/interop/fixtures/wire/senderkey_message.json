@@ -1,0 +1,20 @@
+{
+  "source": "rust/protocol/src/group_cipher.rs (libsignal v0.92.2)",
+  "rust_rev": "98915c442d",
+  "purpose": "SenderKeyMessage: ciphertext bytes produced by group_encrypt for a fixed plaintext.",
+  "vectors": [
+    {
+      "name": "senderkey_message",
+      "inputs": {
+        "alice_device_id": 1,
+        "alice_uuid": "11111111-1111-1111-1111-111111111111",
+        "distribution_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        "plaintext": "776176652d642d666978747572652d706c61696e74657874",
+        "senderkey_distribution_serialized": "330a10aaaaaaaabbbbccccddddeeeeeeeeeeee10daa1f7ff061800222069857dfa4e61582e7808d1b09a5abe7ecb4e4b987851bb7ed38af3d445945c272a21053928f7b9bfc2be77ed481473963c515ded4152230a3c2a0793015902453d3d2e"
+      },
+      "expected": {
+        "serialized": "330a10aaaaaaaabbbbccccddddeeeeeeeeeeee10daa1f7ff0618002220c39564b7065ae4454a1289c93ef9f73248e2fe33e6b05b6dc788c88aa692ecfd40cdc33bf9571d255a27461794f3fb18f75529c026b5066e39f0e448edb1454ed74112586ecdc9c5b0614895ca931380eba9a64265018722f4050c3c1c402e86"
+      }
+    }
+  ]
+}

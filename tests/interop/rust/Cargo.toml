@@ -1,0 +1,47 @@
+[package]
+name = "libsignal-interop"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "libsignal-interop"
+path = "src/main.rs"
+
+[[bin]]
+name = "wire_emitter"
+path = "src/bin/wire_emitter.rs"
+
+[[bin]]
+name = "interop_runner"
+path = "src/bin/interop_runner.rs"
+
+[dependencies]
+spqr = { git = "https://github.com/signalapp/SparsePostQuantumRatchet.git", tag = "v1.5.1" }
+rand = "0.9"
+rand_chacha = "0.9"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+anyhow = "1"
+
+# libsignal-protocol and its transitive dependencies (path-based, read-only upstream).
+# Used only by wire_emitter; the SPQR harness (main.rs) does not link it.
+libsignal-protocol = { path = "../../../../libsignal/rust/protocol" }
+zkgroup = { path = "../../../../libsignal/rust/zkgroup" }
+libsignal-core = { path = "../../../../libsignal/rust/core" }
+tokio = { version = "1", features = ["rt", "macros"] }
+uuid = { version = "1", features = ["v4"] }
+# Direct AES-256-CBC + PKCS7 access for the C2 frame_aes fixture; mirrors the
+# crates used by rust/message-backup/src/export.rs::aes_cbc_encrypt.
+aes = "0.8"
+cbc = { version = "0.1", features = ["block-padding"] }
+hmac = "0.12"
+sha2 = "0.10"
+
+# Patch the public curve25519-dalek with Signal's fork so that zkgroup and
+# libsignal-protocol both resolve to the same patched version and there is no
+# duplicate-type mismatch between crates.
+[patch.crates-io]
+curve25519-dalek = { git = 'https://github.com/signalapp/curve25519-dalek', tag = 'signal-curve25519-4.1.3' }

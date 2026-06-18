@@ -169,6 +169,49 @@ func TestStaticCertificatePinner_FailClosed(t *testing.T) {
 	})
 }
 
+// TestNewEmbeddedCertificatePinner is the integration test for finding #33.
+// It verifies that the embedded Signal and Google proxy root CAs can be loaded
+// and produce working tls.Config objects (non-nil, non-empty cert pools).
+func TestNewEmbeddedCertificatePinner(t *testing.T) {
+	pinner, err := NewEmbeddedCertificatePinner()
+	if err != nil {
+		t.Fatalf("NewEmbeddedCertificatePinner(): %v", err)
+	}
+	if pinner == nil {
+		t.Fatal("returned nil pinner")
+	}
+
+	t.Run("signal config has non-empty cert pool", func(t *testing.T) {
+		cfg := pinner.PinCertificates(RootCertificatesSignal)
+		if cfg == nil {
+			t.Fatal("PinCertificates(Signal) returned nil")
+		}
+		if cfg.RootCAs == nil {
+			t.Error("RootCAs is nil")
+		}
+		if cfg.MinVersion != tls.VersionTLS12 {
+			t.Errorf("MinVersion = %d, want TLS 1.2", cfg.MinVersion)
+		}
+	})
+
+	t.Run("proxy config has non-empty cert pool", func(t *testing.T) {
+		cfg := pinner.PinCertificates(RootCertificatesProxyG)
+		if cfg == nil {
+			t.Fatal("PinCertificates(ProxyG) returned nil")
+		}
+		if cfg.RootCAs == nil {
+			t.Error("RootCAs is nil")
+		}
+	})
+
+	t.Run("native still returns nil", func(t *testing.T) {
+		cfg := pinner.PinCertificates(RootCertificatesNative)
+		if cfg != nil {
+			t.Error("expected nil for native cert type")
+		}
+	})
+}
+
 func generateSelfSignedCertDER(t *testing.T) []byte {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

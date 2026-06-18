@@ -6,7 +6,6 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/logger"
 	"github.com/jeremyhahn/go-libsignal/pkg/protocol"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
-
 )
 
 // NewJSONSerializer will return a serializer for all Signal objects that will

@@ -114,6 +114,23 @@ func (s *SignedPreKey) Signature() [64]byte {
 	return s.signature
 }
 
+// SignatureBytes returns the signature as a plain byte slice.
+// It delegates to Signature() to satisfy the GenericSignedPreKey interface
+// without altering the [64]byte return type that existing callers rely on.
+func (s *SignedPreKey) SignatureBytes() []byte {
+	sig := s.signature
+	out := make([]byte, len(sig))
+	copy(out, sig[:])
+	return out
+}
+
+// SerializedPublicKey returns the type-prefixed serialized EC public key bytes.
+// This satisfies the GenericSignedPreKey interface and gives polymorphic
+// callers access to the raw bytes without depending on ECPublicKeyable.
+func (s *SignedPreKey) SerializedPublicKey() []byte {
+	return s.keyPair.PublicKey().Serialize()
+}
+
 // Serialize uses the SignedPreKey serializer to return the SignedPreKey
 // as serialized bytes.
 func (s *SignedPreKey) Serialize() ([]byte, error) {

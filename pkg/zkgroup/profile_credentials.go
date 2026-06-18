@@ -91,9 +91,9 @@ func (ctx *ProfileKeyCredentialRequestContext) GetRequest() *ProfileKeyCredentia
 // ExpiringProfileKeyCredential is a profile key credential with an expiration
 // time.
 type ExpiringProfileKeyCredential struct {
-	Credential              *zkcredential.Credential
-	ACIBytes                UIDBytes
-	ProfileKeyBytes         ProfileKeyBytes
+	Credential               *zkcredential.Credential
+	ACIBytes                 UIDBytes
+	ProfileKeyBytes          ProfileKeyBytes
 	CredentialExpirationTime Timestamp
 }
 
@@ -118,17 +118,17 @@ type ExpiringProfileKeyCredentialResponse struct {
 // ExpiringProfileKeyCredentialPresentation is a presentation of an expiring
 // profile key credential for verification.
 type ExpiringProfileKeyCredentialPresentation struct {
-	Cx0                     *ristretto255.Element
-	Cx1                     *ristretto255.Element
-	Cy1                     *ristretto255.Element
-	Cy2                     *ristretto255.Element
-	Cy3                     *ristretto255.Element
-	Cy4                     *ristretto255.Element
-	Cy5                     *ristretto255.Element
-	CV                      *ristretto255.Element
-	PokshoProof             []byte
-	UIDEncCiphertext        *UUIDCiphertext
-	ProfileKeyEncCiphertext *ProfileKeyCiphertext
+	Cx0                      *ristretto255.Element
+	Cx1                      *ristretto255.Element
+	Cy1                      *ristretto255.Element
+	Cy2                      *ristretto255.Element
+	Cy3                      *ristretto255.Element
+	Cy4                      *ristretto255.Element
+	Cy5                      *ristretto255.Element
+	CV                       *ristretto255.Element
+	PokshoProof              []byte
+	UIDEncCiphertext         *UUIDCiphertext
+	ProfileKeyEncCiphertext  *ProfileKeyCiphertext
 	CredentialExpirationTime Timestamp
 }
 
@@ -145,29 +145,6 @@ func (p *ExpiringProfileKeyCredentialPresentation) GetProfileKeyCiphertext() *Pr
 // GetExpirationTime returns the credential's expiration time.
 func (p *ExpiringProfileKeyCredentialPresentation) GetExpirationTime() Timestamp {
 	return p.CredentialExpirationTime
-}
-
-// AnyProfileKeyCredentialPresentation holds any version of profile key
-// credential presentation.
-type AnyProfileKeyCredentialPresentation struct {
-	Version      byte
-	Presentation *ExpiringProfileKeyCredentialPresentation
-}
-
-// GetUUIDCiphertext returns the encrypted UUID from any version.
-func (p *AnyProfileKeyCredentialPresentation) GetUUIDCiphertext() *UUIDCiphertext {
-	if p.Presentation == nil {
-		return nil
-	}
-	return p.Presentation.UIDEncCiphertext
-}
-
-// GetProfileKeyCiphertext returns the encrypted profile key from any version.
-func (p *AnyProfileKeyCredentialPresentation) GetProfileKeyCiphertext() *ProfileKeyCiphertext {
-	if p.Presentation == nil {
-		return nil
-	}
-	return p.Presentation.ProfileKeyEncCiphertext
 }
 
 // CreateProfileKeyCredentialRequestContext creates a profile key credential
@@ -388,8 +365,8 @@ func (pub *ServerPublicParams) ReceiveExpiringProfileKeyCredential(
 			U: response.BlindedCredential.U,
 			V: V,
 		},
-		ACIBytes:                ctx.ACIBytes,
-		ProfileKeyBytes:         ctx.ProfileKeyBytes,
+		ACIBytes:                 ctx.ACIBytes,
+		ProfileKeyBytes:          ctx.ProfileKeyBytes,
 		CredentialExpirationTime: response.CredentialExpirationTime,
 	}, nil
 }
@@ -398,12 +375,23 @@ func (pub *ServerPublicParams) ReceiveExpiringProfileKeyCredential(
 // presentation of an expiring profile key credential. This is a client-side
 // operation.
 //
+// presentationVersion selects between PresentationVersion3 (the historical
+// proof) and PresentationVersion4 (adds a C_y5 = z * G_y5 clause that proves
+// the empty C_y5 commitment was formed with the same z, mirroring Rust's
+// const-generic `V >= PRESENTATION_VERSION_4` switch). Any other value
+// returns ErrUnknownPresentationVersion.
+//
 // Matches Rust ServerPublicParams::create_expiring_profile_key_credential_presentation.
 func (pub *ServerPublicParams) CreateExpiringProfileKeyCredentialPresentation(
 	randomness RandomnessBytes,
 	groupSecretParams *GroupSecretParams,
 	credential *ExpiringProfileKeyCredential,
+	presentationVersion byte,
 ) (*ExpiringProfileKeyCredentialPresentation, error) {
+	if presentationVersion != PresentationVersion3 && presentationVersion != PresentationVersion4 {
+		return nil, &ErrUnknownPresentationVersion{Version: presentationVersion}
+	}
+	fullChecking := presentationVersion >= PresentationVersion4
 	sho := zkcredential.NewShoHmacSha256Ext(
 		"Signal_ZKGroup_20220508_Random_ServerPublicParams_CreateExpiringProfileKeyCredentialPresentation",
 	)
@@ -517,25 +505,31 @@ func (pub *ServerPublicParams) CreateExpiringProfileKeyCredentialPresentation(
 	pointArgs.Add("G_y3", legacySys.Gy[2])
 	pointArgs.Add("0", ristretto255.NewIdentityElement())
 
+	if fullChecking {
+		// V4 binds the C_y5 commitment into the proof. Add the matching points.
+		pointArgs.Add("C_y5", Cy5)
+		pointArgs.Add("G_y5", legacySys.Gy[4])
+	}
+
 	proofRandomness := sho.SqueezeAndRatchet(RandomnessLen)
-	st := expiringProfileKeyCredentialPresentationStatement()
+	st := expiringProfileKeyCredentialPresentationStatement(fullChecking)
 	proofBytes, err := st.Prove(scalarArgs, pointArgs, nil, proofRandomness)
 	if err != nil {
 		return nil, &ZkGroupVerificationFailure{Context: "expiring profile key presentation proof: " + err.Error()}
 	}
 
 	return &ExpiringProfileKeyCredentialPresentation{
-		Cx0:                     Cx0,
-		Cx1:                     Cx1,
-		Cy1:                     Cy1,
-		Cy2:                     Cy2,
-		Cy3:                     Cy3,
-		Cy4:                     Cy4,
-		Cy5:                     Cy5,
-		CV:                      CV,
-		PokshoProof:             proofBytes,
-		UIDEncCiphertext:        uuidCiphertext,
-		ProfileKeyEncCiphertext: profileKeyCiphertext,
+		Cx0:                      Cx0,
+		Cx1:                      Cx1,
+		Cy1:                      Cy1,
+		Cy2:                      Cy2,
+		Cy3:                      Cy3,
+		Cy4:                      Cy4,
+		Cy5:                      Cy5,
+		CV:                       CV,
+		PokshoProof:              proofBytes,
+		UIDEncCiphertext:         uuidCiphertext,
+		ProfileKeyEncCiphertext:  profileKeyCiphertext,
 		CredentialExpirationTime: credential.CredentialExpirationTime,
 	}, nil
 }
@@ -548,7 +542,12 @@ func (s *ServerSecretParams) VerifyExpiringProfileKeyCredentialPresentation(
 	groupPublicParams *GroupPublicParams,
 	presentation *ExpiringProfileKeyCredentialPresentation,
 	currentTime Timestamp,
+	presentationVersion byte,
 ) error {
+	if presentationVersion != PresentationVersion3 && presentationVersion != PresentationVersion4 {
+		return &ErrUnknownPresentationVersion{Version: presentationVersion}
+	}
+	fullChecking := presentationVersion >= PresentationVersion4
 	legacySys := zkcredential.GetLegacySystemParams()
 	priv := s.ExpiringProfileKeyCredentialsKeyPair.PrivateKey()
 	credPubKey := s.ExpiringProfileKeyCredentialsKeyPair.PublicKey()
@@ -629,7 +628,12 @@ func (s *ServerSecretParams) VerifyExpiringProfileKeyCredentialPresentation(
 	pointArgs.Add("G_y3", legacySys.Gy[2])
 	pointArgs.Add("0", ristretto255.NewIdentityElement())
 
-	st := expiringProfileKeyCredentialPresentationStatement()
+	if fullChecking {
+		pointArgs.Add("C_y5", presentation.Cy5)
+		pointArgs.Add("G_y5", legacySys.Gy[4])
+	}
+
+	st := expiringProfileKeyCredentialPresentationStatement(fullChecking)
 	err := st.VerifyProof(presentation.PokshoProof, pointArgs, nil)
 	if err != nil {
 		return &ZkGroupVerificationFailure{Context: "expiring profile key presentation verification failed"}
@@ -646,7 +650,12 @@ func (s *ServerSecretParams) VerifyExpiringProfileKeyCredentialPresentation(
 // expiringProfileKeyCredentialPresentationStatement returns the poksho statement
 // for expiring profile key credential presentations. Matches Rust
 // ExpiringProfileKeyCredentialPresentationProof::get_poksho_statement.
-func expiringProfileKeyCredentialPresentationStatement() *poksho.Statement {
+//
+// fullChecking selects between the V3 (false) and V4 (true) statement. V4 adds
+// a `C_y5 = z * G_y5` clause that proves the empty C_y5 commitment was actually
+// formed with the same z used elsewhere. Rust ties this to the const generic
+// `V >= PRESENTATION_VERSION_4`.
+func expiringProfileKeyCredentialPresentationStatement(fullChecking bool) *poksho.Statement {
 	st := poksho.NewStatement()
 	st.Add("Z", [][2]string{{"z", "I"}})
 	st.Add("C_x1", [][2]string{{"t", "C_x0"}, {"z0", "G_x0"}, {"z", "G_x1"}})
@@ -657,6 +666,9 @@ func expiringProfileKeyCredentialPresentationStatement() *poksho.Statement {
 	st.Add("E_B1", [][2]string{{"b1", "C_y3"}, {"z2", "G_y3"}})
 	st.Add("0", [][2]string{{"z1", "I"}, {"a1", "Z"}})
 	st.Add("0", [][2]string{{"z2", "I"}, {"b1", "Z"}})
+	if fullChecking {
+		st.Add("C_y5", [][2]string{{"z", "G_y5"}})
+	}
 	return st
 }
 

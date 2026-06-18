@@ -11,7 +11,7 @@ type Error struct {
 type errorKind int
 
 const (
-	errSenderKeyMismatch        errorKind = iota + 1
+	errSenderKeyMismatch errorKind = iota + 1
 	errServerCertificateRevoked
 	errV2ReceivedMessageTooShort
 	errV2ReceivedUnsupportedVersion
@@ -28,7 +28,6 @@ const (
 	errUnknownUSMCType
 	errInvalidRegistrationID
 )
-
 
 // ErrSenderKeyMismatch indicates the decrypted static key does not match
 // the sender's identity key in the certificate. This is a critical security
@@ -223,6 +222,28 @@ type CertificateError struct {
 // Error returns a human-readable description of the certificate error.
 func (e *CertificateError) Error() string {
 	return fmt.Sprintf("sealed: %s", e.Detail)
+}
+
+// RecipientViewError is returned by MessageForRecipient when the serialized
+// recipient view is malformed (wrong length, unsupported version, or offsets
+// outside the supplied data buffer). The Detail field carries a human-readable
+// description of the specific failure.
+//
+// errors.Is(err, ErrInvalidRecipientView) returns true for all values of this
+// type via the Unwrap method.
+type RecipientViewError struct {
+	Detail string
+}
+
+// Error returns a human-readable description of the recipient view error.
+func (e *RecipientViewError) Error() string {
+	return fmt.Sprintf("sealed: invalid serialized recipient view: %s", e.Detail)
+}
+
+// Unwrap returns ErrInvalidRecipientView so that errors.Is checks against the
+// sentinel continue to work.
+func (e *RecipientViewError) Unwrap() error {
+	return ErrInvalidRecipientView
 }
 
 // IdentityStoreError indicates the identity store does not support loading

@@ -2,6 +2,7 @@ package sealed
 
 import (
 	"encoding/binary"
+	"errors"
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
@@ -29,30 +30,35 @@ func newInMemorySessionStore(serializer *serialize.Serializer) *inMemorySessionS
 	}
 }
 
-func (s *inMemorySessionStore) LoadSession(address *protocol.SignalAddress) *record.Session {
+func (s *inMemorySessionStore) LoadSession(address *protocol.SignalAddress) (*record.Session, error) {
 	if sess, ok := s.sessions[address.String()]; ok {
-		return sess
+		return sess, nil
 	}
-	return record.NewSession(s.serializer.Session, s.serializer.State)
+	return record.NewSession(s.serializer.Session, s.serializer.State), nil
 }
 
-func (s *inMemorySessionStore) GetSubDeviceSessions(name string) []uint32 { return nil }
+func (s *inMemorySessionStore) GetSubDeviceSessions(name string) ([]uint32, error) {
+	return nil, nil
+}
 
-func (s *inMemorySessionStore) StoreSession(address *protocol.SignalAddress, r *record.Session) {
+func (s *inMemorySessionStore) StoreSession(address *protocol.SignalAddress, r *record.Session) error {
 	s.sessions[address.String()] = r
+	return nil
 }
 
-func (s *inMemorySessionStore) ContainsSession(address *protocol.SignalAddress) bool {
+func (s *inMemorySessionStore) ContainsSession(address *protocol.SignalAddress) (bool, error) {
 	_, ok := s.sessions[address.String()]
-	return ok
+	return ok, nil
 }
 
-func (s *inMemorySessionStore) DeleteSession(address *protocol.SignalAddress) {
+func (s *inMemorySessionStore) DeleteSession(address *protocol.SignalAddress) error {
 	delete(s.sessions, address.String())
+	return nil
 }
 
-func (s *inMemorySessionStore) DeleteAllSessions() {
+func (s *inMemorySessionStore) DeleteAllSessions() error {
 	s.sessions = make(map[string]*record.Session)
+	return nil
 }
 
 // inMemoryPreKeyStore for v2 tests.
@@ -64,10 +70,21 @@ func newInMemoryPreKeyStore() *inMemoryPreKeyStore {
 	return &inMemoryPreKeyStore{store: make(map[uint32]*record.PreKey)}
 }
 
-func (s *inMemoryPreKeyStore) LoadPreKey(id uint32) *record.PreKey    { return s.store[id] }
-func (s *inMemoryPreKeyStore) StorePreKey(id uint32, r *record.PreKey) { s.store[id] = r }
-func (s *inMemoryPreKeyStore) ContainsPreKey(id uint32) bool          { _, ok := s.store[id]; return ok }
-func (s *inMemoryPreKeyStore) RemovePreKey(id uint32)                  { delete(s.store, id) }
+func (s *inMemoryPreKeyStore) LoadPreKey(id uint32) (*record.PreKey, error) {
+	return s.store[id], nil
+}
+func (s *inMemoryPreKeyStore) StorePreKey(id uint32, r *record.PreKey) error {
+	s.store[id] = r
+	return nil
+}
+func (s *inMemoryPreKeyStore) ContainsPreKey(id uint32) (bool, error) {
+	_, ok := s.store[id]
+	return ok, nil
+}
+func (s *inMemoryPreKeyStore) RemovePreKey(id uint32) error {
+	delete(s.store, id)
+	return nil
+}
 
 // inMemorySignedPreKeyStore for v2 tests.
 type inMemorySignedPreKeyStore struct {
@@ -78,24 +95,28 @@ func newInMemorySignedPreKeyStore() *inMemorySignedPreKeyStore {
 	return &inMemorySignedPreKeyStore{store: make(map[uint32]*record.SignedPreKey)}
 }
 
-func (s *inMemorySignedPreKeyStore) LoadSignedPreKey(id uint32) *record.SignedPreKey {
-	return s.store[id]
+func (s *inMemorySignedPreKeyStore) LoadSignedPreKey(id uint32) (*record.SignedPreKey, error) {
+	return s.store[id], nil
 }
-func (s *inMemorySignedPreKeyStore) LoadSignedPreKeys() []*record.SignedPreKey {
+func (s *inMemorySignedPreKeyStore) LoadSignedPreKeys() ([]*record.SignedPreKey, error) {
 	var keys []*record.SignedPreKey
 	for _, k := range s.store {
 		keys = append(keys, k)
 	}
-	return keys
+	return keys, nil
 }
-func (s *inMemorySignedPreKeyStore) StoreSignedPreKey(id uint32, r *record.SignedPreKey) {
+func (s *inMemorySignedPreKeyStore) StoreSignedPreKey(id uint32, r *record.SignedPreKey) error {
 	s.store[id] = r
+	return nil
 }
-func (s *inMemorySignedPreKeyStore) ContainsSignedPreKey(id uint32) bool {
+func (s *inMemorySignedPreKeyStore) ContainsSignedPreKey(id uint32) (bool, error) {
 	_, ok := s.store[id]
-	return ok
+	return ok, nil
 }
-func (s *inMemorySignedPreKeyStore) RemoveSignedPreKey(id uint32) { delete(s.store, id) }
+func (s *inMemorySignedPreKeyStore) RemoveSignedPreKey(id uint32) error {
+	delete(s.store, id)
+	return nil
+}
 
 // v2TestIdentityStore extends testIdentityStore with session identity loading.
 type v2TestIdentityStore struct {
@@ -127,12 +148,17 @@ func (s *v2TestIdentityStore) GetLocalRegistrationId() uint32 {
 	return s.registrationID
 }
 
-func (s *v2TestIdentityStore) SaveIdentity(address *protocol.SignalAddress, identityKey *identity.Key) {
+func (s *v2TestIdentityStore) SaveIdentity(address *protocol.SignalAddress, identityKey *identity.Key) (store.IdentityChange, error) {
+	prev, existed := s.trustedKeys[address.String()]
 	s.trustedKeys[address.String()] = identityKey
+	if existed && prev != identityKey {
+		return store.IdentityChangeReplacedExisting, nil
+	}
+	return store.IdentityChangeNewOrUnchanged, nil
 }
 
-func (s *v2TestIdentityStore) IsTrustedIdentity(address *protocol.SignalAddress, identityKey *identity.Key, direction store.Direction) bool {
-	return true
+func (s *v2TestIdentityStore) IsTrustedIdentity(address *protocol.SignalAddress, identityKey *identity.Key, direction store.Direction) (bool, error) {
+	return true, nil
 }
 
 func (s *v2TestIdentityStore) GetIdentity(address *protocol.SignalAddress) (*identity.Key, error) {
@@ -181,7 +207,9 @@ func setupV2Session(t *testing.T) (
 	}
 	bobPreKeyStore := newInMemoryPreKeyStore()
 	for _, pk := range bobPreKeys {
-		bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord))
+		if err := bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord)); err != nil {
+			t.Fatalf("setup: StorePreKey: %v", err)
+		}
 	}
 
 	bobSignedPreKey, err := keyhelper.GenerateSignedPreKey(bobStore.keyPair, 0, serializer.SignedPreKeyRecord)
@@ -189,10 +217,12 @@ func setupV2Session(t *testing.T) (
 		t.Fatalf("GenerateSignedPreKey error: %v", err)
 	}
 	bobSignedPreKeyStore := newInMemorySignedPreKeyStore()
-	bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
+	if err := bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
 		bobSignedPreKey.ID(), bobSignedPreKey.Timestamp(), bobSignedPreKey.KeyPair(),
 		bobSignedPreKey.Signature(), serializer.SignedPreKeyRecord,
-	))
+	)); err != nil {
+		t.Fatalf("setup: StoreSignedPreKey: %v", err)
+	}
 
 	// Generate Bob's Kyber pre-key for PQXDH
 	bobKyberPreKey, err := keyhelper.GenerateKyberPreKey(bobStore.keyPair.PrivateKey(), 42, &mockKyberPreKeySerializer{})
@@ -221,14 +251,22 @@ func setupV2Session(t *testing.T) (
 	}
 
 	// Alice now has a session with Bob
-	bobSession = aliceSessionStore.LoadSession(bobAddress)
+	var loadErr error
+	bobSession, loadErr = aliceSessionStore.LoadSession(bobAddress)
+	if loadErr != nil {
+		t.Fatalf("LoadSession error: %v", loadErr)
+	}
 	if bobSession == nil {
 		t.Fatal("Alice should have a session with Bob")
 	}
 
 	// Save identities
-	aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.keyPair.PublicKey().PublicKey()))
-	bobStore.SaveIdentity(aliceAddress, identity.NewKey(aliceStore.keyPair.PublicKey().PublicKey()))
+	if _, err := aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.keyPair.PublicKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
+	if _, err := bobStore.SaveIdentity(aliceAddress, identity.NewKey(aliceStore.keyPair.PublicKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	return
 }
@@ -522,7 +560,7 @@ func TestV2ParseMessageTruncatedEphemeralKey(t *testing.T) {
 	buf = append(buf, varint[:n]...)
 	n = binary.PutUvarint(varint, 1) // device ID = 1
 	buf = append(buf, varint[:n]...)
-	buf = append(buf, 0x00, 0x01)                       // registration ID = 1
+	buf = append(buf, 0x00, 0x01)                           // registration ID = 1
 	buf = append(buf, make([]byte, v2EncryptedMKeySize)...) // C_i
 	buf = append(buf, make([]byte, v2AuthTagSize)...)       // AT_i
 	// Missing ephemeral key
@@ -538,12 +576,12 @@ func TestV2ParseMessageMissingPayload(t *testing.T) {
 	varint := make([]byte, binary.MaxVarintLen64)
 	n := binary.PutUvarint(varint, 1) // 1 recipient
 	buf = append(buf, varint[:n]...)
-	buf = append(buf, make([]byte, v2ServiceIdSize)...) // service ID (17 bytes)
-	buf = append(buf, 0x01)                              // device ID = 1 (single byte)
-	buf = append(buf, 0x00, 0x01)                        // registration ID = 1, no has_more bit
-	buf = append(buf, make([]byte, v2EncryptedMKeySize)...)  // C_i
-	buf = append(buf, make([]byte, v2AuthTagSize)...)        // AT_i
-	buf = append(buf, make([]byte, 32)...)                   // ephemeral key
+	buf = append(buf, make([]byte, v2ServiceIdSize)...)     // service ID (17 bytes)
+	buf = append(buf, 0x01)                                 // device ID = 1 (single byte)
+	buf = append(buf, 0x00, 0x01)                           // registration ID = 1, no has_more bit
+	buf = append(buf, make([]byte, v2EncryptedMKeySize)...) // C_i
+	buf = append(buf, make([]byte, v2AuthTagSize)...)       // AT_i
+	buf = append(buf, make([]byte, 32)...)                  // ephemeral key
 	// No payload
 
 	_, err := v2ParseMessage(buf, SealedSenderV2VersionServiceId)
@@ -981,14 +1019,18 @@ func TestSealedSenderMultiRecipientEncryptMultipleDevices(t *testing.T) {
 	bobPreKeys1, _ := keyhelper.GeneratePreKeys(0, 10, serializer.PreKeyRecord)
 	bobPreKeyStore1 := newInMemoryPreKeyStore()
 	for _, pk := range bobPreKeys1 {
-		bobPreKeyStore1.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord))
+		if err := bobPreKeyStore1.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord)); err != nil {
+			t.Fatalf("setup: StorePreKey: %v", err)
+		}
 	}
 	bobSignedPreKey1, _ := keyhelper.GenerateSignedPreKey(bobStore.keyPair, 0, serializer.SignedPreKeyRecord)
 	bobSignedPreKeyStore1 := newInMemorySignedPreKeyStore()
-	bobSignedPreKeyStore1.StoreSignedPreKey(bobSignedPreKey1.ID(), record.NewSignedPreKey(
+	if err := bobSignedPreKeyStore1.StoreSignedPreKey(bobSignedPreKey1.ID(), record.NewSignedPreKey(
 		bobSignedPreKey1.ID(), bobSignedPreKey1.Timestamp(), bobSignedPreKey1.KeyPair(),
 		bobSignedPreKey1.Signature(), serializer.SignedPreKeyRecord,
-	))
+	)); err != nil {
+		t.Fatalf("setup: StoreSignedPreKey: %v", err)
+	}
 
 	// Generate Kyber pre-key for device 1
 	bobKyberPreKey1, _ := keyhelper.GenerateKyberPreKey(bobStore.keyPair.PrivateKey(), 42, &mockKyberPreKeySerializer{})
@@ -1016,14 +1058,18 @@ func TestSealedSenderMultiRecipientEncryptMultipleDevices(t *testing.T) {
 	bobPreKeys2, _ := keyhelper.GeneratePreKeys(100, 10, serializer.PreKeyRecord)
 	bobPreKeyStore2 := newInMemoryPreKeyStore()
 	for _, pk := range bobPreKeys2 {
-		bobPreKeyStore2.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord))
+		if err := bobPreKeyStore2.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord)); err != nil {
+			t.Fatalf("setup: StorePreKey: %v", err)
+		}
 	}
 	bobSignedPreKey2, _ := keyhelper.GenerateSignedPreKey(bobStore.keyPair, 1, serializer.SignedPreKeyRecord)
 	bobSignedPreKeyStore2 := newInMemorySignedPreKeyStore()
-	bobSignedPreKeyStore2.StoreSignedPreKey(bobSignedPreKey2.ID(), record.NewSignedPreKey(
+	if err := bobSignedPreKeyStore2.StoreSignedPreKey(bobSignedPreKey2.ID(), record.NewSignedPreKey(
 		bobSignedPreKey2.ID(), bobSignedPreKey2.Timestamp(), bobSignedPreKey2.KeyPair(),
 		bobSignedPreKey2.Signature(), serializer.SignedPreKeyRecord,
-	))
+	)); err != nil {
+		t.Fatalf("setup: StoreSignedPreKey: %v", err)
+	}
 
 	// Generate Kyber pre-key for device 2
 	bobKyberPreKey2, _ := keyhelper.GenerateKyberPreKey(bobStore.keyPair.PrivateKey(), 43, &mockKyberPreKeySerializer{})
@@ -1045,10 +1091,18 @@ func TestSealedSenderMultiRecipientEncryptMultipleDevices(t *testing.T) {
 		t.Fatalf("ProcessBundle (device 2) error: %v", err)
 	}
 
-	bobSession1 := aliceSessionStore.LoadSession(bobAddress1)
-	bobSession2 := aliceSessionStore.LoadSession(bobAddress2)
+	bobSession1, err := aliceSessionStore.LoadSession(bobAddress1)
+	if err != nil {
+		t.Fatalf("LoadSession (device 1) error: %v", err)
+	}
+	bobSession2, err := aliceSessionStore.LoadSession(bobAddress2)
+	if err != nil {
+		t.Fatalf("LoadSession (device 2) error: %v", err)
+	}
 
-	aliceStore.SaveIdentity(bobAddress1, identity.NewKey(bobStore.keyPair.PublicKey().PublicKey()))
+	if _, err := aliceStore.SaveIdentity(bobAddress1, identity.NewKey(bobStore.keyPair.PublicKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	trustRoot := newTestTrustRoot(t)
 	serverCert, serverKey := newTestServerCertificate(t, trustRoot)
@@ -1139,7 +1193,7 @@ func TestV2ParseMessageInvalidServiceIdBytes(t *testing.T) {
 	buf = append(buf, varint[:n]...)
 	n = binary.PutUvarint(varint, 1) // device ID
 	buf = append(buf, varint[:n]...)
-	buf = append(buf, 0x00, 0x01)                          // reg ID
+	buf = append(buf, 0x00, 0x01)                           // reg ID
 	buf = append(buf, make([]byte, v2EncryptedMKeySize)...) // C_i
 	buf = append(buf, make([]byte, v2AuthTagSize)...)       // AT_i
 	buf = append(buf, make([]byte, 32)...)                  // eph pub
@@ -1166,5 +1220,143 @@ func TestKeyhelperNewPreKeyBundle(t *testing.T) {
 	)
 	if bundle == nil {
 		t.Fatal("NewPreKeyBundle returned nil")
+	}
+}
+
+// --- PNI destination encrypt tests (#22) ---
+
+// TestSealedSenderMultiRecipientEncryptPNIDestination verifies that encrypting
+// to a PNI-prefixed address succeeds. Before the fix, the encrypt path called
+// ServiceIdFromString(ServiceIdKindACI, ...) which rejected "PNI:<uuid>" names.
+// After the fix it calls ServiceIdFromServiceIdString which auto-detects the kind.
+func TestSealedSenderMultiRecipientEncryptPNIDestination(t *testing.T) {
+	aliceStore, _, _, _, bobSession, _ := setupV2Session(t)
+
+	trustRoot := newTestTrustRoot(t)
+	serverCert, serverKey := newTestServerCertificate(t, trustRoot)
+
+	senderCert, err := NewSenderCertificate(
+		"9d0652a3-5b24-4e0d-b88e-8e1b2a4f8b1a",
+		nil,
+		aliceStore.GetIdentityKeyPair().PublicKey().PublicKey(),
+		1, 9999999999,
+		serverCert, serverKey.PrivateKey(),
+	)
+	if err != nil {
+		t.Fatalf("NewSenderCertificate error: %v", err)
+	}
+
+	usmc, err := NewUnidentifiedSenderMessageContent(
+		2, senderCert, []byte("pni destination content"), ContentHintDefault, nil,
+	)
+	if err != nil {
+		t.Fatalf("NewUnidentifiedSenderMessageContent error: %v", err)
+	}
+
+	// Use a PNI-prefixed address name. The session was established above and
+	// carries the same remote identity key regardless of the address name prefix.
+	pniAddress := protocol.NewSignalAddress("PNI:a1b2c3d4-e5f6-7890-abcd-ef0123456789", 1)
+	if _, err := aliceStore.SaveIdentity(pniAddress, identity.NewKey(bobSession.SessionState().RemoteIdentityKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
+
+	ciphertext, err := SealedSenderMultiRecipientEncrypt(
+		[]*protocol.SignalAddress{pniAddress},
+		[]*record.Session{bobSession},
+		nil,
+		usmc,
+		aliceStore,
+	)
+	if err != nil {
+		t.Fatalf("SealedSenderMultiRecipientEncrypt (PNI destination): %v", err)
+	}
+	if len(ciphertext) == 0 {
+		t.Fatal("ciphertext should not be empty")
+	}
+}
+
+// TestSealedSenderV2DecryptPNISender verifies that the Step 7.5 ServiceId
+// validation in the v2 decrypt path accepts a PNI-keyed sender certificate.
+// Before the fix, ServiceIdFromString(ServiceIdKindACI, "PNI:...") would reject
+// PNI sender certificates. After the fix, ServiceIdFromServiceIdString detects
+// the kind automatically.
+func TestSealedSenderV2DecryptPNISender(t *testing.T) {
+	aliceStore, bobStore, _, bobAddress, bobSession, _ := setupV2Session(t)
+
+	trustRoot := newTestTrustRoot(t)
+	serverCert, serverKey := newTestServerCertificate(t, trustRoot)
+
+	// Alice sends with a PNI-prefixed UUID in the sender certificate.
+	pniUUID := "PNI:9d0652a3-5b24-4e0d-b88e-8e1b2a4f8b1a"
+	senderCert, err := NewSenderCertificate(
+		pniUUID,
+		nil,
+		aliceStore.GetIdentityKeyPair().PublicKey().PublicKey(),
+		1, 9999999999,
+		serverCert, serverKey.PrivateKey(),
+	)
+	if err != nil {
+		t.Fatalf("NewSenderCertificate (PNI): %v", err)
+	}
+
+	usmc, err := NewUnidentifiedSenderMessageContent(
+		2, senderCert, []byte("pni sender content"), ContentHintDefault, nil,
+	)
+	if err != nil {
+		t.Fatalf("NewUnidentifiedSenderMessageContent error: %v", err)
+	}
+
+	ciphertext, err := SealedSenderMultiRecipientEncrypt(
+		[]*protocol.SignalAddress{bobAddress},
+		[]*record.Session{bobSession},
+		nil,
+		usmc,
+		aliceStore,
+	)
+	if err != nil {
+		t.Fatalf("SealedSenderMultiRecipientEncrypt error: %v", err)
+	}
+
+	bobServiceId, err := protocol.ServiceIdFromString(protocol.ServiceIdKindACI, bobAddress.Name())
+	if err != nil {
+		t.Fatalf("ServiceIdFromString error: %v", err)
+	}
+
+	decryptedUSMC, err := SealedSenderV2DecryptToUSMC(ciphertext, bobServiceId, bobStore)
+	if err != nil {
+		t.Fatalf("SealedSenderV2DecryptToUSMC (PNI sender): %v", err)
+	}
+
+	// The sender UUID in the decrypted USMC must be the PNI-prefixed string.
+	if got := decryptedUSMC.Sender().SenderUUID(); got != pniUUID {
+		t.Errorf("SenderUUID: got %q, want %q", got, pniUUID)
+	}
+	if string(decryptedUSMC.Contents()) != "pni sender content" {
+		t.Errorf("Contents: got %q, want %q", string(decryptedUSMC.Contents()), "pni sender content")
+	}
+}
+
+// TestParseHugeRecipientCount_NoPanic is a regression test for the OOM /
+// makeslice panic that occurred when the recipientOrder slice was preallocated
+// with the raw attacker-controlled wire varint instead of preallocCap.
+//
+// A crafted message with a recipient count of 1<<32 (= 4 294 967 296) would
+// attempt to allocate >4 GB for the recipientOrder slice before the fix.
+// After the fix the preallocation is bounded by v2MaxPreallocRecipients (6000)
+// and the parser returns a *V2ParseError because the first per-recipient read
+// immediately exhausts the empty data buffer.
+func TestParseHugeRecipientCount_NoPanic(t *testing.T) {
+	var buf [1 + binary.MaxVarintLen64]byte
+	buf[0] = SealedSenderV2VersionUUID
+	n := binary.PutUvarint(buf[1:], 1<<32)
+	data := buf[:1+n]
+
+	_, err := ParseSealedSenderV2SentMessage(data)
+	if err == nil {
+		t.Fatal("expected parse error for huge recipient count, got nil")
+	}
+	var parseErr *V2ParseError
+	if !errors.As(err, &parseErr) {
+		t.Errorf("expected *V2ParseError, got %T: %v", err, err)
 	}
 }

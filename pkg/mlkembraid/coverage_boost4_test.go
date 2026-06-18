@@ -178,22 +178,34 @@ func TestReceiveCt1ReceivedCompleteCt2(t *testing.T) {
 	bobKey.Key.Destroy()
 }
 
-// ================== AddChunk: out-of-range index path ==================
+// ================== AddChunk: polynomial redundancy index ==================
 
-// TestAddChunkIndexOutOfRange exercises the branch in AddChunk where the
-// chunk index exceeds the decoder's totalChunks.
-func TestAddChunkIndexOutOfRange(t *testing.T) {
-	// Decoder expecting 1 chunk (32 bytes), so valid indices are only 0.
+// TestAddChunkRedundancyIndex verifies that a chunk index beyond TotalChunks()
+// is accepted as a valid polynomial redundancy chunk. With polynomial encoding
+// any distinct chunk index reconstructs the original message.
+func TestAddChunkRedundancyIndex(t *testing.T) {
+	// Encoder for 32 bytes (1 first-pass chunk). The second NextChunk call
+	// emits a redundancy chunk with index=1.
+	data := make([]byte, 32)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	enc, err := NewEncoder(data, DefaultChunkSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = enc.NextChunk()           // index 0 — discard
+	redundancy := enc.NextChunk() // index 1 — polynomial redundancy
+
 	dec, err := NewDecoder(32, DefaultChunkSize)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// Build a chunk with index=1 (out of range for a 1-chunk decoder).
-	var chunk [1 + ChunkDataSize]byte
-	chunk[0] = 0x01 // varint(1) = index 1, but decoder only accepts index 0
-
-	if err := dec.AddChunk(chunk[:]); err == nil {
-		t.Fatal("expected error for out-of-range chunk index")
+	// Index 1 is beyond TotalChunks() (==1) but is a valid polynomial chunk.
+	if err := dec.AddChunk(redundancy); err != nil {
+		t.Fatalf("AddChunk(redundancy): unexpected error: %v", err)
+	}
+	if !dec.HasMessage() {
+		t.Fatal("decoder should reconstruct from a single redundancy chunk")
 	}
 }

@@ -1,0 +1,32 @@
+{
+  "_provenance": {
+    "source": "rust/account-keys/src/hash.rs",
+    "tests": ["known_hash", "known_hash2", "known_phc_string", "known_salt"],
+    "rust_rev_pin": "/RUST_REV (root of go-libsignal repo)",
+    "note": "Hand-extracted Argon2id (PinHash::create), Argon2i (local_pin_hash_with_salt), and HKDF-SHA-256 (PinHash::make_salt) KATs. Drift detector greps the upstream source for every literal."
+  },
+  "argon2id_pin_hash": [
+    {
+      "name": "known_hash",
+      "pin": "password",
+      "salt_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "expected_access_key_hex": "ab7e8499d21f80a6600b3b9ee349ac6d72c07e3359fe885a934ba7aa844429f8"
+    },
+    {
+      "name": "known_hash2",
+      "pin": "anotherpassword",
+      "salt_hex": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+      "expected_access_key_hex": "301d9dd1e96f20ce51083f67d3298fd37b97525de8324d5e12ed2d407d3d927b"
+    }
+  ],
+  "make_salt": {
+    "username": "username",
+    "group_id": 3862621253427332054,
+    "expected_salt_hex": "d6159ba30f90b6eb6ccf1ec844427f052baaf0705da849767471744cdb3f8a5e"
+  },
+  "local_pin_phc": {
+    "pin": "apassword",
+    "salt_hex": "202122232425262728292A2B2C2D2E2F",
+    "expected_phc": "$argon2i$v=19$m=512,t=64,p=1$ICEiIyQlJicoKSorLC0uLw$NeZzhiNv4cRmRMct9scf7d838bzmHJvrZtU/0BH0v/U"
+  }
+}

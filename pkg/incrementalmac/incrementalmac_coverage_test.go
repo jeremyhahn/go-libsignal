@@ -13,7 +13,12 @@ func TestNewValidatingValidatesChunkSize(t *testing.T) {
 		chunkSize int
 		wantErr   error
 	}{
-		{"too small", MinChunkSize - 1, ErrChunkSizeTooSmall},
+		// Rust asserts only chunk_size > 0 (incremental_mac.rs:50).
+		{"zero", 0, ErrChunkSizeTooSmall},
+		{"negative", -1, ErrChunkSizeTooSmall},
+		// Sub-MinChunkSize values are now accepted (matching Rust).
+		{"rust test chunk size", 32, nil},
+		{"below old minimum", MinChunkSize - 1, nil},
 		{"minimum", MinChunkSize, nil},
 		{"maximum", MaxChunkSize, nil},
 		{"too large", MaxChunkSize + 1, ErrChunkSizeTooLarge},

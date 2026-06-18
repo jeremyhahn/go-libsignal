@@ -237,19 +237,24 @@ func TestErrSHODeriveScalar_Methods(t *testing.T) {
 // --- zeroScalar coverage ---
 
 func TestZeroScalar_NonNil(t *testing.T) {
-	// Set non-zero value
-	sho := NewShoHmacSha256Ext("test_zero_scalar")
-	sho.AbsorbAndRatchet([]byte("data"))
-	s := sho.MustGetScalar()
+	// Construct a deterministically non-zero scalar with canonical value 1
+	// (little-endian 32-byte encoding). This avoids any reliance on random
+	// or pseudo-random generation landing on a non-zero value.
+	one := make([]byte, 32)
+	one[0] = 1
+	s, err := ristretto255.NewScalar().SetCanonicalBytes(one)
+	if err != nil {
+		t.Fatalf("SetCanonicalBytes: %v", err)
+	}
 
-	// Verify non-zero before
 	zero := ristretto255.NewScalar()
+	// Precondition: the scalar with value 1 must not be the zero scalar.
 	if s.Equal(zero) == 1 {
-		t.Skip("scalar is zero, skipping zeroize test")
+		t.Fatal("precondition violated: scalar with canonical value 1 must not equal the zero scalar")
 	}
 
 	zeroScalar(s)
-	// After zeroing, should be zero
+	// After zeroing, the scalar must equal the zero scalar.
 	if s.Equal(zero) != 1 {
 		t.Error("zeroScalar should set scalar to zero")
 	}
@@ -581,6 +586,55 @@ func TestEncodeBlindedPoint_Content(t *testing.T) {
 
 	if !bytes.Equal(encoded, expected) {
 		t.Error("EncodeBlindedPoint produced unexpected bytes")
+	}
+}
+
+// --- ReadBincodeU64Len precondition guard (LOW-10) ---
+
+// TestReadBincodeU64Len_OutOfBounds verifies that ReadBincodeU64Len returns a
+// typed error (never panics) when off+8 > len(data), making the exported API
+// safe for external callers. Matches the rule that security-library exported
+// functions must be panic-free on invalid input.
+func TestReadBincodeU64Len_OutOfBounds(t *testing.T) {
+	data := []byte{0x01, 0x02, 0x03} // only 3 bytes; off+8 = 8 > 3
+
+	_, err := ReadBincodeU64Len(data, 0, 1, "field")
+	if err == nil {
+		t.Fatal("expected error for off+8 > len(data), got nil")
+	}
+	var encErr *ErrInvalidEncoding
+	if !errors.As(err, &encErr) {
+		t.Errorf("expected *ErrInvalidEncoding, got %T: %v", err, err)
+	}
+}
+
+// TestReadBincodeU64Len_NegativeOff verifies that a negative offset returns
+// a typed error rather than panicking.
+func TestReadBincodeU64Len_NegativeOff(t *testing.T) {
+	data := make([]byte, 16)
+
+	_, err := ReadBincodeU64Len(data, -1, 1, "field")
+	if err == nil {
+		t.Fatal("expected error for negative off, got nil")
+	}
+	var encErr *ErrInvalidEncoding
+	if !errors.As(err, &encErr) {
+		t.Errorf("expected *ErrInvalidEncoding, got %T: %v", err, err)
+	}
+}
+
+// TestReadBincodeU64Len_ValidSmall verifies that a well-formed call returns the
+// correct length and no error, confirming existing callers continue to work.
+func TestReadBincodeU64Len_ValidSmall(t *testing.T) {
+	data := make([]byte, 8+5) // 8-byte prefix encoding 5, plus 5 payload bytes
+	data[0] = 5               // LE u64 = 5
+
+	n, err := ReadBincodeU64Len(data, 0, 1, "field")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 5 {
+		t.Errorf("expected 5, got %d", n)
 	}
 }
 

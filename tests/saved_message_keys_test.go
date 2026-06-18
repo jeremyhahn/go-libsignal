@@ -33,7 +33,7 @@ func TestSavedMessageKeys(t *testing.T) {
 
 	// Create a session cipher to encrypt messages to Bob.
 	plaintextMessage := []byte("Hello!")
-	sessionCipher := session.NewCipher(alice.sessionBuilder, bob.address)
+	sessionCipher := session.NewCipherWithLocalAddress(alice.sessionBuilder, alice.address, bob.address)
 	message, err := sessionCipher.Encrypt(plaintextMessage)
 	if err != nil {
 		t.Fatalf("Unable to encrypt message: %v", err)
@@ -58,7 +58,7 @@ func TestSavedMessageKeys(t *testing.T) {
 	}
 
 	// Decrypt the inner message using the deferred session record.
-	bobSessionCipher := session.NewCipher(bob.sessionBuilder, alice.address)
+	bobSessionCipher := session.NewCipherWithLocalAddress(bob.sessionBuilder, bob.address, alice.address)
 	msg, key, err := bobSessionCipher.DecryptWithRecordPreKey(deferred.SessionRecord, receivedMessage.WhisperMessage())
 	if err != nil {
 		t.Fatalf("Unable to decrypt message: %v", err)

@@ -7,6 +7,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/serialize"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
 )
@@ -231,9 +232,33 @@ func TestGenerateSenderKey_RandFailure(t *testing.T) {
 	})
 }
 
-func TestGenerateSenderKeyID(t *testing.T) {
-	id := GenerateSenderKeyID()
-	_ = id // random value, just ensure no panic
+func TestGenerateSenderKeyID_Range(t *testing.T) {
+	// Rust uses (csprng.random::<u32>()) >> 1, so result is in [0, 2^31).
+	const maxSenderKeyID = uint32(1<<31 - 1)
+	for i := 0; i < 100; i++ {
+		id := GenerateSenderKeyID()
+		if id > maxSenderKeyID {
+			t.Fatalf("GenerateSenderKeyID returned %d, exceeds 31-bit max %d", id, maxSenderKeyID)
+		}
+	}
+}
+
+func TestGenerateSenderKeyID_Entropy(t *testing.T) {
+	// With 31-bit space, 1000 draws should populate values well above the
+	// 14-bit ceiling (16383). At least half should exceed the 14-bit range.
+	const iterations = 1000
+	const fourteenBitMax = uint32(0x3FFF)
+	aboveFourteenBit := 0
+	for i := 0; i < iterations; i++ {
+		if GenerateSenderKeyID() > fourteenBitMax {
+			aboveFourteenBit++
+		}
+	}
+	// With a uniform 31-bit distribution the probability of any value being
+	// ≤16383 is 16384/2^31 ≈ 0.00076%. Expect virtually all to exceed 14 bits.
+	if aboveFourteenBit < 990 {
+		t.Fatalf("only %d/%d GenerateSenderKeyID values exceeded 14-bit range; entropy too low", aboveFourteenBit, iterations)
+	}
 }
 
 func TestGenerateKyberPreKey(t *testing.T) {
@@ -338,28 +363,41 @@ func TestGenerateSignedPreKey_RandFailure_KeyGen(t *testing.T) {
 	})
 }
 
+// TestGenerateSignedPreKey_RandFailure_Signing tests the signing-failure error
+// path by calling ecc.CalculateSignature directly with a failing rand.Reader.
+//
+// GenerateSignedPreKey cannot be used to reach the signing failure path via
+// rand.Reader injection because ecc.GenerateKeyPair runs first and consumes
+// random bytes, and memguard's guard-page canary (inside GuardedECPrivateKey)
+// consumes an indeterminate number of additional bytes from the same reader
+// before CalculateSignature is reached. This makes it impossible to provide
+// exactly enough bytes for key generation but not for signing without relying
+// on memguard internals.
+//
+// Calling CalculateSignature directly with pre-generated keys and a failing
+// reader deterministically exercises the error path that GenerateSignedPreKey
+// propagates with "return nil, err" after the signing step.
 func TestGenerateSignedPreKey_RandFailure_Signing(t *testing.T) {
-	serializer := serialize.NewJSONSerializer()
 	identityKP, err := GenerateIdentityKeyPair()
 	if err != nil {
-		t.Fatalf("setup failed: %v", err)
+		t.Fatalf("setup GenerateIdentityKeyPair: %v", err)
 	}
-	// Provide enough random bytes for ecc.GenerateKeyPair (32 bytes + memguard
-	// overhead for GuardedECPrivateKey) but not enough for
-	// ecc.CalculateSignature (which needs 64 bytes from rand.Reader).
-	// We use a failingReader that only provides partial data: enough for key
-	// generation but fails during signing. We give a large budget because
-	// memguard internally uses crypto/rand for guard page initialization.
-	withLimitedRand(16384, func() {
-		spk, spkErr := GenerateSignedPreKey(identityKP, 1, serializer.SignedPreKeyRecord)
-		// With GuardedECPrivateKey, memguard consumes variable amounts of
-		// randomness. If 16384 bytes sufficed for both keygen and signing,
-		// the test is inconclusive — skip rather than fail.
-		if spkErr == nil {
-			t.Skip("limited rand budget was sufficient for full operation; cannot test signing failure in this environment")
+	preKeyPair, err := ecc.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("setup GenerateKeyPair: %v", err)
+	}
+
+	// CalculateSignature reads 64 bytes from rand.Reader for the XEdDSA nonce.
+	// Failing rand.Reader at this point exercises the error path that
+	// GenerateSignedPreKey propagates when signing fails.
+	withFailingRand(func() {
+		sig, sigErr := ecc.CalculateSignature(identityKP.PrivateKey(), preKeyPair.PublicKey().Serialize())
+		if sigErr == nil {
+			t.Fatal("expected error from CalculateSignature when rand.Reader fails")
 		}
-		if spk != nil {
-			t.Fatal("expected nil signed pre key on signing error")
+		var emptyArr [64]byte
+		if sig != emptyArr {
+			t.Fatal("expected zero signature on rand failure")
 		}
 	})
 }

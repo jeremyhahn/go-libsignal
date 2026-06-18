@@ -1,6 +1,8 @@
 package ecc
 
 import (
+	"crypto/subtle"
+
 	"filippo.io/edwards25519"
 	"filippo.io/edwards25519/field"
 )
@@ -40,6 +42,18 @@ func (d *DjbECPublicKey) Serialize() []byte {
 // Type returns the DjbType value.
 func (d *DjbECPublicKey) Type() int {
 	return DjbType
+}
+
+// Equal reports whether this public key equals other using a constant-time
+// byte comparison.  Mirrors the subtle::ConstantTimeEq / PartialEq
+// implementation on Rust libsignal's PublicKey (rust/core/src/curve.rs:201-218).
+// The type byte is not compared separately; only the 32 key bytes are compared
+// because two DjbECPublicKey values with the same 32-byte payload are identical.
+func (d *DjbECPublicKey) Equal(other *DjbECPublicKey) bool {
+	if other == nil {
+		return false
+	}
+	return subtle.ConstantTimeCompare(d.publicKey[:], other.publicKey[:]) == 1
 }
 
 // IsCanonical returns true if the Curve25519 public key is canonical:
@@ -114,6 +128,13 @@ func hasPrimeOrder(pt *edwards25519.Point) bool {
 	q := new(edwards25519.Point).ScalarMult(cofInv, pt)
 	eightQ := new(edwards25519.Point).MultByCofactor(q)
 	return eightQ.Equal(pt) == 1
+}
+
+// ScalarIsInRange reports whether the Curve25519 public key encoding is
+// in the reduced range [0, 2^255 - 19). Mirrors Rust libsignal_core's
+// PublicKey::scalar_is_in_range at rust/core/src/curve.rs.
+func (d *DjbECPublicKey) ScalarIsInRange() bool {
+	return d.scalarIsInRange()
 }
 
 // scalarIsInRange checks that the Curve25519 public key encoding is in the

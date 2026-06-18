@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"bytes"
 	"encoding/hex"
 	"testing"
 
@@ -85,6 +86,108 @@ func TestDeriveMessageBackupKeyLegacy(t *testing.T) {
 	if hex.EncodeToString(mk.AESKey.Bytes()) != hex.EncodeToString(expectedAES) {
 		t.Errorf("AES key mismatch:\n  got  %x\n  want %x", mk.AESKey.Bytes(), expectedAES)
 	}
+}
+
+// TestNewMessageBackupKey verifies round-trip construction from raw key bytes.
+func TestNewMessageBackupKey(t *testing.T) {
+	hmacKey := make([]byte, HMACKeyLen)
+	aesKey := make([]byte, AESKeyLen)
+	for i := range hmacKey {
+		hmacKey[i] = byte(i)
+	}
+	for i := range aesKey {
+		aesKey[i] = byte(i + 32)
+	}
+
+	t.Run("valid keys", func(t *testing.T) {
+		mk, err := NewMessageBackupKey(hmacKey, aesKey)
+		if err != nil {
+			t.Fatalf("NewMessageBackupKey: %v", err)
+		}
+		defer mk.Zeroize()
+
+		if len(mk.HMACKey.Bytes()) != HMACKeyLen {
+			t.Errorf("HMACKey length = %d, want %d", len(mk.HMACKey.Bytes()), HMACKeyLen)
+		}
+		if len(mk.AESKey.Bytes()) != AESKeyLen {
+			t.Errorf("AESKey length = %d, want %d", len(mk.AESKey.Bytes()), AESKeyLen)
+		}
+		for i, b := range mk.HMACKey.Bytes() {
+			if b != hmacKey[i] {
+				t.Errorf("HMACKey[%d] = %d, want %d", i, b, hmacKey[i])
+			}
+		}
+		for i, b := range mk.AESKey.Bytes() {
+			if b != aesKey[i] {
+				t.Errorf("AESKey[%d] = %d, want %d", i, b, aesKey[i])
+			}
+		}
+	})
+
+	t.Run("hmac key wrong length", func(t *testing.T) {
+		_, err := NewMessageBackupKey(hmacKey[:16], aesKey)
+		if err == nil {
+			t.Fatal("expected error for short HMAC key")
+		}
+		var kle *ErrInvalidKeyLength
+		if !isError(err, &kle) {
+			t.Errorf("expected *ErrInvalidKeyLength, got %T: %v", err, err)
+		}
+	})
+
+	t.Run("aes key wrong length", func(t *testing.T) {
+		_, err := NewMessageBackupKey(hmacKey, aesKey[:10])
+		if err == nil {
+			t.Fatal("expected error for short AES key")
+		}
+		var kle *ErrInvalidKeyLength
+		if !isError(err, &kle) {
+			t.Errorf("expected *ErrInvalidKeyLength, got %T: %v", err, err)
+		}
+	})
+
+	t.Run("frame round trip via NewMessageBackupKey", func(t *testing.T) {
+		mk, err := NewMessageBackupKey(hmacKey, aesKey)
+		if err != nil {
+			t.Fatalf("NewMessageBackupKey: %v", err)
+		}
+		defer mk.Zeroize()
+
+		frame := []byte("hello world")
+		enc := NewFrameEncryptor(mk)
+		var buf bytes.Buffer
+		if err := enc.EncryptFrames(&buf, [][]byte{frame}); err != nil {
+			t.Fatalf("EncryptFrames: %v", err)
+		}
+
+		mk2, err := NewMessageBackupKey(hmacKey, aesKey)
+		if err != nil {
+			t.Fatalf("NewMessageBackupKey 2: %v", err)
+		}
+		defer mk2.Zeroize()
+
+		dec := NewFrameDecryptor(mk2)
+		frames, err := dec.DecryptFrames(&buf)
+		if err != nil {
+			t.Fatalf("DecryptFrames: %v", err)
+		}
+		if len(frames) != 1 || string(frames[0]) != string(frame) {
+			t.Errorf("frame mismatch: got %q, want %q", frames, frame)
+		}
+	})
+}
+
+// isError is a type-assertion helper for typed error checks in tests.
+func isError(err error, target interface{}) bool {
+	switch t := target.(type) {
+	case **ErrInvalidKeyLength:
+		e, ok := err.(*ErrInvalidKeyLength)
+		if ok {
+			*t = e
+		}
+		return ok
+	}
+	return false
 }
 
 func TestDeriveMessageBackupKeyWithForwardSecrecy(t *testing.T) {

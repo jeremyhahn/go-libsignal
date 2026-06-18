@@ -194,7 +194,7 @@ func TestSelfSessionLargeJump(t *testing.T) {
 	// Create a self-session: Alice builds a session with herself.
 	// We set up alice's stores to point to her own address.
 	alice.buildSession(t, alice.address, serializer)
-	alice.identityStore.SaveIdentity(alice.address, alice.identityKeyPair.PublicKey())
+	_, _ = alice.identityStore.SaveIdentity(alice.address, alice.identityKeyPair.PublicKey())
 
 	// Trigger ProcessBundle with Alice's own bundle (self-session).
 	selfBundle := alice.kyberBundle()
@@ -204,7 +204,7 @@ func TestSelfSessionLargeJump(t *testing.T) {
 	}
 
 	// Verify that Alice has a session with herself.
-	sessionRecord := alice.sessionStore.LoadSession(alice.address)
+	sessionRecord, _ := alice.sessionStore.LoadSession(alice.address)
 	if sessionRecord == nil {
 		t.Fatal("expected session record to exist for self-session")
 	}
@@ -216,7 +216,7 @@ func TestSelfSessionLargeJump(t *testing.T) {
 	// A self-session should have SessionWithSelf=true because local and remote
 	// identity keys are both Alice's key.
 	if !sessionState.SessionWithSelf() {
-		t.Skip("SessionWithSelf=false for self-session with same key - implementation may differ")
+		t.Fatal("expected SessionWithSelf=true for self-session with identical identity keys, got false")
 	}
 	t.Log("Self-session confirmed: SessionWithSelf=true")
 }
@@ -263,20 +263,20 @@ func TestSPQRActiveEncryptPath(t *testing.T) {
 		sharedKey[i] = byte(0xAB)
 	}
 
-	aliceSessionBytes, err := alice.sessionStore.LoadSession(bob.address).Serialize()
+	aliceSessionRec, _ := alice.sessionStore.LoadSession(bob.address)
+	aliceSessionBytes, err := aliceSessionRec.Serialize()
 	if err != nil {
 		t.Fatal(err)
 	}
 	aliceWithSPQR := injectSPQRState(t, aliceSessionBytes, serializer, sharedKey, spqr.DirectionA2B)
-	alice.sessionStore.StoreSession(bob.address, aliceWithSPQR)
-
-	bobSessionBytes, err := bob.sessionStore.LoadSession(alice.address).Serialize()
+	_ = alice.sessionStore.StoreSession(bob.address, aliceWithSPQR)
+	bobSessionRec, _ := bob.sessionStore.LoadSession(alice.address)
+	bobSessionBytes, err := bobSessionRec.Serialize()
 	if err != nil {
 		t.Fatal(err)
 	}
 	bobWithSPQR := injectSPQRState(t, bobSessionBytes, serializer, sharedKey, spqr.DirectionB2A)
-	bob.sessionStore.StoreSession(alice.address, bobWithSPQR)
-
+	_ = bob.sessionStore.StoreSession(alice.address, bobWithSPQR)
 	// Alice encrypts with SPQR V1 active. spqr.Send succeeds and returns PQR bytes.
 	aliceCipher2 := session.NewCipher(alice.sessionBuilder, bob.address)
 	msg, err := aliceCipher2.Encrypt([]byte("SPQR encrypt audit"))
@@ -301,7 +301,7 @@ func TestSPQRActiveEncryptPath(t *testing.T) {
 	}
 
 	if len(signalMsg.PqRatchetKey()) == 0 {
-		t.Skip("SPQR negotiation-pending: PQR data absent; skipping SPQR encrypt path verification")
+		t.Fatal("expected non-empty PqRatchetKey after SPQR V1 state injection; SPQR encrypt path did not produce PQR data")
 	}
 	t.Logf("SPQR active on Encrypt: PQRKey len=%d", len(signalMsg.PqRatchetKey()))
 
@@ -549,40 +549,53 @@ func TestDecryptWithState_MacVerifyFailureAfterSkippedKey(t *testing.T) {
 		t.Fatalf("decrypt msg2 first: %v", err)
 	}
 
-	// Corrupt msg1 bytes to cause a MAC failure when retrieving the skipped key.
+	// Corrupt the CipherText inside the inner SignalMessage of msg1 to produce a
+	// MAC mismatch when the skipped key for msg1 is retrieved during decryption.
+	// The MAC covers all serialized SignalMessage fields including CipherText, so
+	// changing CipherText makes VerifyMac return an error.
 	bytes1, _ := msgs[1].Serialize()
-	var raw map[string]interface{}
-	if err := json.Unmarshal(bytes1, &raw); err != nil {
-		t.Fatalf("unmarshal msg1: %v", err)
-	}
-	// Corrupt the ciphertext body to cause MAC mismatch.
-	if bodyB64, ok := raw["Body"].(string); ok {
-		bodyBytes, _ := base64.StdEncoding.DecodeString(bodyB64)
-		if len(bodyBytes) > 4 {
-			bodyBytes[len(bodyBytes)/2] ^= 0xFF
-		}
-		raw["Body"] = base64.StdEncoding.EncodeToString(bodyBytes)
-	}
-	corruptBytes, _ := json.Marshal(raw)
-
-	corruptMsg1, err := protocol.NewPreKeySignalMessageFromBytes(corruptBytes,
+	preKey1Tmp, err := protocol.NewPreKeySignalMessageFromBytes(bytes1,
 		serializer.PreKeySignalMessage, serializer.SignalMessage)
 	if err != nil {
-		// If parse fails, skip - the body corruption may prevent even parsing.
-		t.Skipf("corrupted msg1 parse failed: %v", err)
+		t.Fatalf("parse msg1 for corruption: %v", err)
+	}
+	whisperBytes, err := preKey1Tmp.WhisperMessage().Serialize()
+	if err != nil {
+		t.Fatalf("serialize WhisperMessage: %v", err)
+	}
+	var rawWhisper map[string]interface{}
+	if err := json.Unmarshal(whisperBytes, &rawWhisper); err != nil {
+		t.Fatalf("unmarshal WhisperMessage JSON: %v", err)
+	}
+	// Flip a byte in the CipherText field to invalidate the MAC.
+	if ctB64, ok := rawWhisper["CipherText"].(string); ok {
+		ctBytes, _ := base64.StdEncoding.DecodeString(ctB64)
+		if len(ctBytes) > 4 {
+			ctBytes[len(ctBytes)/2] ^= 0xFF
+		}
+		rawWhisper["CipherText"] = base64.StdEncoding.EncodeToString(ctBytes)
+	}
+	corruptWhisperBytes, err := json.Marshal(rawWhisper)
+	if err != nil {
+		t.Fatalf("marshal corrupted WhisperMessage: %v", err)
+	}
+	corruptSignalMsg, err := protocol.NewSignalMessageFromBytes(corruptWhisperBytes, serializer.SignalMessage)
+	if err != nil {
+		t.Fatalf("parse corrupted SignalMessage: %v", err)
 	}
 
-	// Decrypt with corrupted body should fail (MAC mismatch).
-	_, err = bobCipher.Decrypt(corruptMsg1.WhisperMessage())
+	// Decrypt with the corrupted CipherText must fail: the stored MAC was computed
+	// from the original bytes, so re-serialising the corrupted structure produces a
+	// different digest and VerifyMac returns a bad-MAC error.
+	_, err = bobCipher.Decrypt(corruptSignalMsg)
 	if err == nil {
-		// If no error, the corruption didn't trigger MAC failure; skip this case.
-		t.Skip("MAC check did not detect corruption - body format may not include MAC separately")
+		t.Fatal("expected MAC error for corrupted message, but decryption succeeded")
 	}
-	// An error is expected (MAC mismatch or cipher error).
 	t.Logf("Expected MAC/cipher error on corrupted skipped key message: %v", err)
 
-	// After the failed decrypt, the valid msg1 should still be decryptable
-	// because DecryptWithState uses a cloned state (rollback on failure).
+	// After the failed decrypt the skipped key for msg1 must still be present
+	// because DecryptWithState operates on a clone; the original session state is
+	// unchanged when decryption fails (rollback semantics).
 	preKey1, _ := protocol.NewPreKeySignalMessageFromBytes(bytes1,
 		serializer.PreKeySignalMessage, serializer.SignalMessage)
 	decrypted1, err := bobCipher.Decrypt(preKey1.WhisperMessage())

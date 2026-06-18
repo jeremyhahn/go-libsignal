@@ -473,9 +473,9 @@ func TestParseEndorsements_WrongEnclaveType(t *testing.T) {
 
 func TestParseEndorsements_TooFewElements(t *testing.T) {
 	data := make([]byte, 16)
-	binary.LittleEndian.PutUint32(data[0:4], 1) // header version
-	binary.LittleEndian.PutUint32(data[4:8], 2) // enclave type
-	binary.LittleEndian.PutUint32(data[8:12], 0) // buffer size
+	binary.LittleEndian.PutUint32(data[0:4], 1)   // header version
+	binary.LittleEndian.PutUint32(data[4:8], 2)   // enclave type
+	binary.LittleEndian.PutUint32(data[8:12], 0)  // buffer size
 	binary.LittleEndian.PutUint32(data[12:16], 2) // num elements < 9
 	_, err := parseEndorsements(data)
 	if err == nil {
@@ -519,9 +519,9 @@ func TestParseEndorsements_InvalidOffsetsOrder(t *testing.T) {
 	numElements := uint32(sgxEndorsementFieldCount)
 	headerSize := 16 + int(numElements)*4
 	data := make([]byte, headerSize+100)
-	binary.LittleEndian.PutUint32(data[0:4], 1)                // header version
-	binary.LittleEndian.PutUint32(data[4:8], 2)                // enclave type
-	binary.LittleEndian.PutUint32(data[8:12], 0)               // buffer size
+	binary.LittleEndian.PutUint32(data[0:4], 1)  // header version
+	binary.LittleEndian.PutUint32(data[4:8], 2)  // enclave type
+	binary.LittleEndian.PutUint32(data[8:12], 0) // buffer size
 	binary.LittleEndian.PutUint32(data[12:16], numElements)
 
 	// Set all offsets to 0 (not strictly increasing)
@@ -553,14 +553,14 @@ func buildEndorsementsData(t *testing.T, versionFieldBytes []byte) []byte {
 	tcbJSON := buildSignedTCBInfoJSON(t, key)
 
 	fields := make([][]byte, sgxEndorsementFieldCount)
-	fields[0] = versionFieldBytes          // version
-	fields[1] = tcbJSON                    // TCB info (signed)
-	fields[2] = pemCert                     // TCB issuer chain
-	fields[3] = crlPCK                     // CRL PCK cert (DER)
-	fields[4] = crlProcCA                  // CRL PCK proc CA (DER)
-	fields[5] = pemCert                     // PCK CRL issuer chain
-	fields[6] = qeJSON                     // QE ID info (signed)
-	fields[7] = pemCert                     // QE ID issuer chain
+	fields[0] = versionFieldBytes              // version
+	fields[1] = tcbJSON                        // TCB info (signed)
+	fields[2] = pemCert                        // TCB issuer chain
+	fields[3] = crlPCK                         // CRL PCK cert (DER)
+	fields[4] = crlProcCA                      // CRL PCK proc CA (DER)
+	fields[5] = pemCert                        // PCK CRL issuer chain
+	fields[6] = qeJSON                         // QE ID info (signed)
+	fields[7] = pemCert                        // QE ID issuer chain
 	fields[8] = []byte("2024-01-01T00:00:00Z") // creation datetime
 
 	return buildEndorsementsFromFields(fields)
@@ -845,6 +845,81 @@ func TestVerifySignedJSON_MissingContentField(t *testing.T) {
 	err := verifySignedJSON(data, cert, "tcbInfo")
 	if err == nil {
 		t.Fatal("expected error for missing content field")
+	}
+}
+
+// TestVerifySignedJSON_DERSignature exercises the DER-encoded signature branch
+// of verifySignedJSON (the fallback taken when the signature is not raw 64-byte
+// r||s). ecdsa.SignASN1 produces a ~70-byte DER signature that the function
+// verifies via ecdsa.VerifyASN1 directly.
+func TestVerifySignedJSON_DERSignature(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	certBytes, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create cert: %v", err)
+	}
+	cert, err := x509.ParseCertificate(certBytes)
+	if err != nil {
+		t.Fatalf("parse cert: %v", err)
+	}
+
+	inner := `{"field":"value"}`
+	hash := sha256.Sum256([]byte(inner))
+	derSig, err := ecdsa.SignASN1(rand.Reader, key, hash[:])
+	if err != nil {
+		t.Fatalf("SignASN1: %v", err)
+	}
+	if len(derSig) == 64 {
+		t.Fatalf("DER signature unexpectedly 64 bytes; cannot exercise DER branch")
+	}
+	data := []byte(fmt.Sprintf(`{"tcbInfo":%s,"signature":"%s"}`, inner, hex.EncodeToString(derSig)))
+
+	if err := verifySignedJSON(data, cert, "tcbInfo"); err != nil {
+		t.Fatalf("verifySignedJSON with DER signature: %v", err)
+	}
+}
+
+// TestVerifySignedJSON_DERSignature_BadSig exercises the DER verification
+// failure branch: a syntactically valid but cryptographically wrong DER
+// signature must return an EndorsementSignatureError.
+func TestVerifySignedJSON_DERSignature_BadSig(t *testing.T) {
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	certBytes, _ := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	cert, _ := x509.ParseCertificate(certBytes)
+
+	// DER signature over different content -> verification fails.
+	wrongHash := sha256.Sum256([]byte("not the signed content"))
+	derSig, _ := ecdsa.SignASN1(rand.Reader, key, wrongHash[:])
+	data := []byte(fmt.Sprintf(`{"tcbInfo":{"field":"value"},"signature":"%s"}`, hex.EncodeToString(derSig)))
+
+	err := verifySignedJSON(data, cert, "tcbInfo")
+	if err == nil {
+		t.Fatal("expected verification failure for wrong DER signature")
+	}
+	var sigErr *EndorsementSignatureError
+	if !errors.As(err, &sigErr) {
+		t.Errorf("expected EndorsementSignatureError, got %T", err)
 	}
 }
 
@@ -1157,4 +1232,3 @@ func TestParseEndorsements_WithQEIdentityFields(t *testing.T) {
 		t.Errorf("qeIdentity.version = %d, want 2", endorsements.qeIdentity.version)
 	}
 }
-

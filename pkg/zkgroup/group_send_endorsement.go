@@ -264,8 +264,8 @@ func (r *GroupSendEndorsementsResponse) derivePublicSigningKey(
 	return derived, nil
 }
 
-// Combine combines several endorsements into one. All endorsements must come
-// from the same issuance.
+// CombineGroupSendEndorsements combines several endorsements into one.
+// All endorsements must come from the same issuance.
 func CombineGroupSendEndorsements(endorsements []*GroupSendEndorsement) *GroupSendEndorsement {
 	inner := make([]*zkcredential.Endorsement, len(endorsements))
 	for i, e := range endorsements {

@@ -119,7 +119,7 @@ func TestGuardedKyber1024EncapsulateDecapsulateRoundTrip(t *testing.T) {
 func TestGuardedKyber1024EncapsulateWrongKeyType(t *testing.T) {
 	g := NewGuardedKyber1024()
 
-	pk := NewPublicKey(KeyTypeKyber768, make([]byte, 32))
+	pk := NewPublicKey(KeyTypeMLKEM768, make([]byte, 32))
 	_, _, err := g.Encapsulate(pk)
 	if err == nil {
 		t.Fatal("Encapsulate with wrong key type should return error")
@@ -160,7 +160,7 @@ func TestGuardedKyber1024DecapsulateWrongSecretKeyType(t *testing.T) {
 	skCopy := make([]byte, len(skData))
 	copy(skCopy, skData)
 
-	wrongSK, err := NewGuardedSecretKey(KeyTypeKyber768, skCopy)
+	wrongSK, err := NewGuardedSecretKey(KeyTypeMLKEM768, skCopy)
 	if err != nil {
 		t.Fatalf("NewGuardedSecretKey() error: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestGuardedKyber1024DecapsulateWrongCiphertextType(t *testing.T) {
 		t.Fatalf("Encapsulate() error: %v", err)
 	}
 
-	wrongCT := NewCiphertext(KeyTypeKyber768, ct.Data())
+	wrongCT := NewCiphertext(KeyTypeMLKEM768, ct.Data())
 	_, err = g.Decapsulate(kp.Secret, wrongCT)
 	if err == nil {
 		t.Fatal("Decapsulate with wrong ciphertext type should return error")

@@ -60,7 +60,7 @@ func TestExpiringProfileKeyCredential(t *testing.T) {
 	ts := NewTimestamp(86400)
 
 	cred := &ExpiringProfileKeyCredential{
-		ACIBytes:                aciBytes,
+		ACIBytes:                 aciBytes,
 		CredentialExpirationTime: ts,
 	}
 
@@ -102,8 +102,8 @@ func TestExpiringProfileKeyCredentialPresentation(t *testing.T) {
 	pkCT := &ProfileKeyCiphertext{Ciphertext: pkKP.Encrypt(pks)}
 
 	pres := &ExpiringProfileKeyCredentialPresentation{
-		UIDEncCiphertext:        uidCT,
-		ProfileKeyEncCiphertext: pkCT,
+		UIDEncCiphertext:         uidCT,
+		ProfileKeyEncCiphertext:  pkCT,
 		CredentialExpirationTime: ts,
 	}
 
@@ -119,35 +119,62 @@ func TestExpiringProfileKeyCredentialPresentation(t *testing.T) {
 }
 
 func TestAnyProfileKeyCredentialPresentation(t *testing.T) {
-	t.Run("nil presentation", func(t *testing.T) {
+	t.Run("nil v3 variant returns nil ciphertexts", func(t *testing.T) {
+		// An AnyProfileKeyCredentialPresentation with Version=3 but nil V3
+		// must return nil from both accessors without panicking.
 		any := &AnyProfileKeyCredentialPresentation{
-			Version:      1,
-			Presentation: nil,
+			Version: PresentationVersion3,
+			V3:      nil,
 		}
 		if any.GetUUIDCiphertext() != nil {
-			t.Error("should be nil for nil presentation")
+			t.Error("expected nil UUID ciphertext for nil V3")
 		}
 		if any.GetProfileKeyCiphertext() != nil {
-			t.Error("should be nil for nil presentation")
+			t.Error("expected nil profile key ciphertext for nil V3")
+		}
+		if _, ok := any.GetExpirationTime(); ok {
+			t.Error("expected no expiration for nil V3")
 		}
 	})
 
-	t.Run("with presentation", func(t *testing.T) {
+	t.Run("v3 with presentation returns correct ciphertexts", func(t *testing.T) {
 		uidCT := &UUIDCiphertext{}
 		pkCT := &ProfileKeyCiphertext{}
+		ts := NewTimestamp(SecondsPerDay * 5)
 		pres := &ExpiringProfileKeyCredentialPresentation{
-			UIDEncCiphertext:        uidCT,
-			ProfileKeyEncCiphertext: pkCT,
+			UIDEncCiphertext:         uidCT,
+			ProfileKeyEncCiphertext:  pkCT,
+			CredentialExpirationTime: ts,
 		}
 		any := &AnyProfileKeyCredentialPresentation{
-			Version:      1,
-			Presentation: pres,
+			Version: PresentationVersion3,
+			V3:      pres,
 		}
 		if any.GetUUIDCiphertext() != uidCT {
 			t.Error("GetUUIDCiphertext mismatch")
 		}
 		if any.GetProfileKeyCiphertext() != pkCT {
 			t.Error("GetProfileKeyCiphertext mismatch")
+		}
+		expTime, ok := any.GetExpirationTime()
+		if !ok {
+			t.Error("expected expiration time for V3")
+		}
+		if expTime != ts {
+			t.Error("expiration time mismatch")
+		}
+	})
+
+	t.Run("v1 and v2 report no expiration", func(t *testing.T) {
+		// V1 with no variant set
+		anyV1 := &AnyProfileKeyCredentialPresentation{Version: PresentationVersion1}
+		if _, ok := anyV1.GetExpirationTime(); ok {
+			t.Error("V1 should not have expiration")
+		}
+		// V2 with no variant set
+		anyV2 := &AnyProfileKeyCredentialPresentation{Version: PresentationVersion2}
+		if _, ok := anyV2.GetExpirationTime(); ok {
+			t.Error("V2 should not have expiration")
 		}
 	})
 }
@@ -240,7 +267,7 @@ func TestExpiringProfileKeyCredentialFullFlow(t *testing.T) {
 		presRandomness[i] = byte(i + 40)
 	}
 	presentation, err := serverPublic.CreateExpiringProfileKeyCredentialPresentation(
-		presRandomness, groupParams, credential,
+		presRandomness, groupParams, credential, PresentationVersion3,
 	)
 	if err != nil {
 		t.Fatalf("CreateExpiringProfileKeyCredentialPresentation: %v", err)
@@ -261,7 +288,7 @@ func TestExpiringProfileKeyCredentialFullFlow(t *testing.T) {
 	// Server verifies presentation.
 	groupPublicParams := groupParams.GetPublicParams()
 	err = serverSecret.VerifyExpiringProfileKeyCredentialPresentation(
-		groupPublicParams, presentation, currentTime,
+		groupPublicParams, presentation, currentTime, PresentationVersion3,
 	)
 	if err != nil {
 		t.Fatalf("VerifyExpiringProfileKeyCredentialPresentation: %v", err)
@@ -341,7 +368,7 @@ func TestExpiringProfileKeyCredentialVerificationFailure(t *testing.T) {
 		presRandomness[i] = byte(i + 40)
 	}
 	presentation, err := serverPublic1.CreateExpiringProfileKeyCredentialPresentation(
-		presRandomness, groupParams, credential,
+		presRandomness, groupParams, credential, PresentationVersion3,
 	)
 	if err != nil {
 		t.Fatalf("CreateExpiringProfileKeyCredentialPresentation: %v", err)
@@ -350,7 +377,7 @@ func TestExpiringProfileKeyCredentialVerificationFailure(t *testing.T) {
 	// Verify with server 2 -- should fail.
 	groupPublicParams := groupParams.GetPublicParams()
 	err = serverSecret2.VerifyExpiringProfileKeyCredentialPresentation(
-		groupPublicParams, presentation, currentTime,
+		groupPublicParams, presentation, currentTime, PresentationVersion3,
 	)
 	if err == nil {
 		t.Fatal("expected verification failure with wrong server")
@@ -419,7 +446,7 @@ func TestExpiringProfileKeyCredentialExpiredCredential(t *testing.T) {
 		presRandomness[i] = byte(i + 40)
 	}
 	presentation, err := serverPublic.CreateExpiringProfileKeyCredentialPresentation(
-		presRandomness, groupParams, credential,
+		presRandomness, groupParams, credential, PresentationVersion3,
 	)
 	if err != nil {
 		t.Fatalf("CreateExpiringProfileKeyCredentialPresentation: %v", err)
@@ -429,7 +456,7 @@ func TestExpiringProfileKeyCredentialExpiredCredential(t *testing.T) {
 	expiredTime := NewTimestamp(SecondsPerDay * 200)
 	groupPublicParams := groupParams.GetPublicParams()
 	err = serverSecret.VerifyExpiringProfileKeyCredentialPresentation(
-		groupPublicParams, presentation, expiredTime,
+		groupPublicParams, presentation, expiredTime, PresentationVersion3,
 	)
 	if err == nil {
 		t.Fatal("expected verification failure with expired credential")

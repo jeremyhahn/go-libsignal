@@ -228,6 +228,12 @@ func generateWeightsForProof(
 	for i := range weights {
 		var scalarBytes [32]byte
 		copy(scalarBytes[:16], randomness[i*smallScalarBytes:(i+1)*smallScalarBytes])
+		// Clear the top bit so the value is < 2^127 ≪ L (group order).
+		// SetCanonicalBytes requires the input < L; because the value is < 2^127
+		// this always succeeds.  Rust uses from_bytes_mod_order which reduces
+		// mod L, but for this constrained input the semantics are identical.
+		// If upstream ever changes the weight-squeeze width (e.g. beyond 16 bytes),
+		// replace SetCanonicalBytes with a reducing constructor to stay safe.
 		scalarBytes[15] &= 0b0111_1111
 		sc := ristretto255.NewScalar()
 		if _, err := sc.SetCanonicalBytes(scalarBytes[:]); err != nil {

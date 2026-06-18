@@ -1,0 +1,21 @@
+{
+  "_provenance": {
+    "source": "rust/zkgroup/src/api/groups/group_params.rs",
+    "test": "test_encrypt_with_padding",
+    "rust_rev_pin": "/RUST_REV (root of go-libsignal repo)",
+    "note": "Hand-extracted EncryptBlobWithPadding KAT. The drift detector greps the upstream source for both expected ciphertext literals."
+  },
+  "params_seed_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+  "randomness_hex":  "0000000000000000000000000000000000000000000000000000000000000000",
+  "plaintext": "secret team",
+  "vectors": [
+    {
+      "padding_len": 0,
+      "expected_ciphertext_hex": "3798afe9c65ffb35a63b2c048b16f19dd50ee9acc33cc925667a9abad4d4c6f86675fa8e32243e0831203700"
+    },
+    {
+      "padding_len": 8,
+      "expected_ciphertext_hex": "880a70e071b33f81e1219842c8514f34901abb734c191292ac325455d898da000484080099c620f86675fa8e32243e0831203700"
+    }
+  ]
+}

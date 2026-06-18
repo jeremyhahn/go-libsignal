@@ -66,13 +66,15 @@ func TestDecoderAddChunkAfterCompleteCoverage(t *testing.T) {
 		t.Fatal("decoder should be complete")
 	}
 
-	// Duplicate chunk should be silently ignored.
-	dupChunk := enc.NextChunk()
-	if err := dec.AddChunk(dupChunk); err != nil {
+	// With polynomial encoding, NextChunk() after HasMore()==false emits a
+	// redundancy chunk with the next sequential index (not a duplicate of index 0).
+	// Adding it increments ReceivedCount.
+	redundancyChunk := enc.NextChunk()
+	if err := dec.AddChunk(redundancyChunk); err != nil {
 		t.Fatal(err)
 	}
-	if dec.ReceivedCount() != 1 {
-		t.Errorf("received count should still be 1, got %d", dec.ReceivedCount())
+	if dec.ReceivedCount() != 2 {
+		t.Errorf("received count should be 2 after adding redundancy chunk, got %d", dec.ReceivedCount())
 	}
 }
 

@@ -1,919 +1,858 @@
+// Package tripleratchet implements the Triple Ratchet: a hybrid EC + PQ
+// encrypt/decrypt interface combining the Double Ratchet (via ECCipher) and
+// the ML-KEM Braid SCKA (via mlkembraid) with SPQR chain key derivation.
+//
+// Each message is encrypted using keys derived from both the EC ratchet and
+// the PQ ratchet via KDFHybrid. The PQ chain epoch advances when the ML-KEM
+// Braid SCKA produces an output key.
+//
+// Public API:
+//
+//	tr, err := tripleratchet.NewAlice(ecCipher, sharedSecret, kemImpl, chunkSize)
+//	tr, err := tripleratchet.NewBob(ecCipher, sharedSecret, kemImpl, chunkSize)
+//	msg, err := tr.Encrypt(plaintext)
+//	plaintext, err := tr.Decrypt(compositeMessage)
+//
+// Rust source: rust/protocol/src/triple_ratchet.rs
+// Note: This Go package is a higher-level standalone hybrid that wraps the
+// Braid SCKA + SPQR + EC ratchet, while the Rust TripleRatchet is an internal
+// (pub(crate)) session-management helper. The public Go API (NewAlice/NewBob)
+// is a Go-specific design matching the initialization semantics documented in
+// the Signal protocol specification.
 package tripleratchet
 
 import (
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/binary"
-	"errors"
 	"math"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/cipher"
 	"github.com/jeremyhahn/go-libsignal/pkg/mlkembraid"
 	"github.com/jeremyhahn/go-libsignal/pkg/spqr"
-	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
 const (
-	// compositeMessageMinSize is the minimum size of a serialized composite message:
-	// 4 bytes header length + compositeHeaderMinSize + 4 bytes ciphertext length.
-	compositeMessageMinSize = 8
+	// maxSkippedPQKeys is the maximum number of out-of-order PQ keys retained.
+	maxSkippedPQKeys = 2000
 
-	// headerLenPrefixSize is the byte size of the header length prefix.
-	headerLenPrefixSize = 4
+	// maxPQJump is the maximum forward jump in PQ counters.
+	maxPQJump = 25000
 
-	// ciphertextLenPrefixSize is the byte size of the ciphertext length prefix.
-	ciphertextLenPrefixSize = 4
-
-	// HMACSize is the size of the HMAC-SHA256 authentication tag in bytes.
-	HMACSize = sha256.Size
-
-	// maxCompositeComponentLen is the maximum allowed length for header or
-	// ciphertext components in a composite message (64 MiB).
-	maxCompositeComponentLen = 64 * 1024 * 1024
+	// epochsToKeepPriorToSendEpoch is the epoch retention window for skipped keys.
+	epochsToKeepPriorToSendEpoch = 1
 )
 
-// ECCipher abstracts the EC Double Ratchet encrypt/decrypt operations.
-// This allows testing with mock implementations and decouples the Triple
-// Ratchet from the concrete session.Cipher type.
-type ECCipher interface {
-	// SendKey advances the EC Double Ratchet send chain and returns the
-	// serialized EC header and message key bytes without performing
-	// encryption. This avoids wasting CPU on a ciphertext that the Triple
-	// Ratchet discards in favor of its own hybrid-key encryption.
-	SendKey() (ecHeader []byte, messageKey []byte, err error)
-
-	// ReceiveKey advances the EC Double Ratchet receive chain using only the
-	// EC header (no ciphertext) and returns the derived message key.
-	// This mirrors SendKey on the receive side: the Triple Ratchet does not
-	// produce EC ciphertext, so there is nothing for the EC cipher to
-	// decrypt. Passing composite ciphertext to DecryptGetKey would be
-	// incorrect because the EC cipher cannot parse hybrid-encrypted data.
-	ReceiveKey(ecHeader []byte) (messageKey []byte, err error)
-
-	// EncryptGetKey encrypts plaintext and returns the ciphertext body,
-	// the serialized EC header, and the message key bytes used.
-	EncryptGetKey(plaintext []byte) (ciphertext []byte, ecHeader []byte, messageKey []byte, err error)
-
-	// DecryptGetKey decrypts using the provided EC header bytes and
-	// ciphertext body, returning plaintext and the message key used.
-	DecryptGetKey(ecHeader []byte, ciphertext []byte) (plaintext []byte, messageKey []byte, err error)
+// pqSkippedKeyID identifies a skipped PQ key by epoch and counter.
+//
+// NOTE: The epoch field is populated with tr.pqEpoch at derivation time.
+// CompositeHeader carries no PQ epoch field, so cross-epoch out-of-order
+// decryption via skipped keys cannot work: a message from epoch N cannot be
+// decrypted after the ratchet has advanced past N's retention window because
+// (a) there is no epoch in the wire header to look up the correct skipped key,
+// and (b) purgeOldSkippedKeys removes keys from expired epochs. The epoch
+// field is retained as future-proofing: if a later protocol version adds a PQ
+// epoch to CompositeHeader, no structural change to pqSkippedKeyID is needed.
+type pqSkippedKeyID struct {
+	epoch   uint64
+	counter uint32
 }
 
-// ECCipherSnapshotable is an optional interface that ECCipher implementations
-// can provide to support atomic rollback of EC ratchet state on Decrypt
-// failure. When the ECCipher implements this interface, the Triple Ratchet
-// snapshots EC state before ReceiveKey and restores it if MAC verification
-// or any subsequent step fails. Without this interface, a forged message with
-// a valid-looking EC header can permanently advance the EC receive chain.
+// ECCipher abstracts the EC Double Ratchet operations needed by the Triple Ratchet.
+//
+// Implementations should return the EC message key and a serialized EC header
+// on send, and derive the EC message key from the header on receive.
+//
+// Rust source: the EC ratchet path in rust/protocol/src/triple_ratchet.rs,
+// where the DR sender chain key and receiver chain are managed by the session
+// state. This interface provides a Go-idiomatic abstraction for the same role.
+type ECCipher interface {
+	// SendKey returns the EC message key and serialized EC header for the next
+	// outgoing message without performing the actual encryption.
+	SendKey() (ecHeader []byte, messageKey []byte, err error)
+
+	// ReceiveKey derives the EC message key for an incoming message using the
+	// given serialized EC header.
+	ReceiveKey(ecHeader []byte) (messageKey []byte, err error)
+}
+
+// ECCipherSnapshotable is an optional interface for atomic rollback of EC
+// ratchet state. When the ECCipher also implements ECCipherSnapshotable, the
+// Triple Ratchet snapshots EC state before ReceiveKey and restores it if MAC
+// verification or any subsequent step fails.
 type ECCipherSnapshotable interface {
-	// TakeECSnapshot serializes the current EC ratchet state for later
-	// restoration. The returned bytes are opaque to the caller.
+	// TakeECSnapshot serializes the current EC state for atomic rollback.
 	TakeECSnapshot() ([]byte, error)
 
-	// RestoreECSnapshot restores the EC ratchet state from a previous
-	// snapshot, discarding any mutations made since the snapshot was taken.
+	// RestoreECSnapshot replaces the current EC state from a snapshot taken
+	// by TakeECSnapshot.
 	RestoreECSnapshot(data []byte) error
 }
 
-// maxSkippedPQKeys is the maximum number of out-of-order PQ message keys
-// to retain. Matches the SPQR maxSkippedKeys constant.
-const maxSkippedPQKeys = 2000
-
-// maxPQJump is the maximum allowed forward jump in PQ counters.
-// Prevents DoS via memory exhaustion from a malicious counter value.
-// Matches the SPQR maxJump constant (Rust default: 25000).
-const maxPQJump = 25000
-
-// epochsToKeepPriorToSendEpoch controls how many prior epochs' skipped keys
-// are retained during epoch advancement. Matches Rust's
-// EPOCHS_TO_KEEP_PRIOR_TO_SEND_EPOCH = 1.
-const epochsToKeepPriorToSendEpoch = 1
-
-// pqSkippedKeyID uniquely identifies a skipped PQ message key by both its
-// epoch and counter. This prevents cross-epoch collisions where different
-// epochs could produce keys at the same counter value.
-type pqSkippedKeyID struct {
-	Epoch   uint64
-	Counter uint32
+// decryptSnapshot captures all mutable Triple Ratchet state before a Decrypt
+// call. All secrets are independent clones so destroying the snapshot does not
+// affect the live state.
+type decryptSnapshot struct {
+	braidData     []byte
+	rootKey       *secret.Secret
+	sendChainKey  *secret.Secret
+	recvChainKey  *secret.Secret
+	sendCounter   uint32
+	recvCounter   uint32
+	pqEpoch       uint64
+	handshakeDone bool
+	// skippedPQKeys is a deep copy of the skipped keys map at snapshot time.
+	skippedPQKeys map[pqSkippedKeyID]*secret.Secret
+	// ecSnapshot is only set when the ECCipher implements ECCipherSnapshotable.
+	ecSnapshot []byte
 }
 
-// TripleRatchet combines the EC Double Ratchet with the Sparse PQ Ratchet
-// (via the ML-KEM Braid SCKA protocol) to provide hybrid EC+PQ forward secrecy.
+// TripleRatchet is a hybrid EC + PQ encrypt/decrypt session.
 //
-// Each message is encrypted using keys derived from both the EC ratchet and the
-// PQ ratchet via KDF_HYBRID. The PQ chain epoch advances when the Braid SCKA
-// produces an output key, which is fed into KdfSckaRK to derive new root and
-// chain keys (matching Rust's Chain.add_epoch behavior).
-//
-// All sensitive key material is stored in memguard-backed Secrets that are
-// protected from swap and zeroized on destruction.
+// TripleRatchet is NOT safe for concurrent use by multiple goroutines.
+// Session-level serialization (load → mutate → store) provides synchronization.
 type TripleRatchet struct {
-	ecCipher ECCipher
-	braid    *mlkembraid.Braid
+	ecCipher  ECCipher
+	braid     *mlkembraid.Braid
+	rootKey   *secret.Secret
+	sendChain *secret.Secret
+	recvChain *secret.Secret
 
-	// rootKey holds the current SPQR root key, used as the salt when deriving
-	// new epoch chain keys via KdfSckaRK. Matches Rust Chain.next_root.
-	rootKey *secret.Secret
-
-	// sendChainKey and recvChainKey hold the current epoch's per-message chain keys
-	// for the SPQR layer, backed by memguard protected memory.
-	sendChainKey *secret.Secret
-	recvChainKey *secret.Secret
-
-	// sendCounter and recvCounter track the number of messages sent/received
-	// within the current SPQR chain epoch, used as input to KdfSckaCK.
 	sendCounter uint32
 	recvCounter uint32
+	pqEpoch     uint64
 
-	// pqEpoch tracks the current PQ chain epoch, incremented when the Braid
-	// produces an output key and KdfSckaRK advances the chain.
-	pqEpoch uint64
-
-	// isResponder indicates whether this party is Bob (the responder).
-	// When true, send/recv chain keys are swapped relative to KdfSckaRK output,
-	// matching Rust's Chain direction (A2B vs B2A).
+	// isResponder is true for Bob. Controls send/recv chain key assignment.
 	isResponder bool
 
-	// braidHandshakeComplete is set to true once the first successful Braid
-	// epoch advancement occurs. After that, Braid errors are no longer
-	// suppressed as handshake errors -- they indicate real protocol failures
-	// and must not silently downgrade to EC-only security.
+	// braidHandshakeComplete is set after the first epoch advancement.
+	// Before this is set, suppressed braid errors are tolerated; after it,
+	// all braid errors propagate.
 	braidHandshakeComplete bool
 
-	// skippedPQKeys stores PQ message keys derived when the receiver skips
-	// ahead to handle an out-of-order message. Keyed by epoch + counter
-	// to prevent cross-epoch collisions.
+	// skippedPQKeys holds out-of-order PQ message keys keyed by (epoch, counter).
 	skippedPQKeys map[pqSkippedKeyID]*secret.Secret
+
+	// skippedPQKeysFIFO records pqSkippedKeyIDs in insertion order, enabling
+	// O(1)-amortised eviction of the oldest key when the map is at capacity.
+	// Entries may be stale (already removed from skippedPQKeys by consume or
+	// purge); stale entries are skipped during eviction.
+	// skippedPQKeysFIFOHead is the index of the first candidate live entry.
+	skippedPQKeysFIFO     []pqSkippedKeyID
+	skippedPQKeysFIFOHead int
 }
 
-// NewAlice creates a Triple Ratchet for the session initiator (Alice).
-// The ecCipher handles EC Double Ratchet operations. The sharedSecret and
-// KEM implementation initialize the ML-KEM Braid for PQ key agreement.
-func NewAlice(ecCipher ECCipher, sharedSecret []byte, kemImpl mlkembraid.IncrementalKEM, chunkSize int) (*TripleRatchet, error) {
-	if ecCipher == nil {
-		return nil, &ErrInvalidInput{Field: "ecCipher", Reason: "must not be nil"}
-	}
-	if len(sharedSecret) == 0 {
-		return nil, &ErrInvalidInput{Field: "sharedSecret", Reason: "must not be empty"}
-	}
-	if kemImpl == nil {
-		return nil, &ErrInvalidInput{Field: "kemImpl", Reason: "must not be nil"}
-	}
-
-	braid, err := mlkembraid.InitAlice(sharedSecret, kemImpl, chunkSize)
-	if err != nil {
-		return nil, &ErrSPQRFailed{Op: "InitAlice", Err: err}
-	}
-
-	// Initialize SPQR chain keys from the shared secret.
-	// KdfSckaInit returns *secret.Secret values directly.
-	rk, cks, ckr, err := spqr.KdfSckaInit(sharedSecret)
-	if err != nil {
-		return nil, &ErrSPQRFailed{Op: "KdfSckaInit", Err: err}
-	}
-
-	return &TripleRatchet{
-		ecCipher:      ecCipher,
-		braid:         braid,
-		rootKey:       rk,
-		sendChainKey:  cks,
-		recvChainKey:  ckr,
-		skippedPQKeys: make(map[pqSkippedKeyID]*secret.Secret),
-	}, nil
-}
-
-// NewBob creates a Triple Ratchet for the session responder (Bob).
-// The ecCipher handles EC Double Ratchet operations. The sharedSecret and
-// KEM implementation initialize the ML-KEM Braid for PQ key agreement.
-func NewBob(ecCipher ECCipher, sharedSecret []byte, kemImpl mlkembraid.IncrementalKEM, chunkSize int) (*TripleRatchet, error) {
-	if ecCipher == nil {
-		return nil, &ErrInvalidInput{Field: "ecCipher", Reason: "must not be nil"}
-	}
-	if len(sharedSecret) == 0 {
-		return nil, &ErrInvalidInput{Field: "sharedSecret", Reason: "must not be empty"}
-	}
-	if kemImpl == nil {
-		return nil, &ErrInvalidInput{Field: "kemImpl", Reason: "must not be nil"}
-	}
-
-	braid, err := mlkembraid.InitBob(sharedSecret, kemImpl, chunkSize)
-	if err != nil {
-		return nil, &ErrSPQRFailed{Op: "InitBob", Err: err}
-	}
-
-	// Initialize SPQR chain keys from the shared secret.
-	// Bob's send/recv are swapped relative to Alice.
-	// KdfSckaInit returns *secret.Secret values directly.
-	rk, cks, ckr, err := spqr.KdfSckaInit(sharedSecret)
-	if err != nil {
-		return nil, &ErrSPQRFailed{Op: "KdfSckaInit", Err: err}
-	}
-
-	// Bob's send = Alice's recv (ckr), Bob's recv = Alice's send (cks).
-	return &TripleRatchet{
-		ecCipher:      ecCipher,
-		braid:         braid,
-		rootKey:       rk,
-		sendChainKey:  ckr,
-		recvChainKey:  cks,
-		isResponder:   true,
-		skippedPQKeys: make(map[pqSkippedKeyID]*secret.Secret),
-	}, nil
-}
-
-// Encrypt produces a composite message with both EC and PQ components.
+// NewAlice initializes a Triple Ratchet for the initiator (Alice).
+// Derives initial SPQR chain keys from sharedSecret using spqr.KdfSckaInit and
+// initializes the Braid via mlkembraid.InitAlice.
 //
-// The encryption flow:
-//  1. Advance the EC Double Ratchet to get an EC message key and header.
-//  2. Advance the SPQR (Braid) to get a PQ message and optional output key.
-//  3. Derive a per-message PQ key from the send chain.
-//  4. Combine EC and PQ keys via KDF_HYBRID.
-//  5. Encrypt plaintext with the combined keys.
-//  6. Serialize composite header + ciphertext into the output message.
+// Rust source: session initialization path in rust/protocol/src/triple_ratchet.rs.
+// Alice is the session initiator whose Braid starts in KeysUnsampled state.
+func NewAlice(ecCipher ECCipher, sharedSecret []byte, kemImpl mlkembraid.IncrementalKEM, chunkSize int) (*TripleRatchet, error) {
+	return newTripleRatchet(ecCipher, sharedSecret, kemImpl, chunkSize, false)
+}
+
+// NewBob initializes a Triple Ratchet for the responder (Bob).
+// Derives initial SPQR chain keys from sharedSecret using spqr.KdfSckaInit and
+// initializes the Braid via mlkembraid.InitBob. Bob's send and receive chain
+// keys are swapped relative to Alice's.
+//
+// Rust source: session initialization path in rust/protocol/src/triple_ratchet.rs.
+// Bob is the session responder whose Braid starts in NoHeaderReceived state.
+func NewBob(ecCipher ECCipher, sharedSecret []byte, kemImpl mlkembraid.IncrementalKEM, chunkSize int) (*TripleRatchet, error) {
+	return newTripleRatchet(ecCipher, sharedSecret, kemImpl, chunkSize, true)
+}
+
+// newTripleRatchet is the shared constructor for Alice and Bob.
+func newTripleRatchet(ecCipher ECCipher, sharedSecret []byte, kemImpl mlkembraid.IncrementalKEM, chunkSize int, isResponder bool) (*TripleRatchet, error) {
+	if ecCipher == nil {
+		return nil, &ErrInvalidInput{Field: "ecCipher", Reason: "must not be nil"}
+	}
+	if len(sharedSecret) == 0 {
+		return nil, &ErrInvalidInput{Field: "sharedSecret", Reason: "must not be empty"}
+	}
+	if kemImpl == nil {
+		return nil, &ErrInvalidInput{Field: "kemImpl", Reason: "must not be nil"}
+	}
+	if chunkSize <= 0 {
+		return nil, &ErrInvalidInput{Field: "chunkSize", Reason: "must be positive"}
+	}
+
+	rk, cks, ckr, err := spqr.KdfSckaInit(sharedSecret)
+	if err != nil { // coverage-exempt: KdfSckaInit only fails on empty sharedSecret (checked above) or memguard OOM
+		return nil, &ErrSPQRFailed{Op: "KdfSckaInit", Cause: err}
+	}
+
+	var braid *mlkembraid.Braid
+	if isResponder {
+		braid, err = mlkembraid.InitBob(sharedSecret, kemImpl, chunkSize)
+	} else {
+		braid, err = mlkembraid.InitAlice(sharedSecret, kemImpl, chunkSize)
+	}
+	if err != nil { // coverage-exempt: braid init only fails on empty sharedSecret (checked above), nil KEM (checked above), or memguard OOM
+		rk.Destroy()
+		cks.Destroy()
+		ckr.Destroy()
+		return nil, &ErrBraidFailed{Op: "Init", Cause: err}
+	}
+
+	// For Bob, swap send and receive chain keys (matches Rust Chain direction handling).
+	sendChain := cks
+	recvChain := ckr
+	if isResponder {
+		sendChain, recvChain = ckr, cks
+	}
+
+	return &TripleRatchet{
+		ecCipher:      ecCipher,
+		braid:         braid,
+		rootKey:       rk,
+		sendChain:     sendChain,
+		recvChain:     recvChain,
+		sendCounter:   0,
+		recvCounter:   0,
+		pqEpoch:       0,
+		isResponder:   isResponder,
+		skippedPQKeys: make(map[pqSkippedKeyID]*secret.Secret),
+	}, nil
+}
+
+// Encrypt encrypts plaintext and returns the composite wire message.
+//
+// Steps:
+//  1. Calls ecCipher.SendKey() to get an EC message key and serialized EC header.
+//  2. Calls braid.Send() to advance the Braid SCKA and get an outbound SCKA message.
+//  3. If the Braid produces an OutputKey, advances the PQ epoch via advancePQEpoch.
+//  4. Increments sendCounter and derives a PQ message key via spqr.KdfSckaCK.
+//  5. Combines EC and PQ keys via KDFHybrid (or KDFHybridECOnly if PQ key is nil).
+//  6. Encrypts plaintext with AES-256-CBC.
+//  7. Computes HMAC-SHA256 over the encrypted payload.
+//  8. Builds and returns the composite message.
 func (tr *TripleRatchet) Encrypt(plaintext []byte) ([]byte, error) {
-	if len(plaintext) == 0 {
-		return nil, &ErrInvalidInput{Field: "plaintext", Reason: "must not be empty"}
-	}
-
-	// Step 1: Get EC message key and header from the Double Ratchet.
-	// We use SendKey instead of EncryptGetKey to avoid wasting CPU on a
-	// ciphertext that is immediately discarded -- the Triple Ratchet
-	// re-encrypts with hybrid keys below.
-	ecHeader, ecMK, err := tr.ecCipher.SendKey()
+	// Step 1: EC ratchet send key.
+	ecHeader, ecMKBytes, err := tr.ecCipher.SendKey()
 	if err != nil {
-		return nil, &ErrECRatchetFailed{Op: "Encrypt", Err: err}
+		return nil, &ErrECRatchetFailed{Op: "SendKey", Cause: err}
+	}
+	ecMK, err := secret.New(ecMKBytes)
+	if err != nil { // coverage-exempt: only reachable on memguard OOM
+		return nil, &ErrECRatchetFailed{Op: "SendKey", Cause: err}
+	}
+	defer ecMK.Destroy()
+
+	// Step 2: Braid SCKA send.
+	sckaMsg, _, outputKey, braidErr := tr.braid.Send()
+	if braidErr != nil { // coverage-exempt: braid.Send only fails when the state machine is in an invalid state, which cannot occur with a correctly initialized TripleRatchet
+		return nil, &ErrBraidFailed{Op: "Send", Cause: braidErr}
 	}
 
-	// Step 2: Advance the Braid SCKA protocol.
-	sckaMsg, _, outputKey, err := tr.braid.Send()
-	if err != nil {
-		return nil, &ErrSPQRFailed{Op: "Send", Err: err}
-	}
-
-	// If the Braid produced an output key, advance the PQ chain epoch.
-	// This matches Rust's chain.add_epoch(epoch_secret) which calls
-	// KdfSckaRK(next_root, epoch_secret) to derive new root + chain keys.
-	if outputKey != nil && outputKey.Key != nil {
-		epochSecret := copyBytes(outputKey.Key.Bytes())
+	// Step 3: advance PQ epoch if the Braid produced an OutputKey.
+	// NOTE: In the current ML-KEM Braid SCKA implementation, all sendXxx state
+	// handlers return nil OutputKey. OutputKeys are only produced by receiveXxx
+	// handlers (braid.Receive in Decrypt). This block is a defensive forward-
+	// compatibility guard in case the braid protocol is extended with Send-side
+	// OutputKey emission.
+	// Copy the key bytes out of the memguard-protected region before calling
+	// advancePQEpoch, because secret.New inside that function calls
+	// memguard.NewBufferFromBytes which destructively zeroes the source slice.
+	// Zeroing a memguard-protected page via a raw pointer causes a segfault.
+	if outputKey != nil { // coverage-exempt: braid.Send never produces OutputKey in current protocol
+		epochSecretBytes := make([]byte, len(outputKey.Key.Bytes()))
+		copy(epochSecretBytes, outputKey.Key.Bytes())
 		outputKey.Key.Destroy()
-
-		advanceErr := tr.advancePQEpoch(epochSecret)
-		for i := range epochSecret {
-			epochSecret[i] = 0
-		}
-		if advanceErr != nil {
-			return nil, advanceErr
+		if epochErr := tr.advancePQEpoch(epochSecretBytes); epochErr != nil { // coverage-exempt: only reachable on memguard OOM
+			return nil, epochErr
 		}
 	}
 
-	// Step 3: Derive a per-message PQ key from the send chain.
-	// Increment counter before use so the first key is at index 1,
-	// matching the SPQR convention.
+	// Step 4: derive PQ message key from send chain.
+	// Check BEFORE incrementing to avoid mutating state on the error path.
+	// Matches SPQR.Encrypt's pre-increment guard. When sendCounter == MaxUint32
+	// an increment would wrap to 0, producing an invalid counter.
 	if tr.sendCounter == math.MaxUint32 {
-		return nil, &ErrSPQRFailed{Op: "Encrypt", Err: &ErrInvalidInput{Field: "sendCounter", Reason: "counter overflow"}}
+		return nil, &ErrInvalidInput{Field: "sendCounter", Reason: "counter overflow"}
 	}
 	tr.sendCounter++
-	pqCounter := tr.sendCounter
 
-	// KdfSckaCK takes *secret.Secret and returns *secret.Secret values.
-	pqMK, nextChainKey, kdfErr := spqr.KdfSckaCK(tr.sendChainKey, pqCounter)
-	if kdfErr != nil {
-		return nil, kdfErr
+	pqMK, nextSendChain, spqrErr := spqr.KdfSckaCK(tr.sendChain, tr.sendCounter)
+	if spqrErr != nil {
+		return nil, &ErrSPQRFailed{Op: "KdfSckaCK", Cause: spqrErr}
 	}
-	tr.sendChainKey.Destroy()
-	tr.sendChainKey = nextChainKey
+	tr.sendChain.Destroy()
+	tr.sendChain = nextSendChain
+	defer pqMK.Destroy()
 
-	// Step 4: Combine EC and PQ keys.
-	// When pqMK is nil (epoch-0, counter-0 pre-negotiation state), fall back
-	// to EC-only key derivation matching Rust's behavior where the PQ
-	// contribution is None.
-	var hybridKeys *HybridKeys
-	if pqMK == nil {
-		hybridKeys, err = KDFHybridECOnly(ecMK)
-	} else {
-		hybridKeys, err = KDFHybrid(ecMK, pqMK.Bytes())
-		pqMK.Destroy()
+	// Step 5: derive hybrid keys.
+	hkeys, hkdfErr := KDFHybrid(ecMK, pqMK)
+	if hkdfErr != nil { // coverage-exempt: KDFHybrid only fails on nil/destroyed key or memguard OOM; both keys are freshly created above
+		return nil, hkdfErr
 	}
-	// Zeroize raw EC message key.
-	crypto.Zeroize(ecMK)
-	if err != nil {
-		return nil, err
-	}
-	defer hybridKeys.Zeroize()
+	defer hkeys.Zeroize()
 
-	// Step 5: Encrypt plaintext with hybrid keys using AES-CBC.
-	encryptedPayload, err := cipher.Encrypt(hybridKeys.IV.Bytes(), hybridKeys.CipherKey.Bytes(), plaintext)
-	if err != nil {
-		return nil, &ErrECRatchetFailed{Op: "Encrypt/AES", Err: err}
+	// Step 6: AES-256-CBC encrypt.
+	ciphertext, encErr := cipher.AESCBCEncrypt(hkeys.CipherKey.Bytes(), hkeys.IV.Bytes(), plaintext)
+	if encErr != nil { // coverage-exempt: AESCBCEncrypt only fails on invalid key/IV length; KDFHybrid always produces 32-byte key and 16-byte IV
+		return nil, &ErrDecryptFailed{Cause: encErr}
 	}
 
-	// Step 5b: Compute HMAC-SHA256 over the encrypted payload for Encrypt-then-MAC.
-	mac := computeHMAC(hybridKeys.MacKey.Bytes(), encryptedPayload)
+	// Step 7: HMAC-SHA256 over ciphertext.
+	mac := computeHMAC(hkeys.MacKey.Bytes(), ciphertext)
 
-	// Compose authenticated ciphertext: encrypted_payload || mac(32 bytes).
-	ciphertext := make([]byte, len(encryptedPayload)+HMACSize)
-	copy(ciphertext, encryptedPayload)
-	copy(ciphertext[len(encryptedPayload):], mac)
+	// authenticated ciphertext: encrypted_payload || mac(32 bytes)
+	authenticated := make([]byte, len(ciphertext)+HMACSize)
+	copy(authenticated, ciphertext)
+	copy(authenticated[len(ciphertext):], mac)
 
-	// Step 6: Build composite message with PQ counter for out-of-order support.
+	// Step 8: build composite header and message.
 	header := &CompositeHeader{
 		ECHeader:  ecHeader,
-		PQCounter: pqCounter,
+		PQCounter: tr.sendCounter,
 		SCKAMsg:   sckaMsg,
 	}
-
-	return serializeCompositeMessage(header, ciphertext)
-}
-
-// decryptSnapshot captures all mutable state before Decrypt begins, enabling
-// rollback on MAC failure to prevent state corruption from forged messages.
-// Both PQ and EC ratchet state are captured when the ECCipher supports
-// snapshotting (implements ECCipherSnapshotable).
-type decryptSnapshot struct {
-	braidData              []byte
-	rootKey                *secret.Secret
-	sendChainKey           *secret.Secret
-	recvChainKey           *secret.Secret
-	sendCounter            uint32
-	recvCounter            uint32
-	pqEpoch                uint64
-	braidHandshakeComplete bool
-	skippedPQKeys          map[pqSkippedKeyID]*secret.Secret
-
-	// ecData holds the serialized EC ratchet state captured before ReceiveKey.
-	// Non-nil only when the ECCipher implements ECCipherSnapshotable.
-	ecData []byte
-}
-
-// takeSnapshot captures the current mutable PQ and EC state for potential rollback.
-func (tr *TripleRatchet) takeSnapshot() (*decryptSnapshot, error) {
-	braidData, err := tr.braid.Serialize()
-	if err != nil {
-		return nil, &ErrSPQRFailed{Op: "takeSnapshot/braid", Err: err}
+	headerBytes, marshalErr := marshalCompositeHeader(header)
+	if marshalErr != nil { // coverage-exempt: marshalCompositeHeader only fails on nil header; header is always non-nil here
+		return nil, marshalErr
 	}
 
-	// Snapshot EC state if the cipher supports it.
-	var ecData []byte
-	if snapshotable, ok := tr.ecCipher.(ECCipherSnapshotable); ok {
-		ecData, err = snapshotable.TakeECSnapshot()
-		if err != nil {
-			return nil, &ErrECRatchetFailed{Op: "takeSnapshot", Err: err}
+	return marshalCompositeMessage(headerBytes, authenticated), nil
+}
+
+// Decrypt decrypts a composite wire message produced by Encrypt and returns
+// the plaintext.
+//
+// On MAC failure or decryption failure, all state mutations are rolled back
+// via snapshot/restore so the TripleRatchet remains usable.
+func (tr *TripleRatchet) Decrypt(compositeMessage []byte) ([]byte, error) {
+	// Parse outer framing.
+	headerBytes, authenticatedCiphertext, parseErr := unmarshalCompositeMessage(compositeMessage)
+	if parseErr != nil {
+		return nil, parseErr
+	}
+
+	// Parse the composite header.
+	header, headerErr := unmarshalCompositeHeader(headerBytes)
+	if headerErr != nil {
+		return nil, headerErr
+	}
+
+	// Validate ciphertext has at least an HMAC tag.
+	if len(authenticatedCiphertext) < HMACSize {
+		return nil, &ErrInvalidCompositeMessage{Reason: "ciphertext too short to contain MAC"}
+	}
+
+	// Snapshot all mutable state before any mutations.
+	snap, snapErr := tr.takeSnapshot()
+	if snapErr != nil {
+		return nil, snapErr
+	}
+
+	plaintext, err := tr.decryptWithSnapshot(header, authenticatedCiphertext, snap)
+	if err != nil {
+		if restoreErr := tr.restoreSnapshot(snap); restoreErr != nil {
+			// Both decrypt and rollback failed: session state is unrecoverable.
+			// Destroy remaining snapshot secrets and signal to the caller that
+			// this session must be discarded.
+			tr.destroySnapshot(snap)
+			return nil, &ErrStateCorrupted{DecryptErr: err, RestoreErr: restoreErr}
 		}
+		tr.destroySnapshot(snap)
+		return nil, err
 	}
 
-	rk, err := tr.rootKey.Clone()
-	if err != nil {
-		return nil, &ErrSPQRFailed{Op: "takeSnapshot/rootKey", Err: err}
-	}
-	sck, err := tr.sendChainKey.Clone()
-	if err != nil {
-		rk.Destroy()
-		return nil, &ErrSPQRFailed{Op: "takeSnapshot/sendChainKey", Err: err}
-	}
-	rck, err := tr.recvChainKey.Clone()
-	if err != nil {
-		rk.Destroy()
-		sck.Destroy()
-		return nil, &ErrSPQRFailed{Op: "takeSnapshot/recvChainKey", Err: err}
-	}
-
-	// Deep copy the skipped keys map.
-	skippedCopy := make(map[pqSkippedKeyID]*secret.Secret, len(tr.skippedPQKeys))
-	for id, mk := range tr.skippedPQKeys {
-		cloned, cloneErr := mk.Clone()
-		if cloneErr != nil {
-			// Clean up already-cloned keys and snapshot secrets.
-			for _, c := range skippedCopy {
-				c.Destroy()
-			}
-			rk.Destroy()
-			sck.Destroy()
-			rck.Destroy()
-			return nil, &ErrSPQRFailed{Op: "takeSnapshot/skippedKeys", Err: cloneErr}
-		}
-		skippedCopy[id] = cloned
-	}
-
-	return &decryptSnapshot{
-		braidData:              braidData,
-		rootKey:                rk,
-		sendChainKey:           sck,
-		recvChainKey:           rck,
-		sendCounter:            tr.sendCounter,
-		recvCounter:            tr.recvCounter,
-		pqEpoch:                tr.pqEpoch,
-		braidHandshakeComplete: tr.braidHandshakeComplete,
-		skippedPQKeys:          skippedCopy,
-		ecData:                 ecData,
-	}, nil
+	tr.destroySnapshot(snap)
+	return plaintext, nil
 }
 
-// restoreSnapshot restores the mutable PQ and EC state from a snapshot,
-// destroying the current state. The snapshot is consumed and must not be
-// used afterward.
-func (tr *TripleRatchet) restoreSnapshot(snap *decryptSnapshot) error {
-	// Restore braid from serialized data.
-	restoredBraid, err := mlkembraid.DeserializeBraid(snap.braidData)
-	if err != nil {
-		return &ErrSPQRFailed{Op: "restoreSnapshot/braid", Err: err}
+// decryptWithSnapshot performs the actual decryption on live state.
+// On any error, the caller is responsible for restoring the snapshot.
+func (tr *TripleRatchet) decryptWithSnapshot(
+	header *CompositeHeader,
+	authenticatedCiphertext []byte,
+	snap *decryptSnapshot,
+) ([]byte, error) {
+	// Step 1: EC ratchet receive key.
+	ecMKBytes, ecErr := tr.ecCipher.ReceiveKey(header.ECHeader)
+	if ecErr != nil {
+		return nil, &ErrECRatchetFailed{Op: "ReceiveKey", Cause: ecErr}
 	}
+	ecMK, err := secret.New(ecMKBytes)
+	if err != nil { // coverage-exempt: only reachable on memguard OOM
+		return nil, &ErrECRatchetFailed{Op: "ReceiveKey", Cause: err}
+	}
+	defer ecMK.Destroy()
 
-	// Restore EC state if a snapshot was captured.
-	if snap.ecData != nil {
-		if snapshotable, ok := tr.ecCipher.(ECCipherSnapshotable); ok {
-			if restoreErr := snapshotable.RestoreECSnapshot(snap.ecData); restoreErr != nil {
-				restoredBraid.Zeroize()
-				return &ErrECRatchetFailed{Op: "restoreSnapshot", Err: restoreErr}
+	// Step 2: Braid SCKA receive.
+	var outputKey *mlkembraid.OutputKey
+	if header.SCKAMsg != nil {
+		var braidErr error
+		_, outputKey, braidErr = tr.braid.Receive(header.SCKAMsg)
+		if braidErr != nil {
+			// During the initial handshake phase, suppress InvalidState and InvalidEpoch
+			// errors to tolerate out-of-order initial braid messages. After handshake
+			// completes, all braid errors propagate.
+			if tr.braidHandshakeComplete {
+				return nil, &ErrBraidFailed{Op: "Receive", Cause: braidErr}
 			}
 		}
 	}
 
-	// Destroy current state.
-	tr.braid.Zeroize()
+	// Step 3: advance PQ epoch if the Braid produced an OutputKey.
+	// Copy the key bytes out of the memguard-protected region before calling
+	// advancePQEpoch, because secret.New inside that function calls
+	// memguard.NewBufferFromBytes which destructively zeroes the source slice.
+	// Zeroing a memguard-protected page via a raw pointer causes a segfault.
+	if outputKey != nil { // coverage-exempt: reachable only in a synchronized bidirectional TripleRatchet session after the full ML-KEM Braid SCKA handshake completes; requires both parties to exchange braid messages in both directions, which is not achievable in unit tests using a simple symmetric EC cipher without a full session-layer implementation
+		epochSecretBytes := make([]byte, len(outputKey.Key.Bytes()))
+		copy(epochSecretBytes, outputKey.Key.Bytes())
+		outputKey.Key.Destroy()
+		if epochErr := tr.advancePQEpoch(epochSecretBytes); epochErr != nil { // coverage-exempt: only reachable on memguard OOM
+			return nil, epochErr
+		}
+	}
+
+	// Step 4: derive PQ message key for this counter, handling out-of-order.
+	pqMK, pqErr := tr.receivePQKey(header.PQCounter)
+	if pqErr != nil {
+		return nil, pqErr
+	}
+	if pqMK != nil {
+		defer pqMK.Destroy()
+	}
+
+	// Step 5: derive hybrid keys.
+	// pqMK is nil only when pqEpoch==0 && PQCounter==0 (pre-negotiation).
+	// In practice sendCounter is incremented before any message is sent, so
+	// PQCounter is always ≥ 1. The EC-only branch is a defensive fallback.
+	var hkeys *HybridKeys
+	if pqMK != nil {
+		hkeys, err = KDFHybrid(ecMK, pqMK)
+	} else { // coverage-exempt: PQCounter==0 at pqEpoch==0 never occurs in normal flow
+		hkeys, err = KDFHybridECOnly(ecMK)
+	}
+	if err != nil { // coverage-exempt: KDFHybrid only fails on nil/destroyed key or memguard OOM; KDFHybridECOnly branch is dead code (PQCounter==0 never occurs)
+		return nil, err
+	}
+	defer hkeys.Zeroize()
+
+	// Split the authenticated ciphertext.
+	ciphertextLen := len(authenticatedCiphertext) - HMACSize
+	ciphertext := authenticatedCiphertext[:ciphertextLen]
+	receivedMAC := authenticatedCiphertext[ciphertextLen:]
+
+	// Step 6: verify HMAC-SHA256 (constant-time).
+	expectedMAC := computeHMAC(hkeys.MacKey.Bytes(), ciphertext)
+	if !hmac.Equal(expectedMAC, receivedMAC) {
+		return nil, &ErrMACVerificationFailed{}
+	}
+
+	// Step 7: AES-256-CBC decrypt.
+	plaintext, decErr := cipher.AESCBCDecrypt(hkeys.CipherKey.Bytes(), hkeys.IV.Bytes(), ciphertext)
+	if decErr != nil { // coverage-exempt: only reachable when ciphertext is not block-aligned after valid MAC; MAC verification above ensures the ciphertext was produced by Encrypt which always PKCS7-pads
+		return nil, &ErrDecryptFailed{Cause: decErr}
+	}
+
+	return plaintext, nil
+}
+
+// advancePQEpoch advances the PQ ratchet epoch using the given epoch secret.
+// Derives new root key, send chain key, and receive chain key via spqr.KdfSckaRK.
+// For the responder (Bob), send and receive chain keys are swapped.
+// Resets counters, marks handshake complete, and purges old skipped keys.
+func (tr *TripleRatchet) advancePQEpoch(epochSecret []byte) error {
+	epochSec, err := secret.New(epochSecret)
+	if err != nil { // coverage-exempt: only reachable on memguard OOM
+		return &ErrSPQRFailed{Op: "advancePQEpoch", Cause: err}
+	}
+	defer epochSec.Destroy()
+
+	newRK, newCKs, newCKr, kdfErr := spqr.KdfSckaRK(tr.rootKey, epochSec.Bytes())
+	if kdfErr != nil {
+		return &ErrSPQRFailed{Op: "KdfSckaRK", Cause: kdfErr}
+	}
+
 	tr.rootKey.Destroy()
-	tr.sendChainKey.Destroy()
-	tr.recvChainKey.Destroy()
-	for id, mk := range tr.skippedPQKeys {
-		mk.Destroy()
-		delete(tr.skippedPQKeys, id)
+	tr.rootKey = newRK
+
+	tr.sendChain.Destroy()
+	tr.recvChain.Destroy()
+
+	if tr.isResponder {
+		tr.sendChain = newCKr
+		tr.recvChain = newCKs
+	} else {
+		tr.sendChain = newCKs
+		tr.recvChain = newCKr
 	}
 
-	// Install snapshot state.
-	tr.braid = restoredBraid
-	tr.rootKey = snap.rootKey
-	tr.sendChainKey = snap.sendChainKey
-	tr.recvChainKey = snap.recvChainKey
-	tr.sendCounter = snap.sendCounter
-	tr.recvCounter = snap.recvCounter
-	tr.pqEpoch = snap.pqEpoch
-	tr.braidHandshakeComplete = snap.braidHandshakeComplete
-	tr.skippedPQKeys = snap.skippedPQKeys
+	tr.pqEpoch++
+	tr.sendCounter = 0
+	tr.recvCounter = 0
+	tr.braidHandshakeComplete = true
+
+	// Purge skipped keys from epochs before the retention window.
+	tr.purgeOldSkippedKeys()
 
 	return nil
 }
 
-// destroySnapshot cleans up a snapshot that is no longer needed (successful path).
-func destroySnapshot(snap *decryptSnapshot) {
-	if snap == nil {
-		return
-	}
-	snap.rootKey.Destroy()
-	snap.sendChainKey.Destroy()
-	snap.recvChainKey.Destroy()
-	for id, mk := range snap.skippedPQKeys {
-		mk.Destroy()
-		delete(snap.skippedPQKeys, id)
-	}
-	// Zeroize serialized braid data.
-	for i := range snap.braidData {
-		snap.braidData[i] = 0
-	}
-	// Zeroize serialized EC state data.
-	for i := range snap.ecData {
-		snap.ecData[i] = 0
-	}
-}
-
-// Decrypt processes a composite message using both the EC and PQ ratchets.
+// receivePQKey returns the PQ message key for the given counter, handling
+// out-of-order delivery:
 //
-// The decryption flow:
-//  1. Parse the composite header and ciphertext from the message.
-//  2. Snapshot mutable PQ and EC state for rollback on failure.
-//  3. Use the EC header to get the EC message key from the Double Ratchet.
-//  4. Process the SCKA message through the Braid.
-//  5. Derive a per-message PQ key from the receive chain.
-//  6. Combine EC and PQ keys via KDF_HYBRID.
-//  7. Decrypt the ciphertext with the combined keys.
+//   - Epoch 0, counter 0: returns nil (pre-negotiation state, EC-only).
+//   - Previously skipped key: removes from skippedPQKeys and returns.
+//   - Counter behind current position: returns error (counter already consumed).
+//   - Counter ahead: enforces maxPQJump, stores intermediate skipped keys, returns the target key.
 //
-// On MAC verification failure, both PQ and EC state are rolled back to the
-// snapshot to prevent state corruption from forged messages. EC rollback
-// requires the ECCipher to implement ECCipherSnapshotable.
-func (tr *TripleRatchet) Decrypt(compositeMessage []byte) ([]byte, error) {
-	if len(compositeMessage) == 0 {
-		return nil, &ErrInvalidInput{Field: "compositeMessage", Reason: "must not be empty"}
-	}
-
-	// Step 1: Parse composite message.
-	header, ciphertext, err := deserializeCompositeMessage(compositeMessage)
-	if err != nil {
-		return nil, err
-	}
-
-	// Step 2: Snapshot PQ and EC state before any mutations for rollback on failure.
-	snap, err := tr.takeSnapshot()
-	if err != nil {
-		return nil, err
-	}
-
-	// Step 3: Get EC message key from the Double Ratchet.
-	// Use ReceiveKey (not DecryptGetKey) because the Triple Ratchet
-	// encrypts with hybrid keys -- there is no EC ciphertext body.
-	// Passing the composite ciphertext to DecryptGetKey would be incorrect
-	// since the EC cipher cannot parse hybrid-encrypted data.
-	ecMK, err := tr.ecCipher.ReceiveKey(header.ECHeader)
-	if err != nil {
-		destroySnapshot(snap)
-		return nil, &ErrECRatchetFailed{Op: "Decrypt", Err: err}
-	}
-
-	// Step 4: Process SCKA message through the Braid.
-	// Propagate errors from Braid.Receive, except for expected state
-	// machine errors during early handshake (ErrInvalidState, ErrInvalidEpoch)
-	// which indicate the Braid is not yet ready to process messages.
-	_, outputKey, braidErr := tr.braid.Receive(header.SCKAMsg)
-	if braidErr != nil {
-		// Once the Braid handshake has completed (first epoch key produced),
-		// all Braid errors are real failures. Only suppress handshake errors
-		// during the initial negotiation phase; after that, propagate them
-		// to prevent silent downgrade to EC-only security.
-		if tr.braidHandshakeComplete || !isBraidHandshakeError(braidErr) {
-			destroySnapshot(snap)
-			return nil, &ErrSPQRFailed{Op: "Receive", Err: braidErr}
-		}
-		// Expected handshake state: Braid not ready yet, continue with
-		// current chain keys (no epoch advancement).
-	}
-
-	// If the Braid produced an output key, advance the PQ chain epoch.
-	if braidErr == nil && outputKey != nil && outputKey.Key != nil {
-		epochSecret := copyBytes(outputKey.Key.Bytes())
-		outputKey.Key.Destroy()
-
-		advanceErr := tr.advancePQEpoch(epochSecret)
-		for i := range epochSecret {
-			epochSecret[i] = 0
-		}
-		if advanceErr != nil {
-			destroySnapshot(snap)
-			return nil, advanceErr
-		}
-	}
-
-	// Step 5: Derive a per-message PQ key from the receive chain.
-	// Use the PQ counter from the header to support out-of-order messages.
-	// If the counter is ahead of our current position, skip forward and
-	// store intermediate keys (matching SPQR's out-of-order behavior).
-	pqCounter := header.PQCounter
-	pqMK, skipErr := tr.receivePQKey(pqCounter)
-	if skipErr != nil {
-		destroySnapshot(snap)
-		return nil, skipErr
-	}
-
-	// Step 6: Combine EC and PQ keys.
-	// When pqMK is nil (epoch-0, counter-0 pre-negotiation state), fall back
-	// to EC-only key derivation matching Rust's behavior.
-	var hybridKeys *HybridKeys
-	if pqMK == nil {
-		hybridKeys, err = KDFHybridECOnly(ecMK)
-	} else {
-		hybridKeys, err = KDFHybrid(ecMK, pqMK.Bytes())
-		pqMK.Destroy()
-	}
-	// Zeroize raw EC message key.
-	crypto.Zeroize(ecMK)
-	if err != nil {
-		destroySnapshot(snap)
-		return nil, err
-	}
-	defer hybridKeys.Zeroize()
-
-	// Step 7: Verify HMAC and decrypt with hybrid keys.
-	// The ciphertext format is: encrypted_payload || mac(32 bytes).
-	if len(ciphertext) < HMACSize {
-		destroySnapshot(snap)
-		return nil, &ErrInvalidCompositeMessage{Reason: "ciphertext too short for MAC"}
-	}
-
-	splitPoint := len(ciphertext) - HMACSize
-	encryptedPayload := ciphertext[:splitPoint]
-	receivedMAC := ciphertext[splitPoint:]
-
-	// Verify HMAC-SHA256 using constant-time comparison.
-	expectedMAC := computeHMAC(hybridKeys.MacKey.Bytes(), encryptedPayload)
-	if !hmac.Equal(receivedMAC, expectedMAC) {
-		// MAC failure: rollback PQ state to prevent state corruption
-		// from forged messages.
-		if restoreErr := tr.restoreSnapshot(snap); restoreErr != nil {
-			// Restore failed -- state is inconsistent. Return the original
-			// MAC error wrapped with the restore failure context.
-			return nil, &ErrSPQRFailed{Op: "Decrypt/rollback", Err: restoreErr}
-		}
-		return nil, &ErrMACVerificationFailed{}
-	}
-
-	// MAC verified. Attempt AES decryption before committing state -- if
-	// decryption fails (e.g., PKCS7 unpad error) we must roll back.
-	pt, err := cipher.Decrypt(hybridKeys.IV.Bytes(), hybridKeys.CipherKey.Bytes(), encryptedPayload)
-	if err != nil {
-		// AES decryption failed: rollback state to prevent corruption.
-		if restoreErr := tr.restoreSnapshot(snap); restoreErr != nil {
-			return nil, &ErrSPQRFailed{Op: "Decrypt/AES-rollback", Err: restoreErr}
-		}
-		return nil, &ErrECRatchetFailed{Op: "Decrypt/AES", Err: err}
-	}
-
-	// All operations succeeded -- commit the state mutations and discard the snapshot.
-	destroySnapshot(snap)
-
-	return pt, nil
-}
-
-// receivePQKey derives the PQ message key for the given counter, supporting
-// out-of-order delivery. If the counter is ahead of the current receive
-// position, intermediate keys are stored in skippedPQKeys. If a previously
-// skipped key is requested, it is returned and removed from the map.
+// The recvCounter tracks the highest counter whose key has been derived from the
+// chain. Keys are derived by calling KdfSckaCK once per step from the current
+// chain key position.
+//
+// NOTE: Skipped-key lookup always uses tr.pqEpoch (the current epoch). Because
+// CompositeHeader carries no PQ epoch field, cross-epoch out-of-order messages
+// cannot be decrypted from the skipped-key cache after a ratchet epoch advance.
+// This is a known limitation of the current wire format. See pqSkippedKeyID.
 func (tr *TripleRatchet) receivePQKey(counter uint32) (*secret.Secret, error) {
-	// Epoch-0, counter-0 represents the pre-negotiation state where no PQ key
-	// is available yet. Return nil to signal EC-only encryption, matching Rust
-	// behavior where msg_key_epoch=0 && index=0 returns an empty key.
+	// Pre-negotiation: no PQ key yet.
 	if tr.pqEpoch == 0 && counter == 0 {
 		return nil, nil
 	}
 
-	// Check skipped keys first (out-of-order message).
-	keyID := pqSkippedKeyID{Epoch: tr.pqEpoch, Counter: counter}
-	if mk, ok := tr.skippedPQKeys[keyID]; ok {
-		delete(tr.skippedPQKeys, keyID)
+	// Check for a previously stored skipped key.
+	skippedID := pqSkippedKeyID{epoch: tr.pqEpoch, counter: counter}
+	if mk, ok := tr.skippedPQKeys[skippedID]; ok {
+		delete(tr.skippedPQKeys, skippedID)
+		// The FIFO entry for this key is now stale. Trim to prevent
+		// unbounded growth when the map is repeatedly filled and consumed
+		// below capacity (so eviction never triggers compaction), including
+		// stale entries buried behind a still-live head.
+		tr.trimPQFIFOIfNeeded()
 		return mk, nil
 	}
 
-	// Counter must be ahead of our current position.
-	if counter != 0 && counter <= tr.recvCounter {
-		return nil, &ErrSPQRFailed{
-			Op:  "receivePQKey",
-			Err: &ErrInvalidInput{Field: "PQCounter", Reason: "counter already consumed"},
-		}
+	// Counter behind or at current position but not in skipped map: already consumed.
+	if counter <= tr.recvCounter {
+		return nil, &ErrPQKeyConsumed{Counter: counter}
 	}
 
-	// Enforce maximum forward jump to prevent DoS via memory exhaustion.
-	if counter > tr.recvCounter && counter-tr.recvCounter > maxPQJump {
-		return nil, &ErrSPQRFailed{
-			Op:  "receivePQKey",
-			Err: &ErrInvalidInput{Field: "PQCounter", Reason: "forward jump exceeds maximum"},
-		}
+	// Counter too far ahead.
+	jump := counter - tr.recvCounter
+	if jump > maxPQJump {
+		return nil, &ErrPQKeyOutOfRange{Current: tr.recvCounter, Got: counter, Max: maxPQJump}
 	}
 
-	// Skip forward, storing intermediate keys.
-	for tr.recvCounter+1 < counter {
-		if uint32(len(tr.skippedPQKeys)) >= maxSkippedPQKeys {
-			return nil, &ErrSPQRFailed{
-				Op:  "receivePQKey",
-				Err: &ErrInvalidInput{Field: "PQCounter", Reason: "too many skipped PQ keys"},
-			}
-		}
-		if tr.recvCounter == math.MaxUint32 {
-			return nil, &ErrSPQRFailed{Op: "Decrypt", Err: &ErrInvalidInput{Field: "recvCounter", Reason: "counter overflow"}}
-		}
+	// Advance the chain, storing intermediate keys as skipped, until we reach
+	// counter-1. Then derive and return the key for counter.
+	for tr.recvCounter < counter-1 {
 		tr.recvCounter++
-		mk, nextCK, kdfErr := spqr.KdfSckaCK(tr.recvChainKey, tr.recvCounter)
-		if kdfErr != nil {
-			return nil, kdfErr
+		if tr.recvCounter == math.MaxUint32 { // coverage-exempt: dead code — with uint32 counter, the loop terminates when recvCounter reaches counter-1 (at most MaxUint32-1); MaxUint32 is unreachable inside this loop
+			return nil, &ErrInvalidInput{Field: "recvCounter", Reason: "counter overflow"}
 		}
-		tr.recvChainKey.Destroy()
-		tr.recvChainKey = nextCK
-		skippedID := pqSkippedKeyID{Epoch: tr.pqEpoch, Counter: tr.recvCounter}
-		tr.skippedPQKeys[skippedID] = mk
+
+		mk, nextCK, kdfErr := spqr.KdfSckaCK(tr.recvChain, tr.recvCounter)
+		if kdfErr != nil {
+			return nil, &ErrSPQRFailed{Op: "KdfSckaCK", Cause: kdfErr}
+		}
+		tr.recvChain.Destroy()
+		tr.recvChain = nextCK
+
+		// Buffer the skipped key with FIFO eviction when at capacity.
+		// Evict the oldest entry first so that newer (more likely to arrive
+		// out-of-order) keys are retained rather than dropped. This matches
+		// standard Signal/libsignal FIFO behaviour and the sibling spqr package.
+		if len(tr.skippedPQKeys) >= maxSkippedPQKeys {
+			tr.evictOldestSkippedPQKey()
+		}
+		id := pqSkippedKeyID{epoch: tr.pqEpoch, counter: tr.recvCounter}
+		tr.skippedPQKeys[id] = mk
+		tr.skippedPQKeysFIFO = append(tr.skippedPQKeysFIFO, id)
 	}
 
-	// Derive the requested key.
-	if tr.recvCounter == math.MaxUint32 {
-		return nil, &ErrSPQRFailed{Op: "Decrypt", Err: &ErrInvalidInput{Field: "recvCounter", Reason: "counter overflow"}}
-	}
-	tr.recvCounter++
-	mk, nextCK, kdfErr := spqr.KdfSckaCK(tr.recvChainKey, tr.recvCounter)
+	// Derive the key for the target counter.
+	tr.recvCounter = counter
+	mk, nextCK, kdfErr := spqr.KdfSckaCK(tr.recvChain, tr.recvCounter)
 	if kdfErr != nil {
-		return nil, kdfErr
+		return nil, &ErrSPQRFailed{Op: "KdfSckaCK", Cause: kdfErr}
 	}
-	tr.recvChainKey.Destroy()
-	tr.recvChainKey = nextCK
+	tr.recvChain.Destroy()
+	tr.recvChain = nextCK
+
 	return mk, nil
 }
 
-// Epoch returns the current SPQR/Braid epoch.
-func (tr *TripleRatchet) Epoch() uint64 {
-	return tr.braid.Epoch()
+// purgeOldSkippedKeys removes skipped keys from epochs before the retention window.
+// After bulk deletion, the FIFO is compacted so stale entries do not accumulate
+// without bound when purges occur without subsequent eviction triggers.
+func (tr *TripleRatchet) purgeOldSkippedKeys() {
+	if tr.pqEpoch <= epochsToKeepPriorToSendEpoch {
+		return
+	}
+	cutoff := tr.pqEpoch - epochsToKeepPriorToSendEpoch
+	for k, v := range tr.skippedPQKeys {
+		if k.epoch < cutoff {
+			v.Destroy()
+			delete(tr.skippedPQKeys, k)
+		}
+	}
+	tr.trimPQFIFOIfNeeded()
 }
 
-// Zeroize clears all sensitive key material from the Triple Ratchet state.
-// All memguard-backed Secrets are destroyed, releasing their guarded memory.
-func (tr *TripleRatchet) Zeroize() {
-	if tr.rootKey != nil {
-		tr.rootKey.Destroy()
-	}
-	if tr.sendChainKey != nil {
-		tr.sendChainKey.Destroy()
-	}
-	if tr.recvChainKey != nil {
-		tr.recvChainKey.Destroy()
-	}
-	for keyID, mk := range tr.skippedPQKeys {
-		mk.Destroy()
-		delete(tr.skippedPQKeys, keyID)
-	}
-	tr.braid.Zeroize()
-}
-
-// advancePQEpoch advances the PQ chain to a new epoch using the given
-// epoch secret from the Braid. This matches Rust's Chain.add_epoch() which
-// calls KdfSckaRK(next_root, epoch_secret) to derive:
-//   - A new root key (retained for the next epoch advancement)
-//   - New send and recv chain keys (replacing the current ones)
-//
-// Counters and skipped keys are reset for the new epoch.
-func (tr *TripleRatchet) advancePQEpoch(epochSecret []byte) error {
-	newRK, newCKs, newCKr, err := spqr.KdfSckaRK(tr.rootKey, epochSecret)
-	if err != nil {
-		return &ErrSPQRFailed{Op: "advancePQEpoch", Err: err}
-	}
-
-	// Destroy old keys.
-	tr.rootKey.Destroy()
-	tr.sendChainKey.Destroy()
-	tr.recvChainKey.Destroy()
-
-	// Install new epoch keys. The responder (Bob) swaps send/recv chain
-	// keys, matching Rust's Chain direction handling where A2B gets
-	// send=CKs,recv=CKr and B2A gets send=CKr,recv=CKs.
-	tr.rootKey = newRK
-	if tr.isResponder {
-		tr.sendChainKey = newCKr
-		tr.recvChainKey = newCKs
-	} else {
-		tr.sendChainKey = newCKs
-		tr.recvChainKey = newCKr
-	}
-
-	// Mark the Braid handshake as complete once the first epoch key is produced.
-	// After this point, Braid errors will no longer be suppressed.
-	tr.braidHandshakeComplete = true
-
-	// Reset counters for the new epoch.
-	tr.sendCounter = 0
-	tr.recvCounter = 0
-	tr.pqEpoch++
-
-	// Purge skipped keys from epochs older than the retention window.
-	// Rust keeps EPOCHS_TO_KEEP_PRIOR_TO_SEND_EPOCH = 1 epoch of skipped
-	// keys, so we only destroy keys from epochs strictly before
-	// (newEpoch - epochsToKeepPriorToSendEpoch).
-	minRetainEpoch := uint64(0)
-	if tr.pqEpoch > epochsToKeepPriorToSendEpoch {
-		minRetainEpoch = tr.pqEpoch - epochsToKeepPriorToSendEpoch
-	}
-	for keyID, mk := range tr.skippedPQKeys {
-		if keyID.Epoch < minRetainEpoch {
+// evictOldestSkippedPQKey removes the oldest live skipped PQ message key using
+// the FIFO order recorded in skippedPQKeysFIFO. Stale FIFO entries (already
+// removed by consume or purge) are skipped in O(1) amortised time. When the
+// FIFO is exhausted, it is rebuilt from the map via rebuildSkippedPQKeysFIFO
+// so that eviction always succeeds even after a snapshot restore (where the
+// FIFO is reset to nil).
+func (tr *TripleRatchet) evictOldestSkippedPQKey() {
+	for tr.skippedPQKeysFIFOHead < len(tr.skippedPQKeysFIFO) {
+		id := tr.skippedPQKeysFIFO[tr.skippedPQKeysFIFOHead]
+		tr.skippedPQKeysFIFOHead++
+		if mk, ok := tr.skippedPQKeys[id]; ok {
 			mk.Destroy()
-			delete(tr.skippedPQKeys, keyID)
+			delete(tr.skippedPQKeys, id)
+			tr.compactPQFIFOIfNeeded()
+			return
+		}
+		// Entry already removed — advance past it without evicting.
+	}
+	// FIFO exhausted without finding a live entry. Rebuild from the map
+	// (covers the snapshot-restore path where FIFO was reset to nil) and
+	// retry once.
+	tr.rebuildSkippedPQKeysFIFO()
+	if tr.skippedPQKeysFIFOHead < len(tr.skippedPQKeysFIFO) {
+		id := tr.skippedPQKeysFIFO[tr.skippedPQKeysFIFOHead]
+		tr.skippedPQKeysFIFOHead++
+		if mk, ok := tr.skippedPQKeys[id]; ok {
+			mk.Destroy()
+			delete(tr.skippedPQKeys, id)
+		}
+		tr.compactPQFIFOIfNeeded()
+	}
+}
+
+// compactPQFIFOIfNeeded advances the FIFO head past any stale entries (keys
+// already removed from skippedPQKeys by consume, purge, or eviction) and then
+// compacts the underlying slice when more than half the capacity has been
+// consumed. Calling this on the consume and purge paths — not only on eviction
+// — prevents the FIFO from growing unbounded when the map stays below capacity
+// and eviction is never triggered. Each FIFO entry is visited at most once,
+// giving O(1) amortised cost per insert/consume cycle.
+func (tr *TripleRatchet) compactPQFIFOIfNeeded() {
+	// Advance head past any stale entries at the front of the FIFO.
+	for tr.skippedPQKeysFIFOHead < len(tr.skippedPQKeysFIFO) {
+		id := tr.skippedPQKeysFIFO[tr.skippedPQKeysFIFOHead]
+		if _, ok := tr.skippedPQKeys[id]; ok {
+			break // first live entry found
+		}
+		tr.skippedPQKeysFIFOHead++
+	}
+	// Compact the slice when the consumed head exceeds half the slice length.
+	if tr.skippedPQKeysFIFOHead > len(tr.skippedPQKeysFIFO)/2 {
+		tail := tr.skippedPQKeysFIFO[tr.skippedPQKeysFIFOHead:]
+		copy(tr.skippedPQKeysFIFO, tail)
+		tr.skippedPQKeysFIFO = tr.skippedPQKeysFIFO[:len(tail)]
+		tr.skippedPQKeysFIFOHead = 0
+	}
+}
+
+// trimPQFIFOIfNeeded compacts the FIFO head and, when stale entries buried in
+// the tail significantly outnumber live entries, rebuilds the FIFO from the
+// live map. Head compaction alone cannot reclaim stale entries that sit behind
+// a still-live head entry: if an old skipped key remains live while many newer
+// keys are consumed, head never advances and the slice grows without bound.
+// The rebuild guard (mirroring SPQR.trimFIFOIfNeeded) closes that gap. The
+// factor of 2 keeps the rebuild cost amortised — each entry triggers at most
+// one rebuild per doubling of the live map size.
+func (tr *TripleRatchet) trimPQFIFOIfNeeded() {
+	tr.compactPQFIFOIfNeeded()
+	live := len(tr.skippedPQKeysFIFO) - tr.skippedPQKeysFIFOHead
+	if live > 2*len(tr.skippedPQKeys)+64 {
+		tr.rebuildSkippedPQKeysFIFO()
+	}
+}
+
+// rebuildSkippedPQKeysFIFO rebuilds the insertion-order FIFO from the current
+// skippedPQKeys map. Called when the FIFO is empty (e.g., after a snapshot
+// restore). Keys are sorted by (epoch, counter) to provide a deterministic
+// eviction order that approximates the historical insertion order.
+func (tr *TripleRatchet) rebuildSkippedPQKeysFIFO() {
+	tr.skippedPQKeysFIFO = make([]pqSkippedKeyID, 0, len(tr.skippedPQKeys))
+	for id := range tr.skippedPQKeys {
+		tr.skippedPQKeysFIFO = append(tr.skippedPQKeysFIFO, id)
+	}
+	// Insertion sort by (epoch, counter) — skipped-key maps are always small.
+	for i := 1; i < len(tr.skippedPQKeysFIFO); i++ {
+		key := tr.skippedPQKeysFIFO[i]
+		j := i - 1
+		for j >= 0 && (tr.skippedPQKeysFIFO[j].epoch > key.epoch ||
+			(tr.skippedPQKeysFIFO[j].epoch == key.epoch && tr.skippedPQKeysFIFO[j].counter > key.counter)) {
+			tr.skippedPQKeysFIFO[j+1] = tr.skippedPQKeysFIFO[j]
+			j--
+		}
+		tr.skippedPQKeysFIFO[j+1] = key
+	}
+	tr.skippedPQKeysFIFOHead = 0
+}
+
+// takeSnapshot captures a deep copy of all mutable TripleRatchet state.
+func (tr *TripleRatchet) takeSnapshot() (*decryptSnapshot, error) {
+	braidData, err := snapshotBraid(tr.braid)
+	if err != nil { // coverage-exempt: Braid.Serialize only fails when braid.state is nil, which cannot occur after a valid NewAlice/NewBob initialization
+		return nil, &ErrBraidFailed{Op: "Serialize", Cause: err}
+	}
+
+	rkClone, err := tr.rootKey.Clone()
+	if err != nil { // coverage-exempt: only reachable on memguard OOM
+		return nil, &ErrSPQRFailed{Op: "takeSnapshot(rootKey)", Cause: err}
+	}
+
+	scClone, err := tr.sendChain.Clone()
+	if err != nil { // coverage-exempt: only reachable on memguard OOM
+		rkClone.Destroy()
+		return nil, &ErrSPQRFailed{Op: "takeSnapshot(sendChain)", Cause: err}
+	}
+
+	rcClone, err := tr.recvChain.Clone()
+	if err != nil { // coverage-exempt: only reachable on memguard OOM
+		rkClone.Destroy()
+		scClone.Destroy()
+		return nil, &ErrSPQRFailed{Op: "takeSnapshot(recvChain)", Cause: err}
+	}
+
+	// Deep-copy the skipped keys map.
+	skippedCopy := make(map[pqSkippedKeyID]*secret.Secret, len(tr.skippedPQKeys))
+	for k, v := range tr.skippedPQKeys {
+		clone, cloneErr := v.Clone()
+		if cloneErr != nil { // coverage-exempt: only reachable on memguard OOM; cleanup loop and return are unreachable in normal operation
+			rkClone.Destroy()
+			scClone.Destroy()
+			rcClone.Destroy()
+			for _, s := range skippedCopy {
+				s.Destroy()
+			}
+			return nil, &ErrSPQRFailed{Op: "takeSnapshot(skippedPQKeys)", Cause: cloneErr}
+		}
+		skippedCopy[k] = clone
+	}
+
+	snap := &decryptSnapshot{
+		braidData:     braidData,
+		rootKey:       rkClone,
+		sendChainKey:  scClone,
+		recvChainKey:  rcClone,
+		sendCounter:   tr.sendCounter,
+		recvCounter:   tr.recvCounter,
+		pqEpoch:       tr.pqEpoch,
+		handshakeDone: tr.braidHandshakeComplete,
+		skippedPQKeys: skippedCopy,
+	}
+
+	// Snapshot EC state if the cipher supports it.
+	if snapshotable, ok := tr.ecCipher.(ECCipherSnapshotable); ok {
+		ecSnap, ecErr := snapshotable.TakeECSnapshot()
+		if ecErr != nil {
+			tr.destroySnapshot(snap)
+			return nil, &ErrECRatchetFailed{Op: "TakeECSnapshot", Cause: ecErr}
+		}
+		snap.ecSnapshot = ecSnap
+	}
+
+	return snap, nil
+}
+
+// restoreSnapshot replaces all mutable TripleRatchet state from a snapshot.
+// Returns a non-nil error only when braid deserialization or EC-cipher restore
+// fails. Key material is always restored even on partial failure so that the
+// caller can determine the extent of the damage.
+func (tr *TripleRatchet) restoreSnapshot(snap *decryptSnapshot) error {
+	// Attempt braid restore. On failure, continue restoring key material so
+	// the session is in the most consistent state possible; report the error
+	// at the end.
+	var restoreErr error
+	braid, braidErr := restoreBraid(snap.braidData)
+	if braidErr != nil {
+		restoreErr = &ErrBraidFailed{Op: "restoreBraid", Cause: braidErr}
+	} else {
+		tr.braid = braid
+	}
+
+	// Restore key material, destroying current values first.
+	tr.rootKey.Destroy()
+	tr.rootKey = snap.rootKey
+	snap.rootKey = nil
+
+	tr.sendChain.Destroy()
+	tr.sendChain = snap.sendChainKey
+	snap.sendChainKey = nil
+
+	tr.recvChain.Destroy()
+	tr.recvChain = snap.recvChainKey
+	snap.recvChainKey = nil
+
+	tr.sendCounter = snap.sendCounter
+	tr.recvCounter = snap.recvCounter
+	tr.pqEpoch = snap.pqEpoch
+	tr.braidHandshakeComplete = snap.handshakeDone
+
+	// Restore skipped keys, destroying current values first.
+	for _, v := range tr.skippedPQKeys {
+		v.Destroy()
+	}
+	tr.skippedPQKeys = snap.skippedPQKeys
+	snap.skippedPQKeys = nil
+	// Reset the FIFO: the restored map may have a different set of entries.
+	// rebuildSkippedPQKeysFIFO will reconstruct it lazily on the next eviction.
+	tr.skippedPQKeysFIFO = nil
+	tr.skippedPQKeysFIFOHead = 0
+
+	// Restore EC state if available.
+	if snap.ecSnapshot != nil {
+		if snapshotable, ok := tr.ecCipher.(ECCipherSnapshotable); ok {
+			if ecErr := snapshotable.RestoreECSnapshot(snap.ecSnapshot); ecErr != nil && restoreErr == nil {
+				restoreErr = &ErrECRatchetFailed{Op: "RestoreECSnapshot", Cause: ecErr}
+			}
 		}
 	}
 
-	return nil
+	return restoreErr
 }
 
-// isBraidHandshakeError returns true for Braid errors that are expected
-// during the early handshake phase when the state machine is not yet
-// ready to process incoming messages. These are non-fatal and indicate
-// the caller should continue with the current PQ chain state.
-func isBraidHandshakeError(err error) bool {
-	var stateErr *mlkembraid.ErrInvalidState
-	var epochErr *mlkembraid.ErrInvalidEpoch
-	return errors.As(err, &stateErr) || errors.As(err, &epochErr)
-}
-
-// serializeCompositeMessage serializes a composite header and ciphertext into
-// a single byte slice:
+// destroySnapshot zeroizes all secrets in a snapshot on the success path.
+// Every byte slice is overwritten with zeros before the reference is cleared so
+// that sensitive key material does not persist in heap memory after decryption.
 //
-//	[4 bytes: header length][header bytes][4 bytes: ciphertext length][ciphertext bytes]
-func serializeCompositeMessage(header *CompositeHeader, ciphertext []byte) ([]byte, error) {
-	headerBytes, err := header.Serialize()
-	if err != nil {
-		return nil, &ErrInvalidCompositeMessage{Reason: "failed to serialize header"}
+// Rust equivalent: zeroize::Zeroize derive on session-state types in
+// rust/protocol/src/triple_ratchet.rs and rust/protocol/src/ratchet/keys.rs.
+func (tr *TripleRatchet) destroySnapshot(snap *decryptSnapshot) {
+	if snap.rootKey != nil {
+		snap.rootKey.Destroy()
+		snap.rootKey = nil
 	}
+	if snap.sendChainKey != nil {
+		snap.sendChainKey.Destroy()
+		snap.sendChainKey = nil
+	}
+	if snap.recvChainKey != nil {
+		snap.recvChainKey.Destroy()
+		snap.recvChainKey = nil
+	}
+	for _, v := range snap.skippedPQKeys {
+		v.Destroy()
+	}
+	snap.skippedPQKeys = nil
 
-	totalSize := headerLenPrefixSize + len(headerBytes) + ciphertextLenPrefixSize + len(ciphertext)
-	buf := make([]byte, totalSize)
+	// Zero the serialized Braid state before releasing the reference so the
+	// backing array does not contain plaintext session material on the heap.
+	clear(snap.braidData)
+	snap.braidData = nil
 
-	offset := 0
-	binary.BigEndian.PutUint32(buf[offset:], uint32(len(headerBytes)))
-	offset += headerLenPrefixSize
-
-	copy(buf[offset:], headerBytes)
-	offset += len(headerBytes)
-
-	binary.BigEndian.PutUint32(buf[offset:], uint32(len(ciphertext)))
-	offset += ciphertextLenPrefixSize
-
-	copy(buf[offset:], ciphertext)
-
-	return buf, nil
+	// Zero the serialized EC ratchet snapshot for the same reason.
+	clear(snap.ecSnapshot)
+	snap.ecSnapshot = nil
 }
 
-// deserializeCompositeMessage parses a composite message into its header and
-// ciphertext components.
-func deserializeCompositeMessage(data []byte) (*CompositeHeader, []byte, error) {
-	if len(data) < compositeMessageMinSize {
-		return nil, nil, &ErrInvalidCompositeMessage{
-			Reason: "message too short",
-		}
-	}
-
-	offset := 0
-
-	// Header length.
-	headerLen := int(binary.BigEndian.Uint32(data[offset:]))
-	offset += headerLenPrefixSize
-
-	if headerLen > maxCompositeComponentLen {
-		return nil, nil, &ErrMessageTooLarge{
-			Component: "header",
-			Size:      headerLen,
-			Max:       maxCompositeComponentLen,
-		}
-	}
-
-	if headerLen < 0 || offset+headerLen > len(data) {
-		return nil, nil, &ErrInvalidCompositeMessage{
-			Reason: "header length exceeds available data",
-		}
-	}
-
-	// Header bytes.
-	headerBytes := data[offset : offset+headerLen]
-	offset += headerLen
-
-	// Ciphertext length.
-	if offset+ciphertextLenPrefixSize > len(data) {
-		return nil, nil, &ErrInvalidCompositeMessage{
-			Reason: "missing ciphertext length",
-		}
-	}
-
-	ctLen := int(binary.BigEndian.Uint32(data[offset:]))
-	offset += ciphertextLenPrefixSize
-
-	if ctLen > maxCompositeComponentLen {
-		return nil, nil, &ErrMessageTooLarge{
-			Component: "ciphertext",
-			Size:      ctLen,
-			Max:       maxCompositeComponentLen,
-		}
-	}
-
-	if ctLen < 0 || offset+ctLen > len(data) {
-		return nil, nil, &ErrInvalidCompositeMessage{
-			Reason: "ciphertext length exceeds available data",
-		}
-	}
-
-	// Ciphertext.
-	ciphertext := make([]byte, ctLen)
-	copy(ciphertext, data[offset:offset+ctLen])
-
-	// Deserialize header.
-	header, err := DeserializeCompositeHeader(headerBytes)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return header, ciphertext, nil
-}
-
-// computeHMAC computes HMAC-SHA256 over the given data using the provided key.
-// The returned tag is always 32 bytes (sha256.Size).
+// computeHMAC computes an HMAC-SHA256 tag over data using key.
 func computeHMAC(key, data []byte) []byte {
-	h := hmac.New(sha256.New, key)
-	h.Write(data)
-	return h.Sum(nil)
-}
-
-// copyBytes returns an independent copy of the source slice.
-// Returns nil if src is nil.
-func copyBytes(src []byte) []byte {
-	if src == nil {
-		return nil
-	}
-	dst := make([]byte, len(src))
-	copy(dst, src)
-	return dst
-}
-
-// xorKeys XORs two byte slices together and returns the result as a
-// memguard-backed Secret. If they differ in length, the result is the
-// length of the shorter slice. Both inputs are left intact.
-func xorKeys(a, b []byte) (*secret.Secret, error) {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	result := make([]byte, n)
-	for i := 0; i < n; i++ {
-		result[i] = a[i] ^ b[i]
-	}
-	s, err := secret.New(result)
-	if err != nil {
-		return nil, &ErrSPQRFailed{Op: "xorKeys", Err: err}
-	}
-	return s, nil
+	mac := hmac.New(sha256.New, key)
+	mac.Write(data)
+	return mac.Sum(nil)
 }

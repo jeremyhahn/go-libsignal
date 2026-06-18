@@ -4,53 +4,43 @@ package cipher
 import (
 	"bytes"
 	"crypto/aes"
-	"crypto/cipher"
 	"crypto/subtle"
 )
 
-// Decrypt will use the given key, iv, and ciphertext and return
-// the plaintext bytes. The key must be exactly 32 bytes (AES-256).
-// Unlike AESCBCDecrypt, this function is used by the Signal group cipher
-// and always requires AES-256. The ciphertext is not mutated.
+// Decrypt decrypts AES-256-CBC ciphertext using the given iv and key, removing
+// PKCS7 padding. The key must be exactly 32 bytes (AES-256). The ciphertext is
+// not mutated.
+//
+// This function is used by the Signal session and group ciphers. The argument
+// order (iv, key) differs from AESCBCDecrypt (key, iv); both delegate to the
+// same underlying implementation.
+//
+// IMPORTANT: Callers MUST collapse all decrypt errors into a single opaque
+// "decryption failed" result before returning to network peers. Returning
+// distinct errors (e.g. bad padding vs. wrong key) creates an oracle that can
+// be exploited for chosen-ciphertext attacks. This matches the Rust reference
+// which maps all failures to DecryptionError::BadCiphertext("failed to decrypt").
+// Rust source: rust/crypto/src/aes_cbc.rs:52
 func Decrypt(iv, key, ciphertext []byte) ([]byte, error) {
 	if len(key) != 32 {
 		return nil, &ErrCipherInvalidKeySize{Got: len(key)}
 	}
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
 	if len(ciphertext) < aes.BlockSize {
 		return nil, ErrCiphertextTooShort
 	}
-
-	// Decrypt into a new buffer to avoid mutating the input.
-	plaintext := make([]byte, len(ciphertext))
-	cbc := cipher.NewCBCDecrypter(block, iv)
-	cbc.CryptBlocks(plaintext, ciphertext)
-
-	return pkcs7Unpad(plaintext, aes.BlockSize)
+	return AESCBCDecrypt(key, iv, ciphertext)
 }
 
-// Encrypt will use the given iv, key, and plaintext bytes
-// and return ciphertext bytes. The key must be exactly 32 bytes (AES-256).
+// Encrypt encrypts plaintext using AES-256-CBC with the given iv and key,
+// appending PKCS7 padding. The key must be exactly 32 bytes (AES-256).
+//
+// The argument order (iv, key) differs from AESCBCEncrypt (key, iv); both
+// delegate to the same underlying implementation.
 func Encrypt(iv, key, plaintext []byte) ([]byte, error) {
 	if len(key) != 32 {
 		return nil, &ErrCipherInvalidKeySize{Got: len(key)}
 	}
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	paddedText, err := pkcs7Pad(plaintext, block.BlockSize())
-	if err != nil {
-		return nil, err
-	}
-	ciphertext := make([]byte, len(paddedText))
-	mode := cipher.NewCBCEncrypter(block, iv)
-	mode.CryptBlocks(ciphertext, paddedText)
-
-	return ciphertext, nil
+	return AESCBCEncrypt(key, iv, plaintext)
 }
 
 // pkcs7Pad right-pads the given byte slice with 1 to n bytes, where

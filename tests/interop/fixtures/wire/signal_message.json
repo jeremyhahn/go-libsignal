@@ -1,0 +1,26 @@
+{
+  "source": "rust/protocol/src/protocol.rs:79 SignalMessage::new (libsignal v0.92.2)",
+  "rust_rev": "98915c442d",
+  "purpose": "SignalMessage wire vector: fixed (mac_key, ratchet_key, identity_keys, ciphertext) tuple. Go must parse with NewSignalMessageFromBytes, verify all fields round-trip, and VerifyMac with the supplied mac_key.",
+  "vectors": [
+    {
+      "name": "signal_message",
+      "inputs": {
+        "ciphertext": "1e9d097a335082edfbc858f8e42fb0a16fb6e2c6",
+        "counter": 42,
+        "mac_key": "c3ce14a99c255d09a0d728e1e27bec0624607227f2c0aa875b897335e467cc9b",
+        "message_version": 3,
+        "previous_counter": 41,
+        "receiver_identity_private": "80e263c69e9b408c26f94df579d2d6e85418461090adb14862f0692257241949",
+        "receiver_identity_public": "0562b539356efe99a540e373319d830068f1ff18f085200d70175b546247f47d54",
+        "sender_identity_private": "a852026841a8661901d95fcd73cd90a272e1959523492629577436dcdac9e05b",
+        "sender_identity_public": "05a70027362e9d9d88419f7a96e6e44de7107a59349525d44a774daa9faf05b64b",
+        "sender_ratchet_public": "05d25a8d5e27fe1a910f4d0a510b24f774da4f56bf9d69985100e2bef76f7b296e"
+      },
+      "expected": {
+        "mac_tag": "03e9d975c3e2e7d5",
+        "serialized": "340a2105d25a8d5e27fe1a910f4d0a510b24f774da4f56bf9d69985100e2bef76f7b296e102a182922141e9d097a335082edfbc858f8e42fb0a16fb6e2c603e9d975c3e2e7d5"
+      }
+    }
+  ]
+}

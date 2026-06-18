@@ -1,7 +1,7 @@
 // Package incrementalmac provides streaming MAC computation and validation
 // for large data such as message backups. It splits data into fixed-size
-// chunks, computing HMAC-SHA256 over ever-growing prefixes of the input
-// so that each intermediate MAC covers all data from the beginning.
+// chunks, computing HMAC over ever-growing prefixes of the input so that
+// each intermediate MAC covers all data from the beginning.
 //
 // The chaining semantics match the Rust libsignal reference:
 //
@@ -13,19 +13,27 @@
 //
 // At each chunk boundary, the inner hash state is cloned and the HMAC is
 // completed for that prefix. The inner hash continues accumulating data.
+//
+// By default the package uses HMAC-SHA256. Pass crypto.SHA512 to
+// NewWithHash or NewValidatingWithHash to use HMAC-SHA512 instead.
+// Rust source: rust/protocol/src/incremental_mac.rs
 package incrementalmac
 
 import (
+	gocrypto "crypto"
 	"crypto/sha256"
+	"crypto/sha512"
 	"crypto/subtle"
 	"encoding"
 	"hash"
 
-	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
+	_ "crypto/sha512" // registers crypto.SHA512
+
+	utilcrypto "github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 )
 
 const (
-	// DigestLength is the MAC output length (SHA-256 = 32 bytes).
+	// DigestLength is the MAC output length for the default SHA-256 hash (32 bytes).
 	DigestLength = sha256.Size
 
 	// MinChunkSize is the minimum allowed chunk size (64 KB).
@@ -35,51 +43,75 @@ const (
 	MaxChunkSize = 2 * 1024 * 1024
 
 	// targetTotalDigestSize controls the target total size of all MACs
-	// combined. For SHA-256 this yields 256 target chunks.
+	// combined. For SHA-256 this yields 256 target chunks; for SHA-512,
+	// 128 target chunks.
 	targetTotalDigestSize = 8 * 1024
-
-	// sha256BlockSize is the block size of SHA-256.
-	sha256BlockSize = 64
 )
+
+// hashParams bundles the constructor and geometry for a supported hash.
+type hashParams struct {
+	// newHash returns a fresh hash.Hash instance.
+	newHash func() hash.Hash
+	// blockSize is the HMAC block size (key-padding width) in bytes.
+	blockSize int
+	// digestSize is the output length in bytes.
+	digestSize int
+}
+
+// hashParamsFor returns the hashParams for h, or ErrUnsupportedHash if h is
+// not a supported hash function.
+func hashParamsFor(h gocrypto.Hash) (hashParams, error) {
+	switch h {
+	case gocrypto.SHA256:
+		return hashParams{newHash: sha256.New, blockSize: 64, digestSize: sha256.Size}, nil
+	case gocrypto.SHA512:
+		return hashParams{newHash: sha512.New, blockSize: 128, digestSize: sha512.Size}, nil
+	default:
+		return hashParams{}, ErrUnsupportedHash
+	}
+}
 
 // clonableHMAC holds the decomposed HMAC state: the running inner hash and
 // the pre-computed outer padding hash. This allows cloning the inner hash
-// (SHA-256 supports encoding.BinaryMarshaler) at chunk boundaries to
-// produce intermediate MACs without disrupting the running computation.
+// (SHA-256 and SHA-512 both implement encoding.BinaryMarshaler) at chunk
+// boundaries to produce intermediate MACs without disrupting the running
+// computation.
 type clonableHMAC struct {
-	inner    hash.Hash // H(ipad || data...) — accumulates all input
-	outerKey []byte    // K XOR opad, pre-computed for the outer hash pass
+	inner  hash.Hash  // H(ipad || data...) — accumulates all input
+	outer  []byte     // K XOR opad, pre-computed for the outer hash pass
+	params hashParams // hash constructor and geometry
 }
 
-// newClonableHMAC constructs a clonableHMAC from the given key.
+// newClonableHMAC constructs a clonableHMAC from the given key and hash params.
 // It follows the standard HMAC construction (RFC 2104).
-func newClonableHMAC(key []byte) *clonableHMAC {
+func newClonableHMAC(key []byte, p hashParams) *clonableHMAC {
 	// If key is longer than block size, hash it first.
-	if len(key) > sha256BlockSize {
-		h := sha256.New()
+	if len(key) > p.blockSize {
+		h := p.newHash()
 		h.Write(key)
 		key = h.Sum(nil)
 	}
 
 	// Pad key to block size.
-	paddedKey := make([]byte, sha256BlockSize)
+	paddedKey := make([]byte, p.blockSize)
 	copy(paddedKey, key)
-	defer crypto.Zeroize(paddedKey)
+	defer utilcrypto.Zeroize(paddedKey)
 
-	ipad := make([]byte, sha256BlockSize)
-	opad := make([]byte, sha256BlockSize)
-	for i := 0; i < sha256BlockSize; i++ {
+	ipad := make([]byte, p.blockSize)
+	opad := make([]byte, p.blockSize)
+	for i := 0; i < p.blockSize; i++ {
 		ipad[i] = paddedKey[i] ^ 0x36
 		opad[i] = paddedKey[i] ^ 0x5c
 	}
 
-	inner := sha256.New()
+	inner := p.newHash()
 	inner.Write(ipad)
-	crypto.Zeroize(ipad)
+	utilcrypto.Zeroize(ipad)
 
 	return &clonableHMAC{
-		inner:    inner,
-		outerKey: opad,
+		inner:  inner,
+		outer:  opad,
+		params: p,
 	}
 }
 
@@ -92,14 +124,14 @@ func (h *clonableHMAC) Write(p []byte) {
 // clone, and completes the outer hash pass to produce the HMAC digest.
 // The original inner hash state is not modified.
 func (h *clonableHMAC) cloneAndFinalize() []byte {
-	// Clone the inner hash state.
+	// Clone the inner hash state via the encoding.BinaryMarshaler interface.
 	marshaler := h.inner.(encoding.BinaryMarshaler)
 	state, err := marshaler.MarshalBinary()
 	if err != nil {
 		panic("incrementalmac: failed to marshal inner hash state: " + err.Error())
 	}
 
-	clone := sha256.New()
+	clone := h.params.newHash()
 	unmarshaler := clone.(encoding.BinaryUnmarshaler)
 	if err := unmarshaler.UnmarshalBinary(state); err != nil {
 		panic("incrementalmac: failed to unmarshal inner hash state: " + err.Error())
@@ -108,20 +140,20 @@ func (h *clonableHMAC) cloneAndFinalize() []byte {
 	innerDigest := clone.Sum(nil)
 
 	// Outer pass: H(opad || innerDigest).
-	outer := sha256.New()
-	outer.Write(h.outerKey)
-	outer.Write(innerDigest)
-	return outer.Sum(nil)
+	out := h.params.newHash()
+	out.Write(h.outer)
+	out.Write(innerDigest)
+	return out.Sum(nil)
 }
 
 // sum finalizes the inner hash and completes the outer pass.
 // This consumes the inner hash state.
 func (h *clonableHMAC) sum() []byte {
 	innerDigest := h.inner.Sum(nil)
-	outer := sha256.New()
-	outer.Write(h.outerKey)
-	outer.Write(innerDigest)
-	return outer.Sum(nil)
+	out := h.params.newHash()
+	out.Write(h.outer)
+	out.Write(innerDigest)
+	return out.Sum(nil)
 }
 
 // Incremental computes MACs incrementally over fixed-size chunks of data.
@@ -135,17 +167,34 @@ type Incremental struct {
 	finalized bool
 }
 
-// New creates a new Incremental MAC with the given HMAC key and chunk size.
-// The chunk size must be between MinChunkSize and MaxChunkSize inclusive.
+// New creates a new Incremental MAC with the given HMAC key and chunk size
+// using HMAC-SHA256.
+//
+// The chunk size must be positive and at most MaxChunkSize. This matches the
+// Rust reference which asserts only chunk_size > 0 (incremental_mac.rs:50).
+// MinChunkSize is a recommended minimum for production use (good chunk-count
+// vs. overhead trade-off) but is no longer enforced here, allowing callers
+// and tests to use small chunk sizes such as the Rust test constant of 32.
 func New(key []byte, chunkSize int) (*Incremental, error) {
-	if chunkSize < MinChunkSize {
+	return NewWithHash(key, chunkSize, gocrypto.SHA256)
+}
+
+// NewWithHash creates a new Incremental MAC with the given HMAC key, chunk
+// size, and hash function. Supported hashes: crypto.SHA256, crypto.SHA512.
+// Rust source: rust/protocol/src/incremental_mac.rs:48-56
+func NewWithHash(key []byte, chunkSize int, h gocrypto.Hash) (*Incremental, error) {
+	if chunkSize <= 0 {
 		return nil, ErrChunkSizeTooSmall
 	}
 	if chunkSize > MaxChunkSize {
 		return nil, ErrChunkSizeTooLarge
 	}
+	p, err := hashParamsFor(h)
+	if err != nil {
+		return nil, err
+	}
 	return &Incremental{
-		hmac:      newClonableHMAC(key),
+		hmac:      newClonableHMAC(key, p),
 		chunkSize: chunkSize,
 		unused:    chunkSize,
 	}, nil
@@ -199,7 +248,11 @@ func (inc *Incremental) Finalize() ([][]byte, error) {
 // Bytes returns all MACs concatenated as a single byte slice.
 // Finalize must be called before Bytes to include the final MAC.
 func (inc *Incremental) Bytes() []byte {
-	out := make([]byte, 0, len(inc.macs)*DigestLength)
+	digestLen := DigestLength
+	if inc.hmac != nil {
+		digestLen = inc.hmac.params.digestSize
+	}
+	out := make([]byte, 0, len(inc.macs)*digestLen)
 	for _, m := range inc.macs {
 		out = append(out, m...)
 	}
@@ -211,7 +264,7 @@ func (inc *Incremental) Bytes() []byte {
 // no longer needed.
 func (inc *Incremental) Destroy() {
 	if inc.hmac != nil {
-		crypto.Zeroize(inc.hmac.outerKey)
+		utilcrypto.Zeroize(inc.hmac.outer)
 	}
 }
 
@@ -226,9 +279,17 @@ type Validating struct {
 }
 
 // NewValidating creates a new validating instance that checks data against
-// the given pre-computed MACs.
+// the given pre-computed MACs using HMAC-SHA256.
 func NewValidating(key []byte, chunkSize int, macs [][]byte) (*Validating, error) {
-	inc, err := New(key, chunkSize)
+	return NewValidatingWithHash(key, chunkSize, macs, gocrypto.SHA256)
+}
+
+// NewValidatingWithHash creates a new validating instance that checks data
+// against the given pre-computed MACs using the specified hash function.
+// Supported hashes: crypto.SHA256, crypto.SHA512.
+// Rust source: rust/protocol/src/incremental_mac.rs:58-76
+func NewValidatingWithHash(key []byte, chunkSize int, macs [][]byte, h gocrypto.Hash) (*Validating, error) {
+	inc, err := NewWithHash(key, chunkSize, h)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +311,23 @@ func NewValidating(key []byte, chunkSize int, macs [][]byte) (*Validating, error
 //
 // Only bytes from chunks with matching MACs contribute to the
 // validated byte count.
+//
+// Deprecated: Use UpdateValidated which also returns the count of validated
+// bytes, matching Rust's Validating::update -> Result<usize, MacError>.
 func (v *Validating) Update(data []byte) error {
+	_, err := v.UpdateValidated(data)
+	return err
+}
+
+// UpdateValidated feeds data and validates MACs at each chunk boundary,
+// returning the number of bytes validated by complete chunk MAC comparisons.
+// This mirrors Rust's Validating::update -> Result<usize, MacError>, where
+// the returned usize is whole_chunks * chunk_size.
+// Rust source: rust/protocol/src/incremental_mac.rs:110-127
+//
+// ErrTooFewMACs is returned immediately if expected MACs are exhausted.
+// ErrMACMismatch is returned (with validated=0) if any chunk MAC mismatches.
+func (v *Validating) UpdateValidated(data []byte) (validated int, err error) {
 	var mismatch bool
 	for len(data) > 0 {
 		n := v.inc.unused
@@ -264,45 +341,62 @@ func (v *Validating) Update(data []byte) error {
 
 		if v.inc.unused == 0 {
 			if v.idx >= len(v.macs) {
-				return ErrTooFewMACs
+				return 0, ErrTooFewMACs
 			}
 			digest := v.inc.hmac.cloneAndFinalize()
 			if subtle.ConstantTimeCompare(digest, v.macs[v.idx]) != 1 {
 				mismatch = true
+			} else {
+				validated += v.inc.chunkSize
 			}
-			// NOTE: Unlike Rust which misaligns the expected index after a mismatch (causing
-			// all subsequent chunks to also fail), Go continues advancing the index. Both
-			// implementations return a mismatch error. This is an accepted behavioral difference
-			// with equivalent security properties.
 			v.idx++
 			v.inc.unused = v.inc.chunkSize
 		}
 	}
 	if mismatch {
-		return ErrMACMismatch
+		return 0, ErrMACMismatch
 	}
-	return nil
+	return validated, nil
+}
+
+// FinalizeValidated validates the final MAC and returns the count of pending
+// (not yet chunk-boundary-validated) bytes, matching Rust's
+// Validating::finalize -> Result<usize, MacError> which returns
+// pending_bytes_size on success.
+// Rust source: rust/protocol/src/incremental_mac.rs:130-138
+//
+// Returns ErrMACMismatch if the final MAC does not match.
+// Returns ErrTooFewMACs or ErrUnconsumedMACs for structural errors.
+//
+// Deprecated: Use UpdateValidated/FinalizeValidated together for full parity
+// with Rust's byte-count return semantics.
+func (v *Validating) FinalizeValidated() (pending int, err error) {
+	remaining := len(v.macs) - v.idx
+	if remaining != 1 {
+		if remaining == 0 {
+			return 0, ErrTooFewMACs
+		}
+		return 0, ErrUnconsumedMACs
+	}
+
+	pending = v.inc.chunkSize - v.inc.unused
+	digest := v.inc.hmac.sum()
+	if subtle.ConstantTimeCompare(digest, v.macs[v.idx]) != 1 {
+		return 0, ErrMACMismatch
+	}
+	v.idx++
+	return pending, nil
 }
 
 // Finalize validates the final MAC and verifies that all expected MACs
 // have been consumed. Returns ErrMACMismatch if the final MAC does not
 // match. Returns ErrTooFewMACs or ErrUnconsumedMACs for structural errors.
+//
+// Deprecated: Use FinalizeValidated which also returns the count of pending
+// bytes, matching Rust's Validating::finalize -> Result<usize, MacError>.
 func (v *Validating) Finalize() error {
-	remaining := len(v.macs) - v.idx
-	if remaining != 1 {
-		if remaining == 0 {
-			return ErrTooFewMACs
-		}
-		return ErrUnconsumedMACs
-	}
-
-	digest := v.inc.hmac.sum()
-	if subtle.ConstantTimeCompare(digest, v.macs[v.idx]) != 1 {
-		return ErrMACMismatch
-	}
-	v.idx++
-
-	return nil
+	_, err := v.FinalizeValidated()
+	return err
 }
 
 // Destroy zeroizes the underlying HMAC outer key to prevent sensitive key
@@ -315,18 +409,44 @@ func (v *Validating) Destroy() {
 }
 
 // CalculateChunkSize returns an appropriate chunk size for a given data
-// length. The algorithm matches the Rust libsignal reference:
+// length using SHA-256. The algorithm matches the Rust libsignal reference:
 //
 //   - target_chunk_count = TARGET_TOTAL_DIGEST_SIZE / DigestLength (= 256 for SHA-256)
 //   - If data_size < target_chunk_count * MINIMUM_CHUNK_SIZE: return MINIMUM_CHUNK_SIZE
 //   - If data_size < target_chunk_count * MAXIMUM_CHUNK_SIZE: return ceil(data_size / target_chunk_count)
 //   - Otherwise: return MAXIMUM_CHUNK_SIZE
+//
+// Deprecated: Use CalculateChunkSizeForHash(dataLength, crypto.SHA256) for
+// explicit hash selection. This wrapper exists for backwards compatibility.
+// Rust source: rust/protocol/src/incremental_mac.rs:29-46
 func CalculateChunkSize(dataLength int64) int {
+	return CalculateChunkSizeForHash(dataLength, gocrypto.SHA256)
+}
+
+// CalculateChunkSizeForHash returns an appropriate chunk size for a given data
+// length and hash function. The algorithm is generic over the digest output
+// size, matching Rust's calculate_chunk_size::<D>(data_size) where D: FixedOutput.
+// Supported hashes: crypto.SHA256 (output 32 B → 256 target chunks),
+// crypto.SHA512 (output 64 B → 128 target chunks).
+//
+// Rust source: rust/protocol/src/incremental_mac.rs:29-46
+func CalculateChunkSizeForHash(dataLength int64, h gocrypto.Hash) int {
+	p, err := hashParamsFor(h)
+	if err != nil {
+		// Mirror Rust's compile-time assertion at runtime for unsupported hashes.
+		panic("incrementalmac: unsupported hash for CalculateChunkSizeForHash")
+	}
+
+	if targetTotalDigestSize%p.digestSize != 0 {
+		// Rust asserts this at compile time; panic here mirrors that guarantee.
+		panic("incrementalmac: targetTotalDigestSize must be a multiple of the digest size")
+	}
+
 	if dataLength <= 0 {
 		return MinChunkSize
 	}
 
-	targetChunkCount := int64(targetTotalDigestSize / DigestLength) // 256
+	targetChunkCount := int64(targetTotalDigestSize / p.digestSize)
 
 	if dataLength < targetChunkCount*int64(MinChunkSize) {
 		return MinChunkSize

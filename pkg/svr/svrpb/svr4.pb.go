@@ -106,6 +106,9 @@ type Request4 struct {
 	//	*Request4_Restore2_
 	//	*Request4_Remove_
 	//	*Request4_Query_
+	//	*Request4_RotateStart_
+	//	*Request4_RotateCommit_
+	//	*Request4_RotateRollback_
 	Inner         isRequest4_Inner `protobuf_oneof:"inner"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -193,6 +196,33 @@ func (x *Request4) GetQuery() *Request4_Query {
 	return nil
 }
 
+func (x *Request4) GetRotateStart() *Request4_RotateStart {
+	if x != nil {
+		if x, ok := x.Inner.(*Request4_RotateStart_); ok {
+			return x.RotateStart
+		}
+	}
+	return nil
+}
+
+func (x *Request4) GetRotateCommit() *Request4_RotateCommit {
+	if x != nil {
+		if x, ok := x.Inner.(*Request4_RotateCommit_); ok {
+			return x.RotateCommit
+		}
+	}
+	return nil
+}
+
+func (x *Request4) GetRotateRollback() *Request4_RotateRollback {
+	if x != nil {
+		if x, ok := x.Inner.(*Request4_RotateRollback_); ok {
+			return x.RotateRollback
+		}
+	}
+	return nil
+}
+
 type isRequest4_Inner interface {
 	isRequest4_Inner()
 }
@@ -217,6 +247,18 @@ type Request4_Query_ struct {
 	Query *Request4_Query `protobuf:"bytes,5,opt,name=query,proto3,oneof"`
 }
 
+type Request4_RotateStart_ struct {
+	RotateStart *Request4_RotateStart `protobuf:"bytes,6,opt,name=rotate_start,json=rotateStart,proto3,oneof"`
+}
+
+type Request4_RotateCommit_ struct {
+	RotateCommit *Request4_RotateCommit `protobuf:"bytes,7,opt,name=rotate_commit,json=rotateCommit,proto3,oneof"`
+}
+
+type Request4_RotateRollback_ struct {
+	RotateRollback *Request4_RotateRollback `protobuf:"bytes,8,opt,name=rotate_rollback,json=rotateRollback,proto3,oneof"`
+}
+
 func (*Request4_Create_) isRequest4_Inner() {}
 
 func (*Request4_Restore1_) isRequest4_Inner() {}
@@ -227,6 +269,12 @@ func (*Request4_Remove_) isRequest4_Inner() {}
 
 func (*Request4_Query_) isRequest4_Inner() {}
 
+func (*Request4_RotateStart_) isRequest4_Inner() {}
+
+func (*Request4_RotateCommit_) isRequest4_Inner() {}
+
+func (*Request4_RotateRollback_) isRequest4_Inner() {}
+
 type Response4 struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Inner:
@@ -236,6 +284,9 @@ type Response4 struct {
 	//	*Response4_Restore2_
 	//	*Response4_Remove_
 	//	*Response4_Query_
+	//	*Response4_RotateStart_
+	//	*Response4_RotateCommit_
+	//	*Response4_RotateRollback_
 	Inner         isResponse4_Inner `protobuf_oneof:"inner"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -323,6 +374,33 @@ func (x *Response4) GetQuery() *Response4_Query {
 	return nil
 }
 
+func (x *Response4) GetRotateStart() *Response4_RotateStart {
+	if x != nil {
+		if x, ok := x.Inner.(*Response4_RotateStart_); ok {
+			return x.RotateStart
+		}
+	}
+	return nil
+}
+
+func (x *Response4) GetRotateCommit() *Response4_RotateCommit {
+	if x != nil {
+		if x, ok := x.Inner.(*Response4_RotateCommit_); ok {
+			return x.RotateCommit
+		}
+	}
+	return nil
+}
+
+func (x *Response4) GetRotateRollback() *Response4_RotateRollback {
+	if x != nil {
+		if x, ok := x.Inner.(*Response4_RotateRollback_); ok {
+			return x.RotateRollback
+		}
+	}
+	return nil
+}
+
 type isResponse4_Inner interface {
 	isResponse4_Inner()
 }
@@ -347,6 +425,18 @@ type Response4_Query_ struct {
 	Query *Response4_Query `protobuf:"bytes,5,opt,name=query,proto3,oneof"`
 }
 
+type Response4_RotateStart_ struct {
+	RotateStart *Response4_RotateStart `protobuf:"bytes,6,opt,name=rotate_start,json=rotateStart,proto3,oneof"`
+}
+
+type Response4_RotateCommit_ struct {
+	RotateCommit *Response4_RotateCommit `protobuf:"bytes,7,opt,name=rotate_commit,json=rotateCommit,proto3,oneof"`
+}
+
+type Response4_RotateRollback_ struct {
+	RotateRollback *Response4_RotateRollback `protobuf:"bytes,8,opt,name=rotate_rollback,json=rotateRollback,proto3,oneof"`
+}
+
 func (*Response4_Create_) isResponse4_Inner() {}
 
 func (*Response4_Restore1_) isResponse4_Inner() {}
@@ -356,6 +446,12 @@ func (*Response4_Restore2_) isResponse4_Inner() {}
 func (*Response4_Remove_) isResponse4_Inner() {}
 
 func (*Response4_Query_) isResponse4_Inner() {}
+
+func (*Response4_RotateStart_) isResponse4_Inner() {}
+
+func (*Response4_RotateCommit_) isResponse4_Inner() {}
+
+func (*Response4_RotateRollback_) isResponse4_Inner() {}
 
 type Request4_Create struct {
 	state                 protoimpl.MessageState `protogen:"open.v1"`
@@ -617,6 +713,166 @@ func (*Request4_Query) Descriptor() ([]byte, []int) {
 	return file_svr_svrpb_svr4_proto_rawDescGZIP(), []int{0, 4}
 }
 
+// RotateStart initiates an OPRF-key rotation. The server begins a
+// rotation and applies the delta secret-shares.
+//
+// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateStart
+type Request4_RotateStart struct {
+	state                      protoimpl.MessageState `protogen:"open.v1"`
+	Version                    uint32                 `protobuf:"fixed32,1,opt,name=version,proto3" json:"version,omitempty"`
+	OprfSecretshareDelta       []byte                 `protobuf:"bytes,2,opt,name=oprf_secretshare_delta,json=oprfSecretshareDelta,proto3" json:"oprf_secretshare_delta,omitempty"`
+	EncryptionSecretshareDelta []byte                 `protobuf:"bytes,3,opt,name=encryption_secretshare_delta,json=encryptionSecretshareDelta,proto3" json:"encryption_secretshare_delta,omitempty"`
+	unknownFields              protoimpl.UnknownFields
+	sizeCache                  protoimpl.SizeCache
+}
+
+func (x *Request4_RotateStart) Reset() {
+	*x = Request4_RotateStart{}
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Request4_RotateStart) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Request4_RotateStart) ProtoMessage() {}
+
+func (x *Request4_RotateStart) ProtoReflect() protoreflect.Message {
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Request4_RotateStart.ProtoReflect.Descriptor instead.
+func (*Request4_RotateStart) Descriptor() ([]byte, []int) {
+	return file_svr_svrpb_svr4_proto_rawDescGZIP(), []int{0, 5}
+}
+
+func (x *Request4_RotateStart) GetVersion() uint32 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *Request4_RotateStart) GetOprfSecretshareDelta() []byte {
+	if x != nil {
+		return x.OprfSecretshareDelta
+	}
+	return nil
+}
+
+func (x *Request4_RotateStart) GetEncryptionSecretshareDelta() []byte {
+	if x != nil {
+		return x.EncryptionSecretshareDelta
+	}
+	return nil
+}
+
+// RotateCommit commits a previously started rotation, making the new
+// OPRF key permanent.
+//
+// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateCommit
+type Request4_RotateCommit struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Version       uint32                 `protobuf:"fixed32,1,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Request4_RotateCommit) Reset() {
+	*x = Request4_RotateCommit{}
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Request4_RotateCommit) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Request4_RotateCommit) ProtoMessage() {}
+
+func (x *Request4_RotateCommit) ProtoReflect() protoreflect.Message {
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Request4_RotateCommit.ProtoReflect.Descriptor instead.
+func (*Request4_RotateCommit) Descriptor() ([]byte, []int) {
+	return file_svr_svrpb_svr4_proto_rawDescGZIP(), []int{0, 6}
+}
+
+func (x *Request4_RotateCommit) GetVersion() uint32 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+// RotateRollback aborts a previously started rotation and reverts to
+// the previous OPRF key.
+//
+// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateRollback
+type Request4_RotateRollback struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Version       uint32                 `protobuf:"fixed32,1,opt,name=version,proto3" json:"version,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Request4_RotateRollback) Reset() {
+	*x = Request4_RotateRollback{}
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Request4_RotateRollback) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Request4_RotateRollback) ProtoMessage() {}
+
+func (x *Request4_RotateRollback) ProtoReflect() protoreflect.Message {
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Request4_RotateRollback.ProtoReflect.Descriptor instead.
+func (*Request4_RotateRollback) Descriptor() ([]byte, []int) {
+	return file_svr_svrpb_svr4_proto_rawDescGZIP(), []int{0, 7}
+}
+
+func (x *Request4_RotateRollback) GetVersion() uint32 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
 type Response4_Create struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	Status         Response4_Status       `protobuf:"varint,1,opt,name=status,proto3,enum=svrb.client.Response4_Status" json:"status,omitempty"`
@@ -627,7 +883,7 @@ type Response4_Create struct {
 
 func (x *Response4_Create) Reset() {
 	*x = Response4_Create{}
-	mi := &file_svr_svrpb_svr4_proto_msgTypes[7]
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -639,7 +895,7 @@ func (x *Response4_Create) String() string {
 func (*Response4_Create) ProtoMessage() {}
 
 func (x *Response4_Create) ProtoReflect() protoreflect.Message {
-	mi := &file_svr_svrpb_svr4_proto_msgTypes[7]
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -680,7 +936,7 @@ type Response4_Restore1 struct {
 
 func (x *Response4_Restore1) Reset() {
 	*x = Response4_Restore1{}
-	mi := &file_svr_svrpb_svr4_proto_msgTypes[8]
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -692,7 +948,7 @@ func (x *Response4_Restore1) String() string {
 func (*Response4_Restore1) ProtoMessage() {}
 
 func (x *Response4_Restore1) ProtoReflect() protoreflect.Message {
-	mi := &file_svr_svrpb_svr4_proto_msgTypes[8]
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -739,7 +995,7 @@ type Response4_Restore2 struct {
 
 func (x *Response4_Restore2) Reset() {
 	*x = Response4_Restore2{}
-	mi := &file_svr_svrpb_svr4_proto_msgTypes[9]
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -751,7 +1007,7 @@ func (x *Response4_Restore2) String() string {
 func (*Response4_Restore2) ProtoMessage() {}
 
 func (x *Response4_Restore2) ProtoReflect() protoreflect.Message {
-	mi := &file_svr_svrpb_svr4_proto_msgTypes[9]
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -789,7 +1045,7 @@ type Response4_Remove struct {
 
 func (x *Response4_Remove) Reset() {
 	*x = Response4_Remove{}
-	mi := &file_svr_svrpb_svr4_proto_msgTypes[10]
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -801,7 +1057,7 @@ func (x *Response4_Remove) String() string {
 func (*Response4_Remove) ProtoMessage() {}
 
 func (x *Response4_Remove) ProtoReflect() protoreflect.Message {
-	mi := &file_svr_svrpb_svr4_proto_msgTypes[10]
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -829,7 +1085,7 @@ type Response4_Query struct {
 
 func (x *Response4_Query) Reset() {
 	*x = Response4_Query{}
-	mi := &file_svr_svrpb_svr4_proto_msgTypes[11]
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -841,7 +1097,7 @@ func (x *Response4_Query) String() string {
 func (*Response4_Query) ProtoMessage() {}
 
 func (x *Response4_Query) ProtoReflect() protoreflect.Message {
-	mi := &file_svr_svrpb_svr4_proto_msgTypes[11]
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -885,6 +1141,147 @@ func (x *Response4_Query) GetNewVersion() uint32 {
 	return 0
 }
 
+// RotateStart response. Returns the status of the rotation initiation.
+//
+// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.RotateStart
+type Response4_RotateStart struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        Response4_Status       `protobuf:"varint,1,opt,name=status,proto3,enum=svrb.client.Response4_Status" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Response4_RotateStart) Reset() {
+	*x = Response4_RotateStart{}
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Response4_RotateStart) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Response4_RotateStart) ProtoMessage() {}
+
+func (x *Response4_RotateStart) ProtoReflect() protoreflect.Message {
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Response4_RotateStart.ProtoReflect.Descriptor instead.
+func (*Response4_RotateStart) Descriptor() ([]byte, []int) {
+	return file_svr_svrpb_svr4_proto_rawDescGZIP(), []int{1, 5}
+}
+
+func (x *Response4_RotateStart) GetStatus() Response4_Status {
+	if x != nil {
+		return x.Status
+	}
+	return Response4_UNSET
+}
+
+// RotateCommit response. Returns the status of the rotation commit.
+//
+// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.RotateCommit
+type Response4_RotateCommit struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        Response4_Status       `protobuf:"varint,1,opt,name=status,proto3,enum=svrb.client.Response4_Status" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Response4_RotateCommit) Reset() {
+	*x = Response4_RotateCommit{}
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Response4_RotateCommit) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Response4_RotateCommit) ProtoMessage() {}
+
+func (x *Response4_RotateCommit) ProtoReflect() protoreflect.Message {
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Response4_RotateCommit.ProtoReflect.Descriptor instead.
+func (*Response4_RotateCommit) Descriptor() ([]byte, []int) {
+	return file_svr_svrpb_svr4_proto_rawDescGZIP(), []int{1, 6}
+}
+
+func (x *Response4_RotateCommit) GetStatus() Response4_Status {
+	if x != nil {
+		return x.Status
+	}
+	return Response4_UNSET
+}
+
+// RotateRollback response. Returns the status of the rotation rollback.
+//
+// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.RotateRollback
+type Response4_RotateRollback struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        Response4_Status       `protobuf:"varint,1,opt,name=status,proto3,enum=svrb.client.Response4_Status" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Response4_RotateRollback) Reset() {
+	*x = Response4_RotateRollback{}
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Response4_RotateRollback) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Response4_RotateRollback) ProtoMessage() {}
+
+func (x *Response4_RotateRollback) ProtoReflect() protoreflect.Message {
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Response4_RotateRollback.ProtoReflect.Descriptor instead.
+func (*Response4_RotateRollback) Descriptor() ([]byte, []int) {
+	return file_svr_svrpb_svr4_proto_rawDescGZIP(), []int{1, 7}
+}
+
+func (x *Response4_RotateRollback) GetStatus() Response4_Status {
+	if x != nil {
+		return x.Status
+	}
+	return Response4_UNSET
+}
+
 type Response4_Restore1_Auth struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Element       []byte                 `protobuf:"bytes,1,opt,name=element,proto3" json:"element,omitempty"`
@@ -895,7 +1292,7 @@ type Response4_Restore1_Auth struct {
 
 func (x *Response4_Restore1_Auth) Reset() {
 	*x = Response4_Restore1_Auth{}
-	mi := &file_svr_svrpb_svr4_proto_msgTypes[12]
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -907,7 +1304,7 @@ func (x *Response4_Restore1_Auth) String() string {
 func (*Response4_Restore1_Auth) ProtoMessage() {}
 
 func (x *Response4_Restore1_Auth) ProtoReflect() protoreflect.Message {
-	mi := &file_svr_svrpb_svr4_proto_msgTypes[12]
+	mi := &file_svr_svrpb_svr4_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -941,13 +1338,16 @@ var File_svr_svrpb_svr4_proto protoreflect.FileDescriptor
 
 const file_svr_svrpb_svr4_proto_rawDesc = "" +
 	"\n" +
-	"\x14svr/svrpb/svr4.proto\x12\vsvrb.client\"\xcb\x05\n" +
+	"\x14svr/svrpb/svr4.proto\x12\vsvrb.client\"\xa7\t\n" +
 	"\bRequest4\x126\n" +
 	"\x06create\x18\x01 \x01(\v2\x1c.svrb.client.Request4.CreateH\x00R\x06create\x12<\n" +
 	"\brestore1\x18\x02 \x01(\v2\x1e.svrb.client.Request4.Restore1H\x00R\brestore1\x12<\n" +
 	"\brestore2\x18\x03 \x01(\v2\x1e.svrb.client.Request4.Restore2H\x00R\brestore2\x126\n" +
 	"\x06remove\x18\x04 \x01(\v2\x1c.svrb.client.Request4.RemoveH\x00R\x06remove\x123\n" +
-	"\x05query\x18\x05 \x01(\v2\x1b.svrb.client.Request4.QueryH\x00R\x05query\x1a\xf5\x01\n" +
+	"\x05query\x18\x05 \x01(\v2\x1b.svrb.client.Request4.QueryH\x00R\x05query\x12F\n" +
+	"\frotate_start\x18\x06 \x01(\v2!.svrb.client.Request4.RotateStartH\x00R\vrotateStart\x12I\n" +
+	"\rrotate_commit\x18\a \x01(\v2\".svrb.client.Request4.RotateCommitH\x00R\frotateCommit\x12O\n" +
+	"\x0frotate_rollback\x18\b \x01(\v2$.svrb.client.Request4.RotateRollbackH\x00R\x0erotateRollback\x1a\xf5\x01\n" +
 	"\x06Create\x12\x1b\n" +
 	"\tmax_tries\x18\x01 \x01(\rR\bmaxTries\x12)\n" +
 	"\x10oprf_secretshare\x18\x02 \x01(\fR\x0foprfSecretshare\x12'\n" +
@@ -964,14 +1364,25 @@ const file_svr_svrpb_svr4_proto_rawDesc = "" +
 	"authScalar\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\aR\aversion\x1a\b\n" +
 	"\x06Remove\x1a\a\n" +
-	"\x05QueryB\a\n" +
-	"\x05inner\"\xfa\b\n" +
+	"\x05Query\x1a\x9f\x01\n" +
+	"\vRotateStart\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\aR\aversion\x124\n" +
+	"\x16oprf_secretshare_delta\x18\x02 \x01(\fR\x14oprfSecretshareDelta\x12@\n" +
+	"\x1cencryption_secretshare_delta\x18\x03 \x01(\fR\x1aencryptionSecretshareDelta\x1a(\n" +
+	"\fRotateCommit\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\aR\aversion\x1a*\n" +
+	"\x0eRotateRollback\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\aR\aversionB\a\n" +
+	"\x05inner\"\xb7\f\n" +
 	"\tResponse4\x127\n" +
 	"\x06create\x18\x01 \x01(\v2\x1d.svrb.client.Response4.CreateH\x00R\x06create\x12=\n" +
 	"\brestore1\x18\x02 \x01(\v2\x1f.svrb.client.Response4.Restore1H\x00R\brestore1\x12=\n" +
 	"\brestore2\x18\x03 \x01(\v2\x1f.svrb.client.Response4.Restore2H\x00R\brestore2\x127\n" +
 	"\x06remove\x18\x04 \x01(\v2\x1d.svrb.client.Response4.RemoveH\x00R\x06remove\x124\n" +
-	"\x05query\x18\x05 \x01(\v2\x1c.svrb.client.Response4.QueryH\x00R\x05query\x1ah\n" +
+	"\x05query\x18\x05 \x01(\v2\x1c.svrb.client.Response4.QueryH\x00R\x05query\x12G\n" +
+	"\frotate_start\x18\x06 \x01(\v2\".svrb.client.Response4.RotateStartH\x00R\vrotateStart\x12J\n" +
+	"\rrotate_commit\x18\a \x01(\v2#.svrb.client.Response4.RotateCommitH\x00R\frotateCommit\x12P\n" +
+	"\x0frotate_rollback\x18\b \x01(\v2%.svrb.client.Response4.RotateRollbackH\x00R\x0erotateRollback\x1ah\n" +
 	"\x06Create\x125\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x1d.svrb.client.Response4.StatusR\x06status\x12'\n" +
 	"\x0ftries_remaining\x18\x02 \x01(\rR\x0etriesRemaining\x1a\xe0\x01\n" +
@@ -991,7 +1402,13 @@ const file_svr_svrpb_svr4_proto_rawDesc = "" +
 	"\x0ftries_remaining\x18\x02 \x01(\rR\x0etriesRemaining\x12\x18\n" +
 	"\aversion\x18\x03 \x01(\aR\aversion\x12\x1f\n" +
 	"\vnew_version\x18\x04 \x01(\aR\n" +
-	"newVersion\"\xc7\x01\n" +
+	"newVersion\x1aD\n" +
+	"\vRotateStart\x125\n" +
+	"\x06status\x18\x01 \x01(\x0e2\x1d.svrb.client.Response4.StatusR\x06status\x1aE\n" +
+	"\fRotateCommit\x125\n" +
+	"\x06status\x18\x01 \x01(\x0e2\x1d.svrb.client.Response4.StatusR\x06status\x1aG\n" +
+	"\x0eRotateRollback\x125\n" +
+	"\x06status\x18\x01 \x01(\x0e2\x1d.svrb.client.Response4.StatusR\x06status\"\xc7\x01\n" +
 	"\x06Status\x12\t\n" +
 	"\x05UNSET\x10\x00\x12\x06\n" +
 	"\x02OK\x10\x01\x12\x13\n" +
@@ -1005,7 +1422,7 @@ const file_svr_svrpb_svr4_proto_rawDesc = "" +
 	"\x0eMERKLE_FAILURE\x10\t\x12\x15\n" +
 	"\x11DUPLICATE_VERSION\x10\n" +
 	"B\a\n" +
-	"\x05innerB.Z,github.com/jeremyhahn/go-libsignal/svr/svrpbb\x06proto3"
+	"\x05innerB2Z0github.com/jeremyhahn/go-libsignal/pkg/svr/svrpbb\x06proto3"
 
 var (
 	file_svr_svrpb_svr4_proto_rawDescOnce sync.Once
@@ -1020,22 +1437,28 @@ func file_svr_svrpb_svr4_proto_rawDescGZIP() []byte {
 }
 
 var file_svr_svrpb_svr4_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_svr_svrpb_svr4_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_svr_svrpb_svr4_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_svr_svrpb_svr4_proto_goTypes = []any{
-	(Response4_Status)(0),           // 0: svrb.client.Response4.Status
-	(*Request4)(nil),                // 1: svrb.client.Request4
-	(*Response4)(nil),               // 2: svrb.client.Response4
-	(*Request4_Create)(nil),         // 3: svrb.client.Request4.Create
-	(*Request4_Restore1)(nil),       // 4: svrb.client.Request4.Restore1
-	(*Request4_Restore2)(nil),       // 5: svrb.client.Request4.Restore2
-	(*Request4_Remove)(nil),         // 6: svrb.client.Request4.Remove
-	(*Request4_Query)(nil),          // 7: svrb.client.Request4.Query
-	(*Response4_Create)(nil),        // 8: svrb.client.Response4.Create
-	(*Response4_Restore1)(nil),      // 9: svrb.client.Response4.Restore1
-	(*Response4_Restore2)(nil),      // 10: svrb.client.Response4.Restore2
-	(*Response4_Remove)(nil),        // 11: svrb.client.Response4.Remove
-	(*Response4_Query)(nil),         // 12: svrb.client.Response4.Query
-	(*Response4_Restore1_Auth)(nil), // 13: svrb.client.Response4.Restore1.Auth
+	(Response4_Status)(0),            // 0: svrb.client.Response4.Status
+	(*Request4)(nil),                 // 1: svrb.client.Request4
+	(*Response4)(nil),                // 2: svrb.client.Response4
+	(*Request4_Create)(nil),          // 3: svrb.client.Request4.Create
+	(*Request4_Restore1)(nil),        // 4: svrb.client.Request4.Restore1
+	(*Request4_Restore2)(nil),        // 5: svrb.client.Request4.Restore2
+	(*Request4_Remove)(nil),          // 6: svrb.client.Request4.Remove
+	(*Request4_Query)(nil),           // 7: svrb.client.Request4.Query
+	(*Request4_RotateStart)(nil),     // 8: svrb.client.Request4.RotateStart
+	(*Request4_RotateCommit)(nil),    // 9: svrb.client.Request4.RotateCommit
+	(*Request4_RotateRollback)(nil),  // 10: svrb.client.Request4.RotateRollback
+	(*Response4_Create)(nil),         // 11: svrb.client.Response4.Create
+	(*Response4_Restore1)(nil),       // 12: svrb.client.Response4.Restore1
+	(*Response4_Restore2)(nil),       // 13: svrb.client.Response4.Restore2
+	(*Response4_Remove)(nil),         // 14: svrb.client.Response4.Remove
+	(*Response4_Query)(nil),          // 15: svrb.client.Response4.Query
+	(*Response4_RotateStart)(nil),    // 16: svrb.client.Response4.RotateStart
+	(*Response4_RotateCommit)(nil),   // 17: svrb.client.Response4.RotateCommit
+	(*Response4_RotateRollback)(nil), // 18: svrb.client.Response4.RotateRollback
+	(*Response4_Restore1_Auth)(nil),  // 19: svrb.client.Response4.Restore1.Auth
 }
 var file_svr_svrpb_svr4_proto_depIdxs = []int32{
 	3,  // 0: svrb.client.Request4.create:type_name -> svrb.client.Request4.Create
@@ -1043,21 +1466,30 @@ var file_svr_svrpb_svr4_proto_depIdxs = []int32{
 	5,  // 2: svrb.client.Request4.restore2:type_name -> svrb.client.Request4.Restore2
 	6,  // 3: svrb.client.Request4.remove:type_name -> svrb.client.Request4.Remove
 	7,  // 4: svrb.client.Request4.query:type_name -> svrb.client.Request4.Query
-	8,  // 5: svrb.client.Response4.create:type_name -> svrb.client.Response4.Create
-	9,  // 6: svrb.client.Response4.restore1:type_name -> svrb.client.Response4.Restore1
-	10, // 7: svrb.client.Response4.restore2:type_name -> svrb.client.Response4.Restore2
-	11, // 8: svrb.client.Response4.remove:type_name -> svrb.client.Response4.Remove
-	12, // 9: svrb.client.Response4.query:type_name -> svrb.client.Response4.Query
-	0,  // 10: svrb.client.Response4.Create.status:type_name -> svrb.client.Response4.Status
-	0,  // 11: svrb.client.Response4.Restore1.status:type_name -> svrb.client.Response4.Status
-	13, // 12: svrb.client.Response4.Restore1.auth:type_name -> svrb.client.Response4.Restore1.Auth
-	0,  // 13: svrb.client.Response4.Restore2.status:type_name -> svrb.client.Response4.Status
-	0,  // 14: svrb.client.Response4.Query.status:type_name -> svrb.client.Response4.Status
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	8,  // 5: svrb.client.Request4.rotate_start:type_name -> svrb.client.Request4.RotateStart
+	9,  // 6: svrb.client.Request4.rotate_commit:type_name -> svrb.client.Request4.RotateCommit
+	10, // 7: svrb.client.Request4.rotate_rollback:type_name -> svrb.client.Request4.RotateRollback
+	11, // 8: svrb.client.Response4.create:type_name -> svrb.client.Response4.Create
+	12, // 9: svrb.client.Response4.restore1:type_name -> svrb.client.Response4.Restore1
+	13, // 10: svrb.client.Response4.restore2:type_name -> svrb.client.Response4.Restore2
+	14, // 11: svrb.client.Response4.remove:type_name -> svrb.client.Response4.Remove
+	15, // 12: svrb.client.Response4.query:type_name -> svrb.client.Response4.Query
+	16, // 13: svrb.client.Response4.rotate_start:type_name -> svrb.client.Response4.RotateStart
+	17, // 14: svrb.client.Response4.rotate_commit:type_name -> svrb.client.Response4.RotateCommit
+	18, // 15: svrb.client.Response4.rotate_rollback:type_name -> svrb.client.Response4.RotateRollback
+	0,  // 16: svrb.client.Response4.Create.status:type_name -> svrb.client.Response4.Status
+	0,  // 17: svrb.client.Response4.Restore1.status:type_name -> svrb.client.Response4.Status
+	19, // 18: svrb.client.Response4.Restore1.auth:type_name -> svrb.client.Response4.Restore1.Auth
+	0,  // 19: svrb.client.Response4.Restore2.status:type_name -> svrb.client.Response4.Status
+	0,  // 20: svrb.client.Response4.Query.status:type_name -> svrb.client.Response4.Status
+	0,  // 21: svrb.client.Response4.RotateStart.status:type_name -> svrb.client.Response4.Status
+	0,  // 22: svrb.client.Response4.RotateCommit.status:type_name -> svrb.client.Response4.Status
+	0,  // 23: svrb.client.Response4.RotateRollback.status:type_name -> svrb.client.Response4.Status
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_svr_svrpb_svr4_proto_init() }
@@ -1071,6 +1503,9 @@ func file_svr_svrpb_svr4_proto_init() {
 		(*Request4_Restore2_)(nil),
 		(*Request4_Remove_)(nil),
 		(*Request4_Query_)(nil),
+		(*Request4_RotateStart_)(nil),
+		(*Request4_RotateCommit_)(nil),
+		(*Request4_RotateRollback_)(nil),
 	}
 	file_svr_svrpb_svr4_proto_msgTypes[1].OneofWrappers = []any{
 		(*Response4_Create_)(nil),
@@ -1078,6 +1513,9 @@ func file_svr_svrpb_svr4_proto_init() {
 		(*Response4_Restore2_)(nil),
 		(*Response4_Remove_)(nil),
 		(*Response4_Query_)(nil),
+		(*Response4_RotateStart_)(nil),
+		(*Response4_RotateCommit_)(nil),
+		(*Response4_RotateRollback_)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1085,7 +1523,7 @@ func file_svr_svrpb_svr4_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_svr_svrpb_svr4_proto_rawDesc), len(file_svr_svrpb_svr4_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   13,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

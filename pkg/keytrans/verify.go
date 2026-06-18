@@ -149,7 +149,7 @@ func marshalTreeHeadTBS(
 ) []byte {
 	var buf []byte
 
-	buf = append(buf, 0, 0)          // Ciphersuite
+	buf = append(buf, 0, 0)               // Ciphersuite
 	buf = append(buf, config.Mode.byte()) // Deployment mode
 
 	serializeKey := func(keyMaterial []byte) {
@@ -184,8 +184,8 @@ type singleSignatureTreeHead struct {
 	inner *TreeHead
 }
 
-func (s *singleSignatureTreeHead) treeSize() uint64   { return s.inner.TreeSize }
-func (s *singleSignatureTreeHead) timestamp() int64    { return s.inner.Timestamp }
+func (s *singleSignatureTreeHead) treeSize() uint64 { return s.inner.TreeSize }
+func (s *singleSignatureTreeHead) timestamp() int64 { return s.inner.Timestamp }
 func (s *singleSignatureTreeHead) signatureBytes() []byte {
 	return s.inner.Signatures[0].SignatureBytes
 }
@@ -195,9 +195,9 @@ type auditorTreeHeadWrapper struct {
 	inner *AuditorTreeHead
 }
 
-func (a *auditorTreeHeadWrapper) treeSize() uint64        { return a.inner.TreeSize }
-func (a *auditorTreeHeadWrapper) timestamp() int64         { return a.inner.Timestamp }
-func (a *auditorTreeHeadWrapper) signatureBytes() []byte   { return a.inner.Signature }
+func (a *auditorTreeHeadWrapper) treeSize() uint64       { return a.inner.TreeSize }
+func (a *auditorTreeHeadWrapper) timestamp() int64       { return a.inner.Timestamp }
+func (a *auditorTreeHeadWrapper) signatureBytes() []byte { return a.inner.Signature }
 
 // toSingleSignatureTreeHeads splits a multi-signature TreeHead into per-auditor heads.
 func toSingleSignatureTreeHeads(th *TreeHead, config *PublicConfig) ([]struct {

@@ -2,11 +2,26 @@ package spqr
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"math"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/mlkembraid"
 )
+
+// TestInitialStateWithBraidResolved_EmptySecret verifies that InitialStateWithBraidResolved
+// returns an error when sharedSecret is empty (KdfSckaInit fails).
+func TestInitialStateWithBraidResolved_EmptySecret(t *testing.T) {
+	kem := mlkembraid.NewMLKEM768IncrementalKEM()
+	braid, err := mlkembraid.InitAlice(randomBytes(t, 32), kem, mlkembraid.DefaultChunkSize)
+	if err != nil {
+		t.Fatalf("InitAlice: %v", err)
+	}
+	_, err = InitialStateWithBraidResolved(nil, DirectionA2B, false, braid)
+	if err == nil {
+		t.Fatal("expected error for nil sharedSecret")
+	}
+}
 
 func TestInitialState(t *testing.T) {
 	sharedSecret := randomBytes(t, 32)
@@ -69,26 +84,21 @@ func TestSendRecvV1Negotiation(t *testing.T) {
 		t.Fatalf("InitialState bob: %v", err)
 	}
 
-	// Alice sends (resolved V1 -> produces PQR data).
+	// Alice sends (resolved V1 -> produces PQR data in SCKA wire format).
 	newAliceState, pqrMsg, aliceKey, sendErr := Send(aliceState)
 	if sendErr != nil {
 		t.Fatalf("Send: %v", sendErr)
 	}
-	if len(pqrMsg) != pqrMsgSize {
-		t.Fatalf("pqrMsg size: got %d, want %d", len(pqrMsg), pqrMsgSize)
+	if len(pqrMsg) == 0 {
+		t.Fatal("pqrMsg must be non-empty for resolved V1 state")
 	}
 	if len(aliceKey) != keyLen {
 		t.Fatalf("message key size: got %d, want %d", len(aliceKey), keyLen)
 	}
 
-	// Verify wire format: epoch=0, counter=1.
-	wireEpoch := binary.BigEndian.Uint64(pqrMsg[0:8])
-	wireCounter := binary.BigEndian.Uint32(pqrMsg[8:12])
-	if wireEpoch != 0 {
-		t.Errorf("wire epoch: got %d, want 0", wireEpoch)
-	}
-	if wireCounter != 1 {
-		t.Errorf("wire counter: got %d, want 1", wireCounter)
+	// Verify SCKA wire format: must start with wireVersion byte 0x01.
+	if pqrMsg[0] != wireVersion {
+		t.Errorf("pqrMsg[0]: got 0x%02x, want 0x%02x (wireVersion)", pqrMsg[0], wireVersion)
 	}
 
 	// Bob receives (pending + non-empty PQR -> resolves to V1).
@@ -124,13 +134,22 @@ func TestSendRecvV1Negotiation(t *testing.T) {
 	bobSPQR.Zeroize()
 }
 
-// TestSendPendingReturnsEmptyMsg verifies that Send on a pending state returns
-// an empty PQR message and nil key.
+// TestSendPendingReturnsEmptyMsg verifies that Send on a pending state with
+// MinVersion=V0 (opt-in downgrade) returns an empty PQR message and nil key.
+// The default InitialState sets MinVersion=V1, so this test uses the explicit
+// InitialStateWithParams to exercise the V0-pending path.
 func TestSendPendingReturnsEmptyMsg(t *testing.T) {
 	sharedSecret := randomBytes(t, 32)
-	state, err := InitialState(sharedSecret, DirectionA2B, false)
+	state, err := InitialStateWithParams(Params{
+		AuthKey:    sharedSecret,
+		Version:    VersionV1,
+		Direction:  DirectionA2B,
+		MinVersion: VersionV0,
+		MaxJump:    maxJump,
+		MaxOOOKeys: maxSkippedKeys,
+	})
 	if err != nil {
-		t.Fatalf("InitialState: %v", err)
+		t.Fatalf("InitialStateWithParams: %v", err)
 	}
 
 	newState, pqrMsg, key, sendErr := Send(state)
@@ -149,12 +168,21 @@ func TestSendPendingReturnsEmptyMsg(t *testing.T) {
 }
 
 // TestRecvEmptyResolvesV0 tests that receiving an empty PQR message during
-// pending negotiation resolves to V0 (disabled).
+// pending negotiation with MinVersion=V0 resolves to V0 (disabled).
+// Uses InitialStateWithParams explicitly because the default InitialState
+// sets MinVersion=V1, which would reject V0 peers.
 func TestRecvEmptyResolvesV0(t *testing.T) {
 	sharedSecret := randomBytes(t, 32)
-	state, err := InitialState(sharedSecret, DirectionA2B, false)
+	state, err := InitialStateWithParams(Params{
+		AuthKey:    sharedSecret,
+		Version:    VersionV1,
+		Direction:  DirectionA2B,
+		MinVersion: VersionV0,
+		MaxJump:    maxJump,
+		MaxOOOKeys: maxSkippedKeys,
+	})
 	if err != nil {
-		t.Fatalf("InitialState: %v", err)
+		t.Fatalf("InitialStateWithParams: %v", err)
 	}
 
 	// Recv with empty msg -> resolves V0.
@@ -181,6 +209,8 @@ func TestRecvEmptyResolvesV0(t *testing.T) {
 	}
 
 	// Subsequent Send should return empty + nil.
+	// V0-disabled states serialize as empty bytes (Rust empty_state() convention),
+	// so newState2 is expected to be empty (len==0).
 	newState2, pqrMsg, key2, sendErr := Send(newState)
 	if sendErr != nil {
 		t.Fatalf("Send after V0: %v", sendErr)
@@ -191,18 +221,26 @@ func TestRecvEmptyResolvesV0(t *testing.T) {
 	if key2 != nil {
 		t.Error("message key should be nil for V0")
 	}
-	if len(newState2) == 0 {
-		t.Error("state should not be empty")
+	// V0-disabled states are always empty bytes (matches Rust's empty_state()).
+	if len(newState2) != 0 {
+		t.Errorf("V0 state should be empty bytes, got %d bytes", len(newState2))
 	}
 }
 
 // TestRecvNilResolvesV0 tests that receiving a nil PQR message during
-// pending negotiation resolves to V0.
+// pending negotiation with MinVersion=V0 resolves to V0.
 func TestRecvNilResolvesV0(t *testing.T) {
 	sharedSecret := randomBytes(t, 32)
-	state, err := InitialState(sharedSecret, DirectionA2B, false)
+	state, err := InitialStateWithParams(Params{
+		AuthKey:    sharedSecret,
+		Version:    VersionV1,
+		Direction:  DirectionA2B,
+		MinVersion: VersionV0,
+		MaxJump:    maxJump,
+		MaxOOOKeys: maxSkippedKeys,
+	})
 	if err != nil {
-		t.Fatalf("InitialState: %v", err)
+		t.Fatalf("InitialStateWithParams: %v", err)
 	}
 
 	newState, key, recvErr := Recv(state, nil)
@@ -252,19 +290,34 @@ func TestMinVersionRejectsV0(t *testing.T) {
 }
 
 // TestV0RoundTrip tests a full bidirectional exchange where both sides
-// negotiate to V0 (PQR disabled).
+// negotiate to V0 (PQR disabled) via the opt-in MinVersion=V0 path.
+// Uses InitialStateWithParams because the default InitialState enforces V1.
 func TestV0RoundTrip(t *testing.T) {
 	sharedSecret := randomBytes(t, 32)
 	sharedCopy := make([]byte, 32)
 	copy(sharedCopy, sharedSecret)
 
-	aliceState, err := InitialState(sharedSecret, DirectionA2B, false)
+	aliceState, err := InitialStateWithParams(Params{
+		AuthKey:    sharedSecret,
+		Version:    VersionV1,
+		Direction:  DirectionA2B,
+		MinVersion: VersionV0,
+		MaxJump:    maxJump,
+		MaxOOOKeys: maxSkippedKeys,
+	})
 	if err != nil {
-		t.Fatalf("InitialState alice: %v", err)
+		t.Fatalf("InitialStateWithParams alice: %v", err)
 	}
-	bobState, err := InitialState(sharedCopy, DirectionB2A, false)
+	bobState, err := InitialStateWithParams(Params{
+		AuthKey:    sharedCopy,
+		Version:    VersionV1,
+		Direction:  DirectionB2A,
+		MinVersion: VersionV0,
+		MaxJump:    maxJump,
+		MaxOOOKeys: maxSkippedKeys,
+	})
 	if err != nil {
-		t.Fatalf("InitialState bob: %v", err)
+		t.Fatalf("InitialStateWithParams bob: %v", err)
 	}
 
 	// Alice sends (pending -> empty msg).
@@ -514,10 +567,23 @@ func TestSendRecvWithEpochAdvance(t *testing.T) {
 		t.Fatalf("Send epoch 1: %v", err)
 	}
 
-	// Verify wire format shows epoch 1.
-	wireEpoch := binary.BigEndian.Uint64(pqrMsg[0:8])
-	if wireEpoch != 1 {
-		t.Errorf("wire epoch: got %d, want 1", wireEpoch)
+	// Verify SCKA wire format: version byte must be present.
+	if len(pqrMsg) == 0 || pqrMsg[0] != wireVersion {
+		t.Errorf("pqrMsg[0]: got 0x%02x, want 0x%02x (wireVersion)", func() byte {
+			if len(pqrMsg) > 0 {
+				return pqrMsg[0]
+			}
+			return 0
+		}(), wireVersion)
+	}
+
+	// Parse the SCKA wire message and verify epoch offset (chain epoch 1 → SCKA epoch 2).
+	sckaMsg, _, sckaErr := mlkembraid.DeserializeSCKA(pqrMsg)
+	if sckaErr != nil {
+		t.Fatalf("DeserializeSCKA: %v", sckaErr)
+	}
+	if sckaMsg.Epoch != chainToSckaEpoch(1) {
+		t.Errorf("SCKA wire epoch: got %d, want %d (chain epoch 1)", sckaMsg.Epoch, chainToSckaEpoch(1))
 	}
 
 	bobState, bobKey, err = Recv(bobState, pqrMsg)
@@ -547,17 +613,18 @@ func TestRecvInvalidPQRMessageAfterV1(t *testing.T) {
 	}
 	s.Zeroize()
 
-	tests := []struct {
+	// After V1 resolution, a nil or empty pqrMsg is rejected as invalid.
+	invalidMsgs := []struct {
 		name   string
 		pqrMsg []byte
 	}{
 		{"nil message", nil},
 		{"empty message", []byte{}},
-		{"too short", []byte{0x01, 0x02}},
-		{"too long", make([]byte, pqrMsgSize+1)},
+		// A single byte with bad version is a malformed SCKA frame.
+		{"bad version byte", []byte{0xFF}},
 	}
 
-	for _, tt := range tests {
+	for _, tt := range invalidMsgs {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, recvErr := Recv(state, tt.pqrMsg)
 			if recvErr == nil {
@@ -579,7 +646,8 @@ func TestSendInvalidState(t *testing.T) {
 }
 
 func TestRecvInvalidState(t *testing.T) {
-	pqrMsg := make([]byte, pqrMsgSize)
+	// A minimal valid-looking SCKA wire message: version byte + small varint fields.
+	pqrMsg := []byte{wireVersion, 0x01, 0x01, byte(mlkembraid.MessageTypeNone)}
 	_, _, err := Recv([]byte{0x01, 0x02}, pqrMsg)
 	if err == nil {
 		t.Fatal("expected error for invalid state")
@@ -713,10 +781,19 @@ func TestV3SerializationRoundTrip(t *testing.T) {
 	})
 
 	t.Run("disabled_V0", func(t *testing.T) {
+		// Use explicit MinVersion=V0 (opt-in downgrade path) since the default
+		// InitialState now enforces MinVersion=V1.
 		sharedSecret := randomBytes(t, 32)
-		state, err := InitialState(sharedSecret, DirectionA2B, false)
+		state, err := InitialStateWithParams(Params{
+			AuthKey:    sharedSecret,
+			Version:    VersionV1,
+			Direction:  DirectionA2B,
+			MinVersion: VersionV0,
+			MaxJump:    maxJump,
+			MaxOOOKeys: maxSkippedKeys,
+		})
 		if err != nil {
-			t.Fatalf("InitialState: %v", err)
+			t.Fatalf("InitialStateWithParams: %v", err)
 		}
 
 		// Resolve to V0.

@@ -37,7 +37,7 @@ func (e *errLoadKyberPreKeyStore) MarkKyberPreKeyUsed(id uint32, regID uint32, k
 	return e.inner.MarkKyberPreKeyUsed(id, regID, key)
 }
 
-func (e *errLoadKyberPreKeyStore) ContainsKyberPreKey(id uint32) bool {
+func (e *errLoadKyberPreKeyStore) ContainsKyberPreKey(id uint32) (bool, error) {
 	return e.inner.ContainsKyberPreKey(id)
 }
 
@@ -101,7 +101,7 @@ func (e *errMarkKyberPreKeyStore) MarkKyberPreKeyUsed(id uint32, _ uint32, _ ecc
 	return fmt.Errorf("mark kyber pre-key failed: id=%d", id)
 }
 
-func (e *errMarkKyberPreKeyStore) ContainsKyberPreKey(id uint32) bool {
+func (e *errMarkKyberPreKeyStore) ContainsKyberPreKey(id uint32) (bool, error) {
 	return e.inner.ContainsKyberPreKey(id)
 }
 
@@ -150,7 +150,9 @@ func TestNewCipherWithIdentity_UntrustedIdentityOnEncrypt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	alice.identityStore.SaveIdentity(bob.address, otherIdentity.PublicKey())
+	if _, err := alice.identityStore.SaveIdentity(bob.address, otherIdentity.PublicKey()); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	aliceCipher := session.NewCipherWithIdentity(alice.sessionBuilder, bob.address, alice.identityStore)
 
@@ -205,7 +207,9 @@ func TestDecryptAndGetKey_UntrustedIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bob.identityStore.SaveIdentity(alice.address, otherIdentity.PublicKey())
+	if _, err := bob.identityStore.SaveIdentity(alice.address, otherIdentity.PublicKey()); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	// Use NewCipherWithIdentity so the identity check is wired in.
 	bobCipherWithId := session.NewCipherWithIdentity(bob.sessionBuilder, alice.address, bob.identityStore)
@@ -295,7 +299,9 @@ func TestDecryptPreKeyMessage_ProcessFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bob.identityStore.SaveIdentity(alice.address, otherIdentity.PublicKey())
+	if _, err := bob.identityStore.SaveIdentity(alice.address, otherIdentity.PublicKey()); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	bobCipher := session.NewCipher(bob.sessionBuilder, alice.address)
 	_, _, err = bobCipher.DecryptPreKeyMessage(bob.sessionBuilder, preKeyMsg)
@@ -358,9 +364,14 @@ func TestErrorMessages(t *testing.T) {
 			want: "untrusted identity",
 		},
 		{
-			name: "missing PQ pre-key",
-			err:  session.ErrMissingPQPreKey,
-			want: "post-quantum",
+			name: "missing PQ pre-key ID",
+			err:  session.ErrMissingPQPreKeyID,
+			want: "missing pq pre-key ID",
+		},
+		{
+			name: "missing PQ ciphertext",
+			err:  session.ErrMissingPQCiphertext,
+			want: "missing pq ciphertext",
 		},
 		{
 			name: "X3DH no longer supported",
@@ -812,7 +823,7 @@ func TestEncryptStaleSession(t *testing.T) {
 	}
 
 	// Serialize the session record so we can backdate the timestamp.
-	sessionRecord := alice.sessionStore.LoadSession(bob.address)
+	sessionRecord, _ := alice.sessionStore.LoadSession(bob.address)
 	serializedBytes, err := sessionRecord.Serialize()
 	if err != nil {
 		t.Fatal(err)
@@ -845,8 +856,7 @@ func TestEncryptStaleSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	alice.sessionStore.StoreSession(bob.address, modifiedRecord)
-
+	_ = alice.sessionStore.StoreSession(bob.address, modifiedRecord)
 	aliceCipher := session.NewCipher(alice.sessionBuilder, bob.address)
 	_, err = aliceCipher.Encrypt([]byte("stale session test"))
 	if err == nil {
@@ -1239,7 +1249,9 @@ func TestProcessV3_ArchivesNonFreshSession(t *testing.T) {
 	// Second session: Alice builds a NEW session with Bob using pre-key index 1.
 	// Alice uses the SAME identity key (trusted by Bob), only switching pre-keys.
 	// We reset Alice's session store so she generates a fresh PreKeySignalMessage.
-	alice.sessionStore.DeleteSession(bob.address)
+	if err := alice.sessionStore.DeleteSession(bob.address); err != nil {
+		t.Fatalf("setup: DeleteSession: %v", err)
+	}
 	if err := alice.sessionBuilder.ProcessBundle(bob.kyberBundleWithPreKeyIndex(1)); err != nil {
 		t.Fatal(err)
 	}
@@ -1279,7 +1291,7 @@ func TestProcessV3_ArchivesNonFreshSession(t *testing.T) {
 	}
 
 	// The session record should now have a previous session (the first one was archived).
-	sessionRecord := bob.sessionStore.LoadSession(alice.address)
+	sessionRecord, _ := bob.sessionStore.LoadSession(alice.address)
 	if len(sessionRecord.PreviousSessionStates()) == 0 {
 		t.Fatal("expected at least one previous session state after archiving non-fresh session")
 	}
@@ -1321,7 +1333,9 @@ func TestDecryptWithRecordAndType_DuplicateInPreviousState(t *testing.T) {
 
 	// Second session: Alice resets her session and uses pre-key index 1, forcing
 	// Bob to archive the first session. Alice keeps the same identity key so Bob trusts her.
-	alice.sessionStore.DeleteSession(bob.address)
+	if err := alice.sessionStore.DeleteSession(bob.address); err != nil {
+		t.Fatalf("setup: DeleteSession: %v", err)
+	}
 	if err := alice.sessionBuilder.ProcessBundle(bob.kyberBundleWithPreKeyIndex(1)); err != nil {
 		t.Fatal(err)
 	}
@@ -1514,23 +1528,23 @@ func TestSPQRActiveSessionDecrypt(t *testing.T) {
 	}
 
 	// Inject V1 SPQR state into Alice's session (DirectionA2B = sender).
-	aliceSessionBytes, err := alice.sessionStore.LoadSession(bob.address).Serialize()
+	aliceSessionBytesRec, _ := alice.sessionStore.LoadSession(bob.address)
+	aliceSessionBytes, err := aliceSessionBytesRec.Serialize()
 	if err != nil {
 		t.Fatal(err)
 	}
 	aliceSessionWithSPQR := injectSPQRState(t, aliceSessionBytes, serializer,
 		sharedSPQRKey, spqr.DirectionA2B)
-	alice.sessionStore.StoreSession(bob.address, aliceSessionWithSPQR)
-
+	_ = alice.sessionStore.StoreSession(bob.address, aliceSessionWithSPQR)
 	// Inject V1 SPQR state into Bob's session (DirectionB2A = receiver).
-	bobSessionBytes, err := bob.sessionStore.LoadSession(alice.address).Serialize()
+	bobSessionBytesRec, _ := bob.sessionStore.LoadSession(alice.address)
+	bobSessionBytes, err := bobSessionBytesRec.Serialize()
 	if err != nil {
 		t.Fatal(err)
 	}
 	bobSessionWithSPQR := injectSPQRState(t, bobSessionBytes, serializer,
 		sharedSPQRKey, spqr.DirectionB2A)
-	bob.sessionStore.StoreSession(alice.address, bobSessionWithSPQR)
-
+	_ = bob.sessionStore.StoreSession(alice.address, bobSessionWithSPQR)
 	// Now Alice encrypts a message. With MinVersion=VersionV1, spqr.Send
 	// resolves negotiation to V1 and produces real PQR bytes.
 	aliceCipher2 := session.NewCipher(alice.sessionBuilder, bob.address)
@@ -1558,7 +1572,7 @@ func TestSPQRActiveSessionDecrypt(t *testing.T) {
 
 	// Verify the message has non-empty PQR data (SPQR V1 is active).
 	if len(signalMsg.PqRatchetKey()) == 0 {
-		t.Skip("SPQR is not producing PQR data; negotiation may still be pending")
+		t.Fatal("expected non-empty PqRatchetKey after SPQR V1 state injection; negotiation must resolve to V1 on first Send")
 	}
 	t.Logf("SPQR active: PQRKey len=%d", len(signalMsg.PqRatchetKey()))
 
@@ -1612,13 +1626,19 @@ func TestSPQRSkippedKeyRederive(t *testing.T) {
 	}
 
 	// Inject V1 SPQR states.
-	aliceSessionBytes, _ := alice.sessionStore.LoadSession(bob.address).Serialize()
-	alice.sessionStore.StoreSession(bob.address,
-		injectSPQRState(t, aliceSessionBytes, serializer, sharedSPQRKey, spqr.DirectionA2B))
+	aliceSessionBytesRec, _ := alice.sessionStore.LoadSession(bob.address)
+	aliceSessionBytes, _ := aliceSessionBytesRec.Serialize()
+	if err := alice.sessionStore.StoreSession(bob.address,
+		injectSPQRState(t, aliceSessionBytes, serializer, sharedSPQRKey, spqr.DirectionA2B)); err != nil {
+		t.Fatalf("setup: StoreSession: %v", err)
+	}
 
-	bobSessionBytes, _ := bob.sessionStore.LoadSession(alice.address).Serialize()
-	bob.sessionStore.StoreSession(alice.address,
-		injectSPQRState(t, bobSessionBytes, serializer, sharedSPQRKey, spqr.DirectionB2A))
+	bobSessionBytesRec, _ := bob.sessionStore.LoadSession(alice.address)
+	bobSessionBytes, _ := bobSessionBytesRec.Serialize()
+	if err := bob.sessionStore.StoreSession(alice.address,
+		injectSPQRState(t, bobSessionBytes, serializer, sharedSPQRKey, spqr.DirectionB2A)); err != nil {
+		t.Fatalf("setup: StoreSession: %v", err)
+	}
 
 	// Encrypt 3 messages from Alice with SPQR active.
 	aliceCipher2 := session.NewCipher(alice.sessionBuilder, bob.address)
@@ -1644,9 +1664,9 @@ func TestSPQRSkippedKeyRederive(t *testing.T) {
 		signalMsgs[i] = sm
 	}
 
-	// Check if SPQR is active (PQR data present in messages).
+	// SPQR V1 state was injected; PQR data must be present in messages.
 	if len(signalMsgs[0].PqRatchetKey()) == 0 {
-		t.Skip("SPQR not active - PQR data absent; negotiation-pending state")
+		t.Fatal("expected non-empty PqRatchetKey after SPQR V1 state injection; SPQR ratchet not active")
 	}
 
 	bobCipher2 := session.NewCipher(bob.sessionBuilder, alice.address)
@@ -1716,7 +1736,8 @@ func TestEncryptWithoutSPQR(t *testing.T) {
 	// Bob replies to establish a bidirectional session where Bob's session
 	// has processed Alice's message and advanced its ratchet.
 	// Now strip the PqRatchetState from Bob's session to exercise the non-SPQR path.
-	bobSessionBytes, err := bob.sessionStore.LoadSession(alice.address).Serialize()
+	bobSessionBytesRec, _ := bob.sessionStore.LoadSession(alice.address)
+	bobSessionBytes, err := bobSessionBytesRec.Serialize()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1737,8 +1758,7 @@ func TestEncryptWithoutSPQR(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bob.sessionStore.StoreSession(alice.address, noSPQRRecord)
-
+	_ = bob.sessionStore.StoreSession(alice.address, noSPQRRecord)
 	// Now Bob encrypts with no SPQR state. This exercises the else branch
 	// in Encrypt (chainKey.MessageKeys() instead of chainKey.MessageKeysWithSalt()).
 	bobCipher2 := session.NewCipher(bob.sessionBuilder, alice.address)
@@ -1787,13 +1807,19 @@ func TestSPQRDuplicateMessageDetection(t *testing.T) {
 		sharedSPQRKey[i] = byte(i + 0x40)
 	}
 
-	aliceSessionBytes, _ := alice.sessionStore.LoadSession(bob.address).Serialize()
-	alice.sessionStore.StoreSession(bob.address,
-		injectSPQRState(t, aliceSessionBytes, serializer, sharedSPQRKey, spqr.DirectionA2B))
+	aliceSessionBytesRec, _ := alice.sessionStore.LoadSession(bob.address)
+	aliceSessionBytes, _ := aliceSessionBytesRec.Serialize()
+	if err := alice.sessionStore.StoreSession(bob.address,
+		injectSPQRState(t, aliceSessionBytes, serializer, sharedSPQRKey, spqr.DirectionA2B)); err != nil {
+		t.Fatalf("setup: StoreSession: %v", err)
+	}
 
-	bobSessionBytes, _ := bob.sessionStore.LoadSession(alice.address).Serialize()
-	bob.sessionStore.StoreSession(alice.address,
-		injectSPQRState(t, bobSessionBytes, serializer, sharedSPQRKey, spqr.DirectionB2A))
+	bobSessionBytesRec, _ := bob.sessionStore.LoadSession(alice.address)
+	bobSessionBytes, _ := bobSessionBytesRec.Serialize()
+	if err := bob.sessionStore.StoreSession(alice.address,
+		injectSPQRState(t, bobSessionBytes, serializer, sharedSPQRKey, spqr.DirectionB2A)); err != nil {
+		t.Fatalf("setup: StoreSession: %v", err)
+	}
 
 	// Alice encrypts a message with SPQR active.
 	aliceCipher2 := session.NewCipher(alice.sessionBuilder, bob.address)
@@ -1815,7 +1841,7 @@ func TestSPQRDuplicateMessageDetection(t *testing.T) {
 	}
 
 	if len(signalMsg.PqRatchetKey()) == 0 {
-		t.Skip("SPQR not active")
+		t.Fatal("expected non-empty PqRatchetKey after SPQR V1 state injection; SPQR ratchet not active")
 	}
 
 	bobCipher2 := session.NewCipher(bob.sessionBuilder, alice.address)
@@ -1922,7 +1948,8 @@ func TestProcessV3_PreKyberVersionRejected(t *testing.T) {
 }
 
 // TestProcessV3_MissingKyberPreKeyID verifies that processV3 rejects a V4
-// message with nil KyberPreKeyID with errMissingPQPreKey.
+// message with nil KyberPreKeyID with ErrMissingPQPreKeyID.
+// Mirrors Rust's "missing pq pre-key ID" from process_prekey_impl.
 // This covers Session.go line 216 (nil KyberPreKeyID check).
 func TestProcessV3_MissingKyberPreKeyID(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
@@ -1935,7 +1962,7 @@ func TestProcessV3_MissingKyberPreKeyID(t *testing.T) {
 
 	// V4 message with nil KyberPreKeyID and nil KyberCiphertext.
 	// NewPreKeySignalMessageFromStruct accepts this (both absent = symmetric).
-	// processV3 checks KyberPreKeyID() == nil and returns errMissingPQPreKey.
+	// processV3 checks KyberPreKeyID() == nil and returns errMissingPQPreKeyID.
 	structure := &protocol.PreKeySignalMessageStructure{
 		Version:         protocol.CurrentVersion, // 4
 		RegistrationID:  alice.registrationID,
@@ -1956,14 +1983,15 @@ func TestProcessV3_MissingKyberPreKeyID(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for V4 message with nil KyberPreKeyID")
 	}
-	if !errors.Is(err, session.ErrMissingPQPreKey) {
-		t.Fatalf("expected ErrMissingPQPreKey, got: %v", err)
+	if !errors.Is(err, session.ErrMissingPQPreKeyID) {
+		t.Fatalf("expected ErrMissingPQPreKeyID, got: %v", err)
 	}
 }
 
 // TestProcessV3_MissingKyberCiphertext verifies that processV3 rejects a V4
 // message where KyberPreKeyID is present (non-nil but IsEmpty=true) and
-// KyberCiphertext is nil. This covers Session.go line 219.
+// KyberCiphertext is nil. Mirrors Rust's "missing pq ciphertext".
+// This covers Session.go line 219.
 func TestProcessV3_MissingKyberCiphertext(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	alice := newTestUser(t, "Alice", 1, serializer)
@@ -1997,8 +2025,8 @@ func TestProcessV3_MissingKyberCiphertext(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for V4 message with nil KyberCiphertext")
 	}
-	if !errors.Is(err, session.ErrMissingPQPreKey) {
-		t.Fatalf("expected ErrMissingPQPreKey, got: %v", err)
+	if !errors.Is(err, session.ErrMissingPQCiphertext) {
+		t.Fatalf("expected ErrMissingPQCiphertext, got: %v", err)
 	}
 }
 
@@ -2325,7 +2353,8 @@ func TestSPQRNonDuplicateErrorFallthrough(t *testing.T) {
 
 	// Inject SPQR V1 state with MaxJump=1 for Bob (receiver). Alice uses
 	// MaxJump=25000 (sender doesn't need this constraint).
-	aliceSessionBytes, _ := alice.sessionStore.LoadSession(bob.address).Serialize()
+	aliceSessionBytesRec, _ := alice.sessionStore.LoadSession(bob.address)
+	aliceSessionBytes, _ := aliceSessionBytesRec.Serialize()
 
 	// Inject V1 SPQR for Alice (sender direction, standard MaxJump).
 	newAliceSPQR, err := spqr.InitialStateWithParams(spqr.Params{
@@ -2340,10 +2369,10 @@ func TestSPQRNonDuplicateErrorFallthrough(t *testing.T) {
 		t.Fatalf("InitialStateWithParams (alice): %v", err)
 	}
 	aliceSessionWithSPQR := injectSPQRStateBytes(t, aliceSessionBytes, serializer, newAliceSPQR)
-	alice.sessionStore.StoreSession(bob.address, aliceSessionWithSPQR)
-
+	_ = alice.sessionStore.StoreSession(bob.address, aliceSessionWithSPQR)
 	// Inject V1 SPQR for Bob (receiver direction, MaxJump=1 so counter jump > 1 fails).
-	bobSessionBytes, _ := bob.sessionStore.LoadSession(alice.address).Serialize()
+	bobSessionBytesRec, _ := bob.sessionStore.LoadSession(alice.address)
+	bobSessionBytes, _ := bobSessionBytesRec.Serialize()
 	newBobSPQR, err := spqr.InitialStateWithParams(spqr.Params{
 		AuthKey:    sharedSPQRKey,
 		Version:    spqr.VersionV1,
@@ -2356,8 +2385,7 @@ func TestSPQRNonDuplicateErrorFallthrough(t *testing.T) {
 		t.Fatalf("InitialStateWithParams (bob): %v", err)
 	}
 	bobSessionWithSPQR := injectSPQRStateBytes(t, bobSessionBytes, serializer, newBobSPQR)
-	bob.sessionStore.StoreSession(alice.address, bobSessionWithSPQR)
-
+	_ = bob.sessionStore.StoreSession(alice.address, bobSessionWithSPQR)
 	// Alice encrypts 3 messages. Each call to spqr.Send advances Alice's SPQR counter.
 	aliceCipher2 := session.NewCipher(alice.sessionBuilder, bob.address)
 	var lastMsg *protocol.SignalMessage
@@ -2380,7 +2408,7 @@ func TestSPQRNonDuplicateErrorFallthrough(t *testing.T) {
 	}
 
 	if lastMsg == nil || len(lastMsg.PqRatchetKey()) == 0 {
-		t.Skip("SPQR not active or no PQR data in message")
+		t.Fatal("expected non-empty PqRatchetKey after SPQR V1 state injection; SPQR ratchet not active")
 	}
 
 	bobCipher2 := session.NewCipher(bob.sessionBuilder, alice.address)

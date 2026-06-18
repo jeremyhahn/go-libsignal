@@ -3,6 +3,9 @@
 *.prof
 *.exe
 
+# Rust interop harness build output
+tests/interop/rust/target/
+
 # Coverage
 coverage/
 *.out
@@ -15,3 +18,5 @@ coverage/
 CLAUDE.md
 go.work
 go.work.sum
+.claude/scheduled_tasks.lock
+.claude/scheduled_tasks.json

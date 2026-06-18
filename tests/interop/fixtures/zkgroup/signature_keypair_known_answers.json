@@ -1,0 +1,11 @@
+{
+  "_provenance": {
+    "source": "rust/zkgroup/src/crypto/signature.rs::tests::test_signature",
+    "rust_rev_pin": "/RUST_REV (root of go-libsignal repo)",
+    "note": "Hand-extracted zkgroup KeyPair-level Schnorr signature KAT. Distinct from the higher-level ServerSecretParams.Sign KAT: this one exercises the raw SignatureKeyPair generated from a SHO labelled 'Test_Signature' and absorbed with TEST_ARRAY_32 (0..31). The same SHO is then used to derive the 32-byte randomness for poksho::sign over TEST_ARRAY_32_1 message."
+  },
+  "sho_label": "Test_Signature",
+  "group_key_seed": "test_array_32",
+  "message_seed":   "test_array_32_1",
+  "expected_signature_hex": "db9bfbd61526c350f9be951711 06d006 5288cb33031be71725243780532caa07cbda74c4193b6ee6e95faecd41fb4419ceae3f4d63b9475927e110eeb7720b06"
+}

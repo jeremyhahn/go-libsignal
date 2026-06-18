@@ -228,9 +228,22 @@ func (c *GroupCipher) getSenderKey(senderKeyState *record.SenderKeyState, iterat
 	return senderChainKey.SenderMessageKey()
 }
 
-// distributionIDToGroupID formats a 16-byte distribution UUID as a standard
-// UUID string (8-4-4-4-12) for use as a SenderKeyName group ID.
-func distributionIDToGroupID(id [16]byte) string {
+// DistributionIDToGroupID formats a 16-byte distribution UUID as a standard
+// hyphenated UUID string (8-4-4-4-12 lowercase hex) for use as a
+// SenderKeyName group ID. The output is byte-identical to Rust's Uuid::Display
+// (std::fmt::Display for uuid::Uuid) applied to the same 16 bytes.
+//
+// Rust counterpart: uuid::Uuid formatted via Display in
+// rust/protocol/src/group_cipher.rs — the distribution_id field is a Uuid
+// and its string representation via {} in log statements and error types
+// uses this same hyphenated format.
+func DistributionIDToGroupID(id [16]byte) string {
 	h := hex.EncodeToString(id[:])
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
+}
+
+// distributionIDToGroupID is the package-internal alias used by Decrypt and
+// Encrypt so callers within this package are not affected by the rename.
+func distributionIDToGroupID(id [16]byte) string {
+	return DistributionIDToGroupID(id)
 }

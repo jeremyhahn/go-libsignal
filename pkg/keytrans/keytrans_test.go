@@ -1,6 +1,7 @@
 package keytrans
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"testing"
 	"time"
@@ -456,6 +457,82 @@ func TestAccountData_IntoStored(t *testing.T) {
 	}
 	if stored.UsernameHash != nil {
 		t.Error("UsernameHash should be nil when no search key provided")
+	}
+}
+
+func TestMonitoringData_SearchKey_RoundTrip(t *testing.T) {
+	searchKey := []byte("round-trip-search-key")
+	original := &MonitoringData{
+		Index:     [32]byte{1, 2, 3},
+		Pos:       7,
+		Ptrs:      map[uint64]uint32{10: 1, 20: 2},
+		Owned:     true,
+		SearchKey: searchKey,
+	}
+
+	stored := original.IntoStored(original.SearchKey)
+	if !bytes.Equal(stored.SearchKey, searchKey) {
+		t.Errorf("IntoStored: SearchKey = %q, want %q", stored.SearchKey, searchKey)
+	}
+
+	recovered := MonitoringDataFromStored(&stored)
+	if recovered == nil {
+		t.Fatal("MonitoringDataFromStored returned nil")
+	}
+	if !bytes.Equal(recovered.SearchKey, searchKey) {
+		t.Errorf("MonitoringDataFromStored: SearchKey = %q, want %q", recovered.SearchKey, searchKey)
+	}
+
+	// Verify byte-for-byte equality.
+	if recovered.Index != original.Index {
+		t.Error("Index mismatch after round-trip")
+	}
+	if recovered.Pos != original.Pos {
+		t.Errorf("Pos: got %d, want %d", recovered.Pos, original.Pos)
+	}
+	if recovered.Owned != original.Owned {
+		t.Error("Owned mismatch after round-trip")
+	}
+}
+
+func TestMonitoringData_SearchKey_NilRoundTrip(t *testing.T) {
+	// Nil SearchKey must survive the round-trip as nil (not empty slice).
+	original := &MonitoringData{
+		Index: [32]byte{5},
+		Pos:   3,
+		Ptrs:  map[uint64]uint32{1: 1},
+		Owned: false,
+	}
+
+	stored := original.IntoStored(nil)
+	if stored.SearchKey != nil {
+		t.Errorf("IntoStored with nil searchKey: stored.SearchKey = %v, want nil", stored.SearchKey)
+	}
+
+	recovered := MonitoringDataFromStored(&stored)
+	if recovered.SearchKey != nil {
+		t.Errorf("MonitoringDataFromStored: SearchKey = %v, want nil", recovered.SearchKey)
+	}
+}
+
+func TestMonitoringData_Clone_SearchKey(t *testing.T) {
+	original := &MonitoringData{
+		Index:     [32]byte{9},
+		Pos:       1,
+		Ptrs:      map[uint64]uint32{5: 5},
+		Owned:     true,
+		SearchKey: []byte("clone-key"),
+	}
+
+	cloned := original.Clone()
+	if !bytes.Equal(cloned.SearchKey, original.SearchKey) {
+		t.Error("cloned SearchKey should match original")
+	}
+
+	// Verify deep copy: modifying clone should not affect original.
+	cloned.SearchKey[0] = 'X'
+	if original.SearchKey[0] == 'X' {
+		t.Error("modifying cloned SearchKey should not affect original")
 	}
 }
 

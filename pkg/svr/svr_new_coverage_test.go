@@ -1,7 +1,6 @@
 package svr
 
 import (
-	"bytes"
 	"errors"
 	"testing"
 )
@@ -36,46 +35,6 @@ func TestOPRFBackup4_Zeroize_WithValidOutput(t *testing.T) {
 	backup.Zeroize()
 }
 
-// TestMasterKeyGuarded_ValidPIN verifies MasterKeyGuarded returns guarded memory.
-func TestMasterKeyGuarded_ValidPIN(t *testing.T) {
-	var svrSecret Secret
-	copy(svrSecret[:], bytes.Repeat([]byte{0x42}, 32))
-
-	guarded, err := MasterKeyGuarded("my-pin", svrSecret)
-	if err != nil {
-		t.Fatalf("MasterKeyGuarded failed: %v", err)
-	}
-	if guarded == nil {
-		t.Fatal("expected non-nil guarded secret")
-	}
-	defer guarded.Destroy()
-
-	if guarded.Size() != 32 {
-		t.Errorf("guarded secret size = %d, want 32", guarded.Size())
-	}
-
-	// Verify determinism: same PIN+secret should give same key.
-	raw1, err := MasterKey("my-pin", svrSecret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !guarded.EqualTo(raw1[:]) {
-		t.Error("MasterKeyGuarded should match MasterKey output")
-	}
-}
-
-// TestMasterKeyGuarded_EmptyPIN verifies MasterKeyGuarded propagates empty PIN error.
-func TestMasterKeyGuarded_EmptyPIN(t *testing.T) {
-	var svrSecret Secret
-	_, err := MasterKeyGuarded("", svrSecret)
-	if err == nil {
-		t.Fatal("expected error for empty PIN")
-	}
-	if !errors.Is(err, ErrEmptyPIN) {
-		t.Errorf("error = %v, want ErrEmptyPIN", err)
-	}
-}
-
 // TestErrorMessages_AllKinds exercises the Error.Error() switch for all known kinds,
 // including the case-with-cause variants that aren't covered by basic tests.
 func TestErrorMessages_AllKinds_WithCause(t *testing.T) {
@@ -85,11 +44,6 @@ func TestErrorMessages_AllKinds_WithCause(t *testing.T) {
 		err     *Error
 		wantSub string
 	}{
-		{
-			name:    "HKDF with cause",
-			err:     &Error{kind: errHKDFExpansion, cause: inner},
-			wantSub: "HKDF expansion failed: inner cause",
-		},
 		{
 			name:    "cipher create with cause",
 			err:     &Error{kind: errCipherCreate, cause: inner},
@@ -104,11 +58,6 @@ func TestErrorMessages_AllKinds_WithCause(t *testing.T) {
 			name:    "secret size",
 			err:     &Error{kind: errSecretSize, detail: "got 10, want 32"},
 			wantSub: "wrong size",
-		},
-		{
-			name:    "HKDF without cause",
-			err:     &Error{kind: errHKDFExpansion},
-			wantSub: "HKDF expansion failed",
 		},
 		{
 			name:    "cipher create without cause",

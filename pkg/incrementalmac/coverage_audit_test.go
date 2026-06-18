@@ -2,6 +2,7 @@ package incrementalmac
 
 import (
 	"bytes"
+	gocrypto "crypto"
 	"crypto/rand"
 	"testing"
 )
@@ -90,6 +91,17 @@ func TestValidating_Destroy_NilInc(t *testing.T) {
 	v.Destroy() // must not panic
 }
 
+// sha256BlockSize is the HMAC block size for SHA-256, used by tests that
+// exercise the long-key hashing branch in newClonableHMAC.
+const sha256BlockSize = 64
+
+// sha256Params returns the hashParams for SHA-256, used by coverage tests that
+// call newClonableHMAC directly.
+func sha256Params() hashParams {
+	p, _ := hashParamsFor(gocrypto.SHA256)
+	return p
+}
+
 // TestNewClonableHMAC_LongKey exercises the key-hashing branch in newClonableHMAC
 // where the key is longer than sha256BlockSize (64 bytes). This branch hashes the
 // key down to 32 bytes before constructing the HMAC.
@@ -101,15 +113,16 @@ func TestNewClonableHMAC_LongKey(t *testing.T) {
 		longKey[i] = byte(i)
 	}
 
-	h := newClonableHMAC(longKey)
+	p := sha256Params()
+	h := newClonableHMAC(longKey, p)
 	if h == nil {
 		t.Fatal("newClonableHMAC returned nil for long key")
 	}
 	if h.inner == nil {
 		t.Fatal("inner hash must not be nil")
 	}
-	if h.outerKey == nil {
-		t.Fatal("outerKey must not be nil")
+	if h.outer == nil {
+		t.Fatal("outer key must not be nil")
 	}
 
 	// Write some data and finalize to verify the HMAC is functional.
@@ -121,7 +134,7 @@ func TestNewClonableHMAC_LongKey(t *testing.T) {
 	}
 
 	// Verify consistency: same key + data must produce same MAC.
-	h2 := newClonableHMAC(longKey)
+	h2 := newClonableHMAC(longKey, p)
 	h2.Write(data)
 	digest2 := h2.cloneAndFinalize()
 	if !bytes.Equal(digest, digest2) {
@@ -136,12 +149,13 @@ func TestNewClonableHMAC_LongKeyVsShortKeyDiffers(t *testing.T) {
 	shortKey := bytes.Repeat([]byte{0xAB}, 32)
 
 	data := []byte("discriminating data")
+	p := sha256Params()
 
-	h1 := newClonableHMAC(longKey)
+	h1 := newClonableHMAC(longKey, p)
 	h1.Write(data)
 	mac1 := h1.sum()
 
-	h2 := newClonableHMAC(shortKey)
+	h2 := newClonableHMAC(shortKey, p)
 	h2.Write(data)
 	mac2 := h2.sum()
 

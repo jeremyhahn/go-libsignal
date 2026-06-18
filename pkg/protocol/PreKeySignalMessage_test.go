@@ -247,7 +247,8 @@ func TestNewPreKeySignalMessage(t *testing.T) {
 		PreKyberVersion, 0, 0, macKey,
 		ratchetKey.PublicKey(), []byte("cipher"),
 		senderIdentity, receiverIdentity, msgSerializer,
-		nil, // pqRatchetMsg
+		nil,      // pqRatchetMsg
+		nil, nil, // localAddress, remoteAddress (no binding)
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -347,7 +348,8 @@ func TestNewPreKeySignalMessageWithKyberSerializeError(t *testing.T) {
 		PreKyberVersion, 0, 0, macKey,
 		ratchetKey.PublicKey(), []byte("cipher"),
 		senderIdentity, receiverIdentity, goodMsgSerializer,
-		nil, // pqRatchetMsg
+		nil,      // pqRatchetMsg
+		nil, nil, // localAddress, remoteAddress (no binding)
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -382,7 +384,8 @@ func TestNewPreKeySignalMessageWithKyber(t *testing.T) {
 		CurrentVersion, 0, 0, macKey,
 		ratchetKey.PublicKey(), []byte("cipher"),
 		senderIdentity, receiverIdentity, msgSerializer,
-		nil, // pqRatchetMsg
+		nil,      // pqRatchetMsg
+		nil, nil, // localAddress, remoteAddress (no binding)
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -592,7 +595,8 @@ func TestPreKeySignalMessageAsymmetricKyberPayload(t *testing.T) {
 		CurrentVersion, 0, 0, macKey,
 		ratchetKey.PublicKey(), []byte("cipher"),
 		senderIdentity, receiverIdentity, msgSerializer,
-		nil,
+		nil,      // pqRatchetMsg
+		nil, nil, // localAddress, remoteAddress (no binding)
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -673,7 +677,8 @@ func TestPreKeySignalMessageKyberPayloadEnforcement(t *testing.T) {
 		CurrentVersion, 0, 0, macKey,
 		ratchetKey.PublicKey(), []byte("cipher"),
 		senderIdentity, receiverIdentity, msgSerializer,
-		nil, // pqRatchetMsg
+		nil,      // pqRatchetMsg
+		nil, nil, // localAddress, remoteAddress (no binding)
 	)
 	if err != nil {
 		t.Fatal(err)

@@ -15,6 +15,18 @@ func (e *MessageDeserializeError) Error() string {
 	return fmt.Sprintf("serialize: %s too short", e.MessageType)
 }
 
+// ErrInvalidProtobufEncoding indicates a required protobuf field is absent or
+// has an invalid value. Mirrors Rust's SignalProtocolError::InvalidProtobufEncoding
+// (rust/protocol/src/protocol.rs:614-657 for SKM, :748-800 for SKDM).
+type ErrInvalidProtobufEncoding struct {
+	MessageType string
+	Field       string
+}
+
+func (e *ErrInvalidProtobufEncoding) Error() string {
+	return fmt.Sprintf("serialize: %s: missing required field %q", e.MessageType, e.Field)
+}
+
 // FieldLengthError indicates a deserialized field has an invalid length.
 type FieldLengthError struct {
 	MessageType string

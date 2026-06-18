@@ -370,12 +370,10 @@ func TestCheckSearchConsistency_LowVersion(t *testing.T) {
 	// if that node is in Ptrs and its version < the new version, return error.
 	// So we need the stored version to be LOWER than the new version,
 	// and the stored node to be on the monitoring path of verPos.
+	// monitoringPath(2,0,8) always returns [3,7] (2 elements).
 	path, pathErr := monitoringPath(2, 0, 8)
 	if pathErr != nil {
 		t.Fatalf("unexpected error: %v", pathErr)
-	}
-	if len(path) == 0 {
-		t.Skip("no monitoring path to test")
 	}
 	data := &MonitoringData{
 		Index: [32]byte{1},
@@ -396,7 +394,8 @@ func TestCheckSearchConsistency_LowVersion(t *testing.T) {
 
 func TestUpdateInconsistentVersions(t *testing.T) {
 	// Create two ptrs that would both map to the same updated position
-	// but with different versions, causing an inconsistency error
+	// but with different versions, causing an inconsistency error.
+	// monitoringPath(0,0,8) always returns [1,3,7] (3 elements).
 	data := &MonitoringData{
 		Index: [32]byte{1},
 		Pos:   0,
@@ -404,13 +403,10 @@ func TestUpdateInconsistentVersions(t *testing.T) {
 	}
 	mdw := newMonitoringDataWrapper(data)
 
-	// First, find monitoring path for position 0
+	// First, find monitoring path for position 0.
 	path, pathErr := monitoringPath(0, 0, 8)
 	if pathErr != nil {
 		t.Fatalf("unexpected error: %v", pathErr)
-	}
-	if len(path) == 0 {
-		t.Skip("no monitoring path to test")
 	}
 
 	// Create entries that would update the mapping
@@ -665,8 +661,8 @@ func TestVerifyMonitor_EmptyLeaves(t *testing.T) {
 	}
 
 	res := &MonitorResponse{
-		TreeHead: &FullTreeHead{TreeHead: &TreeHead{TreeSize: 10}},
-		Proofs:   []MonitorProof{{Steps: steps}},
+		TreeHead:  &FullTreeHead{TreeHead: &TreeHead{TreeSize: 10}},
+		Proofs:    []MonitorProof{{Steps: steps}},
 		Inclusion: [][]byte{},
 	}
 
@@ -1662,7 +1658,8 @@ func TestVerifyDistinguished_DifferentTreeHeadSize(t *testing.T) {
 }
 
 func TestUpdateWithFindUpdatedMapping(t *testing.T) {
-	// Test the update path where findUpdatedMapping returns an updated mapping
+	// Test the update path where findUpdatedMapping returns an updated mapping.
+	// monitoringPath(0,0,8) always returns [1,3,7] (3 elements).
 	data := &MonitoringData{
 		Index: [32]byte{1},
 		Pos:   0,
@@ -1673,9 +1670,6 @@ func TestUpdateWithFindUpdatedMapping(t *testing.T) {
 	path, pathErr := monitoringPath(0, 0, 8)
 	if pathErr != nil {
 		t.Fatalf("unexpected error: %v", pathErr)
-	}
-	if len(path) == 0 {
-		t.Skip("no monitoring path")
 	}
 
 	// Add entry at first path position with higher version
@@ -1712,13 +1706,11 @@ func TestFindUpdatedMapping_NilPrefix(t *testing.T) {
 }
 
 func TestFindUpdatedMapping_LowVersion(t *testing.T) {
-	// Test findUpdatedMapping when a step has a lower version than stored
+	// Test findUpdatedMapping when a step has a lower version than stored.
+	// monitoringPath(0,0,8) always returns [1,3,7] (3 elements).
 	path, pathErr := monitoringPath(0, 0, 8)
 	if pathErr != nil {
 		t.Fatalf("unexpected error: %v", pathErr)
-	}
-	if len(path) == 0 {
-		t.Skip("no monitoring path")
 	}
 	entries := map[uint64]ProofStep{
 		path[0]: {Prefix: &PrefixProof{Counter: 0}}, // lower than stored version 5
@@ -1970,41 +1962,22 @@ func TestImplicitParent_MultipleSteps(t *testing.T) {
 }
 
 func TestGuidePoll_NonMonotonicCounters(t *testing.T) {
-	// Manually create a guide and insert entries that are non-monotonic when
-	// sorted by ID (lower id has higher counter).
-	g, gErr := newProofGuideForVersion(5, 0, 8)
-	if gErr != nil {
-		t.Fatalf("unexpected error: %v", gErr)
-	}
-
-	// The guide has one id (the root). Insert with version 5 to match target.
-	root := g.ids[0]
-	g.Insert(root, 5)
-
-	// Poll processes the sorted list - since there is only one entry, it cannot
-	// be non-monotonic. We need at least 2 entries.
-	// Use a frontier guide which starts with multiple ids.
-	gf, gfErr := newProofGuideForMostRecent(0, 8)
+	// Use a frontier guide with tree size 5, which produces frontier [3,4] (2 entries).
+	// Power-of-2 sizes (4, 8, 16, ...) collapse to a single-element frontier; n=5 does not.
+	gf, gfErr := newProofGuideForMostRecent(0, 5)
 	if gfErr != nil {
 		t.Fatalf("unexpected error: %v", gfErr)
 	}
-	// frontier of tree(0, 8) includes multiple nodes.
-	if len(gf.ids) < 2 {
-		t.Skip("frontier has less than 2 entries")
-	}
 
-	// Insert in reverse order of id with increasing version -> when sorted by id,
-	// versions should be monotonic. But if we reverse versions...
-	// ids are already sorted ascending in frontier.
 	// Insert first id with HIGH counter, second id with LOW counter.
-	// After sorting by id, sorted[0].version > sorted[1].version -> non-monotonic.
+	// After sorting by id, sorted[0].version > sorted[1].version → non-monotonic.
 	gf.Insert(gf.ids[0], 10)
-	gf.Insert(gf.ids[1], 5) // lower version for higher id
+	gf.Insert(gf.ids[1], 5) // lower version for second (larger) id
 
 	_, err := gf.poll()
-	// Frontier processing may succeed or fail depending on the frontier structure.
-	// The test exercises the code path without asserting a specific outcome.
-	_ = err
+	if err != ErrInvalidGuideState {
+		t.Fatalf("expected ErrInvalidGuideState for non-monotonic counters, got %v", err)
+	}
 }
 
 func TestGuideConsume_StepError(t *testing.T) {
@@ -2024,13 +1997,13 @@ func TestGuideConsume_StepError(t *testing.T) {
 
 func TestGuideConsume_PollError(t *testing.T) {
 	// Exercise the poll error path in Consume (guide.go:158).
-	// Create a frontier guide and insert non-monotonic counters to trigger poll error.
-	g, gErr := newProofGuideForMostRecent(0, 4)
+	// Tree size 5 produces frontier [3,4] (2 entries); power-of-2 sizes collapse to 1.
+	// Consume calls step for each frontier entry before calling poll with all results.
+	// Inserting version 10 at the first (smaller) id then version 5 at the second
+	// (larger) id produces a non-monotonic sequence that poll rejects.
+	g, gErr := newProofGuideForMostRecent(0, 5)
 	if gErr != nil {
 		t.Fatalf("unexpected error: %v", gErr)
-	}
-	if len(g.ids) < 2 {
-		t.Skip("frontier has less than 2 entries")
 	}
 
 	callCount := 0
@@ -2039,14 +2012,12 @@ func TestGuideConsume_PollError(t *testing.T) {
 		if callCount == 1 {
 			guide.Insert(id, 10) // high version for first (lowest) id
 		} else {
-			guide.Insert(id, 5) // lower version for higher id -> non-monotonic
+			guide.Insert(id, 5) // lower version for higher id → non-monotonic
 		}
 		return nil
 	})
-	// Should get ErrInvalidGuideState from poll
-	if err == nil {
-		// If the frontier has only one entry, poll won't detect non-monotonic
-		t.Log("no error (frontier may have only one entry)")
+	if err != ErrInvalidGuideState {
+		t.Fatalf("expected ErrInvalidGuideState for non-monotonic counters in Consume, got %v", err)
 	}
 }
 
@@ -2375,12 +2346,10 @@ func TestProcessDuplicateLeafDifferentValue(t *testing.T) {
 		Ptrs:  map[uint64]uint32{0: 1},
 	}
 
+	// fullMonitoringPath(0,0,4) always returns [1,3] (2 elements).
 	path, pathErr := fullMonitoringPath(0, 0, 4)
 	if pathErr != nil {
 		t.Fatalf("unexpected error: %v", pathErr)
-	}
-	if len(path) == 0 {
-		t.Skip("no monitoring path entries")
 	}
 
 	// Create a first monitor proof accumulator and process one key.
@@ -2453,7 +2422,7 @@ func TestUpdateInconsistentVersionsFromMapping(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Skip("no common monitoring path node found")
+		t.Fatalf("no common monitoring path node found: path0=%v path2=%v", path0, path2)
 	}
 
 	// Stored positions 0 and 2, both will be updated to the common node.
@@ -2484,12 +2453,10 @@ func TestUpdateInconsistentVersionsFromMapping(t *testing.T) {
 
 func TestFindUpdatedMapping_ErrorPropagation(t *testing.T) {
 	// Test that findUpdatedMapping's error propagates through update.
+	// monitoringPath(0,0,8) always returns [1,3,7] (3 elements).
 	path, pathErr := monitoringPath(0, 0, 8)
 	if pathErr != nil {
 		t.Fatalf("unexpected error: %v", pathErr)
-	}
-	if len(path) == 0 {
-		t.Skip("no monitoring path")
 	}
 
 	data := &MonitoringData{
@@ -3524,12 +3491,10 @@ func TestVerifyDistinguished_BadDistinguishedProof(t *testing.T) {
 
 func TestCheckSearchConsistency_HighVersionOnPath(t *testing.T) {
 	// The path where ver >= version means no error ("found" on monitoring path).
+	// monitoringPath(2,0,8) always returns [3,7] (2 elements).
 	path, pathErr := monitoringPath(2, 0, 8)
 	if pathErr != nil {
 		t.Fatalf("unexpected error: %v", pathErr)
-	}
-	if len(path) == 0 {
-		t.Skip("no monitoring path")
 	}
 	data := &MonitoringData{
 		Index: [32]byte{1},
@@ -4389,13 +4354,12 @@ func TestProofGuide_ConsumeWithPollError(t *testing.T) {
 func TestUpdateWithConsistentDuplicateVersions(t *testing.T) {
 	// Test the case where two ptrs map to the same position with the SAME version.
 	// This should succeed (line 909-914 in update()).
+	// monitoringPath(0,0,8) always returns [1,3,7] (3 elements).
 	path, pathErr := monitoringPath(0, 0, 8)
 	if pathErr != nil {
 		t.Fatalf("unexpected error: %v", pathErr)
 	}
-	if len(path) == 0 {
-		t.Skip("no monitoring path to test")
-	}
+	_ = path // path is computed to confirm the tree structure; the test uses empty entries.
 
 	// Create two ptrs: one at position 0 and one somewhere else that both
 	// would map to the same updated position via the monitoring path.
@@ -4500,12 +4464,10 @@ func TestSimpleRootCalculator_MalformedChainAllNil(t *testing.T) {
 
 func TestFindUpdatedMapping_LowVersionCounter(t *testing.T) {
 	// Test the error path where newVersion < storedVer.
+	// monitoringPath(0,0,8) always returns [1,3,7] (3 elements).
 	path, pathErr := monitoringPath(0, 0, 8)
 	if pathErr != nil {
 		t.Fatalf("unexpected error: %v", pathErr)
-	}
-	if len(path) == 0 {
-		t.Skip("no monitoring path available")
 	}
 	entries := map[uint64]ProofStep{
 		path[0]: {
@@ -4520,12 +4482,10 @@ func TestFindUpdatedMapping_LowVersionCounter(t *testing.T) {
 
 func TestFindUpdatedMapping_ValidUpdate(t *testing.T) {
 	// Test successful update where newVersion >= storedVer.
+	// monitoringPath(0,0,8) always returns [1,3,7] (3 elements).
 	path, pathErr := monitoringPath(0, 0, 8)
 	if pathErr != nil {
 		t.Fatalf("unexpected error: %v", pathErr)
-	}
-	if len(path) == 0 {
-		t.Skip("no monitoring path available")
 	}
 	entries := map[uint64]ProofStep{
 		path[0]: {
@@ -4558,12 +4518,10 @@ func TestFindUpdatedMapping_NoMatchingEntries(t *testing.T) {
 func TestMonitoringDataUpdate_InconsistentVersions(t *testing.T) {
 	// Test the inconsistent versions error path in update().
 	// Create two ptrs that will both map to the same finalPos but with different versions.
+	// monitoringPath(0,0,16) always returns [1,3,7,15] (4 elements, always >= 2).
 	path, pathErr := monitoringPath(0, 0, 16)
 	if pathErr != nil {
 		t.Fatalf("unexpected error: %v", pathErr)
-	}
-	if len(path) < 2 {
-		t.Skip("need at least 2 entries in monitoring path")
 	}
 
 	// Two ptrs: one stays at pos 0, another gets updated to pos 0 but with different version.
@@ -4618,13 +4576,11 @@ func TestCheckSearchConsistency_LowVersionOnMonitoringPath(t *testing.T) {
 		Ptrs:  map[uint64]uint32{},
 	}
 
-	// Find a position on the monitoring path from verPos=2, zeroPos=0
+	// Find a position on the monitoring path from verPos=2, zeroPos=0.
+	// monitoringPath(2,0,16) always returns [3,7,15] (3 elements).
 	path, pathErr := monitoringPath(2, 0, 16)
 	if pathErr != nil {
 		t.Fatalf("unexpected error: %v", pathErr)
-	}
-	if len(path) == 0 {
-		t.Skip("no monitoring path available")
 	}
 	// Store a ptr at a path position with version 3 (LOWER than new version 10)
 	data.Ptrs[path[0]] = 3

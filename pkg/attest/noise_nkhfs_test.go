@@ -505,7 +505,8 @@ func TestNKhfsHandshake_HandshakeHashLength(t *testing.T) {
 }
 
 // TestNKhfsHandshake_EmptyPayload verifies that the transport layer correctly
-// handles an empty plaintext (produces AEAD overhead only).
+// handles an empty plaintext. Rust ClientConnection::send returns an empty Vec
+// for empty input (zero chunks iterated); the Go implementation must match.
 func TestNKhfsHandshake_EmptyPayload(t *testing.T) {
 	respStaticPriv := make([]byte, 32)
 	rand.Read(respStaticPriv) //nolint:errcheck
@@ -518,7 +519,7 @@ func TestNKhfsHandshake_EmptyPayload(t *testing.T) {
 	}
 
 	responder := newNKhfsResponder(respStaticPriv, respStaticPub)
-	msg2, _, respRecvCS, _, err := responder.processMessage1(uv.handshake.InitialRequest())
+	msg2, _, _, _, err := responder.processMessage1(uv.handshake.InitialRequest())
 	if err != nil {
 		t.Fatalf("processMessage1: %v", err)
 	}
@@ -530,18 +531,11 @@ func TestNKhfsHandshake_EmptyPayload(t *testing.T) {
 
 	ct, err := conn.Send([]byte{})
 	if err != nil {
-		t.Fatalf("Send empty: %v", err)
+		t.Fatalf("Send([]byte{}) failed: %v", err)
 	}
-	if len(ct) == 0 {
-		t.Error("ciphertext for empty payload should not be empty (AEAD tag)")
-	}
-
-	pt, err := respRecvCS.Decrypt(nil, ct)
-	if err != nil {
-		t.Fatalf("Decrypt empty payload: %v", err)
-	}
-	if len(pt) != 0 {
-		t.Errorf("decrypted empty payload should be empty, got %d bytes", len(pt))
+	// Rust returns empty Vec for empty input — Go must match.
+	if len(ct) != 0 {
+		t.Errorf("Send([]byte{}) = %d bytes, want 0 (Rust returns empty Vec)", len(ct))
 	}
 }
 
@@ -611,4 +605,37 @@ func isErrorType[T error](err error, target *T) bool {
 	// Simple type assertion for test purposes.
 	_, ok := err.(T)
 	return ok
+}
+
+// TestNKhfsErrorMessages covers Error() for NKhfsDecryptError,
+// NKhfsMsgTooShortError, NKhfsDHError, and NKhfsNonceExhaustedError.
+func TestNKhfsErrorMessages(t *testing.T) {
+	cases := []struct {
+		name    string
+		err     error
+		contain string
+	}{
+		{"NKhfsDecryptError", &NKhfsDecryptError{}, "decrypt"},
+		{"NKhfsMsgTooShortError", &NKhfsMsgTooShortError{expected: 64, actual: 10}, "short"},
+		{"NKhfsDHError", &NKhfsDHError{Detail: "bad dh result"}, "dh result"},
+		{"NKhfsNonceExhaustedError", &NKhfsNonceExhaustedError{}, "nonce"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := tc.err.Error()
+			if msg == "" {
+				t.Fatal("Error() returned empty string")
+			}
+			found := false
+			for i := 0; i <= len(msg)-len(tc.contain); i++ {
+				if msg[i:i+len(tc.contain)] == tc.contain {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("Error() = %q, want to contain %q", msg, tc.contain)
+			}
+		})
+	}
 }

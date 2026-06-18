@@ -170,8 +170,8 @@ func TestSenderKeyMessageWithVersion_DistributionID(t *testing.T) {
 	msg, err := NewSenderKeyMessageWithVersion(
 		SenderKeyCurrentVersion,
 		distID,
-		1,                   // keyID
-		5,                   // iteration
+		1,                    // keyID
+		5,                    // iteration
 		[]byte("ciphertext"), // ciphertext
 		signingKey.PrivateKey(),
 		serializer,

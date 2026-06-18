@@ -183,6 +183,67 @@ func TestPkcs7UnpadInconsistentPadding(t *testing.T) {
 	}
 }
 
+// TestEncryptDelegatesToAESCBCEncrypt verifies that Encrypt(iv, key, pt)
+// produces the same result as AESCBCEncrypt(key, iv, pt). This ensures the
+// two entry points are DRY (finding #5 fix): Cipher.go delegates to aescbc.go.
+func TestEncryptDelegatesToAESCBCEncrypt(t *testing.T) {
+	key := make([]byte, 32)
+	iv := make([]byte, 16)
+	for i := range key {
+		key[i] = byte(i + 3)
+	}
+	for i := range iv {
+		iv[i] = byte(i + 0x30)
+	}
+	plaintext := []byte("delegation consistency test data!!")
+
+	ct1, err := Encrypt(iv, key, plaintext)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	ct2, err := AESCBCEncrypt(key, iv, plaintext)
+	if err != nil {
+		t.Fatalf("AESCBCEncrypt: %v", err)
+	}
+	if !bytes.Equal(ct1, ct2) {
+		t.Error("Encrypt(iv,key,pt) != AESCBCEncrypt(key,iv,pt): delegation is broken")
+	}
+}
+
+// TestDecryptDelegatesToAESCBCDecrypt verifies that Decrypt(iv, key, ct)
+// produces the same result as AESCBCDecrypt(key, iv, ct). Finding #5 fix.
+func TestDecryptDelegatesToAESCBCDecrypt(t *testing.T) {
+	key := make([]byte, 32)
+	iv := make([]byte, 16)
+	for i := range key {
+		key[i] = byte(i + 5)
+	}
+	for i := range iv {
+		iv[i] = byte(i + 0x40)
+	}
+	plaintext := []byte("delegation decryption consistency!")
+
+	ct, err := Encrypt(iv, key, plaintext)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+
+	pt1, err := Decrypt(iv, key, ct)
+	if err != nil {
+		t.Fatalf("Decrypt: %v", err)
+	}
+	pt2, err := AESCBCDecrypt(key, iv, ct)
+	if err != nil {
+		t.Fatalf("AESCBCDecrypt: %v", err)
+	}
+	if !bytes.Equal(pt1, pt2) {
+		t.Error("Decrypt(iv,key,ct) != AESCBCDecrypt(key,iv,ct): delegation is broken")
+	}
+	if !bytes.Equal(pt1, plaintext) {
+		t.Error("decrypted plaintext does not match original")
+	}
+}
+
 func TestDecryptBadPadding(t *testing.T) {
 	// Encrypt valid data, then corrupt last byte to produce bad PKCS7 padding.
 	key := make([]byte, 32)

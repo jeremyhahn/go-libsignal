@@ -31,15 +31,15 @@ const (
 	backupForwardSecrecyEncryptionKeyHMACKeySize = 32
 
 	// HKDF info labels matching the Rust implementation.
-	backupKeyFromEntropyInfo              = "20240801_SIGNAL_BACKUP_KEY"
-	backupIDInfo                          = "20241024_SIGNAL_BACKUP_ID:"
-	backupECKeyInfo                       = "20241024_SIGNAL_BACKUP_ID_KEYPAIR:"
-	localBackupMetadataKeyInfo            = "20241011_SIGNAL_LOCAL_BACKUP_METADATA_KEY"
-	mediaIDInfo                           = "20241007_SIGNAL_BACKUP_MEDIA_ID:"
-	mediaEncryptionKeyInfo                = "20241007_SIGNAL_BACKUP_ENCRYPT_MEDIA:"
-	thumbnailTransitEncryptionKeyInfo     = "20241030_SIGNAL_BACKUP_ENCRYPT_THUMBNAIL:"
-	forwardSecrecyPasswordInfo            = "Signal Message Backup 20250627:SVR PIN"
-	forwardSecrecyEncryptionKeyInfo       = "Signal Message Backup 20250627:BackupForwardSecrecyToken Encryption Key"
+	backupKeyFromEntropyInfo          = "20240801_SIGNAL_BACKUP_KEY"
+	backupIDInfo                      = "20241024_SIGNAL_BACKUP_ID:"
+	backupECKeyInfo                   = "20241024_SIGNAL_BACKUP_ID_KEYPAIR:"
+	localBackupMetadataKeyInfo        = "20241011_SIGNAL_LOCAL_BACKUP_METADATA_KEY"
+	mediaIDInfo                       = "20241007_SIGNAL_BACKUP_MEDIA_ID:"
+	mediaEncryptionKeyInfo            = "20241007_SIGNAL_BACKUP_ENCRYPT_MEDIA:"
+	thumbnailTransitEncryptionKeyInfo = "20241030_SIGNAL_BACKUP_ENCRYPT_THUMBNAIL:"
+	forwardSecrecyPasswordInfo        = "Signal Message Backup 20250627:SVR PIN"
+	forwardSecrecyEncryptionKeyInfo   = "Signal Message Backup 20250627:BackupForwardSecrecyToken Encryption Key"
 )
 
 // BackupKey is the primary key for backups, used to derive other backup-related keys.

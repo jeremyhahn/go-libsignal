@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/pem"
 	"fmt"
 	"math/big"
@@ -34,6 +35,14 @@ const MinKeyBits = 2048
 
 // CreateRSAPrivateKey generates an RSA private key of the given bit size
 // and returns it in the specified format as DER-encoded bytes.
+//
+// Behavioral divergences from the Rust reference (rust/device-transfer/src/lib.rs):
+//   - bits <= 0: Go silently promotes to DefaultKeyBits (4096). Rust's
+//     Rsa::generate(0) returns an error. This is an intentional usability
+//     improvement; callers should always pass a positive value.
+//   - bits < MinKeyBits (2048): Go returns ErrInvalidKeySize. The Rust
+//     implementation does not enforce a minimum (BoringSSL will accept any
+//     positive size). Go enforces the minimum as a safety measure.
 //
 // The caller is responsible for zeroizing the returned DER bytes when they
 // are no longer needed (e.g., via crypto.Zeroize).
@@ -97,6 +106,13 @@ func GenerateRSASigner(bits int) (keyops.RSASigner, error) {
 //
 // The private key is parsed by trying PKCS#8 first and falling back to PKCS#1.
 // The parsed key is wrapped in an RSASigner for signing and destroyed after use.
+//
+// Behavioral divergence from the Rust reference (rust/device-transfer/src/lib.rs):
+//   - Key parsing: Rust calls PKey::private_key_from_der, which accepts PKCS#8
+//     only (returns KeyDecodingFailed for PKCS#1). Go also accepts PKCS#1 via
+//     the fallback in parseRSAPrivateKey. This is a superset and does not
+//     introduce a security risk, but callers should not rely on PKCS#1 input
+//     if Rust cross-compatibility is required.
 func CreateSelfSignedCert(privateKeyDER []byte, name string, validDays int) ([]byte, error) {
 	key, err := parseRSAPrivateKey(privateKeyDER)
 	if err != nil {
@@ -170,24 +186,52 @@ func CreateSelfSignedCertPEM(privateKeyPEM []byte, name string, validDays int) (
 	}), nil
 }
 
+// oidCN is the ASN.1 OID for X.509 Common Name (2.5.4.3).
+var oidCN = asn1.ObjectIdentifier{2, 5, 4, 3}
+
+// oidO is the ASN.1 OID for X.509 Organization (2.5.4.10).
+var oidO = asn1.ObjectIdentifier{2, 5, 4, 10}
+
+// oidOU is the ASN.1 OID for X.509 Organizational Unit (2.5.4.11).
+var oidOU = asn1.ObjectIdentifier{2, 5, 4, 11}
+
+// buildSubjectName constructs a pkix.Name with RDNs in the exact order
+// CN, O, OU — matching the Rust libsignal device-transfer build_self_signed_name
+// which calls append_entry_by_text("CN", ...), "O", "OU" in that sequence.
+//
+// We use ExtraNames only (no standard fields) so that pkix.Name.ToRDNSequence
+// marshals exclusively from ExtraNames, preserving our specified order.
+// Using Names alone would be ignored during marshaling (see pkix.Name docs).
+//
+// Rust reference: rust/device-transfer/src/lib.rs build_self_signed_name
+func buildSubjectName(cn string) pkix.Name {
+	return pkix.Name{
+		ExtraNames: []pkix.AttributeTypeAndValue{
+			{Type: oidCN, Value: cn},
+			{Type: oidO, Value: "Signal Foundation"},
+			{Type: oidOU, Value: "Device Transfer"},
+		},
+	}
+}
+
 // createCertificate is the shared certificate creation logic used by both
 // CreateSelfSignedCert and CreateSelfSignedCertWithSigner.
+//
+// The Subject and Issuer RDNs are ordered CN, O, OU to match the Rust reference
+// at rust/device-transfer/src/lib.rs.
 func createCertificate(signer keyops.RSASigner, name string, validDays int) ([]byte, error) {
 	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
 		return nil, newCertCreationError(err)
 	}
 
+	subject := buildSubjectName(name)
 	now := time.Now()
 	template := &x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject: pkix.Name{
-			CommonName:         name,
-			Organization:       []string{"Signal Foundation"},
-			OrganizationalUnit: []string{"Device Transfer"},
-		},
-		NotBefore:             now.Add(-24 * time.Hour),
-		NotAfter:              now.AddDate(0, 0, validDays),
+		SerialNumber:       serialNumber,
+		Subject:            subject,
+		NotBefore:          now.Add(-24 * time.Hour),
+		NotAfter:           now.AddDate(0, 0, validDays),
 		SignatureAlgorithm: x509.SHA256WithRSA,
 	}
 

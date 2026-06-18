@@ -95,6 +95,10 @@ func TestNewUIDStructFromServiceID(t *testing.T) {
 	if uid.M1 == nil || uid.M2 == nil {
 		t.Fatal("M1 or M2 is nil")
 	}
+	// RawUUIDBytes must be populated from the ServiceID.
+	if uid.RawUUIDBytes != uuid {
+		t.Fatal("RawUUIDBytes not populated correctly")
+	}
 
 	// Deterministic
 	uid2 := NewUIDStructFromServiceID(sid)
@@ -106,6 +110,77 @@ func TestNewUIDStructFromServiceID(t *testing.T) {
 	points := uid.AsPoints()
 	if points[0] == nil || points[1] == nil {
 		t.Fatal("AsPoints returned nil")
+	}
+}
+
+// TestUIDStructSerializeRoundTrip constructs a UIDStruct from a known UUID,
+// serializes to the 80-byte wire format, and verifies round-trip fidelity.
+// This directly tests the Rust wire layout: bytes:16 ‖ M1:32 ‖ M2:32.
+func TestUIDStructSerializeRoundTrip(t *testing.T) {
+	uuid := [UUIDLen]byte{
+		0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xba, 0xbe,
+		0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
+	}
+	sid := NewACI(uuid)
+	uid := NewUIDStructFromServiceID(sid)
+
+	wire := uid.Serialize()
+	if len(wire) != UIDStructLen {
+		t.Fatalf("Serialize produced %d bytes, want %d", len(wire), UIDStructLen)
+	}
+
+	// First 16 bytes must be the raw UUID.
+	var gotUUID [16]byte
+	copy(gotUUID[:], wire[:16])
+	if gotUUID != uuid {
+		t.Fatalf("wire[0:16] = %x, want %x", gotUUID, uuid)
+	}
+
+	// Deserialize and check all fields.
+	got, err := DeserializeUIDStruct(wire)
+	if err != nil {
+		t.Fatalf("DeserializeUIDStruct: %v", err)
+	}
+	if got.RawUUIDBytes != uuid {
+		t.Error("RawUUIDBytes mismatch after round-trip")
+	}
+	if got.M1.Equal(uid.M1) != 1 {
+		t.Error("M1 mismatch after round-trip")
+	}
+	if got.M2.Equal(uid.M2) != 1 {
+		t.Error("M2 mismatch after round-trip")
+	}
+
+	// Re-serialize; bytes must be identical.
+	wire2 := got.Serialize()
+	for i := range wire {
+		if wire[i] != wire2[i] {
+			t.Fatalf("byte %d differs: 0x%02x != 0x%02x", i, wire[i], wire2[i])
+		}
+	}
+}
+
+// TestDeserializeUIDStruct_InvalidLength verifies that DeserializeUIDStruct
+// returns ErrInvalidCredentialLength for inputs of the wrong size.
+func TestDeserializeUIDStruct_InvalidLength(t *testing.T) {
+	cases := []struct {
+		name string
+		data []byte
+	}{
+		{"empty", []byte{}},
+		{"too short", make([]byte, 16)},
+		{"too long", make([]byte, 96)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DeserializeUIDStruct(tc.data)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if _, ok := err.(*ErrInvalidCredentialLength); !ok {
+				t.Fatalf("expected *ErrInvalidCredentialLength, got %T: %v", err, err)
+			}
+		})
 	}
 }
 

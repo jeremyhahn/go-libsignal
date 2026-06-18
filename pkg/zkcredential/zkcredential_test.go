@@ -112,7 +112,7 @@ type testDomain struct {
 	ga [2]*ristretto255.Element
 }
 
-func (d *testDomain) ID() string                        { return d.id }
+func (d *testDomain) ID() string                   { return d.id }
 func (d *testDomain) Ga() [2]*ristretto255.Element { return d.ga }
 
 func newTestDomain(id string) *testDomain {

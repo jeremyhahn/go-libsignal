@@ -255,3 +255,101 @@ type ErrKeyPairTypeAssertion struct {
 func (e *ErrKeyPairTypeAssertion) Error() string {
 	return fmt.Sprintf("zkcredential: expected *anyKeyPair, got %T", e.Got)
 }
+
+// ErrEndorsementResponseTruncated indicates the serialized EndorsementResponse
+// is too short to contain the expected fields.
+type ErrEndorsementResponseTruncated struct {
+	Need int
+	Got  int
+}
+
+func (e *ErrEndorsementResponseTruncated) Error() string {
+	return fmt.Sprintf("zkcredential: endorsement response truncated: need %d bytes, got %d", e.Need, e.Got)
+}
+
+// ErrEndorsementResponsePointLength indicates a compressed point within an
+// EndorsementResponse has an unexpected length (must be 32 bytes).
+type ErrEndorsementResponsePointLength struct {
+	Index int
+	Got   int
+}
+
+func (e *ErrEndorsementResponsePointLength) Error() string {
+	return fmt.Sprintf("zkcredential: endorsement response point[%d] has wrong length: got %d, want 32", e.Index, e.Got)
+}
+
+// ErrEndorsementResponseTrailingBytes indicates that unexpected bytes follow
+// the EndorsementResponse payload; bincode rejects trailing bytes.
+type ErrEndorsementResponseTrailingBytes struct {
+	Count int
+}
+
+func (e *ErrEndorsementResponseTrailingBytes) Error() string {
+	return fmt.Sprintf("zkcredential: endorsement response has %d unexpected trailing bytes", e.Count)
+}
+
+// ErrLengthOverflow indicates that a u64 length prefix read from the wire
+// exceeds math.MaxInt and cannot be safely represented as a Go int.
+// This prevents integer-overflow / unbounded-alloc on 64-bit wire lengths.
+type ErrLengthOverflow struct {
+	Field string
+	Value uint64
+}
+
+func (e *ErrLengthOverflow) Error() string {
+	return fmt.Sprintf("zkcredential: %s length %d overflows int", e.Field, e.Value)
+}
+
+// ErrLengthExceedsInput indicates that a u64 length prefix claims more bytes
+// than are available in the remaining input, matching Rust bincode's behavior
+// of failing immediately on lengths that exceed the buffer.
+type ErrLengthExceedsInput struct {
+	Field     string
+	Value     uint64
+	Remaining uint64
+}
+
+func (e *ErrLengthExceedsInput) Error() string {
+	return fmt.Sprintf("zkcredential: %s length %d exceeds remaining input %d", e.Field, e.Value, e.Remaining)
+}
+
+// ErrTrailingBytes indicates that bytes remain unconsumed after a public
+// Deserialize* function completes. Rust's bincode with reject_trailing_bytes()
+// treats this as a decode error; Go matches that behavior.
+type ErrTrailingBytes struct {
+	Count int
+}
+
+func (e *ErrTrailingBytes) Error() string {
+	return fmt.Sprintf("zkcredential: %d unexpected trailing bytes", e.Count)
+}
+
+// ErrSizeConstraint indicates the input is shorter than the minimum required.
+// Used as the Err field of ErrInvalidEncoding for length-prefix validation.
+type ErrSizeConstraint struct {
+	Min int
+	Got int
+}
+
+func (e *ErrSizeConstraint) Error() string {
+	return fmt.Sprintf("too short: need %d bytes, got %d", e.Min, e.Got)
+}
+
+// ErrTruncated indicates the data ends unexpectedly with no known required
+// count. Used as the Err field of ErrInvalidEncoding when data is truncated
+// at a field boundary.
+type ErrTruncated struct{}
+
+func (e *ErrTruncated) Error() string {
+	return "truncated"
+}
+
+// ErrTruncatedNeed indicates the data is truncated and specifies how many
+// additional bytes are needed. Used as the Err field of ErrInvalidEncoding.
+type ErrTruncatedNeed struct {
+	Need int
+}
+
+func (e *ErrTruncatedNeed) Error() string {
+	return fmt.Sprintf("truncated: need %d bytes", e.Need)
+}

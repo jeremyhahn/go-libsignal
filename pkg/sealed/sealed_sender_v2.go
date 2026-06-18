@@ -62,18 +62,58 @@ const (
 )
 
 // SealedSenderV2SentMessageRecipient holds per-recipient data in a v2 multi-recipient message.
+//
+// KeyMaterialOffset and KeyMaterialLength locate this recipient's encrypted-M
+// (C_i) ‖ auth-tag (AT_i) region within the full wire-format message, enabling
+// server-side multi-recipient delivery (MRM) to extract per-recipient views
+// without re-encoding the message. They are populated only when the message is
+// parsed via ParseSealedSenderV2SentMessage; v2ParseMessage callers that pass
+// only the body bytes will see offsets relative to the body. For excluded
+// recipients (no devices) the values are both zero.
 type SealedSenderV2SentMessageRecipient struct {
 	DeviceIDs       []uint32
 	RegistrationIDs []uint16
 	EncryptedMKey   []byte // 32 bytes - encrypted random M (C_i)
 	AuthTag         []byte // 16 bytes - authentication tag (AT_i)
+
+	// KeyMaterialOffset is the byte offset (within the parser input) where
+	// this recipient's C_i ‖ AT_i region begins. See type-level docs.
+	KeyMaterialOffset int
+	// KeyMaterialLength is the length of the C_i ‖ AT_i region (always
+	// v2EncryptedMKeySize + v2AuthTagSize = 48 when non-zero, 0 for
+	// excluded recipients).
+	KeyMaterialLength int
 }
 
 // SealedSenderV2SentMessage represents a parsed v2 multi-recipient sent message.
+//
+// When the message is parsed via ParseSealedSenderV2SentMessage, fullMessage
+// retains the original wire-format bytes (including the leading version byte),
+// version records the format version, sharedBytesOffset records the start of
+// the shared (e_pub ‖ encrypted_payload) region, and RecipientOrder lists the
+// service-ID keys in their parse order. Together these enable server-side MRM
+// to compute per-recipient views.
 type SealedSenderV2SentMessage struct {
 	Recipients       map[string]*SealedSenderV2SentMessageRecipient // keyed by ServiceId string
 	EphemeralPublic  []byte
 	EncryptedPayload []byte
+
+	// RecipientOrder lists Recipients keys in their parse order. Mirrors
+	// the IndexMap iteration order in Rust libsignal so callers that iterate
+	// recipients deterministically can do so even though Go maps are
+	// unordered.
+	RecipientOrder []string
+
+	// fullMessage is the original wire-format buffer when the message was
+	// parsed via ParseSealedSenderV2SentMessage; nil otherwise. Read-only.
+	fullMessage []byte
+	// version is the format version byte (0x22 or 0x23) when fullMessage is
+	// set; zero otherwise.
+	version byte
+	// sharedBytesOffset is the offset within fullMessage where the shared
+	// (ephemeral public key + encrypted payload) region begins. Zero when
+	// fullMessage is nil.
+	sharedBytesOffset int
 }
 
 // v2RecipientInput groups the inputs needed for each recipient during encryption.
@@ -200,8 +240,11 @@ func SealedSenderMultiRecipientEncrypt(
 			return nil, &V2InputError{Detail: fmt.Sprintf("nil session for destination %s", dest.String())}
 		}
 
-		// Parse the address name as an ACI ServiceId.
-		sid, err := protocol.ServiceIdFromString(protocol.ServiceIdKindACI, dest.Name())
+		// Parse the address name as a ServiceId, auto-detecting ACI vs PNI from
+		// the canonical "PNI:<uuid>" prefix. Rust uses ServiceId::parse_from_service_id_string
+		// which accepts both prefixed and bare UUID forms. Hard-coding ACI here would
+		// silently reject PNI-addressed destinations.
+		sid, err := protocol.ServiceIdFromServiceIdString(dest.Name())
 		if err != nil {
 			return nil, &V2ParseError{Detail: fmt.Sprintf("invalid service ID for %s", dest.Name()), Err: err}
 		}
@@ -618,13 +661,14 @@ func SealedSenderV2DecryptToUSMC(
 	}
 
 	// Step 7.5: Validate that the sender's UUID from the certificate is a
-	// well-formed ServiceId. This consistency check ensures the decrypted USMC
-	// carries a valid sender identity before proceeding with AT verification.
+	// well-formed ServiceId, auto-detecting ACI vs PNI from the "PNI:" prefix.
+	// Rust uses ServiceId::parse_from_service_id_string which accepts both
+	// prefixed and bare UUID forms; PNI-keyed sender certificates must succeed.
 	senderUUID := usmcContent.Sender().SenderUUID()
 	if senderUUID == "" {
 		return nil, &CertificateError{Detail: "sender certificate has empty UUID"}
 	}
-	if _, sidErr := protocol.ServiceIdFromString(protocol.ServiceIdKindACI, senderUUID); sidErr != nil {
+	if _, sidErr := protocol.ServiceIdFromServiceIdString(senderUUID); sidErr != nil {
 		return nil, &V2OperationError{Operation: "sender certificate has invalid ServiceId", Err: sidErr}
 	}
 
@@ -903,16 +947,17 @@ func SealedSenderV2DecryptReceivedToUSMC(
 	}
 
 	// Step 7.5: Validate that the sender's UUID from the certificate is a
-	// well-formed ServiceId. This ensures the decrypted USMC contains a
-	// consistent, parseable sender identity before proceeding with sender
-	// authentication. Without this check, a malformed certificate could pass
-	// AT verification (which only binds the identity key) but carry an
-	// invalid sender UUID that would cause failures downstream.
+	// well-formed ServiceId, auto-detecting ACI vs PNI from the "PNI:" prefix.
+	// Rust uses ServiceId::parse_from_service_id_string which accepts both
+	// prefixed and bare UUID forms; PNI-keyed sender certificates must succeed.
+	// Without this check, a malformed certificate could pass AT verification
+	// (which only binds the identity key) but carry an invalid sender UUID
+	// that would cause failures downstream.
 	senderUUID := usmcContent.Sender().SenderUUID()
 	if senderUUID == "" {
 		return nil, ErrV2ReceivedDeserializeFailed
 	}
-	if _, sidErr := protocol.ServiceIdFromString(protocol.ServiceIdKindACI, senderUUID); sidErr != nil {
+	if _, sidErr := protocol.ServiceIdFromServiceIdString(senderUUID); sidErr != nil {
 		return nil, ErrV2ReceivedDeserializeFailed
 	}
 
@@ -981,11 +1026,18 @@ func v2ParseMessage(data []byte, version byte) (*SealedSenderV2SentMessage, erro
 	}
 	offset += n
 
-	if recipientCount > 10000 {
-		return nil, &V2ParseError{Detail: fmt.Sprintf("recipient count too large: %d", recipientCount)}
+	// Rust caps only the IndexMap *preallocation* at 6000; it never rejects
+	// a message based on recipient count. We mirror that: use a bounded
+	// preallocation but do not return an error for large counts. Callers
+	// (e.g. server policy enforcement) may impose their own cap after parsing.
+	const v2MaxPreallocRecipients = 6000
+	preallocCap := recipientCount
+	if preallocCap > v2MaxPreallocRecipients {
+		preallocCap = v2MaxPreallocRecipients
 	}
 
-	recipients := make(map[string]*SealedSenderV2SentMessageRecipient, recipientCount)
+	recipients := make(map[string]*SealedSenderV2SentMessageRecipient, preallocCap)
+	recipientOrder := make([]string, 0, preallocCap)
 
 	for i := uint64(0); i < recipientCount; i++ {
 		// Parse ServiceId based on version.
@@ -1055,13 +1107,16 @@ func v2ParseMessage(data []byte, version byte) (*SealedSenderV2SentMessage, erro
 			}
 		}
 
-		// If devices were found, read C_i and AT_i.
+		sidKey := sid.String()
+
 		if len(deviceIDs) > 0 {
+			// Active recipient: read C_i and AT_i, then insert or merge.
 			perRecipientSize := v2EncryptedMKeySize + v2AuthTagSize
 			if offset+perRecipientSize > len(data) {
 				return nil, &V2ParseError{Detail: "truncated per-recipient data"}
 			}
 
+			keyMaterialOffset := offset
 			encryptedM := make([]byte, v2EncryptedMKeySize)
 			copy(encryptedM, data[offset:offset+v2EncryptedMKeySize])
 			offset += v2EncryptedMKeySize
@@ -1070,11 +1125,11 @@ func v2ParseMessage(data []byte, version byte) (*SealedSenderV2SentMessage, erro
 			copy(authTag, data[offset:offset+v2AuthTagSize])
 			offset += v2AuthTagSize
 
-			sidKey := sid.String()
 			existing, ok := recipients[sidKey]
 			if ok {
 				// Multiple entries for the same ServiceId: merge device lists.
-				// The Rust reference allows this for recipients split across chunks.
+				// Rust mirrors this; an existing empty entry (excluded recipient)
+				// paired with a non-empty one is a protocol error.
 				if len(existing.DeviceIDs) == 0 || len(deviceIDs) == 0 {
 					return nil, &V2ParseError{Detail: "recipient redundantly encoded as empty"}
 				}
@@ -1082,20 +1137,39 @@ func v2ParseMessage(data []byte, version byte) (*SealedSenderV2SentMessage, erro
 				existing.RegistrationIDs = append(existing.RegistrationIDs, regIDs...)
 			} else {
 				recipients[sidKey] = &SealedSenderV2SentMessageRecipient{
-					DeviceIDs:       deviceIDs,
-					RegistrationIDs: regIDs,
-					EncryptedMKey:   encryptedM,
-					AuthTag:         authTag,
+					DeviceIDs:         deviceIDs,
+					RegistrationIDs:   regIDs,
+					EncryptedMKey:     encryptedM,
+					AuthTag:           authTag,
+					KeyMaterialOffset: keyMaterialOffset,
+					KeyMaterialLength: perRecipientSize,
 				}
+				recipientOrder = append(recipientOrder, sidKey)
 			}
+		} else {
+			// Excluded recipient (device_id == 0): insert into the map with empty
+			// device/key-material so callers can distinguish "explicitly excluded"
+			// from "not in message". Mirrors Rust's IndexMap insert with
+			// devices:[] and c_and_at:[] for excluded entries.
+			// Inserting a second excluded entry for the same ServiceId is an error
+			// (matches Rust's "recipient redundantly encoded as empty" check).
+			if existing, ok := recipients[sidKey]; ok {
+				if len(existing.DeviceIDs) == 0 {
+					return nil, &V2ParseError{Detail: "recipient redundantly encoded as empty"}
+				}
+				// Active recipient preceded by excluded — also an error per Rust.
+				return nil, &V2ParseError{Detail: "recipient redundantly encoded as empty"}
+			}
+			recipients[sidKey] = &SealedSenderV2SentMessageRecipient{}
+			recipientOrder = append(recipientOrder, sidKey)
 		}
-		// Excluded recipients (deviceIDs empty) are simply skipped.
 	}
 
 	// Ephemeral public key (32 bytes).
 	if offset+32 > len(data) {
 		return nil, &V2ParseError{Detail: "truncated ephemeral public key"}
 	}
+	sharedBytesOffset := offset
 	ephPub := make([]byte, 32)
 	copy(ephPub, data[offset:offset+32])
 	offset += 32
@@ -1108,8 +1182,10 @@ func v2ParseMessage(data []byte, version byte) (*SealedSenderV2SentMessage, erro
 	copy(encryptedPayload, data[offset:])
 
 	return &SealedSenderV2SentMessage{
-		Recipients:       recipients,
-		EphemeralPublic:  ephPub,
-		EncryptedPayload: encryptedPayload,
+		Recipients:        recipients,
+		EphemeralPublic:   ephPub,
+		EncryptedPayload:  encryptedPayload,
+		RecipientOrder:    recipientOrder,
+		sharedBytesOffset: sharedBytesOffset,
 	}, nil
 }

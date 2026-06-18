@@ -50,39 +50,85 @@ func NewKeys(cipherKey, macKey, iv []byte, index uint32) *Keys {
 	}
 }
 
+// NewSeedOnlyKeys creates a Keys containing only seed material and an index.
+// The cipher/mac/iv fields are nil; the caller MUST re-derive the actual keys
+// via chain.DeriveMessageKeysFromSeed before encryption/decryption.
+// This matches Rust's MessageKeyGenerator::Seed variant, which defers full
+// derivation until the PQR salt is known at rust/protocol/src/ratchet/keys.rs:29-43.
+func NewSeedOnlyKeys(index uint32, seed []byte) *Keys {
+	seedCopy := make([]byte, len(seed))
+	copy(seedCopy, seed)
+	guardedSeed, err := secret.New(seedCopy)
+	if err != nil {
+		panic("message: failed to allocate guarded memory for seed-only key: " + err.Error())
+	}
+	return &Keys{
+		index:        index,
+		seedMaterial: guardedSeed,
+	}
+}
+
 // NewKeysFromStruct will return a new message keys object from the
-// given serializeable structure. The key bytes are copied before being
-// moved into guarded memory so that the source structure is not zeroized
-// by memguard. Panics if memguard allocation fails for seedMaterial (fatal condition).
+// given serializeable structure.
+//
+// When SeedMaterial is non-empty (seed-only form, matching Rust
+// MessageKeyGenerator::from_pb Seed branch at
+// rust/protocol/src/ratchet/keys.rs:85-86), only the seed and index are
+// loaded; cipher_key, mac_key, and iv are left nil. The caller must
+// re-derive the keys via DeriveMessageKeysFromSeed before use.
+//
+// When SeedMaterial is empty (derived-keys form, matching Rust Keys branch),
+// cipher_key, mac_key, and iv are loaded into guarded memory.
+//
+// Panics if memguard allocation fails (fatal condition).
 func NewKeysFromStruct(structure *KeysStructure) *Keys {
+	// Seed-only form: matches Rust MessageKeyGenerator::from_pb Seed branch.
+	if len(structure.SeedMaterial) > 0 {
+		seedCopy := make([]byte, len(structure.SeedMaterial))
+		copy(seedCopy, structure.SeedMaterial)
+		guardedSeed, err := secret.New(seedCopy)
+		if err != nil {
+			panic("message: failed to allocate guarded memory for seed material: " + err.Error())
+		}
+		return &Keys{
+			index:        structure.Index,
+			seedMaterial: guardedSeed,
+		}
+	}
+
+	// Derived-keys form: matches Rust MessageKeyGenerator::from_pb Keys branch.
 	cipherCopy := make([]byte, len(structure.CipherKey))
 	copy(cipherCopy, structure.CipherKey)
 	macCopy := make([]byte, len(structure.MacKey))
 	copy(macCopy, structure.MacKey)
 	ivCopy := make([]byte, len(structure.IV))
 	copy(ivCopy, structure.IV)
-	keys := NewKeys(
-		cipherCopy,
-		macCopy,
-		ivCopy,
-		structure.Index,
-	)
-	if len(structure.SeedMaterial) > 0 {
-		seedCopy := make([]byte, len(structure.SeedMaterial))
-		copy(seedCopy, structure.SeedMaterial)
-		guardedSeed, err := secret.New(seedCopy)
-		if err != nil {
-			keys.Zeroize()
-			panic("message: failed to allocate guarded memory for seed material: " + err.Error())
-		}
-		keys.seedMaterial = guardedSeed
-	}
-	return keys
+	return NewKeys(cipherCopy, macCopy, ivCopy, structure.Index)
 }
 
 // NewStructFromKeys returns a serializeable structure of message keys.
-// The returned structure contains copies of the key bytes for safe serialization.
+//
+// When seed material is present, the structure is written in seed-only form
+// (cipher_key, mac_key, and iv are empty). This matches Rust's
+// MessageKeyGenerator::into_pb for the Seed variant at
+// rust/protocol/src/ratchet/keys.rs:54-60, which stores only the seed so
+// that SPQR re-derivation with a different PQR salt remains possible at
+// decrypt time. When no seed material is present, the fully-derived keys are
+// stored (cipher_key, mac_key, iv populated; seed empty), matching the Keys
+// variant of into_pb.
 func NewStructFromKeys(keys *Keys) *KeysStructure {
+	// Seed-only form: matches Rust MessageKeyGenerator::into_pb Seed variant.
+	if keys.seedMaterial != nil && !keys.seedMaterial.IsDestroyed() {
+		seedBytes := keys.seedMaterial.Bytes()
+		seedCopy := make([]byte, len(seedBytes))
+		copy(seedCopy, seedBytes)
+		return &KeysStructure{
+			Index:        keys.index,
+			SeedMaterial: seedCopy,
+		}
+	}
+
+	// Derived-keys form: matches Rust MessageKeyGenerator::into_pb Keys variant.
 	cipherBytes := keys.cipherKey.Bytes()
 	macBytes := keys.macKey.Bytes()
 	ivBytes := keys.iv.Bytes()
@@ -94,19 +140,12 @@ func NewStructFromKeys(keys *Keys) *KeysStructure {
 	ivCopy := make([]byte, len(ivBytes))
 	copy(ivCopy, ivBytes)
 
-	structure := &KeysStructure{
+	return &KeysStructure{
 		CipherKey: cipherCopy,
 		MacKey:    macCopy,
 		IV:        ivCopy,
 		Index:     keys.index,
 	}
-	if keys.seedMaterial != nil && !keys.seedMaterial.IsDestroyed() {
-		seedBytes := keys.seedMaterial.Bytes()
-		seedCopy := make([]byte, len(seedBytes))
-		copy(seedCopy, seedBytes)
-		structure.SeedMaterial = seedCopy
-	}
-	return structure
 }
 
 // KeysStructure is a serializeable structure of message keys.

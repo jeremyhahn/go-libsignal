@@ -34,4 +34,10 @@ const (
 
 	// MLKEM768FullCTSize is the full ciphertext size (ct1 + ct2).
 	MLKEM768FullCTSize = MLKEM768CT1Size + MLKEM768CT2Size // 1088
+
+	// MLKEM768EncapStateSize is the size in bytes of the libcrux EncapsulationState
+	// wire format produced by Encaps1 and consumed by Encaps2 / CompleteEncaps2.
+	// Layout (per libcrux-ml-kem EncapsState): r_as_ntt(1536) || error2(512) || randomness(32).
+	// Rust SPQR stores this 2080-byte blob in Unchunked.Ct1Sent.es.
+	MLKEM768EncapStateSize = 2080
 )

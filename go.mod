@@ -1,20 +1,23 @@
 module github.com/jeremyhahn/go-libsignal
 
-go 1.25.0
+go 1.26.3
 
 require (
 	filippo.io/edwards25519 v1.2.0
+	github.com/Eyevinn/mp4ff v0.52.0
 	github.com/awnumar/memguard v0.23.0
 	github.com/cloudflare/circl v1.6.3
 	github.com/flynn/noise v1.1.0
 	github.com/gtank/ristretto255 v0.2.0
-	golang.org/x/crypto v0.49.0
-	golang.org/x/text v0.35.0
+	golang.org/x/crypto v0.52.0
+	golang.org/x/text v0.37.0
 	google.golang.org/protobuf v1.36.11
+	pgregory.net/rapid v1.3.0
 )
 
 require (
 	github.com/awnumar/memcall v0.5.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
-	golang.org/x/sys v0.42.0 // indirect
+	github.com/rogpeppe/go-internal v1.14.1 // indirect
+	golang.org/x/sys v0.45.0 // indirect
 )

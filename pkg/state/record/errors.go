@@ -2,7 +2,25 @@ package record
 
 import (
 	"fmt"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/kem"
 )
+
+// ErrKyberPreKeyTypeMismatch is returned when the serialized public-key type
+// tag in a KyberPreKeyStructure does not match the type tag of the secret key.
+// This prevents silently loading a key pair where the public and secret key
+// were generated with different KEM algorithms.
+type ErrKyberPreKeyTypeMismatch struct {
+	PublicKeyType kem.KeyType
+	SecretKeyType kem.KeyType
+}
+
+func (e *ErrKyberPreKeyTypeMismatch) Error() string {
+	return fmt.Sprintf(
+		"record: kyber pre-key type mismatch: public key type 0x%02x != secret key type 0x%02x",
+		e.PublicKeyType, e.SecretKeyType,
+	)
+}
 
 // RootKeyTypeError indicates that the provided RootKeyable value is not the
 // expected concrete type (*root.Key).
@@ -52,4 +70,15 @@ func (e *SessionCopyError) Error() string {
 
 func (e *SessionCopyError) Unwrap() error {
 	return e.Err
+}
+
+// SignedPreKeyPublicKeyLengthError indicates that the public key bytes passed
+// to a SignedPreKey constructor have an unexpected length.
+type SignedPreKeyPublicKeyLengthError struct {
+	Got  int
+	Want int
+}
+
+func (e *SignedPreKeyPublicKeyLengthError) Error() string {
+	return fmt.Sprintf("record: signed pre-key public key: expected %d bytes, got %d", e.Want, e.Got)
 }

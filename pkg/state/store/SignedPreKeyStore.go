@@ -6,19 +6,25 @@ import (
 
 // SignedPreKey store is an interface that describes how to persistently
 // store signed PreKeys.
+//
+// Every method returns an error so that storage backend failures propagate to
+// callers. A nil record with a nil error from Load methods means "not found".
+//
+// Mirrors the Rust libsignal trait SignedPreKeyStore at
+// rust/protocol/src/storage/traits.rs.
 type SignedPreKey interface {
-	// LoadSignedPreKey loads a local SignedPreKeyRecord
-	LoadSignedPreKey(signedPreKeyID uint32) *record.SignedPreKey
+	// LoadSignedPreKey loads a local SignedPreKeyRecord, returning (nil, nil) if not found.
+	LoadSignedPreKey(signedPreKeyID uint32) (*record.SignedPreKey, error)
 
-	// LoadSignedPreKeys loads all local SignedPreKeyRecords
-	LoadSignedPreKeys() []*record.SignedPreKey
+	// LoadSignedPreKeys loads all local SignedPreKeyRecords.
+	LoadSignedPreKeys() ([]*record.SignedPreKey, error)
 
-	// Store a local SignedPreKeyRecord
-	StoreSignedPreKey(signedPreKeyID uint32, record *record.SignedPreKey)
+	// StoreSignedPreKey persists a local SignedPreKeyRecord.
+	StoreSignedPreKey(signedPreKeyID uint32, record *record.SignedPreKey) error
 
-	// Check to see if store contains the given record
-	ContainsSignedPreKey(signedPreKeyID uint32) bool
+	// ContainsSignedPreKey returns true if the store contains a SignedPreKeyRecord.
+	ContainsSignedPreKey(signedPreKeyID uint32) (bool, error)
 
-	// Delete a SignedPreKeyRecord from local storage
-	RemoveSignedPreKey(signedPreKeyID uint32)
+	// RemoveSignedPreKey deletes a SignedPreKeyRecord from local storage.
+	RemoveSignedPreKey(signedPreKeyID uint32) error
 }

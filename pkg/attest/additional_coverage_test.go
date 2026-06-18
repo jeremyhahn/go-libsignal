@@ -203,8 +203,8 @@ func TestParseEndorsements_UnsupportedEnclaveType(t *testing.T) {
 
 func TestParseEndorsements_TooFewFields(t *testing.T) {
 	data := make([]byte, 16)
-	binary.LittleEndian.PutUint32(data[0:4], 1)  // version = 1
-	binary.LittleEndian.PutUint32(data[4:8], 2)  // enclaveType = 2
+	binary.LittleEndian.PutUint32(data[0:4], 1)   // version = 1
+	binary.LittleEndian.PutUint32(data[4:8], 2)   // enclaveType = 2
 	binary.LittleEndian.PutUint32(data[12:16], 2) // numElements = 2 (< sgxEndorsementFieldCount)
 	_, err := parseEndorsements(data)
 	if err == nil {
@@ -263,8 +263,8 @@ func TestParseIntelRootKey_Additional(t *testing.T) {
 	if key == nil {
 		t.Fatal("expected non-nil key")
 	}
-	if key.X == nil || key.Y == nil {
-		t.Fatal("key must have non-nil X and Y")
+	if _, err := key.ECDH(); err != nil {
+		t.Fatalf("key is not a valid P-256 point: %v", err)
 	}
 }
 

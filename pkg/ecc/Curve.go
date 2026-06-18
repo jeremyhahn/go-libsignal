@@ -114,6 +114,25 @@ func GenerateKeyPair() (*ECKeyPair, error) {
 	return keypair, nil
 }
 
+// KeyPairFromBytes constructs an ECKeyPair from raw 33-byte public key bytes
+// (1 type byte + 32 key bytes) and a 32-byte private key.  The private key is
+// clamped before storage, matching Rust KeyPair::from_public_and_private
+// (rust/core/src/curve.rs:350-360) and PrivateKey::deserialize clamping
+// (rust/core/src/curve/curve25519.rs:172).
+//
+// Rust source: rust/core/src/curve.rs:350-360.
+func KeyPairFromBytes(pubBytes []byte, privBytes [32]byte) (*ECKeyPair, error) {
+	pub, err := DecodePoint(pubBytes, 0)
+	if err != nil {
+		return nil, err
+	}
+	guardedPriv, err := NewGuardedECPrivateKey(privBytes)
+	if err != nil {
+		return nil, err
+	}
+	return NewECKeyPair(pub, guardedPriv), nil
+}
+
 // VerifySignature verifies that the message was signed with the given key.
 func VerifySignature(signingKey ECPublicKeyable, message []byte, signature [64]byte) bool {
 	publicKey := signingKey.PublicKey()
@@ -142,5 +161,19 @@ func CalculateSignature(signingKey ECPrivateKeyable, message []byte) ([64]byte, 
 		return [64]byte{}, ErrSignFailed
 	}
 
+	return *signature, nil
+}
+
+// CalculateSignatureWithRandomness signs a message with the given private key
+// using the provided 64-byte randomness. This allows deterministic signing for
+// test vectors and explicit randomness control (e.g., PNI alternate-identity).
+func CalculateSignatureWithRandomness(signingKey ECPrivateKeyable, message []byte, randomness [64]byte) ([64]byte, error) {
+	privateKey := signingKey.Serialize()
+	defer crypto.Zeroize(privateKey[:])
+
+	signature := sign(&privateKey, message, randomness)
+	if signature == nil {
+		return [64]byte{}, ErrSignFailed
+	}
 	return *signature, nil
 }

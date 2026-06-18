@@ -259,11 +259,11 @@ func x25519DH(privateKey, publicKey []byte) ([]byte, error) {
 // nkhfsHandshakeState manages the NKhfs initiator handshake state machine.
 type nkhfsHandshakeState struct {
 	ss               *nkhfsSymmetricState
-	localEphPriv     []byte                     // ephemeral X25519 private key
-	localEphPub      []byte                     // ephemeral X25519 public key
-	remoteStatic     []byte                     // peer's static X25519 public key (pre-shared)
+	localEphPriv     []byte                      // ephemeral X25519 private key
+	localEphPub      []byte                      // ephemeral X25519 public key
+	remoteStatic     []byte                      // peer's static X25519 public key (pre-shared)
 	kemDecapKey      *mlkem.DecapsulationKey1024 // local KEM decapsulation key
-	kemEncapKeyBytes []byte                     // local KEM encapsulation key bytes (sent to peer)
+	kemEncapKeyBytes []byte                      // local KEM encapsulation key bytes (sent to peer)
 }
 
 // destroy zeroizes sensitive key material in the handshake state.
@@ -373,8 +373,8 @@ func (hs *nkhfsHandshakeState) writeMessage1(payload []byte) ([]byte, error) {
 func (hs *nkhfsHandshakeState) readMessage2(msg []byte) ([]byte, *NKhfsCipherState, *NKhfsCipherState, []byte, error) {
 	const (
 		dhPubLen     = 32
-		kemCtLen     = 1568 // ML-KEM-1024 ciphertext size
-		aeadOverhead = 16   // ChaCha20-Poly1305 tag size
+		kemCtLen     = 1568                    // ML-KEM-1024 ciphertext size
+		aeadOverhead = 16                      // ChaCha20-Poly1305 tag size
 		encKemCtLen  = kemCtLen + aeadOverhead // ekem1 encrypted on wire: 1584
 		minMsg2Len   = dhPubLen + encKemCtLen
 	)

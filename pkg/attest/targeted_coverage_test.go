@@ -194,9 +194,9 @@ func TestSGXEndorsements_ValidAt_AllValid(t *testing.T) {
 func TestParseEndorsements_NotEnoughDataForOffsets_Additional(t *testing.T) {
 	// version=1, enclaveType=2, bufferSize=0, numElements=100 (too many for data)
 	data := make([]byte, 16)
-	putUint32LE(data[0:4], 1)   // version
-	putUint32LE(data[4:8], 2)   // enclaveType
-	putUint32LE(data[8:12], 0)  // bufferSize
+	putUint32LE(data[0:4], 1)     // version
+	putUint32LE(data[4:8], 2)     // enclaveType
+	putUint32LE(data[8:12], 0)    // bufferSize
 	putUint32LE(data[12:16], 100) // numElements (too many, no room for offsets)
 	_, err := parseEndorsements(data)
 	if err == nil {

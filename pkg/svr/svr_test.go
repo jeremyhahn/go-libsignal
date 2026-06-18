@@ -91,6 +91,38 @@ func TestMasterKey(t *testing.T) {
 	})
 }
 
+func TestDeriveStorageKey(t *testing.T) {
+	t.Run("deterministic", func(t *testing.T) {
+		master := bytes.Repeat([]byte{0x42}, 32)
+		k1, err := DeriveStorageKey(master)
+		if err != nil {
+			t.Fatalf("DeriveStorageKey failed: %v", err)
+		}
+		k2, err := DeriveStorageKey(master)
+		if err != nil {
+			t.Fatalf("DeriveStorageKey failed: %v", err)
+		}
+		if k1 != k2 {
+			t.Error("same input produced different storage keys")
+		}
+	})
+
+	t.Run("empty master secret", func(t *testing.T) {
+		_, err := DeriveStorageKey(nil)
+		if err == nil {
+			t.Fatal("expected error for empty master secret")
+		}
+	})
+
+	t.Run("different inputs produce different keys", func(t *testing.T) {
+		k1, _ := DeriveStorageKey([]byte("secret1"))
+		k2, _ := DeriveStorageKey([]byte("secret2"))
+		if k1 == k2 {
+			t.Error("different inputs produced same storage key")
+		}
+	})
+}
+
 func TestEncryptDecryptSecret(t *testing.T) {
 	var key [32]byte
 	copy(key[:], bytes.Repeat([]byte{0xCC}, 32))
@@ -128,38 +160,6 @@ func TestEncryptDecryptSecret(t *testing.T) {
 		_, err := DecryptSecret(wrongKey, encrypted)
 		if err == nil {
 			t.Fatal("expected error for wrong key")
-		}
-	})
-}
-
-func TestDeriveStorageKey(t *testing.T) {
-	t.Run("deterministic", func(t *testing.T) {
-		master := bytes.Repeat([]byte{0x42}, 32)
-		k1, err := DeriveStorageKey(master)
-		if err != nil {
-			t.Fatalf("DeriveStorageKey failed: %v", err)
-		}
-		k2, err := DeriveStorageKey(master)
-		if err != nil {
-			t.Fatalf("DeriveStorageKey failed: %v", err)
-		}
-		if k1 != k2 {
-			t.Error("same input produced different storage keys")
-		}
-	})
-
-	t.Run("empty master secret", func(t *testing.T) {
-		_, err := DeriveStorageKey(nil)
-		if err == nil {
-			t.Fatal("expected error for empty master secret")
-		}
-	})
-
-	t.Run("different inputs produce different keys", func(t *testing.T) {
-		k1, _ := DeriveStorageKey([]byte("secret1"))
-		k2, _ := DeriveStorageKey([]byte("secret2"))
-		if k1 == k2 {
-			t.Error("different inputs produced same storage key")
 		}
 	})
 }

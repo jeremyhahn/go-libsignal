@@ -145,11 +145,13 @@ func computeFingerprintMultiple(iterations uint32, stableID []byte, keys []*iden
 		return nil, &ParsingError{Detail: "no identity keys provided"}
 	}
 
-	// Sort keys by their serialized byte representation for deterministic
-	// fingerprint computation regardless of key ordering.
-	sort.Slice(keys, func(i, j int) bool {
-		return bytes.Compare(keys[i].Serialize(), keys[j].Serialize()) < 0
+	// Copy the slice to avoid mutating the caller's input during sort.
+	sorted := make([]*identity.Key, len(keys))
+	copy(sorted, keys)
+	sort.Slice(sorted, func(i, j int) bool {
+		return bytes.Compare(sorted[i].Serialize(), sorted[j].Serialize()) < 0
 	})
+	keys = sorted
 
 	// Concatenate all key bytes.
 	var allKeyBytes []byte

@@ -4,6 +4,8 @@
 package attest
 
 import (
+	"bytes"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -687,8 +689,6 @@ func TestVerifyEnclaveSource_ISVProdIDMismatch(t *testing.T) {
 	}
 }
 
-
-
 // --- verifyClaimsHash ---
 
 func TestVerifyClaimsHash_NoClaims(t *testing.T) {
@@ -776,7 +776,6 @@ func TestParseAttestKey_OffCurve(t *testing.T) {
 }
 
 // --- ForSGX: input validation ---
-
 
 func TestForSGX_WrongMREnclaveSize(t *testing.T) {
 	_, err := ForSGX(make([]byte, 16), []byte("ev"), []byte("end"), nil, time.Now(), PreQuantum)
@@ -885,9 +884,9 @@ func TestHandshake_Complete_FullRoundTrip(t *testing.T) {
 
 	respHS, _ := noise.NewHandshakeState(noise.Config{
 		CipherSuite:   cs,
-		Pattern:        noise.HandshakeNK,
-		Initiator:      false,
-		StaticKeypair:  responderKP,
+		Pattern:       noise.HandshakeNK,
+		Initiator:     false,
+		StaticKeypair: responderKP,
 	})
 
 	_, _, _, _ = respHS.ReadMessage(nil, uv.handshake.InitialRequest())
@@ -1009,8 +1008,8 @@ func TestVerifyCertificates_RootSelfSignedButNotIntelKey(t *testing.T) {
 		},
 	}
 	endorsements := &sgxEndorsements{
-		tcbIssuerChain:    []*x509.Certificate{leafCert, rootCert},
-		qeIDIssuerChain:   []*x509.Certificate{leafCert, rootCert},
+		tcbIssuerChain:  []*x509.Certificate{leafCert, rootCert},
+		qeIDIssuerChain: []*x509.Certificate{leafCert, rootCert},
 	}
 
 	err := verifyCertificates(evidence, endorsements, time.Now())
@@ -1244,8 +1243,8 @@ func TestUnvalidatedHandshake_SkipRaftValidation_WithClaims(t *testing.T) {
 	kp, _ := cs.GenerateKeypair(nil)
 
 	claims := &Claims{
-		PublicKey: kp.Public,
-		Custom:    map[string][]byte{"key": []byte("value")},
+		PublicKey:       kp.Public,
+		Custom:          map[string][]byte{"key": []byte("value")},
 		RaftGroupConfig: &RaftConfig{GroupID: 42},
 	}
 	uv, err := newHandshakeWithClaims(claims, PreQuantum)
@@ -1278,9 +1277,9 @@ func TestHSMClientConnection_SendRecv_AfterComplete(t *testing.T) {
 	}
 
 	respHS, _ := noise.NewHandshakeState(noise.Config{
-		CipherSuite:  cs,
-		Pattern:      noise.HandshakeNK,
-		Initiator:    false,
+		CipherSuite:   cs,
+		Pattern:       noise.HandshakeNK,
+		Initiator:     false,
 		StaticKeypair: responderKP,
 	})
 
@@ -1339,18 +1338,21 @@ func TestParseIntelRootKey_Valid(t *testing.T) {
 // --- parseAttestKey: valid key ---
 
 func TestParseAttestKey_ValidKey(t *testing.T) {
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// Use crypto/ecdh to avoid deprecated big.Int coordinate fields.
+	ecdhPriv, _ := ecdh.P256().GenerateKey(rand.Reader)
 	var raw [64]byte
-	xBytes := key.X.Bytes()
-	yBytes := key.Y.Bytes()
-	copy(raw[32-len(xBytes):32], xBytes)
-	copy(raw[64-len(yBytes):64], yBytes)
+	// Bytes() returns 0x04 || X(32) || Y(32); strip the 0x04 prefix.
+	copy(raw[:], ecdhPriv.PublicKey().Bytes()[1:])
 
 	parsed, err := parseAttestKey(raw[:])
 	if err != nil {
 		t.Fatalf("parseAttestKey failed: %v", err)
 	}
-	if parsed.X.Cmp(key.X) != 0 || parsed.Y.Cmp(key.Y) != 0 {
+	parsedECDH, err := parsed.ECDH()
+	if err != nil {
+		t.Fatalf("parsed key is not a valid P-256 point: %v", err)
+	}
+	if !bytes.Equal(parsedECDH.Bytes(), ecdhPriv.PublicKey().Bytes()) {
 		t.Error("parsed key does not match original")
 	}
 }
@@ -1366,10 +1368,10 @@ func TestVerifyEnclaveSource_AllMatchWithMask(t *testing.T) {
 			quoteBody: &sgxQuoteBody{qeVendorID: intelQEVendorID},
 			support: &sgxQuoteSupport{
 				qeReportBody: &sgxReportBody{
-					mrsigner:       signer,
-					isvprodid:      1,
-					miscselect:     0xFF34,
-					sgxAttributes:  [16]byte{0xAB, 0xCD},
+					mrsigner:      signer,
+					isvprodid:     1,
+					miscselect:    0xFF34,
+					sgxAttributes: [16]byte{0xAB, 0xCD},
 				},
 			},
 		},

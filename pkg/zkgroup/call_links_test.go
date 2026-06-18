@@ -523,3 +523,128 @@ func TestCreateCallLinkCredentialPresentation_Verify_Overflow(t *testing.T) {
 	}
 }
 
+// TestEncodeCreateCallLinkCredentialResponse_LeadingReservedByte verifies that
+// the fixed bug is present: the encoded response must start with 0x00 (the
+// Rust bincode ReservedByte) followed by 8 LE timestamp bytes.
+//
+// Mirrors Rust CreateCallLinkCredentialResponse at
+// rust/zkgroup/src/api/call_links/create_credential.rs:115-121.
+func TestEncodeCreateCallLinkCredentialResponse_LeadingReservedByte(t *testing.T) {
+	roomID := []byte("test-room")
+	var r0 RandomnessBytes
+	for i := range r0 {
+		r0[i] = 0x42
+	}
+	var r1, r2 RandomnessBytes
+	for i := range r1 {
+		r1[i] = 0x43
+		r2[i] = 0x44
+	}
+	uuid := [UUIDLen]byte{0x04}
+	userID := NewACI(uuid)
+	ts := NewTimestamp(1681344000) // 2023-04-13 UTC
+
+	ctx, err := NewCreateCallLinkCredentialRequestContext(roomID, r0)
+	if err != nil {
+		t.Fatalf("NewCreateCallLinkCredentialRequestContext: %v", err)
+	}
+	req := ctx.GetRequest()
+	serverParams := GenerateGenericServerSecretParams(r1)
+	resp, err := req.Issue(userID, ts, serverParams, r2)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	encoded := EncodeCreateCallLinkCredentialResponse(resp)
+
+	if len(encoded) < 9 {
+		t.Fatalf("encoded too short: got %d bytes", len(encoded))
+	}
+
+	// First byte must be the reserved 0x00.
+	if encoded[0] != 0x00 {
+		t.Errorf("first byte = 0x%02x, want 0x00 (reserved byte missing in P0-9 fix)", encoded[0])
+	}
+
+	// Bytes [1:9] must be the timestamp in little-endian.
+	wantTS := ts.ToLeBytes()
+	for i, b := range wantTS {
+		if encoded[1+i] != b {
+			t.Errorf("timestamp byte[%d] = 0x%02x, want 0x%02x (should be LE)", i, encoded[1+i], b)
+		}
+	}
+
+	// Verify timestamp is NOT big-endian (previous bug).
+	beBuf := ts.ToBeBytes()
+	allMatchBE := true
+	for i, b := range beBuf {
+		if encoded[1+i] != b {
+			allMatchBE = false
+			break
+		}
+	}
+	if allMatchBE && beBuf != wantTS {
+		t.Error("timestamp appears to be big-endian (old bug not fixed)")
+	}
+}
+
+// TestEncodeDecodeCreateCallLinkCredentialResponse_RoundTrip verifies the
+// encode/decode round-trip for CreateCallLinkCredentialResponse.
+func TestEncodeDecodeCreateCallLinkCredentialResponse_RoundTrip(t *testing.T) {
+	roomID := []byte("round-trip-room")
+	var r0, r1, r2 RandomnessBytes
+	for i := range r0 {
+		r0[i] = 0x42
+		r1[i] = 0x43
+		r2[i] = 0x44
+	}
+	uuid := [UUIDLen]byte{0x04}
+	userID := NewACI(uuid)
+	ts := NewTimestamp(SecondsPerDay) // day-aligned
+
+	ctx, err := NewCreateCallLinkCredentialRequestContext(roomID, r0)
+	if err != nil {
+		t.Fatalf("NewCreateCallLinkCredentialRequestContext: %v", err)
+	}
+	req := ctx.GetRequest()
+	serverParams := GenerateGenericServerSecretParams(r1)
+	resp, err := req.Issue(userID, ts, serverParams, r2)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	encoded := EncodeCreateCallLinkCredentialResponse(resp)
+	decoded, err := DecodeCreateCallLinkCredentialResponse(encoded)
+	if err != nil {
+		t.Fatalf("DecodeCreateCallLinkCredentialResponse: %v", err)
+	}
+
+	if decoded.Timestamp != resp.Timestamp {
+		t.Errorf("Timestamp mismatch: got %v, want %v", decoded.Timestamp.EpochSeconds(), resp.Timestamp.EpochSeconds())
+	}
+}
+
+// TestDecodeCreateCallLinkCredentialResponse_RejectsBadReservedByte verifies
+// that decoding fails when the first byte is not 0x00.
+func TestDecodeCreateCallLinkCredentialResponse_RejectsBadReservedByte(t *testing.T) {
+	data := make([]byte, 200)
+	data[0] = 0x01 // bad reserved byte
+
+	_, err := DecodeCreateCallLinkCredentialResponse(data)
+	if err == nil {
+		t.Fatal("expected error for bad reserved byte")
+	}
+	var reservedErr *ErrUnexpectedReservedByte
+	if !errors.As(err, &reservedErr) {
+		t.Errorf("expected *ErrUnexpectedReservedByte, got %T: %v", err, err)
+	}
+}
+
+// TestDecodeCreateCallLinkCredentialResponse_TooShort verifies that decoding
+// fails for data that is too short to contain the header.
+func TestDecodeCreateCallLinkCredentialResponse_TooShort(t *testing.T) {
+	_, err := DecodeCreateCallLinkCredentialResponse([]byte{0x00, 0x01})
+	if err == nil {
+		t.Fatal("expected error for too-short data")
+	}
+}

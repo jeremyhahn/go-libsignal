@@ -156,6 +156,109 @@ func TestAddSenderKeyState_DifferentSigningKey(t *testing.T) {
 	}
 }
 
+// TestAddSenderKeyState_ReinsertBecomesmost_recent verifies that re-adding a
+// state with the same (chain_id, signing_key) moves it to the front of the
+// deque, matching Rust's
+// when_second_state_with_same_public_key_and_chain_id_added_then_it_becomes_the_most_recent
+// (rust/protocol/src/sender_keys.rs:571-590).
+func TestAddSenderKeyState_ReinsertBecomesMostRecent(t *testing.T) {
+	recSerializer := newTestRecordSerializer()
+	stateSerializer := newTestStateSerializer()
+	record := NewSenderKey(recSerializer, stateSerializer)
+
+	kp1 := newTestKeyPair(t)
+	kp2 := newTestKeyPair(t)
+	chainKey := make([]byte, 32)
+
+	// Add two distinct states: order becomes [2, 1] (newest first).
+	record.AddSenderKeyState(3, 1, 0, chainKey, kp1.PublicKey())
+	record.AddSenderKeyState(3, 2, 0, chainKey, kp2.PublicKey())
+
+	// SenderKeyState() returns front = state 2.
+	front, err := record.SenderKeyState()
+	if err != nil {
+		t.Fatalf("SenderKeyState() error: %v", err)
+	}
+	if front.KeyID() != 2 {
+		t.Fatalf("before re-add: front KeyID = %d, want 2", front.KeyID())
+	}
+
+	// Re-add state 1 (same key, same chain_id). It must be promoted to front.
+	record.AddSenderKeyState(3, 1, 0, chainKey, kp1.PublicKey())
+
+	front, err = record.SenderKeyState()
+	if err != nil {
+		t.Fatalf("SenderKeyState() after re-add error: %v", err)
+	}
+	if front.KeyID() != 1 {
+		t.Errorf("after re-add: front KeyID = %d, want 1 (promoted to front)", front.KeyID())
+	}
+	// State 2 must still be accessible (second position).
+	_, err = record.GetSenderKeyStateByID(2)
+	if err != nil {
+		t.Errorf("state 2 should still exist after re-add of state 1: %v", err)
+	}
+}
+
+// TestAddSenderKeyState_ExceedsMaxOldestEjected verifies FIFO eviction when
+// MAX_SENDER_KEY_STATES is exceeded, matching Rust's
+// when_exceed_maximum_states_then_oldest_is_ejected
+// (rust/protocol/src/sender_keys.rs:496-535).
+func TestAddSenderKeyState_ExceedsMaxOldestEjected(t *testing.T) {
+	if maxSenderKeyStates != 5 {
+		t.Fatalf("test written expecting maxSenderKeyStates=5, got %d", maxSenderKeyStates)
+	}
+
+	recSerializer := newTestRecordSerializer()
+	stateSerializer := newTestStateSerializer()
+	record := NewSenderKey(recSerializer, stateSerializer)
+
+	kps := make([]*ecc.ECKeyPair, 6)
+	for i := range kps {
+		kps[i] = newTestKeyPair(t)
+	}
+	chainKey := make([]byte, 32)
+
+	// Add 5 states (IDs 1-5). After each add the newest is at front.
+	for i := 0; i < 5; i++ {
+		record.AddSenderKeyState(3, uint32(i+1), 0, chainKey, kps[i].PublicKey())
+	}
+
+	// Front must be state 5 (most recently added).
+	front, err := record.SenderKeyState()
+	if err != nil {
+		t.Fatalf("SenderKeyState() error: %v", err)
+	}
+	if front.KeyID() != 5 {
+		t.Fatalf("front before eviction: KeyID = %d, want 5", front.KeyID())
+	}
+	// State 1 is the oldest (tail).
+	_, err = record.GetSenderKeyStateByID(1)
+	if err != nil {
+		t.Fatalf("state 1 should exist before eviction: %v", err)
+	}
+
+	// Add state 6 — state 1 (oldest) must be evicted.
+	record.AddSenderKeyState(3, 6, 0, chainKey, kps[5].PublicKey())
+
+	if _, err = record.GetSenderKeyStateByID(1); err == nil {
+		t.Error("state 1 (oldest) must be evicted after exceeding maxSenderKeyStates")
+	}
+	// State 6 is now at front.
+	front, err = record.SenderKeyState()
+	if err != nil {
+		t.Fatalf("SenderKeyState() after eviction error: %v", err)
+	}
+	if front.KeyID() != 6 {
+		t.Errorf("front after eviction: KeyID = %d, want 6", front.KeyID())
+	}
+	// States 2-5 must still be present.
+	for _, id := range []uint32{2, 3, 4, 5} {
+		if _, err = record.GetSenderKeyStateByID(id); err != nil {
+			t.Errorf("state %d should still exist after eviction: %v", id, err)
+		}
+	}
+}
 
 // TestSenderKeyStateFromPublicKey_SetsKeyID verifies the full constructor sets
 // all fields when creating from a public key only.

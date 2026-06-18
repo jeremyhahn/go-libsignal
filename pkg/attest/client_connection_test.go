@@ -36,9 +36,9 @@ func setupClientConnection(t *testing.T) (*ClientConnection, *noise.CipherState,
 	// Responder
 	respHS, err := noise.NewHandshakeState(noise.Config{
 		CipherSuite:   cs,
-		Pattern:        noise.HandshakeNK,
-		Initiator:      false,
-		StaticKeypair:  responderKP,
+		Pattern:       noise.HandshakeNK,
+		Initiator:     false,
+		StaticKeypair: responderKP,
 	})
 	if err != nil {
 		t.Fatalf("resp handshake state: %v", err)
@@ -112,36 +112,31 @@ func TestClientConnection_SendRecv_SmallMessage(t *testing.T) {
 	}
 }
 
+// TestClientConnection_Send_EmptyPayload is the regression test for finding #31.
+// Rust ClientConnection::send returns an empty Vec for empty input; the Go
+// implementation must match (no 16-byte AEAD-only packet).
 func TestClientConnection_Send_EmptyPayload(t *testing.T) {
-	conn, respRecvCS, _ := setupClientConnection(t)
+	conn, _, _ := setupClientConnection(t)
 
 	ciphertext, err := conn.Send([]byte{})
 	if err != nil {
-		t.Fatalf("Send empty failed: %v", err)
+		t.Fatalf("Send([]byte{}) failed: %v", err)
 	}
-	if len(ciphertext) == 0 {
-		t.Error("ciphertext for empty payload should not be empty (AEAD overhead)")
-	}
-
-	decrypted, err := respRecvCS.Decrypt(nil, nil, ciphertext)
-	if err != nil {
-		t.Fatalf("responder Decrypt failed: %v", err)
-	}
-	if len(decrypted) != 0 {
-		t.Errorf("decrypted empty payload should be empty, got %d bytes", len(decrypted))
+	if len(ciphertext) != 0 {
+		t.Errorf("Send([]byte{}) = %d bytes, want 0 (Rust returns empty Vec for empty input)", len(ciphertext))
 	}
 }
 
 func TestClientConnection_Send_NilPayload(t *testing.T) {
 	conn, _, _ := setupClientConnection(t)
 
+	// nil is treated as zero-length slice — same as empty, produces empty output.
 	ciphertext, err := conn.Send(nil)
 	if err != nil {
-		t.Fatalf("Send nil failed: %v", err)
+		t.Fatalf("Send(nil) failed: %v", err)
 	}
-	// nil is treated as empty; should produce AEAD tag
-	if len(ciphertext) == 0 {
-		t.Error("expected AEAD overhead for nil payload")
+	if len(ciphertext) != 0 {
+		t.Errorf("Send(nil) = %d bytes, want 0", len(ciphertext))
 	}
 }
 
@@ -242,4 +237,14 @@ func TestClientConnection_SendRecv_LargeMessage(t *testing.T) {
 	if !bytes.Equal(decrypted, plaintext) {
 		t.Error("large message round-trip failed")
 	}
+}
+
+// TestClientConnection_Destroy verifies that Destroy does not panic, even when
+// called on a connection whose cipher states do not implement the destroyable interface.
+func TestClientConnection_Destroy(t *testing.T) {
+	conn, _, _ := setupClientConnection(t)
+	// Must not panic; cipher states from the Noise library may or may not be destroyable.
+	conn.Destroy()
+	// Double-Destroy must also not panic.
+	conn.Destroy()
 }

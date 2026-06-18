@@ -205,6 +205,7 @@ func hashToPoint(input []byte) (*edwards25519.Point, error) {
 //	if E.s == 1: a = -k (mod q)
 //	else:        a = k (mod q)
 //	return A, a
+//
 // edwardsKeyPairResult holds the output of calculateEdwardsKeyPair,
 // including the original sign bit needed for Rust/Java interoperability.
 type edwardsKeyPairResult struct {
@@ -255,7 +256,7 @@ func calculateEdwardsKeyPair(privateKey *[32]byte) edwardsKeyPairResult {
 	return edwardsKeyPairResult{
 		A:         A,
 		Scalar:    privScalar,
-		PublicKey:  publicKey,
+		PublicKey: publicKey,
 		SignBit:   byte(eSignBit),
 	}
 }

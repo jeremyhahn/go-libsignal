@@ -4,6 +4,7 @@
 package attest
 
 import (
+	"bytes"
 	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -97,7 +98,7 @@ func AttestationMetrics(evidenceBytes []byte, endorsementBytes []byte) (map[stri
 type tcbStandingType int
 
 const (
-	tcbUpToDate          tcbStandingType = iota
+	tcbUpToDate tcbStandingType = iota
 	tcbSWHardeningNeeded
 	tcbOutOfDate
 )
@@ -1061,7 +1062,15 @@ func verifyRootCertificate(root *x509.Certificate, intelKey *ecdsa.PublicKey) er
 		return &CertChainError{Detail: "root certificate does not contain ECDSA key"}
 	}
 
-	if rootPubKey.X.Cmp(intelKey.X) != 0 || rootPubKey.Y.Cmp(intelKey.Y) != 0 {
+	rootECDH, err := rootPubKey.ECDH()
+	if err != nil {
+		return &CertChainError{Detail: "root certificate key is not a valid P-256 point", Err: err}
+	}
+	intelECDH, err := intelKey.ECDH()
+	if err != nil {
+		return &CertChainError{Detail: "Intel root key is not a valid P-256 point", Err: err}
+	}
+	if !bytes.Equal(rootECDH.Bytes(), intelECDH.Bytes()) {
 		return &CertChainError{Detail: "root certificate not signed by Intel root key"}
 	}
 

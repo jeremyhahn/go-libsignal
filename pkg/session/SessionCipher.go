@@ -27,53 +27,122 @@ const maxFutureMessages = 25000
 // match the Rust reference (MAX_UNACKNOWLEDGED_SESSION_AGE).
 const maxUnacknowledgedSessionAge = 30 * 24 * time.Hour
 
-// NewCipher constructs a session cipher for encrypt/decrypt operations on a
-// session. In order to use the session cipher, a session must have already
-// been created and stored using session.Builder.
+// NewCipher constructs a session cipher using the legacy unbound path
+// (no address binding). localAddress is set to nil, so SignalMessage
+// field 6 is not populated.
+//
+// Deprecated: NewCipher omits the address-binding proto field (SignalMessage
+// field 6) that Rust libsignal always includes when a local address is known.
+// Use NewCipherWithLocalAddress with a non-nil localAddress to match Rust
+// behavior and prevent address-substitution downgrade attacks.
 func NewCipher(builder *Builder, remoteAddress *protocol.SignalAddress) *Cipher {
-	cipher := &Cipher{
+	return NewCipherWithLocalAddress(builder, nil, remoteAddress)
+}
+
+// NewCipherWithLocalAddress constructs a session cipher for encrypt/decrypt
+// operations on a session. In order to use the session cipher, a session must
+// have already been created and stored using session.Builder.
+//
+// localAddress is the caller's own SignalAddress. When both localAddress and
+// remoteAddress are non-nil canonical ServiceIds, address binding is active
+// and SignalMessage field 6 is populated. Pass nil for localAddress to use
+// the legacy unbound path.
+//
+// Rust source: rust/protocol/src/session_cipher.rs SessionCipher::new.
+func NewCipherWithLocalAddress(builder *Builder, localAddress, remoteAddress *protocol.SignalAddress) *Cipher {
+	return &Cipher{
 		sessionStore:            builder.sessionStore,
 		preKeyMessageSerializer: builder.serializer.PreKeySignalMessage,
 		signalMessageSerializer: builder.serializer.SignalMessage,
 		preKeyStore:             builder.preKeyStore,
 		identityStore:           builder.identityKeyStore,
+		localAddress:            localAddress,
 		remoteAddress:           remoteAddress,
 	}
-
-	return cipher
 }
 
-// NewCipherFromSession creates a cipher from an existing session record.
-func NewCipherFromSession(session *record.Session, remoteAddress *protocol.SignalAddress,
+// NewCipherFromSession creates a cipher from an existing session record
+// using the legacy unbound path (no address binding). localAddress is set
+// to nil, so SignalMessage field 6 is not populated.
+//
+// Deprecated: NewCipherFromSession omits the address-binding proto field
+// (SignalMessage field 6) that Rust libsignal always includes when a local
+// address is known. Use NewCipherFromSessionWithLocalAddress with a non-nil
+// localAddress to match Rust behavior and prevent address-substitution
+// downgrade attacks.
+func NewCipherFromSession(sess *record.Session, remoteAddress *protocol.SignalAddress,
 	sessionStore store.Session, preKeyStore store.PreKey,
 	preKeyMessageSerializer protocol.PreKeySignalMessageSerializer,
 	signalMessageSerializer protocol.SignalMessageSerializer) *Cipher {
-	cipher := &Cipher{
+	return NewCipherFromSessionWithLocalAddress(sess, nil, remoteAddress,
+		sessionStore, preKeyStore, preKeyMessageSerializer, signalMessageSerializer)
+}
+
+// NewCipherFromSessionWithLocalAddress creates a cipher from an existing session record.
+//
+// localAddress is the caller's own SignalAddress. When both localAddress and
+// remoteAddress are non-nil canonical ServiceIds, address binding is active
+// and SignalMessage field 6 is populated. Pass nil for localAddress to use
+// the legacy unbound path.
+//
+// Rust source: rust/protocol/src/session_management.rs message_encrypt /
+// message_decrypt_signal.
+func NewCipherFromSessionWithLocalAddress(sess *record.Session, localAddress, remoteAddress *protocol.SignalAddress,
+	sessionStore store.Session, preKeyStore store.PreKey,
+	preKeyMessageSerializer protocol.PreKeySignalMessageSerializer,
+	signalMessageSerializer protocol.SignalMessageSerializer) *Cipher {
+	return &Cipher{
 		sessionStore:            sessionStore,
 		preKeyMessageSerializer: preKeyMessageSerializer,
 		signalMessageSerializer: signalMessageSerializer,
 		preKeyStore:             preKeyStore,
+		localAddress:            localAddress,
 		remoteAddress:           remoteAddress,
 	}
-
-	return cipher
 }
 
 // NewCipherWithIdentity creates a cipher with an identity key store for
-// trust verification on encrypt and decrypt. This is the recommended
-// constructor as it enables identity trust checks matching the Rust reference.
+// trust verification on encrypt and decrypt, using the legacy unbound path
+// (no address binding). localAddress is set to nil.
+//
+// Deprecated: NewCipherWithIdentity omits the address-binding proto field
+// (SignalMessage field 6) that Rust libsignal always includes when a local
+// address is known. Use NewCipherWithIdentityAndLocalAddress with a non-nil
+// localAddress to match Rust behavior and prevent address-substitution
+// downgrade attacks.
 func NewCipherWithIdentity(builder *Builder, remoteAddress *protocol.SignalAddress,
 	identityStore store.IdentityKey) *Cipher {
-	cipher := &Cipher{
+	return NewCipherWithIdentityAndLocalAddress(builder, nil, remoteAddress, identityStore)
+}
+
+// NewCipherWithIdentityAndLocalAddress creates a cipher with an identity key
+// store for trust verification on encrypt and decrypt.
+//
+// localAddress is the caller's own SignalAddress. When both localAddress and
+// remoteAddress are non-nil canonical ServiceIds, address binding is active
+// and SignalMessage field 6 is populated. Pass nil for localAddress to use
+// the legacy unbound path.
+//
+// Rust source: rust/protocol/src/session_cipher.rs SessionCipher::new with
+// identity-store composition at rust/protocol/src/session_management.rs.
+func NewCipherWithIdentityAndLocalAddress(builder *Builder, localAddress, remoteAddress *protocol.SignalAddress,
+	identityStore store.IdentityKey) *Cipher {
+	return &Cipher{
 		sessionStore:            builder.sessionStore,
 		preKeyMessageSerializer: builder.serializer.PreKeySignalMessage,
 		signalMessageSerializer: builder.serializer.SignalMessage,
 		preKeyStore:             builder.preKeyStore,
 		identityStore:           identityStore,
+		localAddress:            localAddress,
 		remoteAddress:           remoteAddress,
 	}
+}
 
-	return cipher
+// SetIdentityStore attaches an identity-key store to an existing Cipher.
+// Provided so the high-level pkg/sessionmanagement facade can compose a
+// Cipher around a Builder without needing a second constructor.
+func (d *Cipher) SetIdentityStore(s store.IdentityKey) {
+	d.identityStore = s
 }
 
 // Cipher is the main entry point for Signal Protocol encrypt/decrypt operations.
@@ -92,13 +161,17 @@ type Cipher struct {
 	signalMessageSerializer protocol.SignalMessageSerializer
 	preKeyStore             store.PreKey
 	identityStore           store.IdentityKey
+	localAddress            *protocol.SignalAddress
 	remoteAddress           *protocol.SignalAddress
 }
 
 // Encrypt will take the given message in bytes and return an object that follows
 // the CiphertextMessage interface.
 func (d *Cipher) Encrypt(plaintext []byte) (protocol.CiphertextMessage, error) {
-	sessionRecord := d.sessionStore.LoadSession(d.remoteAddress)
+	sessionRecord, err := d.sessionStore.LoadSession(d.remoteAddress)
+	if err != nil {
+		return nil, err
+	}
 	sessionState := sessionRecord.SessionState()
 	chainKey := sessionState.SenderChainKey()
 
@@ -106,7 +179,6 @@ func (d *Cipher) Encrypt(plaintext []byte) (protocol.CiphertextMessage, error) {
 	var (
 		messageKeys *message.Keys
 		pqrMsg      []byte
-		err         error
 	)
 	if pqrState := sessionState.PqRatchetState(); len(pqrState) > 0 {
 		newState, msg, pqrKey, pqrErr := spqr.Send(pqrState)
@@ -149,6 +221,8 @@ func (d *Cipher) Encrypt(plaintext []byte) (protocol.CiphertextMessage, error) {
 		sessionState.RemoteIdentityKey(),
 		d.signalMessageSerializer,
 		pqrMsg,
+		d.localAddress,
+		d.remoteAddress,
 	)
 	if err != nil {
 		return nil, err
@@ -201,14 +275,22 @@ func (d *Cipher) Encrypt(plaintext []byte) (protocol.CiphertextMessage, error) {
 	// ordering (session_cipher.rs) and is safe because the store is not updated.
 	if d.identityStore != nil {
 		theirIdentityKey := sessionState.RemoteIdentityKey()
-		if !d.identityStore.IsTrustedIdentity(d.remoteAddress, theirIdentityKey, store.DirectionSending) {
+		trusted, trustErr := d.identityStore.IsTrustedIdentity(d.remoteAddress, theirIdentityKey, store.DirectionSending)
+		if trustErr != nil {
+			return nil, trustErr
+		}
+		if !trusted {
 			logger.Warning("Identity key is not trusted for sending to ", d.remoteAddress.String())
 			return nil, newUntrustedIdentityError(d.remoteAddress.String())
 		}
-		d.identityStore.SaveIdentity(d.remoteAddress, theirIdentityKey)
+		if _, err := d.identityStore.SaveIdentity(d.remoteAddress, theirIdentityKey); err != nil {
+			return nil, err
+		}
 	}
 
-	d.sessionStore.StoreSession(d.remoteAddress, sessionRecord)
+	if err := d.sessionStore.StoreSession(d.remoteAddress, sessionRecord); err != nil {
+		return nil, err
+	}
 
 	return ciphertextMessage, nil
 }
@@ -261,12 +343,19 @@ func (d *Cipher) DecryptPreKeyMessage(builder *Builder, preKeyMessage *protocol.
 // The caller is responsible for calling Zeroize() on the returned *message.Keys
 // when it is no longer needed to clear key material from heap memory.
 func (d *Cipher) DecryptAndGetKey(ciphertextMessage *protocol.SignalMessage) ([]byte, *message.Keys, error) {
-	if !d.sessionStore.ContainsSession(d.remoteAddress) {
+	hasSession, err := d.sessionStore.ContainsSession(d.remoteAddress)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !hasSession {
 		return nil, nil, newNoSessionError(d.remoteAddress.String())
 	}
 
 	// Load the session record from our session store and decrypt the message.
-	sessionRecord := d.sessionStore.LoadSession(d.remoteAddress)
+	sessionRecord, err := d.sessionStore.LoadSession(d.remoteAddress)
+	if err != nil {
+		return nil, nil, err
+	}
 	plaintext, messageKeys, err := d.DecryptWithRecord(sessionRecord, ciphertextMessage)
 	if err != nil {
 		return nil, nil, err
@@ -275,15 +364,23 @@ func (d *Cipher) DecryptAndGetKey(ciphertextMessage *protocol.SignalMessage) ([]
 	// H3: Identity trust check after decryption (matches Rust message_decrypt_signal).
 	if d.identityStore != nil {
 		theirIdentityKey := sessionRecord.SessionState().RemoteIdentityKey()
-		if !d.identityStore.IsTrustedIdentity(d.remoteAddress, theirIdentityKey, store.DirectionReceiving) {
+		trusted, trustErr := d.identityStore.IsTrustedIdentity(d.remoteAddress, theirIdentityKey, store.DirectionReceiving)
+		if trustErr != nil {
+			return nil, nil, trustErr
+		}
+		if !trusted {
 			logger.Warning("Identity key is not trusted for receiving from ", d.remoteAddress.String())
 			return nil, nil, newUntrustedIdentityError(d.remoteAddress.String())
 		}
-		d.identityStore.SaveIdentity(d.remoteAddress, theirIdentityKey)
+		if _, err := d.identityStore.SaveIdentity(d.remoteAddress, theirIdentityKey); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	// Store the session record in our session store.
-	d.sessionStore.StoreSession(d.remoteAddress, sessionRecord)
+	if err := d.sessionStore.StoreSession(d.remoteAddress, sessionRecord); err != nil {
+		return nil, nil, err
+	}
 
 	return plaintext, messageKeys, nil
 }
@@ -330,6 +427,19 @@ func (d *Cipher) decryptWithRecordAndType(sessionRecord *record.Session, ciphert
 			return nil, nil, err
 		}
 
+		// M3: AddressMismatch short-circuit. An address-binding mismatch means
+		// the message's embedded (sender, recipient) pair does not match the
+		// expected local addresses. No previous session can resolve this — the
+		// binding is a property of the message, not the session state. Surface
+		// the typed error immediately so callers can distinguish a wrong-recipient
+		// delivery from a genuine decryption failure.
+		//
+		// Mirrors Rust session_management.rs:242 and the address-binding
+		// enforcement in triple_ratchet.rs TripleRatchet::decrypt.
+		if errors.Is(err, protocol.ErrAddressMismatch) {
+			return nil, nil, err
+		}
+
 		// M2: PreKey message short-circuit. A PreKey message creates a fresh
 		// session, so previous sessions are irrelevant. Return immediately.
 		if messageType == protocol.PREKEY_TYPE {
@@ -347,6 +457,10 @@ func (d *Cipher) decryptWithRecordAndType(sessionRecord *record.Session, ciphert
 				// a counter collision on a previous session is merely a
 				// wrong-session mismatch, not a genuine replay.
 				if errors.Is(err, ErrDuplicateMessage) {
+					return nil, nil, err
+				}
+				// M3: Address mismatch short-circuit in previous states.
+				if errors.Is(err, protocol.ErrAddressMismatch) {
 					return nil, nil, err
 				}
 				continue
@@ -465,10 +579,24 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 			}
 		}
 
-		err := ciphertextMessage.VerifyMac(messageVersion, sessionState.RemoteIdentityKey(), sessionState.LocalIdentityKey(), skippedKeys.MacKey())
-		if err != nil {
-			logger.Error("Unable to verify ciphertext mac for skipped key: ", err)
-			return nil, nil, err
+		// F15: Use VerifyMacWithAddresses when both local and remote addresses are
+		// known, enforcing address binding on pre-key decrypt. Mirrors Rust
+		// rust/protocol/src/session_management.rs:242 and
+		// rust/protocol/src/triple_ratchet.rs TripleRatchet::decrypt.
+		if d.localAddress != nil && d.remoteAddress != nil {
+			err := ciphertextMessage.VerifyMacWithAddresses(messageVersion,
+				sessionState.RemoteIdentityKey(), sessionState.LocalIdentityKey(),
+				skippedKeys.MacKey(), d.remoteAddress, d.localAddress)
+			if err != nil {
+				logger.Error("Unable to verify ciphertext mac (with addresses) for skipped key: ", err)
+				return nil, nil, err
+			}
+		} else {
+			err := ciphertextMessage.VerifyMac(messageVersion, sessionState.RemoteIdentityKey(), sessionState.LocalIdentityKey(), skippedKeys.MacKey())
+			if err != nil {
+				logger.Error("Unable to verify ciphertext mac for skipped key: ", err)
+				return nil, nil, err
+			}
 		}
 
 		plaintext, err := d.DecryptWithKey(ciphertextMessage, skippedKeys)
@@ -515,10 +643,23 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 		return nil, nil, keysCreateErr
 	}
 
-	err := ciphertextMessage.VerifyMac(messageVersion, sessionState.RemoteIdentityKey(), sessionState.LocalIdentityKey(), messageKeys.MacKey())
-	if err != nil {
-		logger.Error("Unable to verify ciphertext mac: ", err)
-		return nil, nil, err
+	// F15: Use VerifyMacWithAddresses when both local and remote addresses are
+	// known, enforcing address binding. Mirrors Rust
+	// rust/protocol/src/session_management.rs:242.
+	if d.localAddress != nil && d.remoteAddress != nil {
+		err := ciphertextMessage.VerifyMacWithAddresses(messageVersion,
+			sessionState.RemoteIdentityKey(), sessionState.LocalIdentityKey(),
+			messageKeys.MacKey(), d.remoteAddress, d.localAddress)
+		if err != nil {
+			logger.Error("Unable to verify ciphertext mac (with addresses): ", err)
+			return nil, nil, err
+		}
+	} else {
+		err := ciphertextMessage.VerifyMac(messageVersion, sessionState.RemoteIdentityKey(), sessionState.LocalIdentityKey(), messageKeys.MacKey())
+		if err != nil {
+			logger.Error("Unable to verify ciphertext mac: ", err)
+			return nil, nil, err
+		}
 	}
 
 	plaintext, err := d.DecryptWithKey(ciphertextMessage, messageKeys)
@@ -569,18 +710,18 @@ func getOrCreateMessageKeys(sessionState *record.State, theirEphemeral ecc.ECPub
 
 	hasSPQR := len(pqrSalt) > 0
 	for chainKey.Index() < counter {
-		var messageKeys *message.Keys
+		var msgKeys *message.Keys
 		var err error
 		if hasSPQR {
 			// Store seed material so skipped keys can be re-derived with PQR salt later.
-			messageKeys, err = chainKey.MessageKeysWithSeed()
+			msgKeys, err = chainKey.MessageKeysWithSeed()
 		} else {
-			messageKeys, err = chainKey.MessageKeys()
+			msgKeys, err = chainKey.MessageKeys()
 		}
 		if err != nil {
 			return nil, err
 		}
-		if err := sessionState.SetMessageKeys(theirEphemeral, messageKeys); err != nil {
+		if err := sessionState.SetMessageKeys(theirEphemeral, msgKeys); err != nil {
 			return nil, err
 		}
 		// NextKey zeroizes the old chain key internally.

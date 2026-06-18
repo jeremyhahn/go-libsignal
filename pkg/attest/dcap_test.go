@@ -4,6 +4,8 @@
 package attest
 
 import (
+	"bytes"
+	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -29,8 +31,8 @@ func TestParseIntelRootKey(t *testing.T) {
 	if key.Curve != elliptic.P256() {
 		t.Error("expected P-256 curve")
 	}
-	if key.X == nil || key.Y == nil {
-		t.Error("X and Y should not be nil")
+	if _, err := key.ECDH(); err != nil {
+		t.Errorf("key is not a valid P-256 point: %v", err)
 	}
 }
 
@@ -41,30 +43,37 @@ func TestParseIntelRootKey_ValidPoint(t *testing.T) {
 	}
 	// parseIntelRootKey validates the point via ecdh.P256().NewPublicKey, which
 	// rejects any point not on the curve. Verify the coordinates are non-zero.
-	if key.X == nil || key.Y == nil || key.X.Sign() == 0 {
-		t.Error("Intel root key has nil or zero coordinates")
+	ecdhKey, err := key.ECDH()
+	if err != nil {
+		t.Errorf("Intel root key is not a valid P-256 point: %v", err)
+	}
+	// Bytes() returns 0x04 || X || Y; X starts at offset 1.
+	raw := ecdhKey.Bytes()
+	if len(raw) != 65 || raw[1] == 0 {
+		t.Error("Intel root key has zero X coordinate")
 	}
 }
 
 func TestParseAttestKey_HappyPath(t *testing.T) {
-	// Generate a real P-256 key and extract its coordinates
-	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// Generate a real P-256 key via crypto/ecdh to avoid deprecated big.Int fields.
+	ecdhPriv, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatalf("failed to generate key: %v", err)
 	}
-
-	pubBytes := make([]byte, 64)
-	xBytes := privKey.X.Bytes()
-	yBytes := privKey.Y.Bytes()
-	// Pad to 32 bytes each
-	copy(pubBytes[32-len(xBytes):32], xBytes)
-	copy(pubBytes[64-len(yBytes):64], yBytes)
+	// Bytes() returns 0x04 || X(32) || Y(32); strip the 0x04 prefix.
+	uncompressed := ecdhPriv.PublicKey().Bytes()
+	pubBytes := uncompressed[1:] // 64-byte X||Y
 
 	key, err := parseAttestKey(pubBytes)
 	if err != nil {
 		t.Fatalf("parseAttestKey failed: %v", err)
 	}
-	if key.X.Cmp(privKey.X) != 0 || key.Y.Cmp(privKey.Y) != 0 {
+	// Compare via canonical uncompressed encoding.
+	parsedECDH, err := key.ECDH()
+	if err != nil {
+		t.Fatalf("parsed key is not a valid P-256 point: %v", err)
+	}
+	if !bytes.Equal(parsedECDH.Bytes(), ecdhPriv.PublicKey().Bytes()) {
 		t.Error("parsed key does not match original")
 	}
 }
@@ -226,11 +235,11 @@ func TestVerifyRootCertificate_NotSelfSigned(t *testing.T) {
 
 	// Create a cert signed by key1
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "test"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Hour),
-		IsCA:         true,
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
 		BasicConstraintsValid: true,
 	}
 	certBytes, _ := x509.CreateCertificate(rand.Reader, template, template, &key1.PublicKey, key1)
@@ -896,13 +905,11 @@ func TestVerifyEnclaveSignatures_ISVReportSignatureFailure(t *testing.T) {
 	reportBodyHash := sha256.Sum256(rawReportBody)
 	qeSig, _ := ecdsa.SignASN1(rand.Reader, pckKey, reportBodyHash[:])
 
-	// Generate a real attest key
-	attestKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// Generate a real attest key via crypto/ecdh to avoid deprecated big.Int fields.
+	attestECDHKey, _ := ecdh.P256().GenerateKey(rand.Reader)
 	var attestPubKeyBytes [64]byte
-	xBytes := attestKey.X.Bytes()
-	yBytes := attestKey.Y.Bytes()
-	copy(attestPubKeyBytes[32-len(xBytes):32], xBytes)
-	copy(attestPubKeyBytes[64-len(yBytes):64], yBytes)
+	// Bytes() returns 0x04 || X(32) || Y(32); strip the prefix.
+	copy(attestPubKeyBytes[:], attestECDHKey.PublicKey().Bytes()[1:])
 
 	authData := []byte{}
 	h2 := sha256.New()
@@ -992,7 +999,9 @@ func TestVerifyRootCertificate_NonECDSAPublicKey(t *testing.T) {
 	certBytes, _ := x509.CreateCertificate(rand.Reader, template, template, &key1.PublicKey, key1)
 	cert, _ := x509.ParseCertificate(certBytes)
 
-	// X matches but Y doesn't
+	// X matches but Y doesn't — deliberate malformed-key fixture for negative test.
+	// SA1019: accessing X/Y is intentional here; we need a structurally invalid key
+	// that parseIntelRootKey / verifyRootCertificate must reject.
 	mismatchKey := &ecdsa.PublicKey{
 		Curve: elliptic.P256(),
 		X:     key1.X,
@@ -1013,13 +1022,13 @@ func TestDcapAttest_ValidEvidenceInvalidEndorsements(t *testing.T) {
 	// Need a valid quote support with a real PEM cert
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "t"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Hour),
-		IsCA:         true,
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "t"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
 		BasicConstraintsValid: true,
-		KeyUsage:     x509.KeyUsageCertSign,
+		KeyUsage:              x509.KeyUsageCertSign,
 	}
 	cb, _ := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	pemCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cb})
@@ -1399,13 +1408,13 @@ func generateSelfSignedCert(t *testing.T) *x509.Certificate {
 	}
 
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "test"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Hour),
-		IsCA:         true,
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
 		BasicConstraintsValid: true,
-		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 	}
 
 	certBytes, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)

@@ -6,16 +6,22 @@ import (
 
 // ServerSecretParams contains the server's secret parameters for issuing and
 // verifying credentials. These should be kept secret by the server.
+//
+// The reserved field exists so that a future serializer emits the leading 0x00
+// byte required by Rust bincode (ReservedByte at offset 0 of the struct).
+// Mirrors Rust ServerSecretParams at rust/zkgroup/src/api/server_params.rs:17.
 type ServerSecretParams struct {
-	SigKeyPair                             *SignatureKeyPair
-	AuthCredentialsKeyPair                 *zkcredential.CredentialKeyPair
-	ProfileKeyCredentialsKeyPair           *zkcredential.CredentialKeyPair
-	PniCredentialsKeyPair                  *zkcredential.CredentialKeyPair
-	AuthCredentialsWithPniKeyPair          *zkcredential.CredentialKeyPair
-	ReceiptCredentialsKeyPair              *zkcredential.CredentialKeyPair
-	ExpiringProfileKeyCredentialsKeyPair   *zkcredential.CredentialKeyPair
-	GenericCredentialKeyPair               *zkcredential.CredentialKeyPair
-	EndorsementKeyPair                     *zkcredential.ServerRootKeyPair
+	//lint:ignore U1000 matches Rust reserved field (rust/zkgroup/src/api/server_params.rs ReservedByte)
+	reserved                             byte // always 0x00; bincode ReservedByte
+	SigKeyPair                           *SignatureKeyPair
+	AuthCredentialsKeyPair               *zkcredential.CredentialKeyPair
+	ProfileKeyCredentialsKeyPair         *zkcredential.CredentialKeyPair
+	PniCredentialsKeyPair                *zkcredential.CredentialKeyPair
+	AuthCredentialsWithPniKeyPair        *zkcredential.CredentialKeyPair
+	ReceiptCredentialsKeyPair            *zkcredential.CredentialKeyPair
+	ExpiringProfileKeyCredentialsKeyPair *zkcredential.CredentialKeyPair
+	GenericCredentialKeyPair             *zkcredential.CredentialKeyPair
+	EndorsementKeyPair                   *zkcredential.ServerRootKeyPair
 }
 
 // GenerateServerSecretParams creates new server secret parameters from
@@ -101,6 +107,20 @@ func (s *ServerSecretParams) GetEndorsementRootKeyPair() *EndorsementServerRootK
 	}
 }
 
+// Sign produces a NotarySignature over message keyed by this server's
+// signature key pair, using the supplied 32-byte randomness as a
+// deterministic nonce seed (mixed with the SHO transcript).
+//
+// Mirrors Rust libsignal's ServerSecretParams::sign at
+// rust/zkgroup/src/api/server_params.rs. Output bytes are
+// byte-identical for the same inputs.
+func (s *ServerSecretParams) Sign(randomness RandomnessBytes, message []byte) ([]byte, error) {
+	sho := zkcredential.NewShoHmacSha256Ext("Signal_ZKGroup_20200424_Random_ServerSecretParams_Sign")
+	sho.AbsorbAndRatchet(randomness[:])
+	innerRandomness := sho.SqueezeAndRatchet(32)
+	return s.SigKeyPair.Sign(message, innerRandomness)
+}
+
 // CheckAuthCredentialRedemptionTime checks that currentTime is within the
 // validity window defined by redemptionTime.
 func CheckAuthCredentialRedemptionTime(
@@ -125,16 +145,22 @@ func CheckAuthCredentialRedemptionTime(
 
 // ServerPublicParams contains the server's public parameters used by clients
 // for credential operations.
+//
+// The reserved field exists so that a future serializer emits the leading 0x00
+// byte required by Rust bincode (ReservedByte at offset 0 of the struct).
+// Mirrors Rust ServerPublicParams at rust/zkgroup/src/api/server_params.rs:50.
 type ServerPublicParams struct {
-	SigPublicKey                             *SignaturePublicKey
-	AuthCredentialsPublicKey                 *zkcredential.CredentialPublicKey
-	ProfileKeyCredentialsPublicKey           *zkcredential.CredentialPublicKey
-	PniCredentialsPublicKey                  *zkcredential.CredentialPublicKey
-	AuthCredentialsWithPniPublicKey          *zkcredential.CredentialPublicKey
-	ReceiptCredentialsPublicKey              *zkcredential.CredentialPublicKey
-	ExpiringProfileKeyCredentialsPublicKey   *zkcredential.CredentialPublicKey
-	GenericCredentialPublicKey               *zkcredential.CredentialPublicKey
-	EndorsementPublicKey                     *zkcredential.ServerRootPublicKey
+	//lint:ignore U1000 matches Rust reserved field (rust/zkgroup/src/api/server_params.rs ReservedByte)
+	reserved                               byte // always 0x00; bincode ReservedByte
+	SigPublicKey                           *SignaturePublicKey
+	AuthCredentialsPublicKey               *zkcredential.CredentialPublicKey
+	ProfileKeyCredentialsPublicKey         *zkcredential.CredentialPublicKey
+	PniCredentialsPublicKey                *zkcredential.CredentialPublicKey
+	AuthCredentialsWithPniPublicKey        *zkcredential.CredentialPublicKey
+	ReceiptCredentialsPublicKey            *zkcredential.CredentialPublicKey
+	ExpiringProfileKeyCredentialsPublicKey *zkcredential.CredentialPublicKey
+	GenericCredentialPublicKey             *zkcredential.CredentialPublicKey
+	EndorsementPublicKey                   *zkcredential.ServerRootPublicKey
 }
 
 // GetEndorsementPublicKey returns the endorsement public key wrapped in the
@@ -147,7 +173,13 @@ func (p *ServerPublicParams) GetEndorsementPublicKey() *EndorsementPublicKey {
 
 // GenericServerSecretParams holds a generic credential key pair for issuing
 // credentials that do not require the full ServerSecretParams.
+//
+// The reserved field exists so that a future serializer emits the leading 0x00
+// byte required by Rust bincode. Mirrors Rust GenericServerSecretParams at
+// rust/zkgroup/src/api/generic_server_params.rs.
 type GenericServerSecretParams struct {
+	//lint:ignore U1000 matches Rust reserved field (rust/zkgroup/src/api/generic_server_params.rs ReservedByte)
+	reserved      byte // always 0x00; bincode ReservedByte
 	CredentialKey *zkcredential.CredentialKeyPair
 }
 
@@ -166,14 +198,25 @@ func (g *GenericServerSecretParams) GetPublicParams() *GenericServerPublicParams
 }
 
 // GenericServerPublicParams holds a generic credential public key.
+//
+// The reserved field exists so that a future serializer emits the leading 0x00
+// byte required by Rust bincode. Mirrors Rust GenericServerPublicParams at
+// rust/zkgroup/src/api/generic_server_params.rs.
 type GenericServerPublicParams struct {
+	//lint:ignore U1000 matches Rust reserved field (rust/zkgroup/src/api/generic_server_params.rs ReservedByte)
+	reserved      byte // always 0x00; bincode ReservedByte
 	CredentialKey *zkcredential.CredentialPublicKey
 }
 
-// EndorsementServerRootKeyPair wraps the zkcredential endorsement root key pair
-// with a version byte.
+// EndorsementServerRootKeyPair wraps the zkcredential endorsement root key pair.
+//
+// The reserved field exists so that a future serializer emits the leading 0x00
+// byte required by Rust bincode. Mirrors Rust EndorsementServerRootKeyPair at
+// rust/zkgroup/src/api/server_params.rs.
 type EndorsementServerRootKeyPair struct {
-	KeyPair *zkcredential.ServerRootKeyPair
+	//lint:ignore U1000 matches Rust reserved field (rust/zkgroup/src/api/server_params.rs ReservedByte)
+	reserved byte // always 0x00; bincode ReservedByte
+	KeyPair  *zkcredential.ServerRootKeyPair
 }
 
 // PublicKey returns the public key portion.
@@ -183,8 +226,13 @@ func (e *EndorsementServerRootKeyPair) PublicKey() *EndorsementPublicKey {
 	}
 }
 
-// EndorsementPublicKey wraps the zkcredential endorsement root public key with
-// a version byte.
+// EndorsementPublicKey wraps the zkcredential endorsement root public key.
+//
+// The reserved field exists so that a future serializer emits the leading 0x00
+// byte required by Rust bincode. Mirrors Rust EndorsementPublicKey at
+// rust/zkgroup/src/api/server_params.rs.
 type EndorsementPublicKey struct {
+	//lint:ignore U1000 matches Rust reserved field (rust/zkgroup/src/api/server_params.rs ReservedByte)
+	reserved  byte // always 0x00; bincode ReservedByte
 	PublicKey *zkcredential.ServerRootPublicKey
 }

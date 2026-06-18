@@ -8,9 +8,9 @@ import (
 )
 
 const (
-	invalidEvidence  = "Evidence does not fit expected format"
+	invalidEvidence    = "Evidence does not fit expected format"
 	invalidEndorsement = "Endorsement does not fit expected format"
-	invalidMREnclave = "MREnclave value does not fit expected format"
+	invalidMREnclave   = "MREnclave value does not fit expected format"
 
 	// skewAdjustment is how much to offset when checking for time-based validity
 	// checks to adjust for clock skew on clients (24 hours).

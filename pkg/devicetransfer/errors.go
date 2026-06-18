@@ -10,7 +10,7 @@ type Error struct {
 type errorKind int
 
 const (
-	errKeyGeneration    errorKind = iota + 1
+	errKeyGeneration errorKind = iota + 1
 	errKeyParsing
 	errCertCreation
 	errPEMDecode

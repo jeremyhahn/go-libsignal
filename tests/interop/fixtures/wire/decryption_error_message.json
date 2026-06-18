@@ -1,0 +1,27 @@
+{
+  "source": "rust/protocol/src/protocol.rs:881 DecryptionErrorMessage::for_original (libsignal v0.92.2)",
+  "rust_rev": "98915c442d",
+  "purpose": "DecryptionErrorMessage wire vector. Go must DeserializeDecryptionErrorMessage and assert ratchet_key, timestamp, device_id. Also validates PlaintextContent wrapping via ExtractDecryptionErrorMessageFromSerializedContent.",
+  "vectors": [
+    {
+      "name": "decryption_error_message",
+      "inputs": {
+        "original_device_id": 3,
+        "original_mac_key": "9d282e181281f970d4b01d413a9273f91716ef827fdca698ae04fbaa2e374cd2",
+        "original_message_hex": "340a2105118b74816830a5e854a7952d9ae14a473bc00d220cd2e0dca906bc98f36ca23e100118002214396f5ab5d88f0b9efc6e2b27e734139f3ebefa62319b1da661f9f6d5",
+        "original_ratchet_public": "05118b74816830a5e854a7952d9ae14a473bc00d220cd2e0dca906bc98f36ca23e",
+        "original_receiver_identity_public": "05208e4d0d60d067d17041bc29728ec9595f657aca56d01fc18cbef679c5691571",
+        "original_sender_identity_public": "05e79a2a9fef1d375c9a43b91d72ccfd2ef42076c78392144aaac8e8d1a5c84f74",
+        "original_timestamp_ms": 1700000000000,
+        "original_type": "Whisper"
+      },
+      "expected": {
+        "dem_serialized": "0a2105118b74816830a5e854a7952d9ae14a473bc00d220cd2e0dca906bc98f36ca23e1080d095ffbc311803",
+        "device_id": 3,
+        "plaintext_content_serialized": "c0422c0a2105118b74816830a5e854a7952d9ae14a473bc00d220cd2e0dca906bc98f36ca23e1080d095ffbc31180380",
+        "ratchet_key_public": "05118b74816830a5e854a7952d9ae14a473bc00d220cd2e0dca906bc98f36ca23e",
+        "timestamp_ms": 1700000000000
+      }
+    }
+  ]
+}

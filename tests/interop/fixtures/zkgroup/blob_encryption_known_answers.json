@@ -1,0 +1,12 @@
+{
+  "_provenance": {
+    "source": "rust/zkgroup/tests/integration_tests.rs::test_blob_encryption",
+    "rust_rev_pin": "/RUST_REV (root of go-libsignal repo)",
+    "note": "Hand-extracted group blob encryption KAT. The drift detector greps the upstream source for every byte literal. NOTE the upstream comment: 'WARNING: THIS VECTOR DOES *NOT* MATCH JAVA/SWIFT/NODE AS THEY IMPLEMENT PADDING' — this fixture validates the unpadded path only."
+  },
+  "master_key_seed": "test_array_32_1",
+  "randomness_seed": "test_array_32_2",
+  "plaintext_hex":  "0102030405060708111213141516171819",
+  "expected_ciphertext_hex": "e95807b190d478d7be3a77b22927132eeba51c739cd5707317f73e591a915fff1f20a302692afdc7087f10196000",
+  "_inputs_note": "test_array_32_1 = 32 bytes 100..131; test_array_32_2 = 32 bytes 200..231 (per rust/zkgroup/src/common/constants.rs)."
+}

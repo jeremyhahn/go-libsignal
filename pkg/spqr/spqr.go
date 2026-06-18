@@ -83,6 +83,14 @@ type SPQR struct {
 	// chain state. When deserialized from V1/V2/V3 formats, braid starts as
 	// nil and chain-only mode is used.
 	braid *mlkembraid.Braid
+
+	// skippedKeysFIFO holds SkippedKeyIDs in insertion order, enabling
+	// O(1)-amortized eviction without scanning the entire skippedKeys map.
+	// Entries may be stale (already removed from skippedKeys by GC, epoch
+	// pruning, or consumption); stale entries are skipped during eviction.
+	// skippedKeysFIFOHead is the index of the first candidate live entry.
+	skippedKeysFIFO     []SkippedKeyID
+	skippedKeysFIFOHead int
 }
 
 // Init creates a new SPQR instance from a shared secret, direction, and max
@@ -91,6 +99,11 @@ type SPQR struct {
 // send/receive chains. The maxJumpLimit controls the maximum forward jump
 // allowed in the receive counter; use the package-level maxJump constant
 // (25000) for normal sessions and math.MaxUint32 for self-sessions.
+//
+// MinVersion is set to VersionV1, matching the Rust libsignal policy of
+// "Require that all clients speak SPQR" (ratchet.rs:88, 152). V0 (opt-in
+// downgrade) requires explicit use of InitialStateWithParams and warrants an
+// audit note before deployment.
 func Init(sharedSecret []byte, direction Direction, maxJumpLimit uint32) (*SPQR, error) {
 	rk, cks, ckr, err := KdfSckaInit(sharedSecret)
 	if err != nil {
@@ -115,7 +128,7 @@ func Init(sharedSecret []byte, direction Direction, maxJumpLimit uint32) (*SPQR,
 		maxJump:     maxJumpLimit,
 		negotiation: negotiationResolved,
 		version:     VersionV1,
-		minVersion:  VersionV0,
+		minVersion:  VersionV1,
 	}, nil
 }
 
@@ -227,6 +240,9 @@ func (s *SPQR) Decrypt(epoch uint64, counter uint32) (messageKey *secret.Secret,
 	if mk, ok := s.skippedKeys[skID]; ok {
 		// Transfer ownership of the secret out of the map.
 		delete(s.skippedKeys, skID)
+		// Compact the FIFO so the stale entry for this key does not accumulate
+		// indefinitely in sessions that consume skipped keys below eviction capacity.
+		s.trimFIFOIfNeeded()
 		return mk, nil
 	}
 
@@ -259,19 +275,11 @@ func (s *SPQR) Decrypt(epoch uint64, counter uint32) (messageKey *secret.Secret,
 	// Skip forward to the requested counter, storing intermediate keys.
 	// recvCounter tracks the last counter we derived; increment before use.
 	//
-	// NOTE: Intentional safe-direction deviation from Rust. The skip-count
-	// pre-check below calculates toSkip as len(skippedKeys) + (keys about to
-	// be stored), which is more restrictive than Rust's approach of checking
-	// only after storing all intermediate keys. This means Go may reject a
-	// message that Rust would accept in edge cases near the maxSkippedKeys
-	// limit, but it provides stronger DoS protection by failing fast before
-	// allocating memory for intermediate keys that would exceed the limit.
+	// Skipped keys are recorded in both skippedKeys (for O(1) lookup) and
+	// skippedKeysFIFO (for O(1)-amortized FIFO eviction). When the map is at
+	// capacity, evict the oldest entry before inserting, matching Rust's FIFO
+	// trim policy in KeyHistory::gc (chain.rs).
 	for chain.recvCounter+1 < counter {
-		toSkip := uint64(len(s.skippedKeys)) + uint64(counter-chain.recvCounter-1)
-		if toSkip > uint64(maxSkippedKeys) {
-			return nil, &ErrMaxSkippedKeys{Limit: maxSkippedKeys}
-		}
-
 		if chain.recvCounter == math.MaxUint32 {
 			return nil, &ErrCounterExhausted{Epoch: epoch}
 		}
@@ -283,7 +291,12 @@ func (s *SPQR) Decrypt(epoch uint64, counter uint32) (messageKey *secret.Secret,
 		chain.recvKey.Destroy()
 		chain.recvKey = nextCK
 
-		s.skippedKeys[SkippedKeyID{Epoch: epoch, Counter: chain.recvCounter}] = mk
+		if len(s.skippedKeys) >= maxSkippedKeys {
+			s.evictOldestSkippedKey()
+		}
+		id := SkippedKeyID{Epoch: epoch, Counter: chain.recvCounter}
+		s.skippedKeys[id] = mk
+		s.skippedKeysFIFO = append(s.skippedKeysFIFO, id)
 	}
 
 	// Derive the requested key.
@@ -339,6 +352,9 @@ func (s *SPQR) Zeroize() {
 		s.braid.Zeroize()
 		s.braid = nil
 	}
+	// Clear the FIFO — no secret material, just IDs, but nil it for GC.
+	s.skippedKeysFIFO = nil
+	s.skippedKeysFIFOHead = 0
 }
 
 // IsNegotiated returns true if version negotiation has been resolved.
@@ -379,6 +395,12 @@ func (s *SPQR) advanceEpoch(outputKey *secret.Secret) error {
 		}
 	}
 
+	// Check epoch overflow BEFORE any KDF or state mutation. This prevents
+	// leaking freshly derived chain keys when the epoch counter is exhausted.
+	if s.epoch == math.MaxUint64 {
+		return &ErrEpochOverflow{}
+	}
+
 	newRK, newCKs, newCKr, err := KdfSckaRK(s.rootKey, outputKey.Bytes())
 	if err != nil {
 		return err
@@ -392,9 +414,6 @@ func (s *SPQR) advanceEpoch(outputKey *secret.Secret) error {
 	s.rootKey.Destroy()
 	s.rootKey = newRK
 
-	if s.epoch == math.MaxUint64 {
-		return &ErrEpochOverflow{}
-	}
 	newEpoch := s.epoch + 1
 	s.chains[newEpoch] = &EpochChain{
 		sendKey: newCKs,
@@ -446,6 +465,7 @@ func (s *SPQR) clearOldEpochs() {
 			delete(s.skippedKeys, id)
 		}
 	}
+	s.trimFIFOIfNeeded()
 }
 
 // gcSkippedKeys removes skipped message keys for the given epoch that are
@@ -461,4 +481,91 @@ func (s *SPQR) gcSkippedKeys(epoch uint64, currentCounter uint32) {
 			delete(s.skippedKeys, id)
 		}
 	}
+	s.trimFIFOIfNeeded()
+}
+
+// evictOldestSkippedKey removes the oldest live skipped message key using the
+// FIFO order recorded in skippedKeysFIFO. This gives O(1)-amortized eviction:
+// stale entries (already removed by gcSkippedKeys, clearOldEpochs, or normal
+// consumption) are skipped in O(1) per entry, and each entry is visited at most
+// once. When the FIFO is exhausted (e.g., right after deserialization), it is
+// rebuilt from the map and the oldest key by (Epoch, Counter) is evicted.
+func (s *SPQR) evictOldestSkippedKey() {
+	for s.skippedKeysFIFOHead < len(s.skippedKeysFIFO) {
+		id := s.skippedKeysFIFO[s.skippedKeysFIFOHead]
+		s.skippedKeysFIFOHead++
+		if mk, ok := s.skippedKeys[id]; ok {
+			mk.Destroy()
+			delete(s.skippedKeys, id)
+			s.compactFIFOIfNeeded()
+			return
+		}
+		// Entry was already removed (by gcSkippedKeys, clearOldEpochs, or
+		// consumption). Advance past it without evicting — still O(1) amortized.
+	}
+	// FIFO exhausted without finding a live entry. Rebuild from the map
+	// (covers the deserialization path where the FIFO was never populated)
+	// and retry once.
+	s.rebuildSkippedKeysFIFO()
+	if s.skippedKeysFIFOHead < len(s.skippedKeysFIFO) {
+		id := s.skippedKeysFIFO[s.skippedKeysFIFOHead]
+		s.skippedKeysFIFOHead++
+		if mk, ok := s.skippedKeys[id]; ok {
+			mk.Destroy()
+			delete(s.skippedKeys, id)
+		}
+		s.compactFIFOIfNeeded()
+	}
+}
+
+// compactFIFOIfNeeded copies the live tail of skippedKeysFIFO to the front when
+// the consumed head exceeds half the slice capacity, reclaiming memory without
+// frequent allocations.
+func (s *SPQR) compactFIFOIfNeeded() {
+	if s.skippedKeysFIFOHead > len(s.skippedKeysFIFO)/2 {
+		tail := s.skippedKeysFIFO[s.skippedKeysFIFOHead:]
+		copy(s.skippedKeysFIFO, tail)
+		s.skippedKeysFIFO = s.skippedKeysFIFO[:len(tail)]
+		s.skippedKeysFIFOHead = 0
+	}
+}
+
+// trimFIFOIfNeeded compacts the FIFO after a key is consumed or a batch of
+// keys is deleted (by gcSkippedKeys or clearOldEpochs). It first trims the
+// consumed head, then rebuilds the entire slice from the live map when the
+// number of stale FIFO entries has grown significantly larger than the live
+// map. This prevents unbounded slice growth in long-lived sessions that
+// insert and consume skipped keys without ever hitting eviction capacity.
+func (s *SPQR) trimFIFOIfNeeded() {
+	s.compactFIFOIfNeeded()
+	// Rebuild when stale entries in the tail significantly outnumber live
+	// entries. The factor of 2 keeps rebuild cost amortized: each entry
+	// triggers at most one rebuild per "doubling" of live map size.
+	live := len(s.skippedKeysFIFO) - s.skippedKeysFIFOHead
+	if live > 2*len(s.skippedKeys)+64 {
+		s.rebuildSkippedKeysFIFO()
+	}
+}
+
+// rebuildSkippedKeysFIFO rebuilds the insertion-order FIFO from the current
+// skippedKeys map. Called when the FIFO is empty (e.g., after deserialization).
+// Keys are sorted by (Epoch, Counter) to provide a deterministic eviction order
+// that approximates the historical insertion order.
+func (s *SPQR) rebuildSkippedKeysFIFO() {
+	s.skippedKeysFIFO = make([]SkippedKeyID, 0, len(s.skippedKeys))
+	for id := range s.skippedKeys {
+		s.skippedKeysFIFO = append(s.skippedKeysFIFO, id)
+	}
+	// Insertion sort by (Epoch, Counter) — skipped-key maps are always small.
+	for i := 1; i < len(s.skippedKeysFIFO); i++ {
+		key := s.skippedKeysFIFO[i]
+		j := i - 1
+		for j >= 0 && (s.skippedKeysFIFO[j].Epoch > key.Epoch ||
+			(s.skippedKeysFIFO[j].Epoch == key.Epoch && s.skippedKeysFIFO[j].Counter > key.Counter)) {
+			s.skippedKeysFIFO[j+1] = s.skippedKeysFIFO[j]
+			j--
+		}
+		s.skippedKeysFIFO[j+1] = key
+	}
+	s.skippedKeysFIFOHead = 0
 }

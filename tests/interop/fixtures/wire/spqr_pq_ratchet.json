@@ -1,0 +1,23 @@
+{
+  "source": "SparsePostQuantumRatchet crate v1.5.1 — spqr::send (rides in SignalMessage.pq_ratchet, proto field 5)",
+  "rust_rev": "98915c442d",
+  "purpose": "SPQR pq_ratchet wire vector: the post-quantum ratchet message bytes carried in SignalMessage.pq_ratchet (proto field 5), emitted by the Rust SparsePostQuantumRatchet crate. Go's pkg/spqr.Recv must accept the bytes and derive a message key byte-identical to sender_key_hex from the same auth_key.",
+  "vectors": [
+    {
+      "name": "spqr_pq_ratchet_first_message",
+      "inputs": {
+        "auth_key_hex": "696e7465726f702d7368617265642d617574682d6b65792d3332627974657321",
+        "direction": "a2b",
+        "max_jump": 25000,
+        "max_ooo_keys": 2000,
+        "min_version": 1,
+        "send_seed": 1347506771,
+        "version": 1
+      },
+      "expected": {
+        "pq_ratchet_hex": "010101010090c19dd3f496c70f8d26ea7824eb9a53028144b321c11a0b0cb4dc049340210b",
+        "sender_key_hex": "3e04aa6332ce29c72b84d599663d65f8a556d4dc86e5e2499dc12b03d21b813a"
+      }
+    }
+  ]
+}

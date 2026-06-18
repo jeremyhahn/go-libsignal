@@ -48,3 +48,26 @@ type ErrShortRead struct {
 func (e *ErrShortRead) Error() string {
 	return fmt.Sprintf("kdf: short read from HKDF: expected %d bytes, got %d", e.Expected, e.Got)
 }
+
+// ErrHKDFExpand is returned when the HKDF Expand or ExpandFromPRK step fails.
+type ErrHKDFExpand struct {
+	Err error
+}
+
+func (e *ErrHKDFExpand) Error() string {
+	return fmt.Sprintf("kdf: HKDF expand failed: %v", e.Err)
+}
+
+func (e *ErrHKDFExpand) Unwrap() error {
+	return e.Err
+}
+
+// ErrHKDFInvalidPRK is returned when the PRK passed to ExpandFromPRK is the
+// wrong length for the underlying hash function.
+type ErrHKDFInvalidPRK struct {
+	Got int
+}
+
+func (e *ErrHKDFInvalidPRK) Error() string {
+	return fmt.Sprintf("kdf: invalid PRK length %d (must be 32 bytes for HMAC-SHA256)", e.Got)
+}

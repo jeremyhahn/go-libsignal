@@ -341,6 +341,148 @@ func TestReceiveAuthCredentialWithPniZkc_NotDayAligned(t *testing.T) {
 	}
 }
 
+// TestAuthCredentialWithPniZkcSerializeRoundTrip verifies that Serialize and
+// DeserializeAuthCredentialWithPniZkc are exact inverses, producing the
+// Rust-compatible 265-byte bincode wire format.
+func TestAuthCredentialWithPniZkcSerializeRoundTrip(t *testing.T) {
+	var randomness RandomnessBytes
+	for i := range randomness {
+		randomness[i] = byte(i + 1)
+	}
+	serverSecret, err := GenerateServerSecretParams(randomness)
+	if err != nil {
+		t.Fatalf("GenerateServerSecretParams: %v", err)
+	}
+	serverPublic := serverSecret.GetPublicParams()
+
+	var aciUUID UIDBytes
+	for i := range aciUUID {
+		aciUUID[i] = byte(i + 0x61)
+	}
+	var pniUUID UIDBytes
+	for i := range pniUUID {
+		pniUUID[i] = byte(i + 0x81)
+	}
+	aci := NewACI(aciUUID)
+	pni := NewPNI(pniUUID)
+	redemptionTime := NewTimestamp(SecondsPerDay * 100)
+
+	var issueRandomness RandomnessBytes
+	for i := range issueRandomness {
+		issueRandomness[i] = byte(i + 10)
+	}
+	response, err := serverSecret.IssueAuthCredentialWithPniZkc(
+		aci, pni, redemptionTime, issueRandomness,
+	)
+	if err != nil {
+		t.Fatalf("IssueAuthCredentialWithPniZkc: %v", err)
+	}
+
+	credential, err := serverPublic.ReceiveAuthCredentialWithPniZkc(
+		aci, pni, redemptionTime, response,
+	)
+	if err != nil {
+		t.Fatalf("ReceiveAuthCredentialWithPniZkc: %v", err)
+	}
+
+	// Serialize to wire format.
+	wire, err := credential.Serialize()
+	if err != nil {
+		t.Fatalf("Serialize: %v", err)
+	}
+	if len(wire) != authCredentialWithPniZkcLen {
+		t.Fatalf("Serialize produced %d bytes, want %d", len(wire), authCredentialWithPniZkcLen)
+	}
+	// Version byte must be AuthCredentialWithPniVersionZkc (0x03).
+	if wire[0] != byte(AuthCredentialWithPniVersionZkc) {
+		t.Fatalf("version byte = 0x%02x, want 0x%02x", wire[0], byte(AuthCredentialWithPniVersionZkc))
+	}
+
+	// Deserialize and check round-trip.
+	got, err := DeserializeAuthCredentialWithPniZkc(wire)
+	if err != nil {
+		t.Fatalf("DeserializeAuthCredentialWithPniZkc: %v", err)
+	}
+	if got.RedemptionTime != redemptionTime {
+		t.Errorf("RedemptionTime: got %d, want %d",
+			got.RedemptionTime.EpochSeconds(), redemptionTime.EpochSeconds())
+	}
+	if got.ACI.RawUUIDBytes != aciUUID {
+		t.Error("ACI.RawUUIDBytes mismatch after round-trip")
+	}
+	if got.PNI.RawUUIDBytes != pniUUID {
+		t.Error("PNI.RawUUIDBytes mismatch after round-trip")
+	}
+	if got.ACI.M1.Equal(credential.ACI.M1) != 1 {
+		t.Error("ACI.M1 mismatch after round-trip")
+	}
+	if got.ACI.M2.Equal(credential.ACI.M2) != 1 {
+		t.Error("ACI.M2 mismatch after round-trip")
+	}
+	if got.PNI.M1.Equal(credential.PNI.M1) != 1 {
+		t.Error("PNI.M1 mismatch after round-trip")
+	}
+	if got.PNI.M2.Equal(credential.PNI.M2) != 1 {
+		t.Error("PNI.M2 mismatch after round-trip")
+	}
+
+	// Re-serialize the deserialized value; bytes must be identical.
+	wire2, err := got.Serialize()
+	if err != nil {
+		t.Fatalf("Serialize (second): %v", err)
+	}
+	for i := range wire {
+		if wire[i] != wire2[i] {
+			t.Fatalf("byte %d differs after second round-trip: 0x%02x != 0x%02x", i, wire[i], wire2[i])
+		}
+	}
+}
+
+// TestDeserializeAuthCredentialWithPniZkc_InvalidLength verifies that
+// DeserializeAuthCredentialWithPniZkc returns ErrInvalidCredentialLength
+// for inputs of the wrong size.
+func TestDeserializeAuthCredentialWithPniZkc_InvalidLength(t *testing.T) {
+	cases := []struct {
+		name string
+		data []byte
+	}{
+		{"empty", []byte{}},
+		{"too short", make([]byte, 100)},
+		{"too long", make([]byte, 300)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DeserializeAuthCredentialWithPniZkc(tc.data)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			var lenErr *ErrInvalidCredentialLength
+			// Walk the error chain.
+			unwrap := err
+			found := false
+			for unwrap != nil {
+				if e, ok := unwrap.(*ErrInvalidCredentialLength); ok {
+					lenErr = e
+					found = true
+					break
+				}
+				type unwrapper interface{ Unwrap() error }
+				if u, ok := unwrap.(unwrapper); ok {
+					unwrap = u.Unwrap()
+				} else {
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("expected *ErrInvalidCredentialLength, got %T: %v", err, err)
+			}
+			if lenErr.Want != authCredentialWithPniZkcLen {
+				t.Errorf("Want = %d, expected %d", lenErr.Want, authCredentialWithPniZkcLen)
+			}
+		})
+	}
+}
+
 func TestAnyAuthCredentialPresentation(t *testing.T) {
 	ts := NewTimestamp(86400)
 	domain := UIDEncryptionDomain{}

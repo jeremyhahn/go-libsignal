@@ -79,14 +79,14 @@ type ClientConnection struct {
 }
 
 // Send wraps a plaintext message to be sent, returning the ciphertext.
+//
+// Matches Rust libsignal attest/src/client_connection.rs ClientConnection::send:
+// empty input produces an empty output (zero chunks iterated, empty Vec returned).
 func (c *ClientConnection) Send(plaintext []byte) ([]byte, error) {
-	maxCiphertextSize := len(plaintext) +
-		((len(plaintext)+NoiseTransportPerPayloadMax-1)/NoiseTransportPerPayloadMax)*
-			noiseTransportPerPayloadOverhead
-	if len(plaintext) == 0 {
-		maxCiphertextSize = noiseTransportPerPayloadOverhead
-	}
-	ciphertext := make([]byte, 0, maxCiphertextSize)
+	// div_ceil(len, max) * overhead — matches Rust capacity calculation.
+	// For empty input this evaluates to 0, so we allocate nothing.
+	chunkCount := (len(plaintext) + NoiseTransportPerPayloadMax - 1) / NoiseTransportPerPayloadMax
+	ciphertext := make([]byte, 0, len(plaintext)+chunkCount*noiseTransportPerPayloadOverhead)
 
 	for len(plaintext) > 0 {
 		chunkSize := len(plaintext)
@@ -97,14 +97,6 @@ func (c *ClientConnection) Send(plaintext []byte) ([]byte, error) {
 		plaintext = plaintext[chunkSize:]
 
 		encrypted, err := c.sendCipher.Encrypt(nil, chunk)
-		if err != nil {
-			return nil, err
-		}
-		ciphertext = append(ciphertext, encrypted...)
-	}
-
-	if len(ciphertext) == 0 {
-		encrypted, err := c.sendCipher.Encrypt(nil, nil)
 		if err != nil {
 			return nil, err
 		}

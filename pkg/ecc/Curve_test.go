@@ -154,6 +154,40 @@ func TestDecodePoint_WithOffset(t *testing.T) {
 	}
 }
 
+// TestDecodePoint_ExtraTrailingBytesAccepted mirrors Rust test_decode_size
+// (rust/core/src/curve.rs:450-456): a 34-byte input (33 key bytes + 1 trailing
+// byte) must be accepted, and the decoded key must round-trip to the same 33-byte
+// serialization as the original 33-byte input.
+func TestDecodePoint_ExtraTrailingBytesAccepted(t *testing.T) {
+	kp, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair failed: %v", err)
+	}
+	serialized := kp.PublicKey().Serialize() // 33 bytes
+
+	// Append one extra byte — must still be accepted.
+	extra := append(serialized, 0xFF)
+	decoded, err := DecodePoint(extra, 0)
+	if err != nil {
+		t.Fatalf("DecodePoint with 34-byte input failed: %v", err)
+	}
+
+	// Serialization must match the original 33-byte form.
+	if !bytes.Equal(decoded.Serialize(), serialized) {
+		t.Fatal("decoded key serialization does not match original after extra trailing byte")
+	}
+
+	// Append many extra bytes — must also be accepted.
+	manyExtra := append(serialized, make([]byte, 100)...)
+	decoded2, err := DecodePoint(manyExtra, 0)
+	if err != nil {
+		t.Fatalf("DecodePoint with 133-byte input failed: %v", err)
+	}
+	if !bytes.Equal(decoded2.Serialize(), serialized) {
+		t.Fatal("decoded key serialization does not match original after many trailing bytes")
+	}
+}
+
 func TestVerifySignature_ValidSignature(t *testing.T) {
 	kp, err := GenerateKeyPair()
 	if err != nil {
@@ -274,12 +308,18 @@ func TestDjbECPublicKey_PublicKey(t *testing.T) {
 }
 
 func TestDjbECPrivateKey_Serialize(t *testing.T) {
+	// Use pre-clamped bytes so the constructor does not mutate them,
+	// allowing a direct equality check on the serialized form.
+	// Pre-clamped: byte 0 has bits 0-2 clear (0xF8), byte 31 has bit 7
+	// clear and bit 6 set (0x7F satisfies both since 0x7F & 0x80 == 0
+	// and 0x7F & 0x40 != 0).
 	var privBytes [32]byte
-	privBytes[0] = 0x01
+	privBytes[0] = 0xF8  // pre-clamped low byte
+	privBytes[31] = 0x7F // pre-clamped high byte
 	priv := NewDjbECPrivateKey(privBytes)
 	serialized := priv.Serialize()
 	if serialized != privBytes {
-		t.Fatal("Serialize should return the private key bytes")
+		t.Fatalf("Serialize should return clamped key bytes; got[0]=0x%02x got[31]=0x%02x", serialized[0], serialized[31])
 	}
 }
 
@@ -291,11 +331,16 @@ func TestDjbECPrivateKey_Type(t *testing.T) {
 }
 
 func TestDjbECPrivateKey_PrivateKey(t *testing.T) {
+	// Use a pre-clamped key so the constructor does not alter the bytes.
+	// byte 10 can be 0xFF (not affected by clamping), byte 0 must have
+	// bits 0-2 clear, byte 31 must have bit 7 clear and bit 6 set.
 	var key [32]byte
-	key[10] = 0xFF
+	key[0] = 0xF8  // pre-clamped
+	key[10] = 0xFF // unaffected by clamping
+	key[31] = 0x7F // pre-clamped
 	priv := NewDjbECPrivateKey(key)
 	if priv.PrivateKey() != key {
-		t.Fatal("PrivateKey should return the original bytes")
+		t.Fatal("PrivateKey should return the clamped key bytes")
 	}
 }
 
@@ -738,8 +783,8 @@ func TestVerifySignature_RejectsNonCanonicalScalar(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		mutate  func(s *[64]byte)
+		name   string
+		mutate func(s *[64]byte)
 	}{
 		{
 			name: "bit 5 set in s[31]",
@@ -897,5 +942,257 @@ func TestIsCanonical_Interface(t *testing.T) {
 	// Should compile and return true for a generated key.
 	if !pub.IsCanonical() {
 		t.Fatal("generated key should be canonical via interface")
+	}
+}
+
+// ============= ECC-3: Private key clamping tests =============
+
+// TestNewDjbECPrivateKey_ClampsOnConstruction verifies that NewDjbECPrivateKey
+// applies Curve25519 clamping to the input bytes, matching Rust
+// PrivateKey::From<[u8;32]> (rust/core/src/curve/curve25519.rs:172).
+func TestNewDjbECPrivateKey_ClampsOnConstruction(t *testing.T) {
+	// Unclamped raw bytes: low bits of byte 0 set, high bit of byte 31 set,
+	// and bit 6 of byte 31 clear — all three clamping bits need fixing.
+	var raw [32]byte
+	raw[0] = 0xFF  // bits 0-2 should be cleared → 0xF8
+	raw[31] = 0xFF // bit 7 should be cleared, bit 6 set → 0x7F then |0x40 → 0x7F? no:
+	// After clamping: raw[31] &= 127 = 0x7F, then |= 64 = 0x7F (0x7F already has bit 6 set)
+	// raw[0] after: 0xFF & 0xF8 = 0xF8
+
+	priv := NewDjbECPrivateKey(raw)
+	got := priv.Serialize()
+
+	if got[0] != 0xF8 {
+		t.Errorf("byte 0: expected 0xF8 after clamping, got 0x%02x", got[0])
+	}
+	if got[31]&0x80 != 0 {
+		t.Errorf("byte 31 bit 7: expected clear after clamping, got 0x%02x", got[31])
+	}
+	if got[31]&0x40 == 0 {
+		t.Errorf("byte 31 bit 6: expected set after clamping, got 0x%02x", got[31])
+	}
+	if got[0]&0x07 != 0 {
+		t.Errorf("byte 0 bits 0-2: expected clear after clamping, got 0x%02x", got[0])
+	}
+}
+
+// TestNewDjbECPrivateKey_ClampingIdemPotent verifies that clamping is
+// idempotent: a key that is already clamped is unchanged by construction.
+func TestNewDjbECPrivateKey_ClampingIdemPotent(t *testing.T) {
+	var raw [32]byte
+	raw[0] = 0xF8  // already clamped low byte
+	raw[31] = 0x7F // already clamped high byte (bit 6 set, bit 7 clear) — wait: 0x7F has bit 6 set? 0x40=64. 0x7F = 0111 1111 — yes, bit 6 is set.
+	// Actually NewDjbECPrivateKey applies: &= 248 (&=0xF8), &= 127 (&=0x7F), |= 64 (|=0x40)
+	// raw[31] = 0x7F after &=127 stays 0x7F; |=64 → 0x7F (bit 6 already set in 0x7F)
+	// So 0x7F is idempotent.
+
+	priv := NewDjbECPrivateKey(raw)
+	got := priv.Serialize()
+
+	if got[0] != raw[0] {
+		t.Errorf("byte 0 changed: expected 0x%02x, got 0x%02x", raw[0], got[0])
+	}
+	if got[31] != 0x7F {
+		t.Errorf("byte 31 changed: expected 0x7F, got 0x%02x", got[31])
+	}
+}
+
+// TestNewGuardedECPrivateKey_ClampsOnConstruction verifies that
+// NewGuardedECPrivateKey applies Curve25519 clamping, matching Rust
+// PrivateKey::deserialize (rust/core/src/curve.rs:246-247).
+func TestNewGuardedECPrivateKey_ClampsOnConstruction(t *testing.T) {
+	var raw [32]byte
+	raw[0] = 0x07  // low 3 bits set — must be cleared
+	raw[31] = 0x80 // bit 7 set, bit 6 clear — both must be fixed
+
+	priv, err := NewGuardedECPrivateKey(raw)
+	if err != nil {
+		t.Fatalf("NewGuardedECPrivateKey failed: %v", err)
+	}
+	defer priv.Zeroize()
+
+	got := priv.Serialize()
+
+	if got[0]&0x07 != 0 {
+		t.Errorf("byte 0 bits 0-2: expected clear, got 0x%02x", got[0])
+	}
+	if got[31]&0x80 != 0 {
+		t.Errorf("byte 31 bit 7: expected clear, got 0x%02x", got[31])
+	}
+	if got[31]&0x40 == 0 {
+		t.Errorf("byte 31 bit 6: expected set, got 0x%02x", got[31])
+	}
+}
+
+// TestPrivateKeyClamp_SerializeRoundTrip verifies that serialize→deserialize
+// produces byte-for-byte identical output for unclamped inputs, matching
+// the Rust round-trip contract.
+func TestPrivateKeyClamp_SerializeRoundTrip(t *testing.T) {
+	var raw [32]byte
+	for i := range raw {
+		raw[i] = 0xFF
+	}
+	// After clamping: raw[0]=0xF8, raw[31]=0x7F
+	priv1 := NewDjbECPrivateKey(raw)
+	ser1 := priv1.Serialize()
+
+	priv2 := NewDjbECPrivateKey(ser1)
+	ser2 := priv2.Serialize()
+
+	if ser1 != ser2 {
+		t.Fatal("serialize→deserialize is not idempotent: round-trip diverges")
+	}
+}
+
+// ============= ECC-7: KeyPairFromBytes constructor tests =============
+
+// TestKeyPairFromBytes_Success verifies that KeyPairFromBytes constructs a
+// valid key pair from raw public and private key bytes.
+// Mirrors Rust KeyPair::from_public_and_private (rust/core/src/curve.rs:350-360).
+func TestKeyPairFromBytes_Success(t *testing.T) {
+	// Generate a reference key pair and extract its raw bytes.
+	kp, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair failed: %v", err)
+	}
+	pubBytes := kp.PublicKey().Serialize() // 33 bytes: type || 32 key bytes
+	privBytes := kp.PrivateKey().Serialize()
+
+	kp2, err := KeyPairFromBytes(pubBytes, privBytes)
+	if err != nil {
+		t.Fatalf("KeyPairFromBytes failed: %v", err)
+	}
+	if !bytes.Equal(kp2.PublicKey().Serialize(), pubBytes) {
+		t.Fatal("reconstructed public key does not match original")
+	}
+}
+
+// TestKeyPairFromBytes_InvalidPublicKey verifies that KeyPairFromBytes returns
+// an error when the public key bytes are invalid.
+func TestKeyPairFromBytes_InvalidPublicKey(t *testing.T) {
+	var priv [32]byte
+	_, err := KeyPairFromBytes([]byte{0x01, 0x02, 0x03}, priv)
+	if err == nil {
+		t.Fatal("expected error for invalid public key bytes")
+	}
+}
+
+// TestKeyPairFromBytes_ClampsPrivateKey verifies that KeyPairFromBytes applies
+// clamping to the private key bytes, consistent with NewGuardedECPrivateKey.
+func TestKeyPairFromBytes_ClampsPrivateKey(t *testing.T) {
+	kp, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair failed: %v", err)
+	}
+	pubBytes := kp.PublicKey().Serialize()
+
+	var raw [32]byte
+	raw[0] = 0xFF
+	raw[31] = 0xFF
+
+	kp2, err := KeyPairFromBytes(pubBytes, raw)
+	if err != nil {
+		t.Fatalf("KeyPairFromBytes failed: %v", err)
+	}
+	got := kp2.PrivateKey().Serialize()
+	if got[0]&0x07 != 0 {
+		t.Errorf("byte 0 not clamped: 0x%02x", got[0])
+	}
+	if got[31]&0x80 != 0 {
+		t.Errorf("byte 31 bit 7 not clamped: 0x%02x", got[31])
+	}
+	if got[31]&0x40 == 0 {
+		t.Errorf("byte 31 bit 6 not set: 0x%02x", got[31])
+	}
+}
+
+// ============= ECC-9: Constant-time PublicKey equality tests =============
+
+// TestDjbECPublicKey_Equal_SameKey verifies that Equal returns true for two
+// public keys with identical byte content.
+// Mirrors Rust PublicKey's subtle::ConstantTimeEq (rust/core/src/curve.rs:201-218).
+func TestDjbECPublicKey_Equal_SameKey(t *testing.T) {
+	kp, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair failed: %v", err)
+	}
+	pub := kp.PublicKey().(*DjbECPublicKey)
+	pub2 := NewDjbECPublicKey(pub.PublicKey())
+	if !pub.Equal(pub2) {
+		t.Fatal("Equal should return true for identical public keys")
+	}
+}
+
+// TestDjbECPublicKey_Equal_DifferentKeys verifies that Equal returns false for
+// two public keys with different byte content.
+func TestDjbECPublicKey_Equal_DifferentKeys(t *testing.T) {
+	kp1, _ := GenerateKeyPair()
+	kp2, _ := GenerateKeyPair()
+	pub1 := kp1.PublicKey().(*DjbECPublicKey)
+	pub2 := kp2.PublicKey().(*DjbECPublicKey)
+	if pub1.Equal(pub2) {
+		t.Fatal("Equal should return false for different public keys")
+	}
+}
+
+// TestDjbECPublicKey_Equal_NilOther verifies that Equal returns false when
+// the other key is nil.
+func TestDjbECPublicKey_Equal_NilOther(t *testing.T) {
+	kp, _ := GenerateKeyPair()
+	pub := kp.PublicKey().(*DjbECPublicKey)
+	if pub.Equal(nil) {
+		t.Fatal("Equal should return false for nil other key")
+	}
+}
+
+// TestCalculateSignatureWithRandomness verifies the deterministic signing path.
+func TestCalculateSignatureWithRandomness(t *testing.T) {
+	kp, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+	message := []byte("test message for deterministic sign")
+	var randomness [64]byte
+	for i := range randomness {
+		randomness[i] = byte(i + 1)
+	}
+	sig, err := CalculateSignatureWithRandomness(kp.PrivateKey(), message, randomness)
+	if err != nil {
+		t.Fatalf("CalculateSignatureWithRandomness: %v", err)
+	}
+	var zero [64]byte
+	if sig == zero {
+		t.Fatal("signature is all-zero")
+	}
+
+	// Same inputs must produce the same signature (deterministic).
+	sig2, err := CalculateSignatureWithRandomness(kp.PrivateKey(), message, randomness)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if sig != sig2 {
+		t.Fatal("CalculateSignatureWithRandomness is not deterministic")
+	}
+}
+
+// TestDjbECPublicKey_ScalarIsInRange exercises the public ScalarIsInRange method.
+func TestDjbECPublicKey_ScalarIsInRange(t *testing.T) {
+	// A key generated from GenerateKeyPair is always clamped; its scalar
+	// should be in range.
+	kp, err := GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+	pub := kp.PublicKey().(*DjbECPublicKey)
+	if !pub.ScalarIsInRange() {
+		t.Error("fresh generated key should be in scalar range")
+	}
+
+	// A key with the high bit of byte[31] set is out of range.
+	var outOfRangeBytes [32]byte
+	outOfRangeBytes[31] = 0x80 // high bit set
+	outKey := NewDjbECPublicKey(outOfRangeBytes)
+	if outKey.ScalarIsInRange() {
+		t.Error("key with high bit of byte 31 set should be out of range")
 	}
 }

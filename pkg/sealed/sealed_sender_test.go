@@ -2,13 +2,14 @@ package sealed
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/identity"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/prekey"
-	"github.com/jeremyhahn/go-libsignal/pkg/protocol"
 	"github.com/jeremyhahn/go-libsignal/pkg/proto/sealedpb"
+	"github.com/jeremyhahn/go-libsignal/pkg/protocol"
 	"github.com/jeremyhahn/go-libsignal/pkg/serialize"
 	"github.com/jeremyhahn/go-libsignal/pkg/session"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
@@ -51,13 +52,18 @@ func (s *testIdentityStore) GetLocalRegistrationId() uint32 {
 	return s.registrationID
 }
 
-func (s *testIdentityStore) SaveIdentity(address *protocol.SignalAddress, identityKey *identity.Key) {
+func (s *testIdentityStore) SaveIdentity(address *protocol.SignalAddress, identityKey *identity.Key) (store.IdentityChange, error) {
+	prev, existed := s.trustedKeys[address.String()]
 	s.trustedKeys[address.String()] = identityKey
 	s.remoteIdentities[address.String()] = identityKey.PublicKey()
+	if existed && prev != identityKey {
+		return store.IdentityChangeReplacedExisting, nil
+	}
+	return store.IdentityChangeNewOrUnchanged, nil
 }
 
-func (s *testIdentityStore) IsTrustedIdentity(address *protocol.SignalAddress, identityKey *identity.Key, direction store.Direction) bool {
-	return true
+func (s *testIdentityStore) IsTrustedIdentity(address *protocol.SignalAddress, identityKey *identity.Key, direction store.Direction) (bool, error) {
+	return true, nil
 }
 
 func (s *testIdentityStore) GetIdentity(address *protocol.SignalAddress) (*identity.Key, error) {
@@ -142,7 +148,9 @@ func TestSealedSenderEncryptFromUSMCAndDecryptToUSMC(t *testing.T) {
 
 	// Alice needs to know Bob's identity key
 	bobAddress := protocol.NewSignalAddress("bob-uuid", 1)
-	aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey()))
+	if _, err := aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	// Create sender certificate for Alice
 	senderCert, err := NewSenderCertificate(
@@ -249,7 +257,9 @@ func TestSealedSenderDecryptToUSMCTamperedMAC(t *testing.T) {
 	bobStore := newTestIdentityStore(t)
 
 	bobAddress := protocol.NewSignalAddress("bob-uuid", 1)
-	aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey()))
+	if _, err := aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	senderCert, _ := NewSenderCertificate(
 		"alice-uuid", nil,
@@ -304,11 +314,12 @@ func (s *basicIdentityStore) GetLocalRegistrationId() uint32 {
 	return 1
 }
 
-func (s *basicIdentityStore) SaveIdentity(address *protocol.SignalAddress, identityKey *identity.Key) {
+func (s *basicIdentityStore) SaveIdentity(address *protocol.SignalAddress, identityKey *identity.Key) (store.IdentityChange, error) {
+	return store.IdentityChangeNewOrUnchanged, nil
 }
 
-func (s *basicIdentityStore) IsTrustedIdentity(address *protocol.SignalAddress, identityKey *identity.Key, direction store.Direction) bool {
-	return true
+func (s *basicIdentityStore) IsTrustedIdentity(address *protocol.SignalAddress, identityKey *identity.Key, direction store.Direction) (bool, error) {
+	return true, nil
 }
 
 func (s *basicIdentityStore) GetIdentity(address *protocol.SignalAddress) (*identity.Key, error) {
@@ -358,14 +369,18 @@ func TestSealedSenderFullEncryptDecrypt(t *testing.T) {
 	// Generate Bob's pre keys
 	bobPreKeys, _ := keyhelper.GeneratePreKeys(0, 10, serializer.PreKeyRecord)
 	for _, pk := range bobPreKeys {
-		bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord))
+		if err := bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord)); err != nil {
+			t.Fatalf("setup: StorePreKey: %v", err)
+		}
 	}
 
 	bobSignedPreKey, _ := keyhelper.GenerateSignedPreKey(bobIdentity, 0, serializer.SignedPreKeyRecord)
-	bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
+	if err := bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
 		bobSignedPreKey.ID(), bobSignedPreKey.Timestamp(), bobSignedPreKey.KeyPair(),
 		bobSignedPreKey.Signature(), serializer.SignedPreKeyRecord,
-	))
+	)); err != nil {
+		t.Fatalf("setup: StoreSignedPreKey: %v", err)
+	}
 
 	// Generate Bob's Kyber pre-key for PQXDH.
 	bobKyberPreKey, _ := keyhelper.GenerateKyberPreKey(bobIdentity.PrivateKey(), 42, &mockKyberPreKeySerializer{})
@@ -453,12 +468,17 @@ type fullIdentityStore struct {
 
 func (s *fullIdentityStore) GetIdentityKeyPair() *identity.KeyPair { return s.keyPair }
 func (s *fullIdentityStore) GetLocalRegistrationId() uint32        { return s.regID }
-func (s *fullIdentityStore) SaveIdentity(addr *protocol.SignalAddress, key *identity.Key) {
+func (s *fullIdentityStore) SaveIdentity(addr *protocol.SignalAddress, key *identity.Key) (store.IdentityChange, error) {
+	prev, existed := s.trusted[addr.String()]
 	s.trusted[addr.String()] = key
+	if existed && prev != key {
+		return store.IdentityChangeReplacedExisting, nil
+	}
+	return store.IdentityChangeNewOrUnchanged, nil
 }
-func (s *fullIdentityStore) IsTrustedIdentity(addr *protocol.SignalAddress, key *identity.Key, dir store.Direction) bool {
+func (s *fullIdentityStore) IsTrustedIdentity(addr *protocol.SignalAddress, key *identity.Key, dir store.Direction) (bool, error) {
 	t := s.trusted[addr.String()]
-	return t == nil || t.Fingerprint() == key.Fingerprint()
+	return t == nil || t.Fingerprint() == key.Fingerprint(), nil
 }
 func (s *fullIdentityStore) GetIdentity(addr *protocol.SignalAddress) (*identity.Key, error) {
 	return s.trusted[addr.String()], nil
@@ -483,25 +503,30 @@ type inMemorySessionStoreV1 struct {
 	serializer *serialize.Serializer
 }
 
-func (s *inMemorySessionStoreV1) LoadSession(addr *protocol.SignalAddress) *record.Session {
+func (s *inMemorySessionStoreV1) LoadSession(addr *protocol.SignalAddress) (*record.Session, error) {
 	if sess, ok := s.sessions[addr.String()]; ok {
-		return sess
+		return sess, nil
 	}
-	return record.NewSession(s.serializer.Session, s.serializer.State)
+	return record.NewSession(s.serializer.Session, s.serializer.State), nil
 }
-func (s *inMemorySessionStoreV1) GetSubDeviceSessions(name string) []uint32 { return nil }
-func (s *inMemorySessionStoreV1) StoreSession(addr *protocol.SignalAddress, r *record.Session) {
+func (s *inMemorySessionStoreV1) GetSubDeviceSessions(name string) ([]uint32, error) {
+	return nil, nil
+}
+func (s *inMemorySessionStoreV1) StoreSession(addr *protocol.SignalAddress, r *record.Session) error {
 	s.sessions[addr.String()] = r
+	return nil
 }
-func (s *inMemorySessionStoreV1) ContainsSession(addr *protocol.SignalAddress) bool {
+func (s *inMemorySessionStoreV1) ContainsSession(addr *protocol.SignalAddress) (bool, error) {
 	_, ok := s.sessions[addr.String()]
-	return ok
+	return ok, nil
 }
-func (s *inMemorySessionStoreV1) DeleteSession(addr *protocol.SignalAddress) {
+func (s *inMemorySessionStoreV1) DeleteSession(addr *protocol.SignalAddress) error {
 	delete(s.sessions, addr.String())
+	return nil
 }
-func (s *inMemorySessionStoreV1) DeleteAllSessions() {
+func (s *inMemorySessionStoreV1) DeleteAllSessions() error {
 	s.sessions = make(map[string]*record.Session)
+	return nil
 }
 
 func newInMemoryPreKeyStoreForV1() *inMemoryPreKeyStoreV1 {
@@ -512,10 +537,21 @@ type inMemoryPreKeyStoreV1 struct {
 	store map[uint32]*record.PreKey
 }
 
-func (s *inMemoryPreKeyStoreV1) LoadPreKey(id uint32) *record.PreKey    { return s.store[id] }
-func (s *inMemoryPreKeyStoreV1) StorePreKey(id uint32, r *record.PreKey) { s.store[id] = r }
-func (s *inMemoryPreKeyStoreV1) ContainsPreKey(id uint32) bool          { _, ok := s.store[id]; return ok }
-func (s *inMemoryPreKeyStoreV1) RemovePreKey(id uint32)                  { delete(s.store, id) }
+func (s *inMemoryPreKeyStoreV1) LoadPreKey(id uint32) (*record.PreKey, error) {
+	return s.store[id], nil
+}
+func (s *inMemoryPreKeyStoreV1) StorePreKey(id uint32, r *record.PreKey) error {
+	s.store[id] = r
+	return nil
+}
+func (s *inMemoryPreKeyStoreV1) ContainsPreKey(id uint32) (bool, error) {
+	_, ok := s.store[id]
+	return ok, nil
+}
+func (s *inMemoryPreKeyStoreV1) RemovePreKey(id uint32) error {
+	delete(s.store, id)
+	return nil
+}
 
 func newInMemorySignedPreKeyStoreForV1() *inMemorySignedPreKeyStoreV1 {
 	return &inMemorySignedPreKeyStoreV1{store: make(map[uint32]*record.SignedPreKey)}
@@ -525,24 +561,28 @@ type inMemorySignedPreKeyStoreV1 struct {
 	store map[uint32]*record.SignedPreKey
 }
 
-func (s *inMemorySignedPreKeyStoreV1) LoadSignedPreKey(id uint32) *record.SignedPreKey {
-	return s.store[id]
+func (s *inMemorySignedPreKeyStoreV1) LoadSignedPreKey(id uint32) (*record.SignedPreKey, error) {
+	return s.store[id], nil
 }
-func (s *inMemorySignedPreKeyStoreV1) LoadSignedPreKeys() []*record.SignedPreKey {
+func (s *inMemorySignedPreKeyStoreV1) LoadSignedPreKeys() ([]*record.SignedPreKey, error) {
 	var keys []*record.SignedPreKey
 	for _, k := range s.store {
 		keys = append(keys, k)
 	}
-	return keys
+	return keys, nil
 }
-func (s *inMemorySignedPreKeyStoreV1) StoreSignedPreKey(id uint32, r *record.SignedPreKey) {
+func (s *inMemorySignedPreKeyStoreV1) StoreSignedPreKey(id uint32, r *record.SignedPreKey) error {
 	s.store[id] = r
+	return nil
 }
-func (s *inMemorySignedPreKeyStoreV1) ContainsSignedPreKey(id uint32) bool {
+func (s *inMemorySignedPreKeyStoreV1) ContainsSignedPreKey(id uint32) (bool, error) {
 	_, ok := s.store[id]
-	return ok
+	return ok, nil
 }
-func (s *inMemorySignedPreKeyStoreV1) RemoveSignedPreKey(id uint32) { delete(s.store, id) }
+func (s *inMemorySignedPreKeyStoreV1) RemoveSignedPreKey(id uint32) error {
+	delete(s.store, id)
+	return nil
+}
 
 // inMemoryKyberPreKeyStoreV1 is an in-memory Kyber pre-key store for testing.
 type inMemoryKyberPreKeyStoreV1 struct {
@@ -568,9 +608,9 @@ func (s *inMemoryKyberPreKeyStoreV1) MarkKyberPreKeyUsed(id uint32, _ uint32, _ 
 	s.marked[id] = true
 	return nil
 }
-func (s *inMemoryKyberPreKeyStoreV1) ContainsKyberPreKey(id uint32) bool {
+func (s *inMemoryKyberPreKeyStoreV1) ContainsKyberPreKey(id uint32) (bool, error) {
 	_, ok := s.store[id]
-	return ok
+	return ok, nil
 }
 
 // mockKyberPreKeySerializer is a minimal serializer for Kyber pre-key records.
@@ -613,13 +653,17 @@ func TestSealedSenderDecryptSelfSend(t *testing.T) {
 
 	bobPreKeys, _ := keyhelper.GeneratePreKeys(0, 10, serializer.PreKeyRecord)
 	for _, pk := range bobPreKeys {
-		bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord))
+		if err := bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord)); err != nil {
+			t.Fatalf("setup: StorePreKey: %v", err)
+		}
 	}
 	bobSignedPreKey, _ := keyhelper.GenerateSignedPreKey(bobIdentity, 0, serializer.SignedPreKeyRecord)
-	bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
+	if err := bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
 		bobSignedPreKey.ID(), bobSignedPreKey.Timestamp(), bobSignedPreKey.KeyPair(),
 		bobSignedPreKey.Signature(), serializer.SignedPreKeyRecord,
-	))
+	)); err != nil {
+		t.Fatalf("setup: StoreSignedPreKey: %v", err)
+	}
 
 	bobKyberPreKey, _ := keyhelper.GenerateKyberPreKey(bobIdentity.PrivateKey(), 42, &mockKyberPreKeySerializer{})
 	bobKyberPreKeyStore := newInMemoryKyberPreKeyStoreForV1()
@@ -667,7 +711,9 @@ func TestSealedSenderDecryptUnsupportedMessageType(t *testing.T) {
 	bobStore := newTestIdentityStore(t)
 
 	bobAddress := protocol.NewSignalAddress("bob-uuid", 1)
-	aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey()))
+	if _, err := aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	senderCert, _ := NewSenderCertificate("alice-uuid", nil,
 		aliceStore.GetIdentityKeyPair().PublicKey().PublicKey(),
@@ -731,13 +777,17 @@ func TestSealedSenderFullEncryptDecryptWhisperMessage(t *testing.T) {
 	// Generate Bob's pre keys.
 	bobPreKeys, _ := keyhelper.GeneratePreKeys(0, 10, serializer.PreKeyRecord)
 	for _, pk := range bobPreKeys {
-		bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord))
+		if err := bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord)); err != nil {
+			t.Fatalf("setup: StorePreKey: %v", err)
+		}
 	}
 	bobSignedPreKey, _ := keyhelper.GenerateSignedPreKey(bobIdentity, 0, serializer.SignedPreKeyRecord)
-	bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
+	if err := bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
 		bobSignedPreKey.ID(), bobSignedPreKey.Timestamp(), bobSignedPreKey.KeyPair(),
 		bobSignedPreKey.Signature(), serializer.SignedPreKeyRecord,
-	))
+	)); err != nil {
+		t.Fatalf("setup: StoreSignedPreKey: %v", err)
+	}
 
 	// Generate Bob's Kyber pre-key for PQXDH.
 	bobKyberPreKey, _ := keyhelper.GenerateKyberPreKey(bobIdentity.PrivateKey(), 42, &mockKyberPreKeySerializer{})
@@ -860,7 +910,9 @@ func TestSealedSenderDecryptInvalidCertificate(t *testing.T) {
 	bobStore := newTestIdentityStore(t)
 
 	bobAddress := protocol.NewSignalAddress("bob-uuid", 1)
-	aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey()))
+	if _, err := aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	senderCert, _ := NewSenderCertificate(
 		"alice-uuid", nil,
@@ -893,61 +945,70 @@ func TestSealedSenderV1Constants(t *testing.T) {
 	}
 }
 
-func TestGetRecipientIdentityKeyWithLoader(t *testing.T) {
-	loaderStore := &identityLoaderStore{
-		keyPair: newTestIdentityStore(t).keyPair,
-		loaded:  make(map[string]ecc.ECPublicKeyable),
-	}
-
-	// Save an identity
+// TestGetRecipientIdentityKeyViaGetIdentity verifies that getRecipientIdentityKey
+// resolves the recipient's public key through the GetIdentity method mandated by
+// store.IdentityKey — no optional interface assertions, no runtime surprises.
+func TestGetRecipientIdentityKeyViaGetIdentity(t *testing.T) {
 	kp, _ := ecc.GenerateKeyPair()
 	addr := protocol.NewSignalAddress("test", 1)
-	loaderStore.loaded[addr.String()] = kp.PublicKey()
 
-	key, err := getRecipientIdentityKey(addr, loaderStore)
+	s := &knownIdentityStore{
+		keyPair:         newTestIdentityStore(t).keyPair,
+		knownIdentities: map[string]*identity.Key{addr.String(): identity.NewKey(kp.PublicKey())},
+	}
+
+	got, err := getRecipientIdentityKey(addr, s)
 	if err != nil {
-		t.Fatalf("getRecipientIdentityKey with loader error: %v", err)
+		t.Fatalf("getRecipientIdentityKey error: %v", err)
 	}
-	if key == nil {
-		t.Fatal("Should return the loaded identity key")
+	if got == nil {
+		t.Fatal("expected non-nil public key")
 	}
 }
 
-func TestGetRecipientIdentityKeyLoaderReturnsNil(t *testing.T) {
-	loaderStore := &identityLoaderStore{
-		keyPair: newTestIdentityStore(t).keyPair,
-		loaded:  make(map[string]ecc.ECPublicKeyable),
+// TestGetRecipientIdentityKeyMissingIdentity verifies that IdentityStoreError is
+// returned when GetIdentity finds no record for the address — compile-time safe
+// because every store.IdentityKey implementor provides GetIdentity.
+func TestGetRecipientIdentityKeyMissingIdentity(t *testing.T) {
+	s := &knownIdentityStore{
+		keyPair:         newTestIdentityStore(t).keyPair,
+		knownIdentities: map[string]*identity.Key{},
 	}
 
-	addr := protocol.NewSignalAddress("nonexistent", 1)
-	// Loader returns nil, should fall through to next check
-	_, err := getRecipientIdentityKey(addr, loaderStore)
+	addr := protocol.NewSignalAddress("nobody", 1)
+	_, err := getRecipientIdentityKey(addr, s)
 	if err == nil {
-		t.Error("getRecipientIdentityKey with nil loaded identity should return error")
+		t.Fatal("expected IdentityStoreError for missing identity, got nil")
+	}
+	var identErr *IdentityStoreError
+	if !errors.As(err, &identErr) {
+		t.Errorf("error = %v (%T), want *IdentityStoreError", err, err)
 	}
 }
 
-// identityLoaderStore implements identityLoader interface.
-type identityLoaderStore struct {
-	keyPair *identity.KeyPair
-	loaded  map[string]ecc.ECPublicKeyable
+// knownIdentityStore implements store.IdentityKey and surfaces previously-saved
+// identities through GetIdentity, satisfying the compile-time mandate used by
+// getRecipientIdentityKey.
+type knownIdentityStore struct {
+	keyPair         *identity.KeyPair
+	knownIdentities map[string]*identity.Key
 }
 
-func (s *identityLoaderStore) GetIdentityKeyPair() *identity.KeyPair {
-	return s.keyPair
+func (s *knownIdentityStore) GetIdentityKeyPair() *identity.KeyPair { return s.keyPair }
+func (s *knownIdentityStore) GetLocalRegistrationId() uint32        { return 1 }
+func (s *knownIdentityStore) SaveIdentity(address *protocol.SignalAddress, key *identity.Key) (store.IdentityChange, error) {
+	s.knownIdentities[address.String()] = key
+	return store.IdentityChangeNewOrUnchanged, nil
 }
-func (s *identityLoaderStore) GetLocalRegistrationId() uint32 { return 1 }
-func (s *identityLoaderStore) SaveIdentity(address *protocol.SignalAddress, identityKey *identity.Key) {
+func (s *knownIdentityStore) IsTrustedIdentity(_ *protocol.SignalAddress, _ *identity.Key, _ store.Direction) (bool, error) {
+	return true, nil
 }
-func (s *identityLoaderStore) IsTrustedIdentity(address *protocol.SignalAddress, identityKey *identity.Key, direction store.Direction) bool {
-	return true
+func (s *knownIdentityStore) GetIdentity(address *protocol.SignalAddress) (*identity.Key, error) {
+	return s.knownIdentities[address.String()], nil
 }
-func (s *identityLoaderStore) GetIdentity(address *protocol.SignalAddress) (*identity.Key, error) {
-	return nil, nil
-}
-func (s *identityLoaderStore) LoadIdentity(address *protocol.SignalAddress) ecc.ECPublicKeyable {
-	return s.loaded[address.String()]
-}
+
+// Compile-time assertion: knownIdentityStore must satisfy store.IdentityKey.
+var _ store.IdentityKey = (*knownIdentityStore)(nil)
 
 func TestSealedSenderDecryptToUSMCInvalidStructure(t *testing.T) {
 	// Cover the "invalid sealed sender message structure" check (line 233).
@@ -1026,7 +1087,9 @@ func TestSealedSenderDecryptToUSMCStaticMACFailure(t *testing.T) {
 	bobStore := newTestIdentityStore(t)
 
 	bobAddress := protocol.NewSignalAddress("bob-uuid", 1)
-	aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey()))
+	if _, err := aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	senderCert, _ := NewSenderCertificate("alice-uuid", nil,
 		aliceStore.GetIdentityKeyPair().PublicKey().PublicKey(),
@@ -1074,7 +1137,9 @@ func TestSealedSenderDecryptToUSMCMessageMACFailure(t *testing.T) {
 	bobStore := newTestIdentityStore(t)
 
 	bobAddress := protocol.NewSignalAddress("bob-uuid", 1)
-	aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey()))
+	if _, err := aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	senderCert, _ := NewSenderCertificate("alice-uuid", nil,
 		aliceStore.GetIdentityKeyPair().PublicKey().PublicKey(),
@@ -1113,7 +1178,7 @@ func TestSealedSenderDecryptToUSMCInvalidEphemeralKey(t *testing.T) {
 
 	envelope := &sealedpb.UnidentifiedSenderMessage{
 		EphemeralPublic:  []byte{0x99, 0x01, 0x02, 0x03}, // invalid key type prefix
-		EncryptedStatic:  make([]byte, 44),                // 33 + macTruncateLen + 1
+		EncryptedStatic:  make([]byte, 44),               // 33 + macTruncateLen + 1
 		EncryptedMessage: make([]byte, 20),
 	}
 	envelopeBytes, _ := proto.Marshal(envelope)
@@ -1155,13 +1220,17 @@ func TestSealedSenderDecryptExpiredCertificate(t *testing.T) {
 
 	bobPreKeys, _ := keyhelper.GeneratePreKeys(0, 10, serializer.PreKeyRecord)
 	for _, pk := range bobPreKeys {
-		bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord))
+		if err := bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord)); err != nil {
+			t.Fatalf("setup: StorePreKey: %v", err)
+		}
 	}
 	bobSignedPreKey, _ := keyhelper.GenerateSignedPreKey(bobIdentity, 0, serializer.SignedPreKeyRecord)
-	bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
+	if err := bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
 		bobSignedPreKey.ID(), bobSignedPreKey.Timestamp(), bobSignedPreKey.KeyPair(),
 		bobSignedPreKey.Signature(), serializer.SignedPreKeyRecord,
-	))
+	)); err != nil {
+		t.Fatalf("setup: StoreSignedPreKey: %v", err)
+	}
 
 	bobKyberPreKey, _ := keyhelper.GenerateKyberPreKey(bobIdentity.PrivateKey(), 42, &mockKyberPreKeySerializer{})
 
@@ -1218,7 +1287,9 @@ func TestSealedSenderEncryptSenderKeyType(t *testing.T) {
 	bobStore := newTestIdentityStore(t)
 
 	bobAddress := protocol.NewSignalAddress("bob-uuid", 1)
-	aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey()))
+	if _, err := aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	senderCert, _ := NewSenderCertificate("alice-uuid", nil,
 		aliceStore.GetIdentityKeyPair().PublicKey().PublicKey(),
@@ -1260,7 +1331,9 @@ func TestSealedSenderDecryptBadInnerPreKeyMessage(t *testing.T) {
 	bobStore := newTestIdentityStore(t)
 
 	bobAddress := protocol.NewSignalAddress("bob-uuid", 1)
-	aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey()))
+	if _, err := aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	senderCert, _ := NewSenderCertificate("alice-uuid", nil,
 		aliceStore.GetIdentityKeyPair().PublicKey().PublicKey(),
@@ -1297,7 +1370,9 @@ func TestSealedSenderDecryptBadInnerWhisperMessage(t *testing.T) {
 	bobStore := newTestIdentityStore(t)
 
 	bobAddress := protocol.NewSignalAddress("bob-uuid", 1)
-	aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey()))
+	if _, err := aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	senderCert, _ := NewSenderCertificate("alice-uuid", nil,
 		aliceStore.GetIdentityKeyPair().PublicKey().PublicKey(),

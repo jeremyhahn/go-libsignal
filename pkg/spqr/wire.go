@@ -11,10 +11,6 @@ const (
 	// wireVersion is the version byte prepended to variable-length wire messages.
 	wireVersion uint8 = 0x01
 
-	// legacyPQRMsgSize is the fixed 12-byte wire format used by legacy (non-braid)
-	// SPQR messages: epoch(8 BE) + counter(4 BE).
-	legacyPQRMsgSize = 12
-
 	// maxWireMessageSize is the maximum expected size of a wire message,
 	// used for pre-allocation: version(1) + epoch(10) + counter(5) + msgType(1) +
 	// chunkIndex(3) + chunkData(32) = ~52 bytes.
@@ -37,6 +33,19 @@ type ErrWireEncode struct {
 
 func (e *ErrWireEncode) Error() string {
 	return fmt.Sprintf("spqr: wire encode failed: %s", e.Reason)
+}
+
+// sckaToChainEpoch converts a 1-indexed SCKA wire epoch to a 0-indexed Go chain epoch.
+// Rust SCKA wire messages carry epochs starting at 1; Go chains are 0-indexed.
+// Callers must validate that sckaEpoch >= 1 before calling this function.
+func sckaToChainEpoch(sckaEpoch uint64) uint64 {
+	return sckaEpoch - 1
+}
+
+// chainToSckaEpoch converts a 0-indexed Go chain epoch to a 1-indexed SCKA wire epoch.
+// Rust SCKA wire messages carry epochs starting at 1; Go chains are 0-indexed.
+func chainToSckaEpoch(chainEpoch uint64) uint64 {
+	return chainEpoch + 1
 }
 
 // messageTypeHasChunk returns true if the given message type carries chunk data.
@@ -91,23 +100,11 @@ func encodeWireMessage(epoch uint64, counter uint32, msgType mlkembraid.MessageT
 // decodeWireMessage parses a variable-length SPQR wire message.
 // Returns the decoded WireMessage or an error.
 //
-// For backward compatibility, if the data is exactly 12 bytes it is parsed as
-// a legacy fixed-format message (epoch(8 BE) + counter(4 BE)) with
-// MessageTypeNone and nil chunk.
+// The expected format is: version(1) + varint(epoch) + varint(counter) + msgType(1) + [chunk_data].
+// The version byte must be wireVersion (0x01).
 func decodeWireMessage(data []byte) (*WireMessage, error) {
 	if len(data) == 0 {
 		return nil, &ErrWireDecode{Reason: "empty input"}
-	}
-
-	// Legacy format detection: exactly 12 bytes = epoch(8 BE) + counter(4 BE).
-	if len(data) == legacyPQRMsgSize {
-		epoch := binary.BigEndian.Uint64(data[0:8])
-		counter := binary.BigEndian.Uint32(data[8:12])
-		return &WireMessage{
-			Epoch:   epoch,
-			Counter: counter,
-			MsgType: mlkembraid.MessageTypeNone,
-		}, nil
 	}
 
 	// Variable-length format.
@@ -162,13 +159,4 @@ func decodeWireMessage(data []byte) (*WireMessage, error) {
 		MsgType: msgType,
 		Chunk:   chunk,
 	}, nil
-}
-
-// encodeLegacyMessage builds the legacy 12-byte fixed wire format:
-// epoch(8 BE) + counter(4 BE).
-func encodeLegacyMessage(epoch uint64, counter uint32) []byte {
-	msg := make([]byte, legacyPQRMsgSize)
-	binary.BigEndian.PutUint64(msg[0:8], epoch)
-	binary.BigEndian.PutUint32(msg[8:12], counter)
-	return msg
 }

@@ -15,8 +15,8 @@ const scannableFingerprintSize = 32
 // QR-code based identity verification. The local and remote fingerprints
 // are the first 32 bytes of the iterative SHA-512 hash output.
 type Scannable struct {
-	version          uint32
-	localFingerprint [scannableFingerprintSize]byte
+	version           uint32
+	localFingerprint  [scannableFingerprintSize]byte
 	remoteFingerprint [scannableFingerprintSize]byte
 }
 
@@ -101,7 +101,7 @@ func (s *Scannable) Compare(scannedData []byte) (bool, error) {
 
 	theirVersion := combined.GetVersion()
 	if theirVersion != s.version {
-		return false, nil
+		return false, &VersionMismatchError{Ours: s.version, Theirs: theirVersion}
 	}
 
 	theirLocal := combined.GetLocalFingerprint()

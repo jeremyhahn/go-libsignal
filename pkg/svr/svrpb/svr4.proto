@@ -15,6 +15,9 @@ message Request4 {
     Restore2 restore2 = 3;
     Remove remove = 4;
     Query query = 5;
+    RotateStart rotate_start = 6;
+    RotateCommit rotate_commit = 7;
+    RotateRollback rotate_rollback = 8;
   }
 
   message Create {
@@ -37,6 +40,29 @@ message Request4 {
   }
   message Query {
   }
+  // RotateStart initiates an OPRF-key rotation. The server begins a
+  // rotation and applies the delta secret-shares.
+  //
+  // Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateStart
+  message RotateStart {
+    fixed32 version = 1;
+    bytes oprf_secretshare_delta = 2;
+    bytes encryption_secretshare_delta = 3;
+  }
+  // RotateCommit commits a previously started rotation, making the new
+  // OPRF key permanent.
+  //
+  // Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateCommit
+  message RotateCommit {
+    fixed32 version = 1;
+  }
+  // RotateRollback aborts a previously started rotation and reverts to
+  // the previous OPRF key.
+  //
+  // Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateRollback
+  message RotateRollback {
+    fixed32 version = 1;
+  }
 }
 
 message Response4 {
@@ -46,6 +72,9 @@ message Response4 {
     Restore2 restore2 = 3;
     Remove remove = 4;
     Query query = 5;
+    RotateStart rotate_start = 6;
+    RotateCommit rotate_commit = 7;
+    RotateRollback rotate_rollback = 8;
   }
 
   enum Status {
@@ -90,5 +119,26 @@ message Response4 {
     uint32 tries_remaining = 2;
     fixed32 version = 3;
     fixed32 new_version = 4;
+  }
+
+  // RotateStart response. Returns the status of the rotation initiation.
+  //
+  // Rust libsignal ref: rust/svrb/src/svrb.proto Response4.RotateStart
+  message RotateStart {
+    Status status = 1;
+  }
+
+  // RotateCommit response. Returns the status of the rotation commit.
+  //
+  // Rust libsignal ref: rust/svrb/src/svrb.proto Response4.RotateCommit
+  message RotateCommit {
+    Status status = 1;
+  }
+
+  // RotateRollback response. Returns the status of the rotation rollback.
+  //
+  // Rust libsignal ref: rust/svrb/src/svrb.proto Response4.RotateRollback
+  message RotateRollback {
+    Status status = 1;
   }
 }

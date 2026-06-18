@@ -169,7 +169,9 @@ func TestSealedSenderEncrypt_NilSenderCert(t *testing.T) {
 		keyPair: aliceIdentity, regID: 1,
 		trusted: make(map[string]*identity.Key),
 	}
-	aliceIdentityStore.SaveIdentity(bobAddress, identity.NewKey(bobKP.PublicKey()))
+	if _, err := aliceIdentityStore.SaveIdentity(bobAddress, identity.NewKey(bobKP.PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	bobPreKeys, _ := keyhelper.GeneratePreKeys(0, 1, serializer.PreKeyRecord)
 	bobSignedPreKey, _ := keyhelper.GenerateSignedPreKey(bobIdentity, 0, serializer.SignedPreKeyRecord)
@@ -223,7 +225,9 @@ func TestSealedSenderDecryptWithKyber_CertValidateError(t *testing.T) {
 		keyPair: aliceIdentity, regID: 1,
 		trusted: make(map[string]*identity.Key),
 	}
-	aliceIdentityStore.SaveIdentity(bobAddress, identity.NewKey(bobKP.PublicKey()))
+	if _, err := aliceIdentityStore.SaveIdentity(bobAddress, identity.NewKey(bobKP.PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	bobSessionStore := newInMemorySessionStoreForV1(serializer)
 	bobPreKeyStore := newInMemoryPreKeyStoreForV1()
@@ -232,7 +236,9 @@ func TestSealedSenderDecryptWithKyber_CertValidateError(t *testing.T) {
 		keyPair: bobIdentity, regID: 2,
 		trusted: make(map[string]*identity.Key),
 	}
-	bobIdentityStore.SaveIdentity(aliceAddress, identity.NewKey(aliceKP.PublicKey()))
+	if _, err := bobIdentityStore.SaveIdentity(aliceAddress, identity.NewKey(aliceKP.PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	// Build a server certificate protobuf manually with a 32-byte (invalid length) signature.
 	// DeserializeServerCertificate does not check signature length; Validate does.
@@ -849,7 +855,9 @@ func TestSealedSenderDecryptWithKyber_E164SelfSend(t *testing.T) {
 	bobStore := newTestIdentityStore(t)
 
 	bobAddress := protocol.NewSignalAddress("bob-uuid-e164-test", 1)
-	aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey()))
+	if _, err := aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	// Alice has E164 +15555551234
 	e164 := "+15555551234"
@@ -899,7 +907,9 @@ func TestSealedSenderDecryptWithKyber_UnsupportedMsgType(t *testing.T) {
 	bobStore := newTestIdentityStore(t)
 
 	bobAddress := protocol.NewSignalAddress("bob-uuid-msgtype", 1)
-	aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey()))
+	if _, err := aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	senderCert, _ := NewSenderCertificate(
 		"alice-uuid-msgtype", nil,
@@ -973,7 +983,9 @@ func TestSealedSenderDecryptToUSMC_SenderKeyMismatch(t *testing.T) {
 	}
 
 	bobAddress := protocol.NewSignalAddress("bob-uuid-mismatch", 1)
-	aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey()))
+	if _, err := aliceStore.SaveIdentity(bobAddress, identity.NewKey(bobStore.GetIdentityKeyPair().PublicKey().PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	// Sender cert uses fakeKP's public key (NOT Alice's real identity key).
 	senderCert, err := NewSenderCertificate(
@@ -1090,15 +1102,15 @@ func TestV2ParseMessage_DuplicateServiceIDMerge(t *testing.T) {
 
 	// Entry 1: ServiceId + device 1 (no has_more bit) + C_i + AT_i
 	buf = append(buf, serviceIDBytes...)
-	buf = append(buf, 0x01)      // device_id = 1
-	buf = append(buf, 0x00, 0x01) // reg_id = 1, no has_more
+	buf = append(buf, 0x01)                                 // device_id = 1
+	buf = append(buf, 0x00, 0x01)                           // reg_id = 1, no has_more
 	buf = append(buf, make([]byte, v2EncryptedMKeySize)...) // C_i
 	buf = append(buf, make([]byte, v2AuthTagSize)...)       // AT_i
 
 	// Entry 2: same ServiceId + device 2 (no has_more bit) + same C_i + AT_i
 	buf = append(buf, serviceIDBytes...)
-	buf = append(buf, 0x02)      // device_id = 2
-	buf = append(buf, 0x00, 0x02) // reg_id = 2, no has_more
+	buf = append(buf, 0x02)                                 // device_id = 2
+	buf = append(buf, 0x00, 0x02)                           // reg_id = 2, no has_more
 	buf = append(buf, make([]byte, v2EncryptedMKeySize)...) // C_i (same)
 	buf = append(buf, make([]byte, v2AuthTagSize)...)       // AT_i (same)
 
@@ -1140,7 +1152,7 @@ func TestV2ParseMessage_DuplicateServiceIDRedundantlyEmpty(t *testing.T) {
 
 	// Entry 1: has device 1, with C_i and AT_i
 	buf = append(buf, serviceIDBytes...)
-	buf = append(buf, 0x01)      // device_id = 1
+	buf = append(buf, 0x01)       // device_id = 1
 	buf = append(buf, 0x00, 0x01) // reg_id = 1
 	buf = append(buf, make([]byte, v2EncryptedMKeySize)...)
 	buf = append(buf, make([]byte, v2AuthTagSize)...)
@@ -1156,7 +1168,7 @@ func TestV2ParseMessage_DuplicateServiceIDRedundantlyEmpty(t *testing.T) {
 	// if we manipulate the parsed structure directly.
 	// Let's instead verify the merge path succeeds normally.
 	buf = append(buf, serviceIDBytes...)
-	buf = append(buf, 0x02)      // device_id = 2 (another device for same ID)
+	buf = append(buf, 0x02)       // device_id = 2 (another device for same ID)
 	buf = append(buf, 0x00, 0x02) // reg_id = 2
 	buf = append(buf, make([]byte, v2EncryptedMKeySize)...)
 	buf = append(buf, make([]byte, v2AuthTagSize)...)
@@ -1392,9 +1404,9 @@ func TestSealedSenderV2DecryptToUSMC_AuthTagMismatch(t *testing.T) {
 	// Tamper ONLY with AT_i at the correct offset (54..69) for version 0x23.
 	// C_i at [22..53] must remain intact so M is recovered correctly.
 	const (
-		versionSize  = 1
-		varintSize   = 1 // varint for count=1 is exactly 1 byte
-		atStart      = versionSize + varintSize + v2ServiceIdSize + 1 + 2 + v2EncryptedMKeySize // =54
+		versionSize = 1
+		varintSize  = 1                                                                        // varint for count=1 is exactly 1 byte
+		atStart     = versionSize + varintSize + v2ServiceIdSize + 1 + 2 + v2EncryptedMKeySize // =54
 	)
 	tampered := make([]byte, len(ciphertext))
 	copy(tampered, ciphertext)
@@ -1442,7 +1454,9 @@ func TestSealedSenderDecryptWithKyber_PreKeyDecryptReplay(t *testing.T) {
 		keyPair: aliceIdentity, regID: 1,
 		trusted: make(map[string]*identity.Key),
 	}
-	aliceIdentityStore.SaveIdentity(bobAddress, identity.NewKey(bobKP.PublicKey()))
+	if _, err := aliceIdentityStore.SaveIdentity(bobAddress, identity.NewKey(bobKP.PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	bobSessionStore := newInMemorySessionStoreForV1(serializer)
 	bobPreKeyStore := newInMemoryPreKeyStoreForV1()
@@ -1451,17 +1465,23 @@ func TestSealedSenderDecryptWithKyber_PreKeyDecryptReplay(t *testing.T) {
 		keyPair: bobIdentity, regID: 2,
 		trusted: make(map[string]*identity.Key),
 	}
-	bobIdentityStore.SaveIdentity(protocol.NewSignalAddress(aliceUUID, 1), identity.NewKey(aliceKP.PublicKey()))
+	if _, err := bobIdentityStore.SaveIdentity(protocol.NewSignalAddress(aliceUUID, 1), identity.NewKey(aliceKP.PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	bobPreKeys, _ := keyhelper.GeneratePreKeys(0, 1, serializer.PreKeyRecord)
 	for _, pk := range bobPreKeys {
-		bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord))
+		if err := bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord)); err != nil {
+			t.Fatalf("setup: StorePreKey: %v", err)
+		}
 	}
 	bobSignedPreKey, _ := keyhelper.GenerateSignedPreKey(bobIdentity, 0, serializer.SignedPreKeyRecord)
-	bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
+	if err := bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
 		bobSignedPreKey.ID(), bobSignedPreKey.Timestamp(), bobSignedPreKey.KeyPair(),
 		bobSignedPreKey.Signature(), serializer.SignedPreKeyRecord,
-	))
+	)); err != nil {
+		t.Fatalf("setup: StoreSignedPreKey: %v", err)
+	}
 	bobKyberPreKey, _ := keyhelper.GenerateKyberPreKey(bobIdentity.PrivateKey(), 42, &mockKyberPreKeySerializer{})
 	bobKyberPreKeyStore := newInMemoryKyberPreKeyStoreForV1()
 	if err := bobKyberPreKeyStore.StoreKyberPreKey(42, bobKyberPreKey); err != nil {
@@ -1544,7 +1564,9 @@ func TestSealedSenderDecryptWithKyber_WhisperDecryptFailure(t *testing.T) {
 		keyPair: aliceIdentity, regID: 1,
 		trusted: make(map[string]*identity.Key),
 	}
-	aliceIdentityStore.SaveIdentity(bobAddress, identity.NewKey(bobKP.PublicKey()))
+	if _, err := aliceIdentityStore.SaveIdentity(bobAddress, identity.NewKey(bobKP.PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	bobSessionStore := newInMemorySessionStoreForV1(serializer)
 	bobPreKeyStore := newInMemoryPreKeyStoreForV1()
@@ -1553,18 +1575,24 @@ func TestSealedSenderDecryptWithKyber_WhisperDecryptFailure(t *testing.T) {
 		keyPair: bobIdentity, regID: 2,
 		trusted: make(map[string]*identity.Key),
 	}
-	bobIdentityStore.SaveIdentity(aliceAddress, identity.NewKey(aliceKP.PublicKey()))
+	if _, err := bobIdentityStore.SaveIdentity(aliceAddress, identity.NewKey(aliceKP.PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	// Generate Bob's pre-keys.
 	bobPreKeys, _ := keyhelper.GeneratePreKeys(0, 1, serializer.PreKeyRecord)
 	for _, pk := range bobPreKeys {
-		bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord))
+		if err := bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord)); err != nil {
+			t.Fatalf("setup: StorePreKey: %v", err)
+		}
 	}
 	bobSignedPreKey, _ := keyhelper.GenerateSignedPreKey(bobIdentity, 0, serializer.SignedPreKeyRecord)
-	bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
+	if err := bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
 		bobSignedPreKey.ID(), bobSignedPreKey.Timestamp(), bobSignedPreKey.KeyPair(),
 		bobSignedPreKey.Signature(), serializer.SignedPreKeyRecord,
-	))
+	)); err != nil {
+		t.Fatalf("setup: StoreSignedPreKey: %v", err)
+	}
 	bobKyberPreKey, _ := keyhelper.GenerateKyberPreKey(bobIdentity.PrivateKey(), 42, &mockKyberPreKeySerializer{})
 	bobKyberPreKeyStore := newInMemoryKyberPreKeyStoreForV1()
 	if err := bobKyberPreKeyStore.StoreKyberPreKey(42, bobKyberPreKey); err != nil {
@@ -1682,7 +1710,9 @@ func TestSealedSenderDecryptWithKyber_NilKyberStoreWhisperMessage(t *testing.T) 
 		keyPair: aliceIdentity, regID: 1,
 		trusted: make(map[string]*identity.Key),
 	}
-	aliceIdentityStore.SaveIdentity(bobAddress, identity.NewKey(bobKP.PublicKey()))
+	if _, err := aliceIdentityStore.SaveIdentity(bobAddress, identity.NewKey(bobKP.PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	// Set up stores for Bob.
 	bobSessionStore := newInMemorySessionStoreForV1(serializer)
@@ -1692,20 +1722,26 @@ func TestSealedSenderDecryptWithKyber_NilKyberStoreWhisperMessage(t *testing.T) 
 		keyPair: bobIdentity, regID: 2,
 		trusted: make(map[string]*identity.Key),
 	}
-	bobIdentityStore.SaveIdentity(aliceAddress, identity.NewKey(aliceKP.PublicKey()))
+	if _, err := bobIdentityStore.SaveIdentity(aliceAddress, identity.NewKey(aliceKP.PublicKey())); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	// Generate Bob's pre-keys (with Kyber).
 	bobPreKeys, _ := keyhelper.GeneratePreKeys(0, 1, serializer.PreKeyRecord)
 	for _, pk := range bobPreKeys {
-		bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(
+		if err := bobPreKeyStore.StorePreKey(pk.ID().Value, record.NewPreKey(
 			pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord,
-		))
+		)); err != nil {
+			t.Fatalf("setup: StorePreKey: %v", err)
+		}
 	}
 	bobSignedPreKey, _ := keyhelper.GenerateSignedPreKey(bobIdentity, 0, serializer.SignedPreKeyRecord)
-	bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
+	if err := bobSignedPreKeyStore.StoreSignedPreKey(bobSignedPreKey.ID(), record.NewSignedPreKey(
 		bobSignedPreKey.ID(), bobSignedPreKey.Timestamp(), bobSignedPreKey.KeyPair(),
 		bobSignedPreKey.Signature(), serializer.SignedPreKeyRecord,
-	))
+	)); err != nil {
+		t.Fatalf("setup: StoreSignedPreKey: %v", err)
+	}
 	bobKyberPreKey, _ := keyhelper.GenerateKyberPreKey(bobIdentity.PrivateKey(), 42, &mockKyberPreKeySerializer{})
 	bobKyberPreKeyStore := newInMemoryKyberPreKeyStoreForV1()
 	if err := bobKyberPreKeyStore.StoreKyberPreKey(42, bobKyberPreKey); err != nil {

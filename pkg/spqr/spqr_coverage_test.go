@@ -2,6 +2,7 @@ package spqr
 
 import (
 	"bytes"
+	"math"
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
@@ -399,5 +400,48 @@ func TestKdfSckaCKDifferentCounters(t *testing.T) {
 
 	if bytes.Equal(mk1.Bytes(), mk2.Bytes()) {
 		t.Error("different counters should produce different message keys")
+	}
+}
+
+// TestDecryptAtMaxCounter verifies that Decrypt with recvCounter = MaxUint32
+// and a lower counter request returns ErrKeyTrimmed (the counter is too old).
+// This also validates the boundary behavior of the trim check.
+func TestDecryptAtMaxCounter(t *testing.T) {
+	rkBytes := make([]byte, keyLen)
+	rk, err := secret.New(rkBytes)
+	if err != nil {
+		t.Fatalf("secret.New rk: %v", err)
+	}
+	ckBytes := make([]byte, keyLen)
+	for i := range ckBytes {
+		ckBytes[i] = byte(i + 1)
+	}
+	ck, err := secret.New(ckBytes)
+	if err != nil {
+		t.Fatalf("secret.New ck: %v", err)
+	}
+
+	// With recvCounter = MaxUint32 and counter = 1, counter < recvCounter, and
+	// counter+maxSkippedKeys < recvCounter (1+2000 << MaxUint32), so ErrKeyTrimmed.
+	s := &SPQR{
+		chains: map[uint64]*EpochChain{
+			0: {recvKey: ck, recvCounter: math.MaxUint32},
+		},
+		skippedKeys: make(map[SkippedKeyID]*secret.Secret),
+		direction:   DirectionA2B,
+		maxJump:     math.MaxUint32, // allow large jump
+		negotiation: negotiationResolved,
+		version:     VersionV1,
+		minVersion:  VersionV0,
+		rootKey:     rk,
+	}
+	defer s.Zeroize()
+
+	_, err = s.Decrypt(0, 1)
+	if err == nil {
+		t.Fatal("expected error for counter far behind recvCounter=MaxUint32")
+	}
+	if _, ok := err.(*ErrKeyTrimmed); !ok {
+		t.Errorf("expected *ErrKeyTrimmed, got %T: %v", err, err)
 	}
 }

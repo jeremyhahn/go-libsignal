@@ -76,9 +76,9 @@ func TestHSMClientConnectionEstablishment_Complete_HappyPath(t *testing.T) {
 	// Set up responder
 	respHS, err := noise.NewHandshakeState(noise.Config{
 		CipherSuite:   cs,
-		Pattern:        noise.HandshakeNK,
-		Initiator:      false,
-		StaticKeypair:  responderKP,
+		Pattern:       noise.HandshakeNK,
+		Initiator:     false,
+		StaticKeypair: responderKP,
 	})
 	if err != nil {
 		t.Fatalf("responder handshake: %v", err)
@@ -129,9 +129,9 @@ func TestHSMClientConnectionEstablishment_Complete_WrongCodeHash(t *testing.T) {
 
 	respHS, _ := noise.NewHandshakeState(noise.Config{
 		CipherSuite:   cs,
-		Pattern:        noise.HandshakeNK,
-		Initiator:      false,
-		StaticKeypair:  responderKP,
+		Pattern:       noise.HandshakeNK,
+		Initiator:     false,
+		StaticKeypair: responderKP,
 	})
 
 	_, _, _, _ = respHS.ReadMessage(nil, est.InitialRequest())
@@ -169,9 +169,9 @@ func TestHSMClientConnectionEstablishment_Complete_WrongPayloadSize(t *testing.T
 
 	respHS, _ := noise.NewHandshakeState(noise.Config{
 		CipherSuite:   cs,
-		Pattern:        noise.HandshakeNK,
-		Initiator:      false,
-		StaticKeypair:  responderKP,
+		Pattern:       noise.HandshakeNK,
+		Initiator:     false,
+		StaticKeypair: responderKP,
 	})
 
 	_, _, _, _ = respHS.ReadMessage(nil, est.InitialRequest())
@@ -230,9 +230,9 @@ func TestHSMClientConnectionEstablishment_MultipleCodeHashes(t *testing.T) {
 
 	respHS, _ := noise.NewHandshakeState(noise.Config{
 		CipherSuite:   cs,
-		Pattern:        noise.HandshakeNK,
-		Initiator:      false,
-		StaticKeypair:  responderKP,
+		Pattern:       noise.HandshakeNK,
+		Initiator:     false,
+		StaticKeypair: responderKP,
 	})
 
 	payload, _, _, _ := respHS.ReadMessage(nil, est.InitialRequest())

@@ -13,7 +13,7 @@ type Error struct {
 type errorKind int
 
 const (
-	errSecretDestroyed    errorKind = iota + 1
+	errSecretDestroyed errorKind = iota + 1
 	errSecretSizeMismatch
 	errSecretAlloc
 	errNilInput

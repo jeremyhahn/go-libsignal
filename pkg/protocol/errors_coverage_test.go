@@ -246,3 +246,35 @@ func strContains(s, sub string) bool {
 	}
 	return false
 }
+
+// TestDeviceIDError_Error covers the DeviceIDError.Error() method for both
+// the zero-device-ID sentinel and a specific out-of-range device ID.
+func TestDeviceIDError_Error(t *testing.T) {
+	t.Run("zero device ID", func(t *testing.T) {
+		err := &DeviceIDError{ID: 0}
+		msg := err.Error()
+		if msg == "" {
+			t.Fatal("Error() returned empty string")
+		}
+		if !strContains(msg, "0") {
+			t.Errorf("Error() = %q, expected to contain device ID", msg)
+		}
+	})
+
+	t.Run("non-zero out-of-range ID", func(t *testing.T) {
+		err := &DeviceIDError{ID: 200}
+		msg := err.Error()
+		if msg == "" {
+			t.Fatal("Error() returned empty string")
+		}
+		if !strContains(msg, "200") {
+			t.Errorf("Error() = %q, expected to contain '200'", msg)
+		}
+	})
+
+	t.Run("sentinel matches via errors.Is", func(t *testing.T) {
+		if !errors.Is(&DeviceIDError{ID: 42}, &DeviceIDError{}) {
+			t.Error("errors.Is should match any DeviceIDError against ErrInvalidDeviceID sentinel")
+		}
+	})
+}

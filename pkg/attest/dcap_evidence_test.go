@@ -38,13 +38,13 @@ func buildMinimalQuoteSupport(t *testing.T) []byte {
 	// Generate a test cert for the PCK chain
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "test-pck"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Hour),
-		IsCA:         true,
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-pck"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
 		BasicConstraintsValid: true,
-		KeyUsage:     x509.KeyUsageCertSign,
+		KeyUsage:              x509.KeyUsageCertSign,
 	}
 	certBytes, _ := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	pemCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certBytes})
@@ -62,8 +62,8 @@ func buildMinimalQuoteSupport(t *testing.T) []byte {
 	buf = append(buf, 0x00, 0x00)
 	// Cert key type (2 bytes LE) = 5 (pckCertChainKeyType)
 	binary.LittleEndian.PutUint16(buf[len(buf)-2:], 0) // fix: need to append properly
-	buf = buf[:len(buf)-2]                               // remove the bad append
-	buf = append(buf, 0x00, 0x00)                        // auth data size = 0
+	buf = buf[:len(buf)-2]                             // remove the bad append
+	buf = append(buf, 0x00, 0x00)                      // auth data size = 0
 
 	// cert key type
 	certKeyType := make([]byte, 2)
@@ -128,10 +128,10 @@ func TestParseReportBody_HappyPath(t *testing.T) {
 	// Set some fields
 	copy(data[0:16], []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 		0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10})
-	binary.LittleEndian.PutUint32(data[16:20], 42) // miscselect
-	data[64] = 0xAA                                  // mrenclave[0]
-	binary.LittleEndian.PutUint16(data[256:258], 7)  // isvprodid
-	binary.LittleEndian.PutUint16(data[258:260], 3)  // isvsvn
+	binary.LittleEndian.PutUint32(data[16:20], 42)  // miscselect
+	data[64] = 0xAA                                 // mrenclave[0]
+	binary.LittleEndian.PutUint16(data[256:258], 7) // isvprodid
+	binary.LittleEndian.PutUint16(data[258:260], 3) // isvsvn
 
 	rb, err := parseReportBody(data)
 	if err != nil {
@@ -319,11 +319,11 @@ func TestParseCustomClaims_TruncatedClaimData(t *testing.T) {
 	buf = append(buf, b8...)
 	binary.LittleEndian.PutUint64(b8, 1)
 	buf = append(buf, b8...)
-	binary.LittleEndian.PutUint64(b8, 5)  // name size
+	binary.LittleEndian.PutUint64(b8, 5) // name size
 	buf = append(buf, b8...)
 	binary.LittleEndian.PutUint64(b8, 10) // value size
 	buf = append(buf, b8...)
-	buf = append(buf, []byte("he")...)     // only 2 bytes, need 15
+	buf = append(buf, []byte("he")...) // only 2 bytes, need 15
 
 	_, err := parseCustomClaims(buf)
 	if err == nil {

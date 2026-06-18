@@ -196,6 +196,30 @@ func TestErrReadingRandomness_WrapsAsError(t *testing.T) {
 	}
 }
 
+// TestVXEdDSAErrorTypes exercises the Error() method on all VXEdDSA error
+// types and verifies the sentinel variables are set correctly.
+func TestVXEdDSAErrorTypes(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"ErrVXEdDSAInvalidSignatureLength", &ErrVXEdDSAInvalidSignatureLength{Got: 64}, "96"},
+		{"ErrVXEdDSAHashToPointFailed", &ErrVXEdDSAHashToPointFailed{}, "hash to point"},
+		{"ErrVXEdDSAInvalidVRFPoint", &ErrVXEdDSAInvalidVRFPoint{}, "VRF"},
+		{"ErrVXEdDSANilPrivateKey", &ErrVXEdDSANilPrivateKey{}, "nil private"},
+		{"ErrVXEdDSANilPublicKey", &ErrVXEdDSANilPublicKey{}, "nil public"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			msg := tc.err.Error()
+			if !contains(msg, tc.want) {
+				t.Errorf("Error() = %q, want to contain %q", msg, tc.want)
+			}
+		})
+	}
+}
+
 // contains is a local helper to check substring presence.
 func contains(s, sub string) bool {
 	return len(s) >= len(sub) && (s == sub || len(sub) == 0 ||

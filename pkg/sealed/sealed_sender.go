@@ -8,8 +8,8 @@ import (
 	signalcipher "github.com/jeremyhahn/go-libsignal/pkg/cipher"
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/kdf"
-	"github.com/jeremyhahn/go-libsignal/pkg/protocol"
 	"github.com/jeremyhahn/go-libsignal/pkg/proto/sealedpb"
+	"github.com/jeremyhahn/go-libsignal/pkg/protocol"
 	"github.com/jeremyhahn/go-libsignal/pkg/serialize"
 	"github.com/jeremyhahn/go-libsignal/pkg/session"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/store"
@@ -28,11 +28,12 @@ const (
 	// hkdfOutputLen is the total HKDF output size: chain_key(32) + cipher_key(32) + mac_key(32).
 	hkdfOutputLen = 96
 
-	// hkdfInfo is the salt prefix used in sealed sender HKDF derivation.
-	// Per the Rust reference, this is used ONLY in the salt construction
-	// ("UnidentifiedDelivery" || their_pub || ephemeral_pub), NOT as the
-	// HKDF info parameter (which must be empty).
-	hkdfInfo = "UnidentifiedDelivery"
+	// v1SaltPrefix is the prefix prepended to the two public keys when
+	// constructing the HKDF salt for sealed sender v1. Per the Rust
+	// reference (EphemeralKeys::calculate / StaticKeys::calculate), the
+	// salt is "UnidentifiedDelivery" || their_pub || eph_pub; this
+	// constant is NOT the HKDF info parameter (which is always empty).
+	v1SaltPrefix = "UnidentifiedDelivery"
 )
 
 // SealedSenderDecryptionResult holds the result of decrypting a sealed
@@ -483,9 +484,14 @@ func SealedSenderDecryptWithKyber(
 		return nil, &CertificateError{Detail: "sender certificate validation failed"}
 	}
 
-	// Step 3: Check for self-send (matches Rust sealed_sender_decrypt).
+	// Step 3: Check for self-send.
 	// A message is considered a self-send if the sender's UUID OR E164
 	// matches the local identity AND the device ID matches.
+	//
+	// Byte-for-byte parity with Rust libsignal v0.92.2 (RUST_REV
+	// 98915c442d): rust/protocol/src/sealed_sender.rs:2025-2033 applies
+	// the same `(is_local_uuid || is_local_e164) && device_id == local`
+	// predicate before returning SealedSenderSelfSend.
 	isLocalUUID := senderCert.SenderUUID() == localUUID
 	isLocalE164 := false
 	if localE164 != nil && *localE164 != "" {
@@ -570,7 +576,7 @@ func SealedSenderDecryptWithKyber(
 // buildSalt constructs the salt for sealed sender HKDF:
 // "UnidentifiedDelivery" || theirPub || ephemeralPub
 func buildSalt(theirPub, ephemeralPub []byte) []byte {
-	prefix := []byte(hkdfInfo)
+	prefix := []byte(v1SaltPrefix)
 	salt := make([]byte, len(prefix)+len(theirPub)+len(ephemeralPub))
 	n := copy(salt, prefix)
 	n += copy(salt[n:], theirPub)
@@ -587,49 +593,26 @@ func truncatedHMAC(key, data []byte) []byte {
 }
 
 // getRecipientIdentityKey retrieves the recipient's identity public key from
-// the session store (via the identity key saved in the session state).
+// the identity store using the GetIdentity method required by store.IdentityKey.
+//
+// Compile-time guarantee: every store.IdentityKey implementation must provide
+// GetIdentity, so there is no silent runtime fallback. If the store has no
+// record for the address, GetIdentity returns (nil, nil) and this function
+// returns IdentityStoreError to the caller.
+//
+// Rust libsignal counterpart: rust/protocol/src/sealed_sender.rs — the
+// recipient public key is obtained directly from the identity store trait via
+// get_identity which is mandated on IdentityKeyStore.
 func getRecipientIdentityKey(
 	address *protocol.SignalAddress,
 	identityStore store.IdentityKey,
 ) (ecc.ECPublicKeyable, error) {
-	// The identity store does not have a direct "load identity" method,
-	// but during session establishment, identity keys are saved.
-	// We need the recipient's public key for ECDH. We use the store's
-	// identity key pair only for our own key. For the recipient, we rely
-	// on the fact that IdentityKey store has saved their identity during
-	// session setup. However, the store.IdentityKey interface only exposes
-	// IsTrustedIdentity and SaveIdentity, not a direct load.
-	//
-	// In practice, the recipient's identity key is available from the session
-	// record's remote identity key. We cannot access session store from here
-	// since we only have the identity store. The caller must ensure the
-	// identity is available.
-	//
-	// For the sealed sender protocol, the "their_pub" used in ECDH is the
-	// recipient's identity key. We obtain this from the identity store
-	// interface which should be extended, but given the current interface,
-	// we return an error asking the caller to use a store that supports
-	// loading identities.
-	//
-	// As a workaround, we accept the identity store which may implement
-	// an optional Loader interface.
-	type identityLoader interface {
-		LoadIdentity(address *protocol.SignalAddress) ecc.ECPublicKeyable
+	identityKey, err := identityStore.GetIdentity(address)
+	if err != nil {
+		return nil, err
 	}
-	if loader, ok := identityStore.(identityLoader); ok {
-		key := loader.LoadIdentity(address)
-		if key != nil {
-			return key, nil
-		}
+	if identityKey == nil {
+		return nil, &IdentityStoreError{}
 	}
-
-	// Fallback: try using a SessionIdentityStore that combines session and identity.
-	type sessionIdentityStore interface {
-		GetIdentityKey(address *protocol.SignalAddress) (ecc.ECPublicKeyable, error)
-	}
-	if sis, ok := identityStore.(sessionIdentityStore); ok {
-		return sis.GetIdentityKey(address)
-	}
-
-	return nil, &IdentityStoreError{}
+	return identityKey.PublicKey(), nil
 }

@@ -49,6 +49,31 @@ func (s *CallLinkSecretParams) EncryptUID(userID ServiceID) *UUIDCiphertext {
 	return &UUIDCiphertext{Ciphertext: ct}
 }
 
+// DecryptUID decrypts a UUIDCiphertext to recover the original ServiceID.
+// Mirrors Rust CallLinkSecretParams::decrypt_uid at
+// rust/zkgroup/src/api/call_links/params.rs.
+func (s *CallLinkSecretParams) DecryptUID(ct *UUIDCiphertext) (ServiceID, error) {
+	m2, err := s.UIDEncKeyPair.DecryptToSecondPoint(ct.Ciphertext)
+	if err != nil {
+		return ServiceID{}, ErrVerificationFailure
+	}
+
+	uuidBytes, ok := LizardDecode(m2)
+	if !ok {
+		return ServiceID{}, ErrVerificationFailure
+	}
+
+	// Recover M1 = a1^{-1} * EA1 and match against ACI candidate.
+	a1Inv := new(ristretto255.Scalar).Invert(s.UIDEncKeyPair.A1)
+	decryptedM1 := new(ristretto255.Element).ScalarMult(a1Inv, ct.Ciphertext.EA1)
+	aciSID := NewACI(uuidBytes)
+	aciUID := NewUIDStructFromServiceID(aciSID)
+	if decryptedM1.Equal(aciUID.M1) != 1 {
+		return ServiceID{}, ErrVerificationFailure
+	}
+	return aciSID, nil
+}
+
 // CallLinkPublicParams contains the public parameters for a call link.
 type CallLinkPublicParams struct {
 	UIDEncPublicKey *zkcredential.PublicKey
@@ -341,9 +366,9 @@ func (c *CreateCallLinkCredential) Present(
 	}
 
 	return &CreateCallLinkCredentialPresentation{
-		Timestamp:  c.Timestamp,
-		UserID:     encryptedUserID,
-		Proof:      proof,
+		Timestamp: c.Timestamp,
+		UserID:    encryptedUserID,
+		Proof:     proof,
 	}, nil
 }
 
@@ -398,9 +423,11 @@ func SerializeCreateCallLinkCredentialRequest(r *CreateCallLinkCredentialRequest
 // DeserializeCreateCallLinkCredentialRequest deserializes a
 // CreateCallLinkCredentialRequest from raw bytes.
 // The serialized form is BlindedRoomID (64 bytes: D1+D2) + BlindingPublicKey (32 bytes).
+// Rust oracle: bincode reject_trailing_bytes() — exactly 96 bytes are accepted.
+// rust/zkgroup/src/common/serialization.rs zkgroup_bincode_options().
 func DeserializeCreateCallLinkCredentialRequest(data []byte) (*CreateCallLinkCredentialRequest, error) {
-	if len(data) < 96 {
-		return nil, &ZkGroupVerificationFailure{Context: "create call link credential request too short"}
+	if len(data) != 96 {
+		return nil, &ZkGroupDeserializationFailure{TypeName: "CreateCallLinkCredentialRequest"}
 	}
 
 	blindedRoomID, err := zkcredential.DecodeBlindedPoint(data[0:64])
@@ -419,13 +446,52 @@ func DeserializeCreateCallLinkCredentialRequest(data []byte) (*CreateCallLinkCre
 	}, nil
 }
 
-// EncodeCreateCallLinkCredentialResponse serializes a CreateCallLinkCredentialResponse.
-// The serialized form is Timestamp (8 bytes big-endian) + BlindedIssuanceProof (variable).
+// EncodeCreateCallLinkCredentialResponse serializes a CreateCallLinkCredentialResponse
+// to the Rust bincode wire format.
+//
+// Layout (matches Rust CreateCallLinkCredentialResponse bincode/serde at
+// rust/zkgroup/src/api/call_links/create_credential.rs:115-121):
+//
+//	[0x00]          reserved byte
+//	[8 bytes LE]    timestamp (u64, little-endian per bincode with_fixint_encoding)
+//	[variable]      BlindedIssuanceProof
 func EncodeCreateCallLinkCredentialResponse(r *CreateCallLinkCredentialResponse) []byte {
-	tsBytes := r.Timestamp.ToBeBytes()
+	tsBytes := r.Timestamp.ToLeBytes()
 	proof := zkcredential.EncodeBlindedIssuanceProof(r.BlindedCredential)
-	out := make([]byte, 0, 8+len(proof))
+	out := make([]byte, 0, 1+8+len(proof))
+	out = append(out, 0x00) // reserved byte
 	out = append(out, tsBytes[:]...)
 	out = append(out, proof...)
 	return out
+}
+
+// DecodeCreateCallLinkCredentialResponse deserializes a
+// CreateCallLinkCredentialResponse from Rust bincode wire format.
+// Returns ErrUnexpectedReservedByte if the first byte is not 0x00.
+func DecodeCreateCallLinkCredentialResponse(data []byte) (*CreateCallLinkCredentialResponse, error) {
+	if len(data) < 1 {
+		return nil, &ErrDataTooShort{}
+	}
+	if data[0] != 0x00 {
+		return nil, &ErrUnexpectedReservedByte{Value: data[0]}
+	}
+	data = data[1:]
+
+	if len(data) < 8 {
+		return nil, &ErrDataTooShort{}
+	}
+	var tsBytes [8]byte
+	copy(tsBytes[:], data[:8])
+	ts := TimestampFromLeBytes(tsBytes)
+	data = data[8:]
+
+	proof, err := zkcredential.DecodeBlindedIssuanceProof(data)
+	if err != nil {
+		return nil, &ZkGroupDeserializationFailure{TypeName: "CreateCallLinkCredentialResponse"}
+	}
+
+	return &CreateCallLinkCredentialResponse{
+		Timestamp:         ts,
+		BlindedCredential: proof,
+	}, nil
 }

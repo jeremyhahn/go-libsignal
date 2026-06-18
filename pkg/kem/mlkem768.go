@@ -1,16 +1,17 @@
 package kem
 
 import (
-	"github.com/cloudflare/circl/kem/kyber/kyber768"
+	"crypto/mlkem"
 
 	crypto "github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 )
 
-var kyber768Scheme = kyber768.Scheme()
-
-// MLKEM768KEM implements the KEM interface using round-3 Kyber-768.
-// Despite the type name, this uses Kyber-768 (not NIST-final ML-KEM-768)
-// to match the Rust reference implementation (libcrux_ml_kem::kyber768).
+// MLKEM768KEM implements the KEM interface using NIST ML-KEM-768 (FIPS 203).
+// It uses Go's standard library crypto/mlkem package for a standards-conformant
+// implementation.
+//
+// Rust source: libsignal/rust/protocol/src/kem.rs — mlkem768 feature
+// (libcrux_ml_kem::mlkem768).
 type MLKEM768KEM struct{}
 
 // NewMLKEM768KEM returns a new MLKEM768KEM instance.
@@ -18,80 +19,81 @@ func NewMLKEM768KEM() *MLKEM768KEM {
 	return &MLKEM768KEM{}
 }
 
-// KeyType returns KeyTypeKyber768.
+// KeyType returns KeyTypeMLKEM768.
 func (k *MLKEM768KEM) KeyType() KeyType {
-	return KeyTypeKyber768
+	return KeyTypeMLKEM768
 }
 
-// Generate creates a new Kyber-768 key pair.
+// Generate creates a new ML-KEM-768 key pair. The secret key is stored as
+// the 64-byte seed defined in NIST FIPS 203; the public key is the 1184-byte
+// encapsulation key.
 func (k *MLKEM768KEM) Generate() (*KeyPair, error) {
-	pk, sk, err := kyber768Scheme.GenerateKeyPair()
+	dk, err := mlkem.GenerateKey768()
 	if err != nil {
-		return nil, &KeyGenError{Algorithm: "kyber768", Err: err}
+		return nil, &KeyGenError{Algorithm: "mlkem768", Err: err}
 	}
 
-	pkBytes, err := pk.MarshalBinary()
-	if err != nil {
-		return nil, &MarshalError{Algorithm: "kyber768", KeyKind: "public", Err: err}
-	}
+	// Seed bytes are the canonical secret key representation (64 bytes).
+	seedBytes := dk.Bytes()
+	defer crypto.Zeroize(seedBytes)
 
-	skBytes, err := sk.MarshalBinary()
-	if err != nil {
-		return nil, &MarshalError{Algorithm: "kyber768", KeyKind: "secret", Err: err}
-	}
-	defer crypto.Zeroize(skBytes)
+	ekBytes := dk.EncapsulationKey().Bytes()
 
-	secretKey, skErr := NewSecretKey(KeyTypeKyber768, skBytes)
+	secretKey, skErr := NewSecretKey(KeyTypeMLKEM768, seedBytes)
 	if skErr != nil {
 		return nil, skErr
 	}
 
 	return &KeyPair{
-		Public: NewPublicKey(KeyTypeKyber768, pkBytes),
+		Public: NewPublicKey(KeyTypeMLKEM768, ekBytes),
 		Secret: secretKey,
 	}, nil
 }
 
 // Encapsulate generates a shared secret and ciphertext for the given public key.
+// The public key must be of type KeyTypeMLKEM768.
 func (k *MLKEM768KEM) Encapsulate(publicKey *PublicKey) (*SharedSecret, *Ciphertext, error) {
-	if publicKey.Type() != KeyTypeKyber768 {
-		return nil, nil, &KeyTypeMismatchError{Expected: "Kyber768", Actual: publicKey.Type()}
+	if publicKey.Type() != KeyTypeMLKEM768 {
+		return nil, nil, &KeyTypeMismatchError{Expected: KeyTypeMLKEM768, Actual: publicKey.Type()}
 	}
 
-	pk, err := kyber768Scheme.UnmarshalBinaryPublicKey(publicKey.Data())
+	ek, err := mlkem.NewEncapsulationKey768(publicKey.Data())
 	if err != nil {
-		return nil, nil, &UnmarshalError{Algorithm: "kyber768", KeyKind: "public", Err: err}
+		return nil, nil, &UnmarshalError{Algorithm: "mlkem768", KeyKind: "public", Err: err}
 	}
 
-	ct, ssBytes, err := kyber768Scheme.Encapsulate(pk)
-	if err != nil {
-		return nil, nil, &EncapsulationError{Algorithm: "kyber768", Err: err}
-	}
+	// Encapsulate returns (sharedKey, ciphertext) per crypto/mlkem API.
+	ssBytes, ctBytes := ek.Encapsulate()
 	defer crypto.Zeroize(ssBytes)
 
 	var ss SharedSecret
 	copy(ss[:], ssBytes)
 
-	return &ss, NewCiphertext(KeyTypeKyber768, ct), nil
+	return &ss, NewCiphertext(KeyTypeMLKEM768, ctBytes), nil
 }
 
-// Decapsulate recovers the shared secret from the given ciphertext using the secret key.
+// Decapsulate recovers the shared secret from the given ciphertext using the
+// secret key. Both the secret key and ciphertext must be of type KeyTypeMLKEM768.
 func (k *MLKEM768KEM) Decapsulate(secretKey *SecretKey, ciphertext *Ciphertext) (*SharedSecret, error) {
-	if secretKey.Type() != KeyTypeKyber768 {
-		return nil, &KeyTypeMismatchError{Expected: "Kyber768", Actual: secretKey.Type(), KeyKind: "secret key"}
+	if secretKey.Type() != KeyTypeMLKEM768 {
+		return nil, &KeyTypeMismatchError{Expected: KeyTypeMLKEM768, Actual: secretKey.Type(), KeyKind: "secret key"}
 	}
-	if ciphertext.Type() != KeyTypeKyber768 {
-		return nil, &KeyTypeMismatchError{Expected: "Kyber768", Actual: ciphertext.Type(), KeyKind: "ciphertext"}
-	}
-
-	sk, err := kyber768Scheme.UnmarshalBinaryPrivateKey(secretKey.Data())
-	if err != nil {
-		return nil, &UnmarshalError{Algorithm: "kyber768", KeyKind: "secret", Err: err}
+	if ciphertext.Type() != KeyTypeMLKEM768 {
+		return nil, &KeyTypeMismatchError{Expected: KeyTypeMLKEM768, Actual: ciphertext.Type(), KeyKind: "ciphertext"}
 	}
 
-	ssBytes, err := kyber768Scheme.Decapsulate(sk, ciphertext.Data())
+	// Reconstruct the decapsulation key from the 64-byte seed.
+	seedBytes := secretKey.Data()
+	defer crypto.Zeroize(seedBytes)
+
+	dk, err := mlkem.NewDecapsulationKey768(seedBytes)
 	if err != nil {
-		return nil, &DecapsulationError{Algorithm: "kyber768", Err: err}
+		return nil, &UnmarshalError{Algorithm: "mlkem768", KeyKind: "secret", Err: err}
+	}
+
+	ssBytes, err := dk.Decapsulate(ciphertext.Data())
+	if err != nil {
+		return nil, &DecapsulationError{Algorithm: "mlkem768", Err: err}
 	}
 	defer crypto.Zeroize(ssBytes)
 

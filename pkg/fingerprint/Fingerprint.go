@@ -4,7 +4,7 @@ package fingerprint
 // components.
 func NewFingerprint(displayFingerprint *Display, scannableFingerprint *Scannable) *Fingerprint {
 	return &Fingerprint{
-		fingerprintDisplay:  displayFingerprint,
+		fingerprintDisplay:   displayFingerprint,
 		fingerprintScannable: scannableFingerprint,
 	}
 }

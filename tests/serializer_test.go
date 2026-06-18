@@ -31,13 +31,16 @@ func TestSerializing(t *testing.T) {
 
 	// Create a session cipher to encrypt messages to Bob.
 	plaintextMessage := []byte("Hello!")
-	sessionCipher := session.NewCipher(alice.sessionBuilder, bob.address)
+	sessionCipher := session.NewCipherWithLocalAddress(alice.sessionBuilder, alice.address, bob.address)
 	if _, err := sessionCipher.Encrypt(plaintextMessage); err != nil {
 		t.Fatalf("Encrypt failed: %v", err)
 	}
 
 	// Serialize our session so it can be stored.
-	loadedSession := alice.sessionStore.LoadSession(bob.address)
+	loadedSession, err := alice.sessionStore.LoadSession(bob.address)
+	if err != nil {
+		t.Fatalf("LoadSession failed: %v", err)
+	}
 	serializedSession, err := loadedSession.Serialize()
 	if err != nil {
 		t.Fatalf("Failed to serialize session: %v", err)

@@ -281,3 +281,37 @@ func TestCopySlice_Empty(t *testing.T) {
 		t.Fatal("copy of empty slice should be empty")
 	}
 }
+
+func TestByteHelperErrorMessages(t *testing.T) {
+	t.Run("ErrInputTooSmall", func(t *testing.T) {
+		err := &ErrInputTooSmall{Required: 32, Got: 16}
+		msg := err.Error()
+		if msg == "" {
+			t.Fatal("Error() returned empty string")
+		}
+		// Should mention both sizes.
+		if !func(s, sub string) bool {
+			for i := 0; i <= len(s)-len(sub); i++ {
+				if s[i:i+len(sub)] == sub {
+					return true
+				}
+			}
+			return false
+		}(msg, "32") {
+			t.Errorf("ErrInputTooSmall.Error() = %q, want '32'", msg)
+		}
+	})
+	t.Run("ErrNilInput", func(t *testing.T) {
+		err := &ErrNilInput{}
+		if err.Error() == "" {
+			t.Fatal("ErrNilInput.Error() returned empty string")
+		}
+	})
+	t.Run("ErrNegativeLength", func(t *testing.T) {
+		err := &ErrNegativeLength{Lengths: []int{-1, 2}}
+		msg := err.Error()
+		if msg == "" {
+			t.Fatal("ErrNegativeLength.Error() returned empty string")
+		}
+	})
+}

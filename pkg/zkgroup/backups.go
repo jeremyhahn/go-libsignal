@@ -2,6 +2,7 @@ package zkgroup
 
 import (
 	"github.com/gtank/ristretto255"
+	"github.com/jeremyhahn/go-libsignal/pkg/accountkeys"
 	"github.com/jeremyhahn/go-libsignal/pkg/zkcredential"
 )
 
@@ -50,9 +51,57 @@ func (b *backupIDPoint) AsPoint() *ristretto255.Element {
 // BackupAuthCredentialRequestContext holds the state needed to process a backup
 // auth credential response.
 type BackupAuthCredentialRequestContext struct {
-	BlindedBackupID *zkcredential.BlindedPoint
+	BlindedBackupID  *zkcredential.BlindedPoint
 	BackupIdentifier BackupID
-	KeyPair         *zkcredential.BlindingKeyPair
+	KeyPair          *zkcredential.BlindingKeyPair
+}
+
+// NewBackupAuthCredentialRequestContext derives a BackupAuthCredentialRequestContext
+// deterministically from (backupKey, aci) using the canonical SHO label
+// "20231003_Signal_BackupAuthCredentialRequest". The ACI must have kind ACI
+// (not PNI); Rust enforces this structurally via the type system.
+//
+// Mirrors Rust BackupAuthCredentialRequestContext::new at
+// rust/zkgroup/src/api/backups/auth_credential.rs:118.
+func NewBackupAuthCredentialRequestContext(backupKey [32]byte, aci ServiceID) (*BackupAuthCredentialRequestContext, error) {
+	if aci.Type != ServiceIDTypeACI {
+		return nil, &ErrInvalidServiceIDKind{Got: aci.Type}
+	}
+
+	// Derive the backup ID using the canonical HKDF derivation from
+	// libsignal_account_keys::BackupKey::derive_backup_id.
+	bk := accountkeys.NewBackupKey(backupKey)
+	backupIdVal, err := bk.DeriveBackupId(aci.RawUUID[:])
+	if err != nil {
+		return nil, &ZkGroupVerificationFailure{Context: "derive backup id: " + err.Error()}
+	}
+	var backupID BackupID
+	rawBackupIdBytes := backupIdVal.Bytes()
+	copy(backupID[:], rawBackupIdBytes[:])
+
+	// Derive the blinding key pair and blinded backup ID from the SHO,
+	// absorbing ACI bytes first, then backup key bytes — matching the Rust
+	// field order: sho.absorb_and_ratchet(aci_bytes); sho.absorb_and_ratchet(backup_key).
+	sho := zkcredential.NewShoHmacSha256Ext("20231003_Signal_BackupAuthCredentialRequest")
+	sho.AbsorbAndRatchet(aci.RawUUID[:])
+	sho.AbsorbAndRatchet(backupKey[:])
+
+	keyPair, err := zkcredential.GenerateBlindingKeyPair(sho)
+	if err != nil {
+		return nil, &ZkGroupVerificationFailure{Context: "generate blinding key pair: " + err.Error()}
+	}
+
+	idPoint := newBackupIDPoint(backupID)
+	blindedBackupID, err := keyPair.Blind(idPoint, sho)
+	if err != nil {
+		return nil, &ZkGroupVerificationFailure{Context: "blind backup id: " + err.Error()}
+	}
+
+	return &BackupAuthCredentialRequestContext{
+		BlindedBackupID:  blindedBackupID,
+		BackupIdentifier: backupID,
+		KeyPair:          keyPair,
+	}, nil
 }
 
 // GetRequest returns the request to send to the issuing server.

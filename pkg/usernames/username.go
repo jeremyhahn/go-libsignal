@@ -5,6 +5,7 @@ import (
 	"crypto/sha512"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"math/big"
 	"strings"
 
@@ -287,12 +288,13 @@ func validateDiscriminator(discriminator string) (uint64, error) {
 		if c < '0' || c > '9' {
 			return 0, ErrBadDiscriminatorCharacter
 		}
-		prev := n
-		n = n*10 + uint64(c-'0')
-		// Overflow check.
-		if n < prev {
+		digit := uint64(c - '0')
+		// Two-condition overflow check: handles all 64-bit wrap-around cases,
+		// not just the common wrap (n < prev).
+		if n > math.MaxUint64/10 || (n == math.MaxUint64/10 && digit > math.MaxUint64%10) {
 			return 0, ErrDiscriminatorTooLarge
 		}
+		n = n*10 + digit
 	}
 
 	if n == 0 {
@@ -381,7 +383,7 @@ func createProof(scalars [3]*ristretto255.Scalar, hashPoint *ristretto255.Elemen
 
 	proof, err := st.Prove(scalarArgs, pointArgs, message, randomness[:])
 	if err != nil {
-		panic(fmt.Sprintf("usernames: failed to create proof: %v", err))
+		return nil, &CryptoError{Operation: "failed to create proof", Err: err}
 	}
 	return proof, nil
 }

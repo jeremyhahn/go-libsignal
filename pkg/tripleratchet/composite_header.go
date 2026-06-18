@@ -6,121 +6,83 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/mlkembraid"
 )
 
-const (
-	// ecHeaderLenSize is the byte size of the EC header length prefix.
-	ecHeaderLenSize = 4
-
-	// compositeHeaderMinSize is the minimum serialized size of a composite header:
-	// 4 bytes EC header length + 1 byte version (min SCKA message).
-	compositeHeaderMinSize = ecHeaderLenSize + 1
-)
-
-// CompositeHeader combines an EC Signal message header with an SCKA
-// (Sparse Continuous Key Agreement) message from the ML-KEM Braid.
-// Together they carry both EC and PQ ratchet advancement data.
+// CompositeHeader carries the EC header, PQ counter, and SCKA message for
+// each Triple Ratchet message.
+//
+// Serialized format:
+//
+//	ecHeaderLen(4 BE) + ecHeader(N) + sckaWireMessage(M)
+//
+// The SCKA wire message uses the Rust-compatible format:
+//
+//	version(1) + varint(epoch) + varint(chain_index) + msg_type(1) + [chunk_data]
+//
+// where chain_index is encoded as PQCounter to support out-of-order delivery.
 type CompositeHeader struct {
-	// ECHeader is the serialized EC Signal message header containing
-	// ratchet_key, counter, and previous_counter.
+	// ECHeader is the serialized EC Signal message header.
 	ECHeader []byte
 
-	// PQCounter is the SPQR chain counter for this message, enabling
-	// out-of-order message key derivation on the receive side.
+	// PQCounter is the SPQR chain counter for out-of-order support.
+	// This is the chain_index embedded in the SCKA wire message.
 	PQCounter uint32
 
-	// SCKAMsg is the SCKA message carrying epoch, type, and chunk data
-	// from the ML-KEM Braid protocol.
+	// SCKAMsg is the SCKA chunk from the Braid.
 	SCKAMsg *mlkembraid.Message
 }
 
-// Serialize encodes the composite header into a binary format:
+// marshalCompositeHeader serializes a CompositeHeader into:
 //
-//	[4 bytes: EC header length]
-//	[N bytes: EC header data]
-//	[M bytes: SCKA wire message (Rust SPQR format)]
+//	ecHeaderLen(4 BE) + ecHeader(N) + sckaWireMsg(M)
 //
-// The SCKA message is serialized using the Rust-compatible wire format:
-//
-//	[version(1)] [varint(epoch)] [varint(chain_index)] [msg_type(1)] [chunk...]
-//
-// This ensures wire compatibility with the Rust SPQR reference implementation.
-func (h *CompositeHeader) Serialize() ([]byte, error) {
-	if h.ECHeader == nil {
-		return nil, &ErrInvalidInput{Field: "ECHeader", Reason: "must not be nil"}
-	}
-	if h.SCKAMsg == nil {
-		return nil, &ErrInvalidInput{Field: "SCKAMsg", Reason: "must not be nil"}
+// where the sckaWireMsg includes the PQCounter as the chain_index.
+func marshalCompositeHeader(h *CompositeHeader) ([]byte, error) {
+	if h == nil {
+		return nil, &ErrInvalidInput{Field: "header", Reason: "must not be nil"}
 	}
 
-	ecLen := len(h.ECHeader)
+	var sckaBytes []byte
+	if h.SCKAMsg != nil {
+		sckaBytes = h.SCKAMsg.SerializeSCKA(h.PQCounter)
+	}
 
-	// Serialize the SCKA message in Rust-compatible wire format.
-	sckaBytes := h.SCKAMsg.SerializeSCKA(h.PQCounter)
-
-	totalSize := ecHeaderLenSize + ecLen + len(sckaBytes)
-	buf := make([]byte, totalSize)
-
-	offset := 0
-
-	// EC header length (4 bytes, big-endian).
-	binary.BigEndian.PutUint32(buf[offset:], uint32(ecLen))
-	offset += ecHeaderLenSize
-
-	// EC header data.
-	copy(buf[offset:], h.ECHeader)
-	offset += ecLen
-
-	// SCKA wire message (Rust SPQR format).
-	copy(buf[offset:], sckaBytes)
+	// ecHeaderLen(4) + ecHeader(N) + sckaBytes(M)
+	buf := make([]byte, 0, 4+len(h.ECHeader)+len(sckaBytes))
+	buf = appendU32BE(buf, uint32(len(h.ECHeader)))
+	buf = append(buf, h.ECHeader...)
+	buf = append(buf, sckaBytes...)
 
 	return buf, nil
 }
 
-// DeserializeCompositeHeader decodes a binary composite header back into
-// its EC header and SCKA message components.
-func DeserializeCompositeHeader(data []byte) (*CompositeHeader, error) {
-	if len(data) < compositeHeaderMinSize {
-		return nil, &ErrInvalidCompositeMessage{
-			Reason: "data too short for composite header",
-		}
+// unmarshalCompositeHeader deserializes a CompositeHeader from wire bytes.
+func unmarshalCompositeHeader(data []byte) (*CompositeHeader, error) {
+	if len(data) < 4 {
+		return nil, &ErrInvalidCompositeMessage{Reason: "too short for composite header"}
 	}
 
-	offset := 0
+	ecHeaderLen := int(binary.BigEndian.Uint32(data[0:4]))
+	offset := 4
 
-	// EC header length.
-	ecLen := int(binary.BigEndian.Uint32(data[offset:]))
-	offset += ecHeaderLenSize
-
-	if ecLen > maxCompositeComponentLen {
-		return nil, &ErrMessageTooLarge{
-			Component: "EC header",
-			Size:      ecLen,
-			Max:       maxCompositeComponentLen,
-		}
+	if len(data) < offset+ecHeaderLen {
+		return nil, &ErrInvalidCompositeMessage{Reason: "EC header length exceeds data"}
 	}
 
-	if ecLen < 0 || offset+ecLen > len(data) {
-		return nil, &ErrInvalidCompositeMessage{
-			Reason: "EC header length exceeds available data",
-		}
-	}
+	ecHeader := make([]byte, ecHeaderLen)
+	copy(ecHeader, data[offset:offset+ecHeaderLen])
+	offset += ecHeaderLen
 
-	// EC header data.
-	ecHeader := make([]byte, ecLen)
-	copy(ecHeader, data[offset:offset+ecLen])
-	offset += ecLen
-
-	// Remaining bytes are the SCKA wire message in Rust SPQR format.
-	if offset >= len(data) {
-		return nil, &ErrInvalidCompositeMessage{
-			Reason: "no SCKA message data after EC header",
+	var (
+		sckaMsg   *mlkembraid.Message
+		pqCounter uint32
+	)
+	if offset < len(data) {
+		var err error
+		var chainIndex uint32
+		sckaMsg, chainIndex, err = mlkembraid.DeserializeSCKA(data[offset:])
+		if err != nil {
+			return nil, &ErrInvalidCompositeMessage{Reason: "failed to unmarshal SCKA message: " + err.Error()}
 		}
-	}
-
-	sckaMsg, pqCounter, err := mlkembraid.DeserializeSCKA(data[offset:])
-	if err != nil {
-		return nil, &ErrInvalidCompositeMessage{
-			Reason: "failed to decode SCKA message: " + err.Error(),
-		}
+		pqCounter = chainIndex
 	}
 
 	return &CompositeHeader{
@@ -128,4 +90,53 @@ func DeserializeCompositeHeader(data []byte) (*CompositeHeader, error) {
 		PQCounter: pqCounter,
 		SCKAMsg:   sckaMsg,
 	}, nil
+}
+
+// marshalCompositeMessage serializes a full Triple Ratchet message:
+//
+//	headerLen(4 BE) + header(N) + ciphertextLen(4 BE) + ciphertext(M)
+func marshalCompositeMessage(headerBytes, ciphertext []byte) []byte {
+	buf := make([]byte, 0, 8+len(headerBytes)+len(ciphertext))
+	buf = appendU32BE(buf, uint32(len(headerBytes)))
+	buf = append(buf, headerBytes...)
+	buf = appendU32BE(buf, uint32(len(ciphertext)))
+	buf = append(buf, ciphertext...)
+	return buf
+}
+
+// unmarshalCompositeMessage parses a full Triple Ratchet message into
+// its header bytes and ciphertext bytes.
+func unmarshalCompositeMessage(data []byte) (headerBytes, ciphertext []byte, err error) {
+	if len(data) < 8 {
+		return nil, nil, &ErrInvalidCompositeMessage{Reason: "too short for composite message"}
+	}
+
+	headerLen := int(binary.BigEndian.Uint32(data[0:4]))
+	offset := 4
+
+	if len(data) < offset+headerLen {
+		return nil, nil, &ErrInvalidCompositeMessage{Reason: "header length exceeds data"}
+	}
+
+	headerBytes = data[offset : offset+headerLen]
+	offset += headerLen
+
+	if len(data) < offset+4 {
+		return nil, nil, &ErrInvalidCompositeMessage{Reason: "too short for ciphertext length"}
+	}
+
+	ciphertextLen := int(binary.BigEndian.Uint32(data[offset : offset+4]))
+	offset += 4
+
+	if len(data) < offset+ciphertextLen {
+		return nil, nil, &ErrInvalidCompositeMessage{Reason: "ciphertext length exceeds data"}
+	}
+
+	ciphertext = data[offset : offset+ciphertextLen]
+	return headerBytes, ciphertext, nil
+}
+
+// appendU32BE appends a big-endian uint32 to buf.
+func appendU32BE(buf []byte, v uint32) []byte {
+	return append(buf, byte(v>>24), byte(v>>16), byte(v>>8), byte(v))
 }

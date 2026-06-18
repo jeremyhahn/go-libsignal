@@ -13,8 +13,8 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/crypto/argon2"
-	"golang.org/x/text/unicode/norm"
 	"golang.org/x/crypto/hkdf"
+	"golang.org/x/text/unicode/norm"
 
 	crypto "github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"

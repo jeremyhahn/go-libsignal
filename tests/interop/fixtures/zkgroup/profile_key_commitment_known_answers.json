@@ -1,0 +1,11 @@
+{
+  "_provenance": {
+    "source": "rust/zkgroup/src/crypto/profile_key_commitment.rs::tests::test_commitment",
+    "rust_ref": "crypto/profile_key_commitment.rs:120",
+    "rust_rev_pin": "/RUST_REV (root of go-libsignal repo)",
+    "note": "KAT for ProfileKeyCommitmentWithSecretNonce determinism. Rust test asserts new(profile_key, uid) == new(profile_key, uid). Go fixture stores the computed J1‖J2‖J3 output so we can assert byte-for-byte stability across refactors. Inputs: profile_key = TEST_ARRAY_32 (0x00..0x1f), uid_bytes = TEST_ARRAY_16 (0x00..0x0f). Output is 3×32 compressed Ristretto255 points."
+  },
+  "profile_key_seed": "test_array_32",
+  "uid_bytes_seed": "test_array_16",
+  "expected_commitment_hex": "e44b31a36cc76be0e029bc432af32387f4c4eb2835f0d48d6a60928177f8b21d520c7e2642d9d69cdc06f2cbf1f26c85e6cba007dc688b0bd32018a3dbb7ad2dfcde2ae077f59294c8d786a5d767dd0b5c5397221ef10fdfdc7469a7031f543e"
+}

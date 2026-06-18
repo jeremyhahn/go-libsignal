@@ -60,14 +60,14 @@ func TestLevel(t *testing.T) {
 		x    uint64
 		want int
 	}{
-		{0, 0},  // leaf
-		{1, 1},  // level 1
-		{2, 0},  // leaf
-		{3, 2},  // level 2
-		{4, 0},  // leaf
-		{5, 1},  // level 1
-		{6, 0},  // leaf
-		{7, 3},  // level 3
+		{0, 0}, // leaf
+		{1, 1}, // level 1
+		{2, 0}, // leaf
+		{3, 2}, // level 2
+		{4, 0}, // leaf
+		{5, 1}, // level 1
+		{6, 0}, // leaf
+		{7, 3}, // level 3
 	}
 
 	for _, tt := range tests {

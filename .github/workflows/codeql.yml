@@ -1,0 +1,67 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Sundays at 03:00 UTC
+    - cron: '0 3 * * 0'
+  workflow_dispatch: {}
+
+permissions:
+  security-events: write
+  actions: read
+  contents: read
+
+env:
+  GOWORK: off
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@d60b41a563a30eb0b7f6a852f3d5e67ebb8f8df8  # v5.5.0
+        with:
+          go-version: '1.26.3'
+          cache: false
+
+      - name: Cache Go build cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-codeql-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-codeql-
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@ce28f5bb42b49b536464e0b2ae1f6c99f380d68c  # v3.28.0
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended,security-and-quality
+
+      - name: Build
+        env:
+          GOWORK: off
+        run: GOWORK=off go build ./...
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@ce28f5bb42b49b536464e0b2ae1f6c99f380d68c  # v3.28.0
+        with:
+          category: "/language:${{ matrix.language }}"

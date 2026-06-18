@@ -15,8 +15,8 @@ func TestNewMLKEM768KEM(t *testing.T) {
 
 func TestMLKEM768KEMKeyType(t *testing.T) {
 	k := NewMLKEM768KEM()
-	if k.KeyType() != KeyTypeKyber768 {
-		t.Errorf("KeyType() = 0x%02x, want 0x%02x", k.KeyType(), KeyTypeKyber768)
+	if k.KeyType() != KeyTypeMLKEM768 {
+		t.Errorf("KeyType() = 0x%02x, want 0x%02x", k.KeyType(), KeyTypeMLKEM768)
 	}
 }
 
@@ -28,15 +28,15 @@ func TestMLKEM768KEMKeySizes(t *testing.T) {
 		t.Fatalf("Generate() error: %v", err)
 	}
 
-	// Round-3 Kyber-768 key sizes: pk=1184, sk=2400, ct=1088.
+	// NIST FIPS 203 ML-KEM-768 key sizes: pk=1184, sk seed=64, ct=1088.
 	pkData := kp.Public.Data()
 	if len(pkData) != 1184 {
-		t.Errorf("public key size = %d, want 1184 (round-3 Kyber-768)", len(pkData))
+		t.Errorf("public key size = %d, want 1184 (ML-KEM-768)", len(pkData))
 	}
 
 	skData := kp.Secret.Data()
-	if len(skData) != 2400 {
-		t.Errorf("secret key size = %d, want 2400 (round-3 Kyber-768)", len(skData))
+	if len(skData) != 64 {
+		t.Errorf("secret key size = %d, want 64 (ML-KEM-768 seed, FIPS 203)", len(skData))
 	}
 
 	ss, ct, err := k.Encapsulate(kp.Public)
@@ -47,7 +47,7 @@ func TestMLKEM768KEMKeySizes(t *testing.T) {
 
 	ctData := ct.Data()
 	if len(ctData) != 1088 {
-		t.Errorf("ciphertext size = %d, want 1088 (round-3 Kyber-768)", len(ctData))
+		t.Errorf("ciphertext size = %d, want 1088 (ML-KEM-768)", len(ctData))
 	}
 }
 
@@ -64,11 +64,11 @@ func TestMLKEM768KEMGenerate(t *testing.T) {
 	if kp.Secret == nil {
 		t.Fatal("Generate() returned nil secret key")
 	}
-	if kp.Public.Type() != KeyTypeKyber768 {
-		t.Errorf("public key type = 0x%02x, want 0x%02x", kp.Public.Type(), KeyTypeKyber768)
+	if kp.Public.Type() != KeyTypeMLKEM768 {
+		t.Errorf("public key type = 0x%02x, want 0x%02x", kp.Public.Type(), KeyTypeMLKEM768)
 	}
-	if kp.Secret.Type() != KeyTypeKyber768 {
-		t.Errorf("secret key type = 0x%02x, want 0x%02x", kp.Secret.Type(), KeyTypeKyber768)
+	if kp.Secret.Type() != KeyTypeMLKEM768 {
+		t.Errorf("secret key type = 0x%02x, want 0x%02x", kp.Secret.Type(), KeyTypeMLKEM768)
 	}
 }
 
@@ -101,8 +101,8 @@ func TestMLKEM768KEMEncapsulateDecapsulateRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Encapsulate() error: %v", err)
 	}
-	if ct.Type() != KeyTypeKyber768 {
-		t.Errorf("ciphertext type = 0x%02x, want 0x%02x", ct.Type(), KeyTypeKyber768)
+	if ct.Type() != KeyTypeMLKEM768 {
+		t.Errorf("ciphertext type = 0x%02x, want 0x%02x", ct.Type(), KeyTypeMLKEM768)
 	}
 
 	ss2, err := k.Decapsulate(kp.Secret, ct)
@@ -206,8 +206,8 @@ func TestMLKEM768KEMPublicKeySerializeRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeserializePublicKey() error: %v", err)
 	}
-	if pk2.Type() != KeyTypeKyber768 {
-		t.Errorf("deserialized key type = 0x%02x, want 0x%02x", pk2.Type(), KeyTypeKyber768)
+	if pk2.Type() != KeyTypeMLKEM768 {
+		t.Errorf("deserialized key type = 0x%02x, want 0x%02x", pk2.Type(), KeyTypeMLKEM768)
 	}
 	if !bytes.Equal(pk2.Data(), kp.Public.Data()) {
 		t.Error("deserialized public key data does not match original")

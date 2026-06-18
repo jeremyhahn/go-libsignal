@@ -12,14 +12,14 @@ import (
 // configurable errors. It delegates to the real kyber1024 scheme for
 // operations that are not configured to fail.
 type errScheme struct {
-	real              circlkem.Scheme
-	generateErr       error
-	marshalPKErr      error
-	marshalSKErr      error
-	encapsulateErr    error
-	decapsulateErr    error
-	unmarshalPKErr    error
-	unmarshalSKErr    error
+	real           circlkem.Scheme
+	generateErr    error
+	marshalPKErr   error
+	marshalSKErr   error
+	encapsulateErr error
+	decapsulateErr error
+	unmarshalPKErr error
+	unmarshalSKErr error
 }
 
 func (e *errScheme) Name() string { return e.real.Name() }
@@ -67,12 +67,12 @@ func (e *errScheme) UnmarshalBinaryPrivateKey(data []byte) (circlkem.PrivateKey,
 	return e.real.UnmarshalBinaryPrivateKey(data)
 }
 
-func (e *errScheme) CiphertextSize() int            { return e.real.CiphertextSize() }
-func (e *errScheme) SharedKeySize() int              { return e.real.SharedKeySize() }
-func (e *errScheme) PrivateKeySize() int             { return e.real.PrivateKeySize() }
-func (e *errScheme) PublicKeySize() int              { return e.real.PublicKeySize() }
-func (e *errScheme) SeedSize() int                   { return e.real.SeedSize() }
-func (e *errScheme) EncapsulationSeedSize() int      { return e.real.EncapsulationSeedSize() }
+func (e *errScheme) CiphertextSize() int        { return e.real.CiphertextSize() }
+func (e *errScheme) SharedKeySize() int         { return e.real.SharedKeySize() }
+func (e *errScheme) PrivateKeySize() int        { return e.real.PrivateKeySize() }
+func (e *errScheme) PublicKeySize() int         { return e.real.PublicKeySize() }
+func (e *errScheme) SeedSize() int              { return e.real.SeedSize() }
+func (e *errScheme) EncapsulationSeedSize() int { return e.real.EncapsulationSeedSize() }
 
 func (e *errScheme) DeriveKeyPair(seed []byte) (circlkem.PublicKey, circlkem.PrivateKey) {
 	return e.real.DeriveKeyPair(seed)
@@ -88,7 +88,7 @@ type errKey struct {
 	marshalErr error
 }
 
-func (k *errKey) Scheme() circlkem.Scheme        { return k.inner.Scheme() }
+func (k *errKey) Scheme() circlkem.Scheme             { return k.inner.Scheme() }
 func (k *errKey) Equal(other circlkem.PublicKey) bool { return k.inner.Equal(other) }
 
 func (k *errKey) MarshalBinary() ([]byte, error) {
@@ -104,9 +104,9 @@ type errPrivKey struct {
 	marshalErr error
 }
 
-func (k *errPrivKey) Scheme() circlkem.Scheme           { return k.inner.Scheme() }
+func (k *errPrivKey) Scheme() circlkem.Scheme              { return k.inner.Scheme() }
 func (k *errPrivKey) Equal(other circlkem.PrivateKey) bool { return k.inner.Equal(other) }
-func (k *errPrivKey) Public() circlkem.PublicKey         { return k.inner.Public() }
+func (k *errPrivKey) Public() circlkem.PublicKey           { return k.inner.Public() }
 
 func (k *errPrivKey) MarshalBinary() ([]byte, error) {
 	if k.marshalErr != nil {
@@ -157,12 +157,12 @@ func (p *panicScheme) UnmarshalBinaryPrivateKey(data []byte) (circlkem.PrivateKe
 	return p.real.UnmarshalBinaryPrivateKey(data)
 }
 
-func (p *panicScheme) CiphertextSize() int       { return p.real.CiphertextSize() }
+func (p *panicScheme) CiphertextSize() int        { return p.real.CiphertextSize() }
 func (p *panicScheme) SharedKeySize() int         { return p.real.SharedKeySize() }
 func (p *panicScheme) PrivateKeySize() int        { return p.real.PrivateKeySize() }
-func (p *panicScheme) PublicKeySize() int          { return p.real.PublicKeySize() }
-func (p *panicScheme) SeedSize() int               { return p.real.SeedSize() }
-func (p *panicScheme) EncapsulationSeedSize() int  { return p.real.EncapsulationSeedSize() }
+func (p *panicScheme) PublicKeySize() int         { return p.real.PublicKeySize() }
+func (p *panicScheme) SeedSize() int              { return p.real.SeedSize() }
+func (p *panicScheme) EncapsulationSeedSize() int { return p.real.EncapsulationSeedSize() }
 
 func (p *panicScheme) DeriveKeyPair(seed []byte) (circlkem.PublicKey, circlkem.PrivateKey) {
 	return p.real.DeriveKeyPair(seed)

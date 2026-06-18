@@ -3,6 +3,7 @@ package protocol
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"crypto/subtle"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/identity"
@@ -68,11 +69,36 @@ func NewSignalMessageFromStruct(structure *SignalMessageStructure, serializer Si
 
 // NewSignalMessage returns a Signal Ciphertext message. The pqRatchetMsg parameter
 // carries the SPQR ratchet key for post-quantum forward secrecy; pass nil when SPQR
-// is not active.
+// is not active. localAddress and remoteAddress bind sender/recipient ServiceIds
+// into the addresses field (proto field 6); pass nil for either to omit the field,
+// retaining backward compatibility with older clients.
+//
+// Mirrors Rust SignalMessage::new at rust/protocol/src/protocol.rs:79.
 func NewSignalMessage(messageVersion int, counter, previousCounter uint32, macKey []byte,
 	senderRatchetKey ecc.ECPublicKeyable, ciphertext []byte, senderIdentityKey,
 	receiverIdentityKey *identity.Key, serializer SignalMessageSerializer,
-	pqRatchetMsg []byte) (*SignalMessage, error) {
+	pqRatchetMsg []byte, localAddress, remoteAddress *SignalAddress) (*SignalMessage, error) {
+
+	// Serialize addresses into the binding field (proto field 6).
+	//
+	// Both nil → legacy unbound format (backward compat, no error).
+	// Asymmetric (exactly one nil) → legacy unbound; the nil side is not
+	//   known, so address binding cannot be established (backward compat, no
+	//   error). Callers that want to enforce binding must supply both.
+	// Both non-nil → binding is attempted. If SerializeAddresses returns nil
+	//   (invalid device ID or non-ServiceId name), return
+	//   ErrInvalidAddressForBinding rather than silently downgrading to an
+	//   unbound message. This closes the silent-omission bug reported in
+	//   Codex finding P2.
+	//
+	// Mirrors Rust SignalMessage::new at rust/protocol/src/protocol.rs:79.
+	var addresses []byte
+	if localAddress != nil && remoteAddress != nil {
+		addresses = SerializeAddresses(localAddress, remoteAddress)
+		if addresses == nil {
+			return nil, newInvalidAddressForBindingError()
+		}
+	}
 
 	// Build the signal message structure with the given data.
 	structure := &SignalMessageStructure{
@@ -82,6 +108,7 @@ func NewSignalMessage(messageVersion int, counter, previousCounter uint32, macKe
 		RatchetKey:      senderRatchetKey.Serialize(),
 		CipherText:      ciphertext,
 		PqRatchetKey:    pqRatchetMsg,
+		Addresses:       addresses,
 	}
 
 	// Serialize the structure to get bytes for MAC calculation.
@@ -92,7 +119,7 @@ func NewSignalMessage(messageVersion int, counter, previousCounter uint32, macKe
 
 	// Get the message authentication code from the serialized structure.
 	mac, err := getMac(
-		messageVersion, senderIdentityKey, receiverIdentityKey,
+		senderIdentityKey, receiverIdentityKey,
 		macKey, serializedBytes,
 	)
 	if err != nil {
@@ -117,6 +144,7 @@ type SignalMessageStructure struct {
 	PreviousCounter uint32
 	CipherText      []byte
 	PqRatchetKey    []byte // Protobuf field 5: pq_ratchet
+	Addresses       []byte // Protobuf field 6: addresses (36-byte sender+recipient binding)
 	Version         int
 	Mac             []byte
 }
@@ -180,7 +208,6 @@ func (s *SignalMessage) VerifyMac(messageVersion int, senderIdentityKey,
 
 	// Calculate the message authentication code from the serialized structure.
 	ourMac, err := getMac(
-		messageVersion,
 		senderIdentityKey,
 		receiverIdentityKey,
 		macKey,
@@ -203,6 +230,53 @@ func (s *SignalMessage) VerifyMac(messageVersion int, senderIdentityKey,
 	return nil
 }
 
+// Addresses returns the 36-byte sender/recipient binding carried in proto
+// field 6, or nil if the message was constructed without address binding
+// (backward compatibility with older clients).
+func (s *SignalMessage) Addresses() []byte {
+	return s.structure.Addresses
+}
+
+// VerifyMacWithAddresses verifies the MAC and, if the message carries an
+// addresses field (proto field 6), asserts that it matches the
+// reserialization of (sender, recipient). Returns nil when the MAC is good
+// and either (a) no addresses are carried (backward compat), or (b) the
+// carried addresses match the expected reserialization.
+//
+// Mirrors Rust SignalMessage::verify_mac_with_addresses at
+// rust/protocol/src/protocol.rs:186.
+func (s *SignalMessage) VerifyMacWithAddresses(messageVersion int, senderIdentityKey,
+	receiverIdentityKey *identity.Key, macKey []byte,
+	sender, recipient *SignalAddress) error {
+
+	if err := s.VerifyMac(messageVersion, senderIdentityKey, receiverIdentityKey, macKey); err != nil {
+		return err
+	}
+
+	// If no addresses were carried, accept for backward compatibility.
+	if len(s.structure.Addresses) == 0 {
+		return nil
+	}
+
+	// Reserialize local (sender, recipient) and compare.
+	expected := SerializeAddresses(sender, recipient)
+	if expected == nil {
+		// Locally supplied addresses are not valid ServiceId strings.
+		logger.Warning("VerifyMacWithAddresses: locally supplied addresses are not valid ServiceIds")
+		return newAddressMismatchError()
+	}
+
+	// Constant-time compare matches Rust's ct_eq at rust/protocol/src/protocol.rs:213.
+	// While the address-binding blob is not secret per-se, using ct compare here
+	// preserves byte-for-byte semantic parity with the Rust implementation.
+	if subtle.ConstantTimeCompare(expected, s.structure.Addresses) != 1 {
+		logger.Warning("VerifyMacWithAddresses: address mismatch")
+		return newAddressMismatchError()
+	}
+
+	return nil
+}
+
 // Serialize will return the Signal Message as bytes.
 func (s *SignalMessage) Serialize() ([]byte, error) {
 	return s.serializer.Serialize(&s.structure)
@@ -219,10 +293,16 @@ func (s *SignalMessage) Type() uint32 {
 	return WHISPER_TYPE
 }
 
-// getMac will calculate the mac using the given message version, identity
-// keys, macKey and SignalMessageStructure. The MAC key is a private key held
-// by both parties that is concatenated with the message and hashed.
-func getMac(messageVersion int, senderIdentityKey, receiverIdentityKey *identity.Key,
+// getMac calculates the HMAC-SHA256 MAC over the sender identity key,
+// receiver identity key, and serialized message bytes. The MAC is truncated
+// to macLength (8) bytes.
+//
+// Rust unconditionally prepends both identity keys before the message body
+// (rust/protocol/src/protocol.rs:230-246). Go matches that behaviour: version
+// checks are performed at the deserialization boundary (NewSignalMessageFromBytes
+// rejects version < PreKyberVersion), so by the time getMac is called the
+// version is always >= 3 and identity keys are always included.
+func getMac(senderIdentityKey, receiverIdentityKey *identity.Key,
 	macKey, serialized []byte) ([]byte, error) {
 
 	if len(macKey) != 32 {
@@ -230,12 +310,8 @@ func getMac(messageVersion int, senderIdentityKey, receiverIdentityKey *identity
 	}
 
 	mac := hmac.New(sha256.New, macKey[:])
-
-	if messageVersion >= 3 {
-		mac.Write(senderIdentityKey.PublicKey().Serialize())
-		mac.Write(receiverIdentityKey.PublicKey().Serialize())
-	}
-
+	mac.Write(senderIdentityKey.PublicKey().Serialize())
+	mac.Write(receiverIdentityKey.PublicKey().Serialize())
 	mac.Write(serialized)
 
 	fullMac := mac.Sum(nil)

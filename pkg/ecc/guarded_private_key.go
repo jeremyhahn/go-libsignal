@@ -28,7 +28,14 @@ type GuardedECPrivateKey struct {
 	key *secret.Secret32
 }
 
-// NewGuardedECPrivateKey creates a GuardedECPrivateKey from a 32-byte array.
+// NewGuardedECPrivateKey creates a GuardedECPrivateKey from a 32-byte array
+// after applying Curve25519 clamping.  Rust PrivateKey::From<[u8;32]> and
+// PrivateKey::deserialize both call scalar::clamp_integer before storing the
+// key; this constructor matches that behaviour so that round-trip serialization
+// produces byte-for-byte identical output to the Rust reference.
+//
+// Rust source: rust/core/src/curve/curve25519.rs:170-175; rust/core/src/curve.rs:246-247.
+//
 // The source array is zeroized after the data is moved into guarded memory.
 func NewGuardedECPrivateKey(data [32]byte) (k *GuardedECPrivateKey, err error) {
 	defer func() {
@@ -37,6 +44,7 @@ func NewGuardedECPrivateKey(data [32]byte) (k *GuardedECPrivateKey, err error) {
 			err = &ErrGuardedKeyAllocation{Operation: "guarded key allocation", Err: fmt.Errorf("%v", r)}
 		}
 	}()
+	clampCurve25519(&data)
 	s, sErr := secret.NewSecret32(data)
 	if sErr != nil {
 		return nil, &ErrGuardedKeyAllocation{Operation: "guarded key allocation", Err: sErr}

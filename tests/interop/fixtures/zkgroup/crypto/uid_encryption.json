@@ -1,0 +1,35 @@
+{
+  "source": "rust/zkgroup/src/crypto/uid_encryption.rs:112-181",
+  "rust_rev": "98915c442d",
+  "purpose": "UidEncryptionDomain encrypt+decrypt for ACI. key_pair derived from TEST_ARRAY_32 via Sho(HMAC-SHA256, b'Test_Uid_Encryption'). Expected ciphertext pinned from Rust's assert!(ciphertext_bytes == vec![...]) in test_uid_encryption().",
+  "vectors": [
+    {
+      "name": "encrypt_aci_from_array_16",
+      "inputs": {
+        "sho_label": "Test_Uid_Encryption",
+        "sho_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "aci_uuid_hex": "000102030405060708090a0b0c0d0e0f",
+        "system_params_hardcoded_hex": "a6324c368df734691147981348b6e7eb42c3307e711b6c7eccd3032d45693f5a048013525b76124bf2640c5e9369c76efbe80aba2a24aa5d8e18a98eba14f837"
+      },
+      "expected": {
+        "ciphertext_hex": "f89ee7705a66036b908db884211b773ac543ee35c4a3086220fc3e1e35b4234cfa1d2eea2cc2f4b4c42cff39a9dceb57293b5f8770ca60f9e9b74447bfd3bd3d",
+        "service_id_type": "ACI",
+        "note": "64-byte bincode serialization of Ciphertext<UidEncryptionDomain>. Decrypt must recover ACI with the same UUID bytes."
+      }
+    },
+    {
+      "name": "encrypt_pni_from_array_16",
+      "inputs": {
+        "sho_label": "Test_Pni_Encryption",
+        "sho_key_hex": "",
+        "pni_uuid_hex": "000102030405060708090a0b0c0d0e0f",
+        "note": "key_pair derived from empty key via Sho(b'Test_Pni_Encryption', empty). No pinned ciphertext in Rust test — property-based only (decrypt recovers PNI type)."
+      },
+      "expected": {
+        "service_id_type": "PNI",
+        "verify_result": "decrypt_recovers_pni"
+      }
+    }
+  ],
+  "skipped": "test_pni_encryption has no pinned ciphertext hex in Rust source (no assert! on bytes); only the ACI case has a hardcoded expected."
+}

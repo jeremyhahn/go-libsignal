@@ -1,0 +1,34 @@
+{
+  "_provenance": {
+    "source": "rust/core/src/address.rs",
+    "tests": [
+      "round_trip_service_id_binary",
+      "accepts_ios_system_story_aci"
+    ],
+    "rust_rev_pin": "/RUST_REV (root of go-libsignal repo)",
+    "note": "Hand-extracted ServiceId binary-encoding KATs. The variable-width form is what Rust uses inside HKDF info strings (e.g. derive_backup_id concatenates AccountEntropyPool || ACI::service_id_binary). The drift detector greps the upstream source for every literal."
+  },
+  "vectors": [
+    {
+      "name": "ios_system_story_aci",
+      "kind": "aci",
+      "uuid": "00000000-0000-0000-0000-000000000001",
+      "expected_binary_hex": "00000000000000000000000000000001",
+      "expected_fixed_width_hex": "0000000000000000000000000000000001"
+    },
+    {
+      "name": "common_aci",
+      "kind": "aci",
+      "uuid": "8c78cd2a-16ff-427d-83dc-1a5e36ce713d",
+      "expected_binary_hex": "8c78cd2a16ff427d83dc1a5e36ce713d",
+      "expected_fixed_width_hex": "008c78cd2a16ff427d83dc1a5e36ce713d"
+    },
+    {
+      "name": "common_pni",
+      "kind": "pni",
+      "uuid": "8c78cd2a-16ff-427d-83dc-1a5e36ce713d",
+      "expected_binary_hex": "018c78cd2a16ff427d83dc1a5e36ce713d",
+      "expected_fixed_width_hex": "018c78cd2a16ff427d83dc1a5e36ce713d"
+    }
+  ]
+}

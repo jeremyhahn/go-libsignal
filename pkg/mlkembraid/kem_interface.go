@@ -1,11 +1,21 @@
+// Package mlkembraid implements the ML-KEM Braid SCKA protocol using the
+// libcrux-compatible incremental ML-KEM-768 API.
+//
+// The preferred implementation is IncrementalMLKEM768KEM, which uses
+// internal/incremental_mlkem768 for a wire-compatible port of the Rust SPQR
+// incremental_mlkem768 module. The legacy MLKEM768IncrementalKEM is retained
+// for backward compatibility but does not produce Rust-compatible wire bytes.
 package mlkembraid
 
 import (
+	"crypto/rand"
+	"crypto/sha3"
 	"crypto/subtle"
+	"hash"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/kem"
+	imlkem "github.com/jeremyhahn/go-libsignal/pkg/mlkembraid/internal/incremental_mlkem768"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
-	"golang.org/x/crypto/sha3"
 )
 
 // IncrementalKEM defines the interface for an incremental KEM supporting the
@@ -104,7 +114,7 @@ func Header(ekSeed, ekVector []byte) []byte {
 
 // computeHEK computes hek = SHA3-256(ek_seed || ek_vector).
 func computeHEK(ekSeed, ekVector []byte) []byte {
-	h := sha3.New256()
+	var h hash.Hash = sha3.New256()
 	h.Write(ekSeed)
 	h.Write(ekVector)
 	return h.Sum(nil)
@@ -112,7 +122,7 @@ func computeHEK(ekSeed, ekVector []byte) []byte {
 
 // Encaps1 performs the first phase of two-phase incremental encapsulation.
 //
-// Since the standard ML-KEM-768 API (circl/mlkem768) does not expose split
+// Since the standard ML-KEM-768 API (crypto/mlkem) does not expose split
 // encapsulation internals (ct1 requires the A matrix from ek_seed, but ct2
 // requires the t vector from ek_vector), the actual cryptographic encapsulation
 // is deferred to Encaps2. Encaps1 captures ek_seed and hek into an opaque
@@ -155,7 +165,7 @@ func (k *MLKEM768IncrementalKEM) FullEncaps(ekSeed, ekVector []byte) ([]byte, []
 	copy(fullEK, ekSeed)
 	copy(fullEK[len(ekSeed):], ekVector)
 
-	pk := kem.NewPublicKey(kem.KeyTypeKyber768, fullEK)
+	pk := kem.NewPublicKey(kem.KeyTypeMLKEM768, fullEK)
 
 	ss, ct, err := k.inner.Encapsulate(pk)
 	if err != nil {
@@ -295,11 +305,11 @@ func (k *MLKEM768IncrementalKEM) Decaps(dk []byte, ct1 []byte, ct2 []byte) ([]by
 	copy(fullCT, ct1)
 	copy(fullCT[MLKEM768CT1Size:], ct2)
 
-	sk, skErr := kem.NewSecretKey(kem.KeyTypeKyber768, dk)
+	sk, skErr := kem.NewSecretKey(kem.KeyTypeMLKEM768, dk)
 	if skErr != nil {
 		return nil, &ErrKEMOperation{Op: "NewSecretKey", Err: skErr}
 	}
-	ciphertext := kem.NewCiphertext(kem.KeyTypeKyber768, fullCT)
+	ciphertext := kem.NewCiphertext(kem.KeyTypeMLKEM768, fullCT)
 
 	ss, err := k.inner.Decapsulate(sk, ciphertext)
 	if err != nil {
@@ -330,4 +340,247 @@ func (k *MLKEM768IncrementalKEM) CT2Size() int {
 // HeaderSize returns the header size: ek_seed(32) || hek(32) = 64.
 func (k *MLKEM768IncrementalKEM) HeaderSize() int {
 	return HeaderSize
+}
+
+// kemCompleter is an internal interface for performing the deferred Bob-side
+// full encapsulation. Both MLKEM768IncrementalKEM and IncrementalMLKEM768KEM
+// implement it so that state.go's bobCompleteEncapsulationDeferred can
+// accept either without a concrete type assertion.
+type kemCompleter interface {
+	// CompleteEncaps2 completes encapsulation given the opaque encapsSecret
+	// from Encaps1 and the full key components. Returns ct1, ct2, ss.
+	CompleteEncaps2(encapsSecret []byte, ekSeed []byte, ekVector []byte) ([]byte, []byte, []byte, error)
+
+	// FullEncaps performs a complete single-step encapsulation when ek_seed
+	// and ek_vector are both available. Returns ct1, ct2, ss.
+	FullEncaps(ekSeed, ekVector []byte) ([]byte, []byte, []byte, error)
+}
+
+// IncrementalMLKEM768KEM implements IncrementalKEM using the pure-Go
+// incremental ML-KEM-768 port (internal/incremental_mlkem768). It is
+// wire-compatible with the Rust sparsepostquantumratchet crate's
+// incremental_mlkem768 module.
+//
+// Key layout:
+//   - ekSeed  (pk1, 64 bytes): seed_for_A(32) || H(ek)(32)
+//   - ekVector (pk2, 1152 bytes): ByteEncode12(t_as_ntt)
+//   - dk  (2400 bytes): compressed decapsulation key (libcrux format)
+//
+// Rust: sparsepostquantumratchet::incremental_mlkem768::generate / encaps1 / encaps2 / decaps
+type IncrementalMLKEM768KEM struct{}
+
+// NewIncrementalMLKEM768KEM creates a new KEM backed by the pure-Go
+// incremental ML-KEM-768 implementation. This is the production-grade
+// replacement for MLKEM768IncrementalKEM.
+func NewIncrementalMLKEM768KEM() *IncrementalMLKEM768KEM {
+	return &IncrementalMLKEM768KEM{}
+}
+
+// KeyGen generates a new incremental ML-KEM-768 key pair.
+//
+// Returns:
+//   - dk:       2400-byte compressed decapsulation key
+//   - ekSeed:   64-byte pk1 = seed_for_A(32) || H(ek)(32)
+//   - ekVector: 1152-byte pk2 = ByteEncode12(t_as_ntt)
+func (k *IncrementalMLKEM768KEM) KeyGen() (dk []byte, ekSeed []byte, ekVector []byte, err error) {
+	pk1, pk2, dkArr, genErr := imlkem.GenerateKey()
+	if genErr != nil {
+		return nil, nil, nil, &ErrKEMOperation{Op: "IncrementalMLKEM768KEM.KeyGen", Err: genErr}
+	}
+	dkSlice := make([]byte, len(dkArr))
+	copy(dkSlice, dkArr[:])
+	return dkSlice, pk1[:], pk2[:], nil
+}
+
+// Encaps1 performs the first phase of incremental encapsulation.
+//
+// ekSeed is pk1 (64 bytes = seed_for_A || H(ek)).
+// hek is redundant (pk1[32:64] already contains H(ek)) and is ignored.
+//
+// The returned encapsSecret is a 3072-byte packed blob: es(2080) || ct1(960) || ss(32).
+// This packing allows state.go to store encapsSecret and recover all three values
+// in CompleteEncaps2 without requiring additional state fields.
+//
+// Returns:
+//   - encapsSecret: 3072-byte packed blob = es || ct1 || ss
+//   - ct1:          960-byte first ciphertext (also embedded in encapsSecret)
+//   - sharedSecret: 32-byte shared secret (also embedded in encapsSecret)
+func (k *IncrementalMLKEM768KEM) Encaps1(ekSeed []byte, hek []byte) (encapsSecret []byte, ct1 []byte, sharedSecret []byte, err error) {
+	if len(ekSeed) != imlkem.PublicKey1Size {
+		return nil, nil, nil, &ErrInvalidInput{
+			Field:  "ekSeed",
+			Reason: "must be 64 bytes (pk1 = seed_for_A || H(ek))",
+		}
+	}
+
+	var randomness [imlkem.SharedSecretSize]byte
+	if _, err = rand.Read(randomness[:]); err != nil {
+		return nil, nil, nil, &ErrKEMOperation{Op: "IncrementalMLKEM768KEM.Encaps1", Err: err}
+	}
+
+	ct1Arr, esArr, ssArr, encErr := imlkem.Encaps1(ekSeed, randomness)
+	if encErr != nil {
+		return nil, nil, nil, &ErrKEMOperation{Op: "IncrementalMLKEM768KEM.Encaps1", Err: encErr}
+	}
+
+	// Pack es || ct1 || ss into encapsSecret so CompleteEncaps2 can reconstruct them.
+	packed := make([]byte, imlkem.EncapsStateSize+imlkem.Ciphertext1Size+imlkem.SharedSecretSize)
+	copy(packed[:imlkem.EncapsStateSize], esArr[:])
+	copy(packed[imlkem.EncapsStateSize:], ct1Arr[:])
+	copy(packed[imlkem.EncapsStateSize+imlkem.Ciphertext1Size:], ssArr[:])
+
+	ct1Slice := make([]byte, imlkem.Ciphertext1Size)
+	copy(ct1Slice, ct1Arr[:])
+	ssSlice := make([]byte, imlkem.SharedSecretSize)
+	copy(ssSlice, ssArr[:])
+
+	return packed, ct1Slice, ssSlice, nil
+}
+
+// Encaps2 returns ct2 for the interface contract. Use CompleteEncaps2 internally.
+// encapsSecret is the 2080-byte EncapsulationState from Encaps1.
+// ekSeed is pk1, ekVector is pk2.
+func (k *IncrementalMLKEM768KEM) Encaps2(encapsSecret []byte, ekSeed []byte, ekVector []byte) ([]byte, error) {
+	ct2Arr, err := imlkem.Encaps2(encapsSecret, ekVector)
+	if err != nil {
+		return nil, &ErrKEMOperation{Op: "IncrementalMLKEM768KEM.Encaps2", Err: err}
+	}
+	ct2 := make([]byte, len(ct2Arr))
+	copy(ct2, ct2Arr[:])
+	return ct2, nil
+}
+
+// CompleteEncaps2 completes encapsulation and returns ct1, ct2, and ss.
+//
+// In the real incremental implementation, ct1 and ss were already produced
+// by Encaps1. The encapsSecret IS the 2080-byte EncapsulationState. ct1 is
+// embedded in the state (it was returned by Encaps1 and stored separately).
+//
+// Since the state machine stores ct1 from Encaps1 in bobCt1, this method
+// only needs to produce ct2 using Encaps2. However, to satisfy the
+// kemCompleter interface which returns ct1, ct2, ss — and because the
+// state machine in the two-phase path already has ct1 and ss from the
+// Encaps1 call — we cannot easily reconstruct ct1 here without storing it.
+//
+// For this reason, the state machine (state.go) is updated to use the new
+// three-output Encaps1 path directly, and CompleteEncaps2 is only called
+// on the old MLKEM768IncrementalKEM path.
+//
+// In the new path (IncrementalMLKEM768KEM), sendHeaderReceived calls Encaps1
+// which returns ct1 and ss immediately, so CompleteEncaps2 is not needed.
+// This method is provided for kemCompleter compliance.
+func (k *IncrementalMLKEM768KEM) CompleteEncaps2(encapsSecret []byte, ekSeed []byte, ekVector []byte) ([]byte, []byte, []byte, error) {
+	// encapsSecret for IncrementalMLKEM768KEM is structured as:
+	//   es (2080B) || ct1 (960B) || ss (32B)
+	// This packing is done by the adapted sendHeaderReceived path.
+	const esSize = imlkem.EncapsStateSize
+	const ct1Size = imlkem.Ciphertext1Size
+	const ssSize = imlkem.SharedSecretSize
+	const packedSize = esSize + ct1Size + ssSize
+
+	if len(encapsSecret) != packedSize {
+		return nil, nil, nil, &ErrKEMOperation{Op: "IncrementalMLKEM768KEM.CompleteEncaps2", Err: &ErrInvalidInput{
+			Field:  "encapsSecret",
+			Reason: "must be 3072 bytes (es||ct1||ss)",
+		}}
+	}
+
+	es := encapsSecret[:esSize]
+	ct1 := make([]byte, ct1Size)
+	copy(ct1, encapsSecret[esSize:esSize+ct1Size])
+	ss := make([]byte, ssSize)
+	copy(ss, encapsSecret[esSize+ct1Size:])
+
+	ct2Arr, err := imlkem.Encaps2(es, ekVector)
+	if err != nil {
+		return nil, nil, nil, &ErrKEMOperation{Op: "IncrementalMLKEM768KEM.CompleteEncaps2", Err: err}
+	}
+	ct2 := make([]byte, len(ct2Arr))
+	copy(ct2, ct2Arr[:])
+
+	return ct1, ct2, ss, nil
+}
+
+// FullEncaps performs a complete single-step encapsulation using pk1 (ekSeed)
+// and pk2 (ekVector). This is the path when Encaps1 was not called ahead of time.
+//
+// It generates fresh randomness internally and calls Encaps1 + Encaps2.
+func (k *IncrementalMLKEM768KEM) FullEncaps(ekSeed, ekVector []byte) ([]byte, []byte, []byte, error) {
+	if len(ekSeed) != imlkem.PublicKey1Size {
+		return nil, nil, nil, &ErrInvalidInput{Field: "ekSeed", Reason: "must be 64 bytes"}
+	}
+	if len(ekVector) != imlkem.PublicKey2Size {
+		return nil, nil, nil, &ErrInvalidInput{Field: "ekVector", Reason: "must be 1152 bytes"}
+	}
+
+	var randomness [imlkem.SharedSecretSize]byte
+	if _, err := rand.Read(randomness[:]); err != nil {
+		return nil, nil, nil, &ErrKEMOperation{Op: "IncrementalMLKEM768KEM.FullEncaps", Err: err}
+	}
+
+	ct1Arr, esArr, ssArr, err := imlkem.Encaps1(ekSeed, randomness)
+	if err != nil {
+		return nil, nil, nil, &ErrKEMOperation{Op: "IncrementalMLKEM768KEM.FullEncaps/Encaps1", Err: err}
+	}
+
+	ct2Arr, err := imlkem.Encaps2(esArr[:], ekVector)
+	if err != nil {
+		return nil, nil, nil, &ErrKEMOperation{Op: "IncrementalMLKEM768KEM.FullEncaps/Encaps2", Err: err}
+	}
+
+	ct1 := make([]byte, len(ct1Arr))
+	copy(ct1, ct1Arr[:])
+	ct2 := make([]byte, len(ct2Arr))
+	copy(ct2, ct2Arr[:])
+	ss := make([]byte, len(ssArr))
+	copy(ss, ssArr[:])
+	return ct1, ct2, ss, nil
+}
+
+// Decaps recovers the shared secret from ct1 and ct2 using the 2400-byte dk.
+func (k *IncrementalMLKEM768KEM) Decaps(dk []byte, ct1 []byte, ct2 []byte) ([]byte, error) {
+	ssArr, err := imlkem.Decaps(dk, ct1, ct2)
+	if err != nil {
+		return nil, &ErrKEMOperation{Op: "IncrementalMLKEM768KEM.Decaps", Err: err}
+	}
+	ss := make([]byte, len(ssArr))
+	copy(ss, ssArr[:])
+	return ss, nil
+}
+
+// EKSize returns the pk2 (ek_vector) size for incremental ML-KEM-768.
+func (k *IncrementalMLKEM768KEM) EKSize() int {
+	return imlkem.PublicKey2Size // 1152
+}
+
+// CT1Size returns the first ciphertext size for incremental ML-KEM-768.
+func (k *IncrementalMLKEM768KEM) CT1Size() int {
+	return imlkem.Ciphertext1Size // 960
+}
+
+// CT2Size returns the second ciphertext size for incremental ML-KEM-768.
+func (k *IncrementalMLKEM768KEM) CT2Size() int {
+	return imlkem.Ciphertext2Size // 128
+}
+
+// HeaderSize returns the header size = pk1 size = 64 bytes.
+func (k *IncrementalMLKEM768KEM) HeaderSize() int {
+	return imlkem.PublicKey1Size // 64
+}
+
+// IncrementalHeader builds a header from pk1 directly (it IS the header).
+// For IncrementalMLKEM768KEM, ekSeed = pk1 = rho || H(ek), so the header
+// is simply pk1. The ekVector is used to verify consistency via ValidatePKBytes.
+//
+// This replaces the legacy Header() function for the new KEM implementation.
+func IncrementalHeader(pk1 []byte) []byte {
+	h := make([]byte, len(pk1))
+	copy(h, pk1)
+	return h
+}
+
+// IncrementalVerifyEKVector verifies that pk2 (ekVector) is consistent with pk1 (ekSeed).
+// It calls ValidatePKBytes which checks H(ek) and the modulus domain of pk2.
+func IncrementalVerifyEKVector(pk1, pk2 []byte) error {
+	return imlkem.ValidatePKBytes(pk1, pk2)
 }

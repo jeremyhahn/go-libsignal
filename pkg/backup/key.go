@@ -40,6 +40,45 @@ type MessageBackupKey struct {
 	AESKey  *secret.Secret
 }
 
+// NewMessageBackupKey constructs a MessageBackupKey directly from raw 32-byte
+// HMAC and AES key material. Both slices must be exactly 32 bytes. The bytes
+// are copied into guarded memory; the caller may zeroize its own copies after
+// this call returns.
+//
+// This constructor is provided so interop tests and callers that hold raw key
+// material can construct a MessageBackupKey without going through the full
+// HKDF derivation path.
+func NewMessageBackupKey(hmacKey, aesKey []byte) (*MessageBackupKey, error) {
+	if len(hmacKey) != HMACKeyLen {
+		return nil, &ErrInvalidKeyLength{Field: "hmacKey", Got: len(hmacKey), Want: HMACKeyLen}
+	}
+	if len(aesKey) != AESKeyLen {
+		return nil, &ErrInvalidKeyLength{Field: "aesKey", Got: len(aesKey), Want: AESKeyLen}
+	}
+
+	hmacBuf := make([]byte, HMACKeyLen)
+	copy(hmacBuf, hmacKey)
+	hmacSecret, err := secret.New(hmacBuf)
+	if err != nil {
+		crypto.Zeroize(hmacBuf)
+		return nil, &ErrSecuringSecret{Operation: "HMAC key", Err: err}
+	}
+
+	aesBuf := make([]byte, AESKeyLen)
+	copy(aesBuf, aesKey)
+	aesSecret, err := secret.New(aesBuf)
+	if err != nil {
+		crypto.Zeroize(aesBuf)
+		hmacSecret.Destroy()
+		return nil, &ErrSecuringSecret{Operation: "AES key", Err: err}
+	}
+
+	return &MessageBackupKey{
+		HMACKey: hmacSecret,
+		AESKey:  aesSecret,
+	}, nil
+}
+
 // Zeroize securely wipes the HMAC and AES keys from memory.
 func (mk *MessageBackupKey) Zeroize() {
 	if mk.HMACKey != nil {

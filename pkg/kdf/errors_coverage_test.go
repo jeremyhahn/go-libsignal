@@ -131,3 +131,26 @@ func containsString(s, substr string) bool {
 			return false
 		}())
 }
+
+func TestErrHKDFExpand_Error(t *testing.T) {
+	inner := errors.New("io.ReadFull failed")
+	err := &ErrHKDFExpand{Err: inner}
+	msg := err.Error()
+	if !containsString(msg, "expand") {
+		t.Errorf("ErrHKDFExpand.Error() = %q, want 'expand'", msg)
+	}
+	if !errors.Is(err, inner) {
+		t.Error("ErrHKDFExpand.Unwrap() should expose inner via errors.Is")
+	}
+}
+
+func TestErrHKDFInvalidPRK_Error(t *testing.T) {
+	err := &ErrHKDFInvalidPRK{Got: 16}
+	msg := err.Error()
+	if !containsString(msg, "16") {
+		t.Errorf("ErrHKDFInvalidPRK.Error() = %q, want '16'", msg)
+	}
+	if !containsString(msg, "32") {
+		t.Errorf("ErrHKDFInvalidPRK.Error() = %q, want '32'", msg)
+	}
+}

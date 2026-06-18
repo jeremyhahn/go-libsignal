@@ -8,6 +8,20 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
+// TestInitWithBraid_EmptySharedSecret verifies that InitWithBraid propagates
+// the Init error when sharedSecret is empty.
+func TestInitWithBraid_EmptySharedSecret(t *testing.T) {
+	kem := mlkembraid.NewMLKEM768IncrementalKEM()
+	braid, err := mlkembraid.InitAlice(make([]byte, 32), kem, mlkembraid.DefaultChunkSize)
+	if err != nil {
+		t.Fatalf("InitAlice: %v", err)
+	}
+	_, err = InitWithBraid(nil, DirectionA2B, uint32(maxJump), braid)
+	if err == nil {
+		t.Fatal("expected error for nil sharedSecret")
+	}
+}
+
 func TestInitWithBraid_Alice(t *testing.T) {
 	sharedSecret := make([]byte, 32)
 	for i := range sharedSecret {
@@ -365,4 +379,100 @@ func TestSetBraid(t *testing.T) {
 // Uses the real secret.New under the hood.
 func newTestSecret(data []byte) (*secret.Secret, error) {
 	return secret.New(data)
+}
+
+// TestSendBraid_PendingMinVersionV0ReturnsEmpty exercises the SendBraid path
+// where negotiation is still pending and minVersion < V1. In this state,
+// SendBraid returns empty bytes and nil key (deferred to later negotiation).
+func TestSendBraid_PendingMinVersionV0ReturnsEmpty(t *testing.T) {
+	sharedSecret := make([]byte, 32)
+	for i := range sharedSecret {
+		sharedSecret[i] = byte(i + 1)
+	}
+
+	kem := mlkembraid.NewMLKEM768IncrementalKEM()
+	braid, err := mlkembraid.InitAlice(sharedSecret, kem, mlkembraid.DefaultChunkSize)
+	if err != nil {
+		t.Fatalf("InitAlice: %v", err)
+	}
+
+	// Construct SPQR in negotiationPending state with minVersion=V0 (< V1).
+	authKeyBytes := make([]byte, 32)
+	for i := range authKeyBytes {
+		authKeyBytes[i] = byte(i + 0xAA)
+	}
+	authKeyCopy := make([]byte, len(authKeyBytes))
+	copy(authKeyCopy, authKeyBytes)
+
+	s := &SPQR{
+		chains:      make(map[uint64]*EpochChain),
+		skippedKeys: make(map[SkippedKeyID]*secret.Secret),
+		direction:   DirectionA2B,
+		maxJump:     uint32(maxJump),
+		negotiation: negotiationPending,
+		version:     VersionV1,
+		minVersion:  VersionV0, // < VersionV1 → triggers empty-return path
+		authKey:     authKeyCopy,
+		braid:       braid,
+	}
+	defer s.Zeroize()
+
+	pqrMsg, messageKey, err := s.SendBraid()
+	if err != nil {
+		t.Fatalf("SendBraid: unexpected error: %v", err)
+	}
+	if len(pqrMsg) != 0 {
+		t.Errorf("expected empty pqrMsg for pending V0 negotiation, got %d bytes", len(pqrMsg))
+	}
+	if messageKey != nil {
+		t.Errorf("expected nil messageKey for pending V0 negotiation, got %d bytes", len(messageKey))
+	}
+}
+
+// TestRecvBraid_PendingMinVersionV0ReturnsNil exercises the RecvBraid path
+// where negotiation is pending and minVersion < V1. RecvBraid should resolve
+// negotiation to V0-disabled and return nil message key.
+func TestRecvBraid_PendingMinVersionV0ReturnsNil(t *testing.T) {
+	sharedSecret := make([]byte, 32)
+	for i := range sharedSecret {
+		sharedSecret[i] = byte(i + 1)
+	}
+
+	kem := mlkembraid.NewMLKEM768IncrementalKEM()
+	braid, err := mlkembraid.InitAlice(sharedSecret, kem, mlkembraid.DefaultChunkSize)
+	if err != nil {
+		t.Fatalf("InitAlice: %v", err)
+	}
+
+	authKeyBytes := make([]byte, 32)
+	for i := range authKeyBytes {
+		authKeyBytes[i] = byte(i + 0xBB)
+	}
+	authKeyCopy := make([]byte, len(authKeyBytes))
+	copy(authKeyCopy, authKeyBytes)
+
+	s := &SPQR{
+		chains:      make(map[uint64]*EpochChain),
+		skippedKeys: make(map[SkippedKeyID]*secret.Secret),
+		direction:   DirectionA2B,
+		maxJump:     uint32(maxJump),
+		negotiation: negotiationPending,
+		version:     VersionV1,
+		minVersion:  VersionV0,
+		authKey:     authKeyCopy,
+		braid:       braid,
+	}
+	defer s.Zeroize()
+
+	// An empty pqrMsg signals V0 (peer does not support PQR). Since minVersion=V0,
+	// negotiation resolves to disabled and RecvBraid returns nil without error.
+	pqrMsg := []byte{}
+	messageKey, err := s.RecvBraid(pqrMsg)
+	if err != nil {
+		t.Fatalf("RecvBraid: unexpected error: %v", err)
+	}
+	// V0-disabled: nil message key.
+	if messageKey != nil {
+		t.Errorf("expected nil messageKey for V0 negotiation, got %d bytes", len(messageKey))
+	}
 }

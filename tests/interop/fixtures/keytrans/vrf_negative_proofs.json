@@ -1,0 +1,147 @@
+{
+  "source": "rust/keytrans/src/vrf.rs:230-242",
+  "rust_rev": "98915c44",
+  "purpose": "VRF negative test vectors. Each vector specifies a valid public key and message but a CORRUPTED proof (single-byte XOR flip or wrong message). The Go ProofToHash must REJECT each with ErrInvalidVRFProof. Mirrors Rust test_proof_to_hash_fails which for every test vector (a) changes the message to 'a' and asserts error, and (b) for every byte i flips bit 0 and asserts error.",
+  "vectors": [
+    {
+      "name": "v0_flip_byte0",
+      "description": "Vector 0 proof with byte[0] XOR 0x01",
+      "inputs": {
+        "public_key_hex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+        "message_hex": "",
+        "proof_hex": "8757106690b5526245a92b003bb079ccd1a92130477671f6fc01ad16f26f723f26f8a57ccaed74ee1b190bed1f479d9727d2d0f9b005a6e456a35d4fb0daab1268a1b0db10836d9826a528ca76567805"
+      },
+      "expected_error": "ErrInvalidVRFProof"
+    },
+    {
+      "name": "v0_flip_byte16",
+      "description": "Vector 0 proof with byte[16] XOR 0x01",
+      "inputs": {
+        "public_key_hex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+        "message_hex": "",
+        "proof_hex": "8657106690b5526245a92b003bb079ccd0a92130477671f6fc01ad16f26f723f26f8a57ccaed74ee1b190bed1f479d9727d2d0f9b005a6e456a35d4fb0daab1268a1b0db10836d9826a528ca76567805"
+      },
+      "expected_error": "ErrInvalidVRFProof"
+    },
+    {
+      "name": "v0_flip_byte32",
+      "description": "Vector 0 proof with byte[32] XOR 0x01 (c scalar region)",
+      "inputs": {
+        "public_key_hex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+        "message_hex": "",
+        "proof_hex": "8657106690b5526245a92b003bb079ccd1a92130477671f6fc01ad16f26f723f27f8a57ccaed74ee1b190bed1f479d9727d2d0f9b005a6e456a35d4fb0daab1268a1b0db10836d9826a528ca76567805"
+      },
+      "expected_error": "ErrInvalidVRFProof"
+    },
+    {
+      "name": "v0_flip_byte48",
+      "description": "Vector 0 proof with byte[48] XOR 0x01 (s scalar region)",
+      "inputs": {
+        "public_key_hex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+        "message_hex": "",
+        "proof_hex": "8657106690b5526245a92b003bb079ccd1a92130477671f6fc01ad16f26f723f26f8a57ccaed74ee1b190bed1f479d9727d3d0f9b005a6e456a35d4fb0daab1268a1b0db10836d9826a528ca76567805"
+      },
+      "expected_error": "ErrInvalidVRFProof"
+    },
+    {
+      "name": "v0_flip_byte79",
+      "description": "Vector 0 proof with byte[79] XOR 0x01 (last byte)",
+      "inputs": {
+        "public_key_hex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+        "message_hex": "",
+        "proof_hex": "8657106690b5526245a92b003bb079ccd1a92130477671f6fc01ad16f26f723f26f8a57ccaed74ee1b190bed1f479d9727d2d0f9b005a6e456a35d4fb0daab1268a1b0db10836d9826a528ca76567804"
+      },
+      "expected_error": "ErrInvalidVRFProof"
+    },
+    {
+      "name": "v0_wrong_message",
+      "description": "Vector 0 valid proof but message changed to 0x61 ('a')",
+      "inputs": {
+        "public_key_hex": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+        "message_hex": "61",
+        "proof_hex": "8657106690b5526245a92b003bb079ccd1a92130477671f6fc01ad16f26f723f26f8a57ccaed74ee1b190bed1f479d9727d2d0f9b005a6e456a35d4fb0daab1268a1b0db10836d9826a528ca76567805"
+      },
+      "expected_error": "ErrInvalidVRFProof"
+    },
+    {
+      "name": "v1_flip_byte0",
+      "description": "Vector 1 proof with byte[0] XOR 0x01",
+      "inputs": {
+        "public_key_hex": "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+        "message_hex": "72",
+        "proof_hex": "f2141cd382dc42909d19ec5110469e4feae18300e94f304590abdced48aed5933bf0864a62558b3ed7f2fea45c92a465301b3bbf5e3e54ddf2d935be3b67926da3ef39226bbc355bdc9850112c8f4b02"
+      },
+      "expected_error": "ErrInvalidVRFProof"
+    },
+    {
+      "name": "v1_flip_byte16",
+      "description": "Vector 1 proof with byte[16] XOR 0x01",
+      "inputs": {
+        "public_key_hex": "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+        "message_hex": "72",
+        "proof_hex": "f3141cd382dc42909d19ec5110469e4ffae18300e94f304590abdced48aed5933bf0864a62558b3ed7f2fea45c92a465301b3bbf5e3e54ddf2d935be3b67926da3ef39226bbc355bdc9850112c8f4b02"
+      },
+      "expected_error": "ErrInvalidVRFProof"
+    },
+    {
+      "name": "v1_flip_byte48",
+      "description": "Vector 1 proof with byte[48] XOR 0x01 (s scalar region)",
+      "inputs": {
+        "public_key_hex": "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+        "message_hex": "72",
+        "proof_hex": "f3141cd382dc42909d19ec5110469e4feae18300e94f304590abdced48aed5933bf0864a62558b3ed7f2fea45c92a465300b3bbf5e3e54ddf2d935be3b67926da3ef39226bbc355bdc9850112c8f4b02"
+      },
+      "expected_error": "ErrInvalidVRFProof"
+    },
+    {
+      "name": "v1_wrong_message",
+      "description": "Vector 1 valid proof but message changed to 0x61 ('a')",
+      "inputs": {
+        "public_key_hex": "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+        "message_hex": "61",
+        "proof_hex": "f3141cd382dc42909d19ec5110469e4feae18300e94f304590abdced48aed5933bf0864a62558b3ed7f2fea45c92a465301b3bbf5e3e54ddf2d935be3b67926da3ef39226bbc355bdc9850112c8f4b02"
+      },
+      "expected_error": "ErrInvalidVRFProof"
+    },
+    {
+      "name": "v2_flip_byte0",
+      "description": "Vector 2 proof with byte[0] XOR 0x01",
+      "inputs": {
+        "public_key_hex": "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025",
+        "message_hex": "af82",
+        "proof_hex": "9ac0f79119cc5604bf02d23b4caede71393cedfbb191434dd016d30177ccbf8096bb474e53895c362d8628ee9f9ea3c0e52c7a5c691b6c18c9979866568add7a2d41b00b05081ed0f58ee5e31b3a970e"
+      },
+      "expected_error": "ErrInvalidVRFProof"
+    },
+    {
+      "name": "v2_flip_byte32",
+      "description": "Vector 2 proof with byte[32] XOR 0x01 (c scalar boundary)",
+      "inputs": {
+        "public_key_hex": "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025",
+        "message_hex": "af82",
+        "proof_hex": "9bc0f79119cc5604bf02d23b4caede71393cedfbb191434dd016d30177ccbf8197bb474e53895c362d8628ee9f9ea3c0e52c7a5c691b6c18c9979866568add7a2d41b00b05081ed0f58ee5e31b3a970e"
+      },
+      "expected_error": "ErrInvalidVRFProof"
+    },
+    {
+      "name": "v2_flip_byte64",
+      "description": "Vector 2 proof with byte[64] XOR 0x01",
+      "inputs": {
+        "public_key_hex": "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025",
+        "message_hex": "af82",
+        "proof_hex": "9bc0f79119cc5604bf02d23b4caede71393cedfbb191434dd016d30177ccbf8096bb474e53895c362d8628ee9f9ea3c0e52c7a5c691b6c18c9979866568add7a2c41b00b05081ed0f58ee5e31b3a970e"
+      },
+      "expected_error": "ErrInvalidVRFProof"
+    },
+    {
+      "name": "v2_wrong_message",
+      "description": "Vector 2 valid proof but message changed to 0x61 ('a')",
+      "inputs": {
+        "public_key_hex": "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025",
+        "message_hex": "61",
+        "proof_hex": "9bc0f79119cc5604bf02d23b4caede71393cedfbb191434dd016d30177ccbf8096bb474e53895c362d8628ee9f9ea3c0e52c7a5c691b6c18c9979866568add7a2d41b00b05081ed0f58ee5e31b3a970e"
+      },
+      "expected_error": "ErrInvalidVRFProof"
+    }
+  ]
+}

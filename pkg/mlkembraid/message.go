@@ -179,8 +179,18 @@ func DeserializeSCKA(data []byte) (*Message, uint32, error) {
 	at++
 
 	// For types that carry chunk data, the rest is the chunk wire bytes.
+	// Validate the inner chunk index against the Rust bound of 65535
+	// (chunked/states/serialize.rs:196: index > 65535 → MsgDecode).
 	var chunkData []byte
 	if messageTypeHasChunk(msgType) && at < len(data) {
+		// Peek at the chunk index varint to enforce the 65535 upper bound.
+		chunkIdx, n2 := binary.Uvarint(data[at:])
+		if n2 <= 0 {
+			return nil, 0, &ErrSCKADecode{Reason: "invalid chunk index varint"}
+		}
+		if chunkIdx > 65535 {
+			return nil, 0, &ErrSCKADecode{Reason: "chunk index exceeds 65535"}
+		}
 		chunkData = make([]byte, len(data)-at)
 		copy(chunkData, data[at:])
 	}

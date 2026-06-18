@@ -1,0 +1,587 @@
+# Conformance-fixture manifest.
+#
+# Each entry pins a fixture that is a verbatim copy of a file in the upstream
+# Rust libsignal source tree at the commit recorded in /RUST_REV. CI regenerates
+# the manifest from the upstream tree and fails on any drift; manual edits to
+# this file or to the fixture bytes are not allowed except as part of a
+# RUST_REV bump.
+#
+# Schema: each fixture is one [[fixture]] table with these fields:
+#   path      relative path under tests/interop/fixtures/
+#   upstream  relative path under <RUST_REV>/rust/
+#   sha256    sha256 of the upstream bytes
+#   size      size in bytes
+#   purpose   short human note on what the fixture proves
+
+[[fixture]]
+path = "crypto/aes_gcm_test.json"
+upstream = "crypto/tests/data/aes_gcm_test.json"
+sha256 = "c63f7a34d5f49be52f8f2f5a5c47750b418af304265869f77cd4bacb8e1d2f51"
+size = 133455
+purpose = "Wycheproof AES-GCM KAT suite. Used to validate pkg/cipher AES-GCM-SIV and AES-GCM round-trips against NIST/Wycheproof vectors."
+
+[[fixture]]
+path = "attest/tcb_info_v2.json"
+upstream = "attest/tests/data/tcb_info_v2.json"
+sha256 = "0db5fc98157eb4dbd317b35ee15aac58f13d0134a2f849c1cd2d23d8b4f20676"
+size = 2224
+purpose = "Intel SGX TCB Info v2 reference. Used to validate pkg/attest DCAP TCB status evaluation."
+
+[[fixture]]
+path = "attest/tcb_info_v3.json"
+upstream = "attest/tests/data/tcb_info_v3.json"
+sha256 = "c38c0f5f75ea5108d341e23f16be6cb7971e97247940c7f29cf46cfe484e84f5"
+size = 2940
+purpose = "Intel SGX TCB Info v3 reference. Used to validate pkg/attest DCAP TCB status evaluation."
+
+[[fixture]]
+path = "messagebackup/canonical-backup.expected.json"
+upstream = "message-backup/tests/res/canonical-backup.expected.json"
+sha256 = "27347a62c694ef3039e9bdba103b188c2f5c107e5cf030c1138ccf80b2e64f37"
+size = 3186
+purpose = "Canonical message-backup round-trip golden. Used to validate pkg/backup serialize/deserialize semantics."
+
+[[fixture]]
+path = "messagebackup/canonical-backup.scrambled.expected.json"
+upstream = "message-backup/tests/res/canonical-backup.scrambled.expected.json"
+sha256 = "2d5c830ca4e399412a5d27d01a1ef641907e8db595a43992634750fa5e0810fe"
+size = 3181
+purpose = "Scrambled-key backup round-trip golden. Validates that pkg/backup rejects or normalizes mis-keyed frames identically to the Rust reference."
+
+[[fixture]]
+path = "net/chat_search_response.dat"
+upstream = "net/tests/data/chat_search_response.dat"
+sha256 = "f34d3509377f2828cbc58c914445d48faebecb8898f722916abfbcc7da88632c"
+size = 313204
+purpose = "Protobuf-encoded ChatSearchResponse fixture. Used to validate pkg/keytrans search verification end-to-end."
+
+[[fixture]]
+path = "protocol/kem/mlkem-pk.dat"
+upstream = "protocol/src/kem/test-data/mlkem-pk.dat"
+sha256 = "439f1da5a6375ede3cdd6f0ac240a7c43f793ab25e9f7584267159b502e0511f"
+size = 1569
+purpose = "ML-KEM-1024 public key with 1-byte type prefix (0x0a). Validates pkg/kem ML-KEM-1024 deserialization byte-format parity."
+
+[[fixture]]
+path = "protocol/kem/mlkem-sk.dat"
+upstream = "protocol/src/kem/test-data/mlkem-sk.dat"
+sha256 = "85693440c50b76785e0d1eb7e0b5fba6fa8dca851d72c88bb06bb74c9c539fa6"
+size = 3169
+purpose = "ML-KEM-1024 secret key with 1-byte type prefix (0x0a) in libcrux expanded form (3168-byte body). Used only for local-storage round-trip in Rust's test_serialize. NOTE: ML-KEM secret keys are never transmitted on the wire, so Go's choice to store the 64-byte FIPS 203 seed form is a local-only representation difference and not a wire-compat divergence. The Go conformance test skips the SK round-trip portion intentionally; PK + CT round-trip (which IS wire-relevant) does pass."
+
+[[fixture]]
+path = "protocol/kem/pk.dat"
+upstream = "protocol/src/kem/test-data/pk.dat"
+sha256 = "3c78727462f5ab3dbf9ff8caf38171ebfec3f017bcfb39cc030d252d4d7ca98f"
+size = 1568
+purpose = "Kyber-1024 (pre-FIPS) public key. Used during ML-KEM/Kyber transition for backwards-compat tests."
+
+[[fixture]]
+path = "protocol/kem/sk.dat"
+upstream = "protocol/src/kem/test-data/sk.dat"
+sha256 = "69897e702697cf1052134100db411817fa596fe388039c27a9e3ffc0d6b51ac5"
+size = 3168
+purpose = "Kyber-1024 (pre-FIPS) secret key (full expanded form). Used during ML-KEM/Kyber transition for backwards-compat tests."
+
+[[fixture]]
+path = "crypto/aes_gcm_smoke.json"
+upstream = "crypto/tests/aes_gcm.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308",
+  "cafebabefacedbaddecaf888",
+  "feedfacedeadbeeffeedfacedeadbeefabaddad2",
+  "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
+  "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f66276fc6ece0f4e1768cddf8853bb2d551b",
+]
+sha256 = "f1906ad3e36a3e430bbb3b45b63043588c89008f06ec0e54d174ad8d7e0591b7"
+size = 846
+purpose = "Hand-extracted AES-256-GCM smoke-test KAT from rust/crypto/tests/aes_gcm.rs::aes_gcm_smoke_test (NIST GCM TC). Validates that Go stdlib AES-GCM produces ciphertext+tag byte-identical to Rust signal_crypto::Aes256GcmEncryption."
+
+[[fixture]]
+path = "crypto/aes_ctr_known_answers.json"
+upstream = "crypto/tests/aes_ctr.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "603DEB1015CA71BE2B73AEF0857D77811F352C073B6108D72D9810A30914DFF4",
+  "F0F1F2F3F4F5F6F7F8F9FAFB",
+  "6BC1BEE22E409F96E93D7E117393172AAE2D8A571E03AC9C9EB76FAC45AF8E5130C81C46A35CE411E5FBC1191A0A52EFF69F2445DF4F9B17AD2B417BE66C3710",
+  "601EC313775789A5B7A7F504BBF3D228F443E3CA4D62B59ACA84E990CACAF5C52B0930DAA23DE94CE87017BA2D84988DDFC9C58DB67AADA613C2DD08457941A6",
+]
+sha256 = "9d7031ee7aae099b3010de8bc1b81708378c3e285b97972a67dee0d624f62eda"
+size = 871
+purpose = "Hand-extracted AES-256-CTR-32-BE KAT vectors from the Rust aes_ctr_smoke_test. Validates that Go's stdlib AES-CTR with a CTR32BE counter scheme matches Rust signal_crypto::Aes256Ctr32 byte for byte against a NIST SP 800-38A test vector."
+
+[[fixture]]
+path = "zkgroup/profile_key_encryption_known_answers.json"
+upstream = "zkgroup/src/crypto/profile_key_encryption.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "test_profile_key_encryption",
+  "Test_Profile_Key_Encryption",
+  "0x56, 0x18, 0xcb, 0x4c, 0x7d, 0x72, 0x1e",
+  "0x99, 0xa, 0xab, 0x2a, 0xf2, 0x43, 0x2d, 0x3f, 0x8f, 0x7d, 0x21, 0x3a",
+]
+sha256 = "44c78ed95d091003affc98a183d7564399e06873795d832e299f8969405861b7"
+size = 642
+purpose = "Hand-extracted profile-key encryption KAT from rust/zkgroup/src/crypto/profile_key_encryption.rs::tests::test_profile_key_encryption. Validates that Go's profile-key encryption keypair (derived from a SHO labelled 'Test_Profile_Key_Encryption' with TEST_ARRAY_32_1 absorb) encrypts a ProfileKeyStruct(profile_key=TEST_ARRAY_32_1, uid=TEST_ARRAY_16_1) to a 64-byte ciphertext byte-identical to Rust libsignal's bincode-serialized form."
+
+[[fixture]]
+path = "zkgroup/uid_encryption_known_answers.json"
+upstream = "zkgroup/src/crypto/uid_encryption.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "test_uid_encryption",
+  "Test_Uid_Encryption",
+  "0xf8, 0x9e, 0xe7, 0x70, 0x5a, 0x66",
+  "0x70, 0xca, 0x60, 0xf9, 0xe9, 0xb7, 0x44, 0x47, 0xbf, 0xd3, 0xbd, 0x3d",
+]
+sha256 = "5c72122f6d1767c7aa79d4c3ad7f7204e61c009508affc790aec456abc0ef4b4"
+size = 1023
+purpose = "Hand-extracted UID encryption KAT from rust/zkgroup/src/crypto/uid_encryption.rs::tests::test_uid_encryption and ::test_pni_encryption. Covers both ACI and PNI paths under {aci, pni} keys. Validates that Go's UID encryption keypair (derived from a SHO labelled 'Test_Uid_Encryption' with TEST_ARRAY_32 absorb) encrypts a UidStruct (ACI(TEST_ARRAY_16) or PNI(TEST_ARRAY_16)) to a 64-byte ciphertext (EA1 || EA2) byte-identical to Rust libsignal's bincode-serialized form."
+
+[[fixture]]
+path = "zkgroup/signature_keypair_known_answers.json"
+upstream = "zkgroup/src/crypto/signature.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "test_signature",
+  "Test_Signature",
+  "0xdb, 0x9b, 0xfb, 0xd6, 0x15, 0x26, 0xc3, 0x50",
+]
+sha256 = "c849d2410e33e28144be69a369fface48f3d8b73d8f230072b7521c9d1e4fd20"
+size = 808
+purpose = "Hand-extracted zkgroup KeyPair-level Schnorr signature KAT from rust/zkgroup/src/crypto/signature.rs::tests::test_signature. Validates Go's SignatureKeyPair.Sign byte-equality with Rust libsignal when (a) the SHO is initialized with label 'Test_Signature' + TEST_ARRAY_32 absorb, (b) GenerateSignatureKeyPair consumes the next 64 bytes, (c) sho.SqueezeAndRatchet(32) produces the randomness for poksho.Sign over TEST_ARRAY_32_1."
+
+[[fixture]]
+path = "zkgroup/blob_padding_known_answers.json"
+upstream = "zkgroup/src/api/groups/group_params.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "test_encrypt_with_padding",
+  "3798afe9c65ffb35a63b2c048b16f19dd50ee9acc33cc925667a9abad4d4c6f86675fa8e32243e0831203700",
+  "880a70e071b33f81e1219842c8514f34901abb734c191292ac325455d898da000484080099c620f86675fa8e32243e0831203700",
+  "secret team",
+]
+sha256 = "55afb2fcb816d1bad89c98ed4721b0db34d61ebfc0a6c222c8cb99e153a2bf80"
+size = 896
+purpose = "Hand-extracted EncryptBlobWithPadding KATs from rust/zkgroup/src/api/groups/group_params.rs::test_encrypt_with_padding. Validates that GroupSecretParams.EncryptBlobWithPadding with [0u8;32] randomness, [0u8;32] params seed, and 'secret team' plaintext produces byte-identical output to Rust libsignal for padding_len=0 and padding_len=8."
+
+[[fixture]]
+path = "zkgroup/blob_encryption_known_answers.json"
+upstream = "zkgroup/tests/integration_tests.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "test_blob_encryption",
+  "0xe9, 0x58, 0x07, 0xb1, 0x90, 0xd4, 0x78, 0xd7, 0xbe, 0x3a, 0x77, 0xb2, 0x29, 0x27, 0x13",
+]
+sha256 = "68da09b6a15498ff05ee758280cc4d929cf45cc03aeb70646ab35a496424ed0a"
+size = 853
+purpose = "Hand-extracted group blob encryption KAT from rust/zkgroup/tests/integration_tests.rs::test_blob_encryption. Validates that GroupSecretParams.EncryptBlob with TEST_ARRAY_32_1 master key seed and TEST_ARRAY_32_2 randomness produces byte-identical AES-256-GCM-SIV output to Rust libsignal. Note the upstream warning: this vector intentionally tests the *unpadded* path; Java/Swift/Node use the padded variant which produces a different ciphertext."
+
+[[fixture]]
+path = "zkgroup/server_sig_known_answers.json"
+upstream = "zkgroup/tests/integration_tests.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "87d354564d35ef91edba851e0815612e864c227a0471d50c270698604406d003a55473f576cf241fc6b41c6b16e5e63b333c02fe4a33858022fdd7a4ab367b06",
+  "test_server_sigs",
+]
+sha256 = "b2f37417d2bc3bad1f6062d42dba873f4a52d3a63af7ce7be798a54480d18bae"
+size = 1388
+purpose = "Hand-extracted Schnorr-signature KATs. server_sig section: rust/zkgroup/tests/integration_tests.rs::test_server_sigs (ServerSecretParams::sign over TEST_ARRAY_32_1 message with TEST_ARRAY_32_2 randomness, server params generated from TEST_ARRAY_32). poksho_sig section: rust/poksho/src/sign.rs::tests::test_signature (a 64-byte → reduced scalar with deterministic public key, signing 100-byte message). Drift detector pins the expected_signature hex literal."
+
+[[fixture]]
+path = "protocol/fingerprint_known_answers.json"
+upstream = "protocol/src/fingerprint.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "0506863bc66d02b40d27b8d49ca7c09e9239236f9d7d25d6fcca5ce13c7064d868",
+  "05f781b6fb32fed9ba1cf2de978d4d5da28dc34046ae814402b5c0dbd96fda907b",
+  "300354477692869396892869876765458257569162576843440918079131",
+  "+14152222222",
+  "+14153333333",
+  "080112220a201e301a0353dce3dbe7684cb8336e85136cdc0ee96219494ada305d62a7bd61df1a220a20d62cbf73a11592015b6b9f1682ac306fea3aaf3885b84d12bca631e9d4fb3a4d",
+  "080212220a201e301a0353dce3dbe7684cb8336e85136cdc0ee96219494ada305d62a7bd61df1a220a20d62cbf73a11592015b6b9f1682ac306fea3aaf3885b84d12bca631e9d4fb3a4d",
+]
+sha256 = "6348933cadb63c7468aad289b85fdb2f2f7b86523c7345fe1720fcaf248e36d3"
+size = 1470
+purpose = "Hand-extracted Fingerprint KATs from rust/protocol/src/fingerprint.rs::test::{fingerprint_test_v1, fingerprint_test_v2}. Validates that Go's NumericFingerprintGenerator.CreateFor with iterations=5200 produces byte-identical 60-digit displayable strings AND v1/v2 scannable protobuf encodings for the canonical Alice/Bob test identities."
+
+[[fixture]]
+path = "core/service_id_binary.json"
+upstream = "core/src/address.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "00000000-0000-0000-0000-000000000001",
+  "8c78cd2a-16ff-427d-83dc-1a5e36ce713d",
+  "service_id_binary",
+  "service_id_fixed_width_binary",
+]
+sha256 = "562cb8f177f41e691214a25ec75db2a03ee3503f6eda21e22c5b89db768a1494"
+size = 1289
+purpose = "Hand-extracted ServiceId variable-width and fixed-width binary encoding KATs from rust/core/src/address.rs. Validates Go's ServiceIdBinary (16 bytes for ACI, 17 with 0x01 prefix for PNI) and FixedWidthBinary (always 17 bytes with kind prefix) byte-match Rust libsignal_core's service_id_binary and service_id_fixed_width_binary."
+
+[[fixture]]
+path = "curve/scalar_range_known_answers.json"
+upstream = "core/src/curve.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "0000000000000000000000000000000000000000000000000000000000000080",
+  "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+  "scalar_is_in_range",
+]
+sha256 = "998a7150c7d2a1067d9a41482e416dec2e8731db8ea65c435873952e34e595c9"
+size = 1385
+purpose = "Hand-extracted Curve25519 scalar-range KATs from rust/core/src/curve.rs::tests::{keys_with_the_high_bit_set_are_out_of_range, keys_above_the_prime_modulus_are_out_of_range}. Validates that Go's pkg/ecc.DjbECPublicKey.ScalarIsInRange byte-for-byte matches Rust's PublicKey::scalar_is_in_range across the boundary cases (0, 2^255, 2^256-1, p, p+18, p-1)."
+
+[[fixture]]
+path = "zkgroup/expiring_profile_key_credential_known_answers.json"
+upstream = "zkgroup/tests/integration_tests.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "test_integration_expiring_profile",
+  "PROFILE_KEY_CREDENTIAL_PRESENTATION_V3_RESULT",
+  "PROFILE_KEY_CREDENTIAL_PRESENTATION_V4_RESULT",
+  "02fc58a4f2c9bd736238abfc28890c8b2363d084bee430692f05ee559bd37dea3378949e72b271fe0d815b6d908035106cd670b45892df40780c62c37fae106c41",
+  "03fc58a4f2c9bd736238abfc28890c8b2363d084bee430692f05ee559bd37dea3378949e72b271fe0d815b6d908035106cd670b45892df40780c62c37fae106c41",
+  "TEST_ARRAY_32_3",
+  "TEST_ARRAY_32_4",
+  "TEST_ARRAY_32_5",
+  "17u64 * 24 * 60 * 60",
+]
+sha256 = "bf61587cc99330e79d05277ef374168430f07dbe9d28a71cdc7d8bd933816330"
+size = 3973
+purpose = "End-to-end ExpiringProfileKeyCredential V3 + V4 KAT extracted from rust/zkgroup/tests/integration_tests.rs::test_integration_expiring_profile_v1 and ::v2. Validates the *full* round trip: client builds a credential request context under TEST_ARRAY_32_3, server issues an expiring credential under TEST_ARRAY_32_4, client receives, and the V3 / V4 presentation under TEST_ARRAY_32_5 randomness against a group derived from TEST_ARRAY_32_1 must serialize byte-identical to the Rust constants. V3 and V4 share issuance + ciphertexts but differ in the inner PoKShO statement (V4 binds the C_y5 commitment with an extra clause); without this KAT the V4 path could silently produce bytes that fail Rust-side verification."
+
+[[fixture]]
+path = "zkgroup/auth_credential_with_pni_zkc_known_answers.json"
+upstream = "zkgroup/tests/integration_tests.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "test_integration_auth_zkc",
+  "035e3e79afda8dc0d489fcf7c78f71e1502f2e06e8aeb20149046f85b3004d3f7f982d57dfad49cd1e6c335755cef4cc5e8d3de1eb4f5e8f24d71cf9f2220ae750",
+  "AUTH_CREDENTIAL_PRESENTATION_V4_RESULT",
+  "TEST_ARRAY_32_2",
+  "TEST_ARRAY_32_5",
+  "123456 * SECONDS_PER_DAY",
+]
+sha256 = "ab24be7026caeb0c47074c821b3ca9fd69e7f564f90b4b076dc754d1f82ad502"
+size = 2134
+purpose = "End-to-end AuthCredentialWithPniZkc KAT extracted from rust/zkgroup/tests/integration_tests.rs::test_integration_auth_zkc. Validates the *full* zkc auth round trip: server issues a credential under TEST_ARRAY_32 server seed and TEST_ARRAY_32_2 issuance randomness, client receives, client presents under TEST_ARRAY_32_5 randomness against a group derived from TEST_ARRAY_32_1, and the bincode V4 presentation bytes match Rust's AUTH_CREDENTIAL_PRESENTATION_V4_RESULT byte-for-byte. This is the only KAT today that exercises IssuanceProof + PresentationProof + attribute encryption + the wire format together."
+
+[[fixture]]
+path = "zkgroup/presentations.go"
+upstream = "zkgroup/tests/integration_tests.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "000cde979737ed30bbeb16362e4e076945ce02069f727b0ed4c3c33c011e82546e1cdf081fbdf37c03a851ad060bdcbf6378cb4cb16dc3154d08de5439b5323203",
+  "035e3e79afda8dc0d489fcf7c78f71e1502f2e06e8aeb20149046f85b3004d3f7f982d57dfad49cd1e6c335755cef4cc5e8d3de1eb4f5e8f24d71cf9f2220ae750",
+  "00c4d19bca1ae844585168869da4133e0e0bb59f2ce17b7ac65bff5da9610eca103429d8022a94bae2b5b1057b5595b8ad70bfc2d0e1ad662cb75e6bae0782be6f",
+  "01e0f49cef4f25c31d1bfdc4a328fd508d2222b6decee2a253cf71e8821e97cc3f86824f79b1884b43c67f854717b1a47f56c8ff50a1c07fddbf4f6e857027d548",
+  "02fc58a4f2c9bd736238abfc28890c8b2363d084bee430692f05ee559bd37dea3378949e72b271fe0d815b6d908035106cd670b45892df40780c62c37fae106c41",
+  "03fc58a4f2c9bd736238abfc28890c8b2363d084bee430692f05ee559bd37dea3378949e72b271fe0d815b6d908035106cd670b45892df40780c62c37fae106c41",
+]
+sha256 = "620abe9d20b800ddc8069f3270e9e2e8fa20b428281192c2624640343fd9e9a4"
+size = 11039
+purpose = "Hand-extracted Go-source replicas of the V1 (rejected), V4 (auth), and V1/V2/V3/V4 (profile-key) presentation byte vectors from rust/zkgroup/tests/integration_tests.rs. The drift detector greps the Rust source for each presentation's leading-prefix bytes; if any presentation literal disappears upstream, the gate fails."
+
+[[fixture]]
+path = "messagebackup/frame_hmac.json"
+upstream = "message-backup/src/frame/mac_read.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "mac_read",
+  "asdf",
+  "HMAC_KEY",
+]
+sha256 = "83619f4e932c0a644e19e1abfc84f8e788141cfff9ebb6f256d2d25790c91569"
+size = 757
+purpose = "Hand-extracted HMAC-SHA256 frame KAT from rust/message-backup/src/frame/mac_read.rs::test::mac_read. Validates that Go's pkg/backup HMAC-SHA256 over 128 bytes of b'asdf' repeated 32 times with a 32-byte all-ones key produces the byte-identical MAC to the Rust MacReader<Hmac<Sha256>> implementation."
+
+[[fixture]]
+path = "messagebackup/frame_aes.json"
+upstream = "tests/interop/rust/src/bin/wire_emitter.rs::emit_frame_aes_cbc (computed via rust/message-backup/src/export.rs::aes_cbc_encrypt)"
+upstream_kind = "emitted"
+sha256 = "e45e51219cf8ac373b8ff1fee8a3a3a692ad4e9d5e9f6b8f7631e5e15a1778df"
+size = 6918
+purpose = "AES-256-CBC + PKCS7 frame ciphertexts emitted by Rust libsignal v0.92.2's aes/cbc crates (the same construction as message-backup's aes_cbc_encrypt). Inputs key=[0xaf;32] iv=[0xbb;16] applied to four pinned plaintexts (0, 26, 256, 1024 bytes); Go's pkg/backup AES-256-CBC must reproduce the bytes byte-for-byte. Regenerate via `make interop-wire-emit`."
+
+[[fixture]]
+path = "accountkeys/pin_hash_known_answers.json"
+upstream = "account-keys/src/hash.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "ab7e8499d21f80a6600b3b9ee349ac6d72c07e3359fe885a934ba7aa844429f8",
+  "301d9dd1e96f20ce51083f67d3298fd37b97525de8324d5e12ed2d407d3d927b",
+  "d6159ba30f90b6eb6ccf1ec844427f052baaf0705da849767471744cdb3f8a5e",
+  "$argon2i$v=19$m=512,t=64,p=1$ICEiIyQlJicoKSorLC0uLw$NeZzhiNv4cRmRMct9scf7d838bzmHJvrZtU/0BH0v/U",
+  "3862621253427332054",
+]
+sha256 = "f8f313b39d0770baf9d933b24e3985db7a60c0f6982b357e095f306f529ce8e0"
+size = 1350
+purpose = "Hand-extracted PIN hashing KATs from rust/account-keys/src/hash.rs::tests::{known_hash, known_hash2, known_phc_string, known_salt}. Validates PinHash::create (Argon2id 16MiB/t=32/output=64), local_pin_hash_with_salt (Argon2i 512KiB/t=64/output=32), and PinHash::make_salt (HKDF-SHA-256 with group_id big-endian salt) all produce byte-identical output to Rust libsignal-account-keys."
+
+[[fixture]]
+path = "keytrans/vrf_proofs.json"
+upstream = "keytrans/src/vrf.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+  "8657106690b5526245a92b003bb079ccd1a92130477671f6fc01ad16f26f723f26f8a57ccaed74ee1b190bed1f479d9727d2d0f9b005a6e456a35d4fb0daab1268a1b0db10836d9826a528ca76567805",
+  "90cf1df3b703cce59e2a35b925d411164068269d7b2d29f3301c03dd757876ff",
+  "test_proof_to_hash",
+]
+sha256 = "ae8b142b266d396e645205cb33c91719646b5d349b0260e0048ccd20afc18c76"
+size = 1804
+purpose = "Hand-extracted VRF proof-to-hash KATs from rust/keytrans/src/vrf.rs::tests::test_proof_to_hash (TEST_VECTORS). Validates that Go's VRFPublicKey.ProofToHash produces the expected 32-byte beta output (VRF hash) byte-for-byte for all three upstream test vectors (ECVRF-EDWARDS25519-SHA512-TAI, RFC 9381)."
+
+[[fixture]]
+path = "keytrans/commitments.json"
+upstream = "keytrans/src/commitments.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "edc3f59798cd87f2f48ec8836e2b6ef425cde9ab121ffdefc93d769db7cebabf",
+  "25df431e884358826fe66f96d65702580104240abd63fa741d9ea3f32914bbf5",
+  "6c31a163a7660d1467fc1c997bd78b0a70b8921ca76b7eb0c6ca077f1e5e121e",
+  "5de6c6c9ed4bf48122f6c851c80e6eacbf885947f02f974cdc794b14c8e975f1",
+  "test_commit",
+]
+sha256 = "334b0b7ec8bef4d0b76f0ee8138eb93d74dc2363c38c831ab3f3c0b4ed337865"
+size = 1536
+purpose = "Hand-extracted commitment KATs from rust/keytrans/src/commitments.rs::test::test_commit. Validates that Go's keytrans.Commit(search_key, data, nonce=[0;16]) produces the expected 32-byte HMAC-SHA256 output byte-for-byte for all four upstream test cases (empty, foo/bar, foo1/bar, foo/bar1)."
+
+[[fixture]]
+path = "accountkeys/backup_known_answers.json"
+upstream = "account-keys/src/backup.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "dtjs858asj6tv0jzsqrsmj0ubp335pisj98e9ssnss8myoc08drhtcktyawvx45l",
+  "659aa5f4a28dfcc11ea1b997537a3d95",
+  "ea26a2ddb5dba5ef9e34e1b8dea1f5ae7f255306a6d2d883e542306eaa9fe985",
+  "8a624fbc45379043f39f1391cddc5fe8",
+]
+sha256 = "03de531917a57b6b086886d0d5228cba70d2379b8867023185c4752bf3b53443"
+size = 919
+purpose = "Hand-authored JSON capture of the inline backup_key_known_from_account_entropy and backup_id_known_from_account_entropy hex constants in rust/account-keys/src/backup.rs. The fixture pins (a) the AccountEntropyPool input, (b) the FAKE_ACI UUID input, (c) the expected BackupKey output, and (d) the expected BackupId output. The drift detector validates the fixture sha256 AND, when LIBSIGNAL_UPSTREAM is set, greps the upstream Rust source for every literal in upstream_must_contain. If a literal is missing — meaning the inline constant changed upstream — the check fails so the fixture can be re-extracted."
+
+[[fixture]]
+path = "svr/svr4_protocol.json"
+upstream = "svrb/src/lib.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "fd8d53d811528ba9510759ec665dacf31b747f5a94a58f4b84f5d5f40458b9e8",
+  "Signal_SVR_EncryptionKey_20240823",
+  "output_to_encryption",
+]
+sha256 = "77c7cc5fa75e317e35423a8ac0dc9a28b249d92af474455224ff888a918810d1"
+size = 2599
+purpose = "Hand-extracted SVR4 OPRF KAT from rust/svrb/src/lib.rs::test::output_to_encryption (the sole hardcoded hex constant in the svrb test module). Validates that Go's pkg/svr encryption_key KDF label 'Signal_SVR_EncryptionKey_20240823' and passwordToUniformInput label 'Signal_SVR_InputFromPassword_20240823' produce byte-identical HKDF-SHA256 output to the Rust svrb reference. Also exercises EncryptSecret/DecryptSecret AES-256-GCM-SIV round-trip."
+
+[[fixture]]
+path = "protocol/group_id_from_distribution_id.json"
+upstream = "protocol/src/group_cipher.rs"
+upstream_kind = "computed"
+sha256 = "5b163d94f863896f4583be6b41474bec6c82b8b59d5b202868d554f2b68a4198"
+size = 973
+purpose = "Distribution-ID to group-ID transform parity. Verifies that Go's distributionIDToGroupID produces the standard hyphenated UUID string (identical to Rust Uuid::Display) from a 16-byte distribution ID. Three fixed inputs cover the representative, all-zeros, and all-0xFF cases."
+
+[[fixture]]
+path = "wire/sealed_sender_v1.json"
+upstream = "tests/interop/rust/src/bin/wire_emitter.rs (deterministic emission)"
+upstream_kind = "emitted"
+sha256 = "70c33bba3d5f938a9a4ae1e991fac7bbee82ad6a7487a52b98323fa98baa9531"
+size = 2891
+purpose = "Sealed Sender v1 wire-format vector. Rust emitter encrypts a fixed (sender_cert, recipient_identity, plaintext) tuple under a seeded ChaCha20 RNG. Go decrypts the ciphertext with pkg/sealed and asserts the recovered sender certificate is byte-identical to the fixture's serialized sender_cert. Regenerate via `make interop-wire-emit`."
+
+[[fixture]]
+path = "wire/sealed_sender_v2_received.json"
+upstream = "tests/interop/rust/src/bin/wire_emitter.rs (deterministic emission)"
+upstream_kind = "emitted"
+sha256 = "68d7e4de5de35594712218855e9fe1f0926ed2bfdedb58ee08c60f3f7f5ac9b6"
+size = 2997
+purpose = "Sealed Sender v2 received-format wire vector for a single recipient. Drives pkg/sealed v2 received parser with the Rust-emitted bytes and asserts decrypted USMC + sender certificate match the fixture. Regenerate via `make interop-wire-emit`."
+
+[[fixture]]
+path = "wire/sealed_sender_v2_multi.json"
+upstream = "tests/interop/rust/src/bin/wire_emitter.rs (deterministic emission)"
+upstream_kind = "emitted"
+sha256 = "b45a8a027f1d9d5ae337e203eeadd1f14dd3e9b85956e7a3e6198cad3b3c0c03"
+size = 5853
+purpose = "Sealed Sender v2 multi-recipient wire vector (3 recipients). Validates that Go's per-recipient v2 split, parse, and decrypt path round-trips byte-identically with Rust libsignal v0.92.2. Regenerate via `make interop-wire-emit`."
+
+[[fixture]]
+path = "wire/senderkey_distribution.json"
+upstream = "tests/interop/rust/src/bin/wire_emitter.rs (deterministic emission)"
+upstream_kind = "emitted"
+sha256 = "fe36fcc7f63a70ce5ec0a3628becd4af49bfc43ff1c251d59b0f6a0992f470ca"
+size = 987
+purpose = "SenderKeyDistributionMessage wire vector. Deterministic given the (distribution_id, chain_key, signing_key, iteration) inputs the Rust emitter exposes; Go's pkg/groups SenderKeyDistribution builder must reproduce the bytes byte-for-byte. Regenerate via `make interop-wire-emit`."
+
+[[fixture]]
+path = "wire/senderkey_message.json"
+upstream = "tests/interop/rust/src/bin/wire_emitter.rs (deterministic emission)"
+upstream_kind = "emitted"
+sha256 = "b788f0a566705f1c3a3e3cb41ecf0467e439323974a34eb550b207254651e248"
+size = 1068
+purpose = "SenderKeyMessage wire vector. Drives pkg/groups GroupCipher.Encrypt path; assertion strategy depends on whether the Rust emitter exposed the AES IV (direct bytes-equal) or only the plaintext (decrypt-and-match). Regenerate via `make interop-wire-emit`."
+
+[[fixture]]
+path = "wire/fingerprint.json"
+upstream = "tests/interop/rust/src/bin/wire_emitter.rs (deterministic emission)"
+upstream_kind = "emitted"
+sha256 = "604faeff0acac142138520d61d4cc048cc387245e7a845832d3824e28a18e757"
+size = 2307
+purpose = "Displayable + Scannable fingerprint vectors at 5200 iterations for both v1 and v2 protocol versions. Inputs (alice/bob identity public keys + stable IDs) fully determine outputs, so Go is asserted byte-identical to the Rust-emitted DisplayText and Scannable.Serialize bytes. Regenerate via `make interop-wire-emit`."
+
+[[fixture]]
+path = "wire/signal_message.json"
+upstream = "tests/interop/rust/src/bin/wire_emitter.rs (deterministic emission)"
+upstream_kind = "emitted"
+sha256 = "981dcc8a5ea77f9dd587799ad5d112eb3f5b4b67848988d00f90ba3731f93828"
+size = 1421
+purpose = "SignalMessage wire vector (version 3, no SPQR, no address binding). Rust emitter calls SignalMessage::new at protocol.rs:79 with seeded ChaCha20 key material; Go must NewSignalMessageFromBytes, assert counter/ratchet-key/body, and VerifyMac byte-identical to Rust. Regenerate via `make interop-wire-emit`."
+
+[[fixture]]
+path = "wire/prekey_signal_message.json"
+upstream = "tests/interop/rust/src/bin/wire_emitter.rs (deterministic emission)"
+upstream_kind = "emitted"
+sha256 = "06cd9841ac3efaee82a8596bf2f24e6a426e5c9182e904694f8275061fd302e0"
+size = 1863
+purpose = "PreKeySignalMessage wire vector (version 3, no Kyber payload). Rust emitter calls PreKeySignalMessage::new at protocol.rs:352 wrapping a SignalMessage; Go must NewPreKeySignalMessageFromBytes, assert all fields, and verify the inner SignalMessage MAC. Regenerate via `make interop-wire-emit`."
+
+[[fixture]]
+path = "wire/decryption_error_message.json"
+upstream = "tests/interop/rust/src/bin/wire_emitter.rs (deterministic emission)"
+upstream_kind = "emitted"
+sha256 = "c2c33179cb3fd588affc163e02981c13240c6e098ac1669c62c565ad9cb7ad66"
+size = 1643
+purpose = "DecryptionErrorMessage wire vector. Rust emitter calls DecryptionErrorMessage::for_original at protocol.rs:881 with a Whisper-type original message; Go must DeserializeDecryptionErrorMessage, assert timestamp/device_id/ratchet_key, and round-trip via PlaintextContent wrapping. Regenerate via `make interop-wire-emit`."
+
+[[fixture]]
+path = "wire/plaintext_content.json"
+upstream = "tests/interop/rust/src/bin/wire_emitter.rs (deterministic emission)"
+upstream_kind = "emitted"
+sha256 = "bd128c490aab3c766c3afcff099612a877b4627eba3030889abffe3ff0ca14ed"
+size = 1125
+purpose = "PlaintextContent wire vector. Rust emitter uses From<DecryptionErrorMessage> for PlaintextContent at protocol.rs:837; layout is [0xC0] || Content proto || [0x80]. Go must NewPlaintextContentFromBytes, assert identifier/padding bytes, and ExtractDecryptionErrorMessageFromSerializedContent. Regenerate via `make interop-wire-emit`."
+
+[[fixture]]
+path = "wire/spqr_pq_ratchet.json"
+upstream = "tests/interop/rust/src/bin/wire_emitter.rs (deterministic emission)"
+upstream_kind = "emitted"
+sha256 = "f644da8ea38ebf60d9a61faaca4d1d2c3cca8d48610b962b119b1fd718e57353"
+size = 1049
+purpose = "SPQR pq_ratchet wire vector: the post-quantum ratchet message bytes carried in SignalMessage.pq_ratchet (proto field 5). Rust emitter runs spqr::send (SparsePostQuantumRatchet crate v1.5.1) from an A2B sender state with a fixed auth_key and seeded RNG; Go's pkg/spqr.Recv (B2A receiver, same auth_key) must accept the bytes and derive a message key byte-identical to sender_key_hex. Regenerate via `make interop-wire-emit`."
+
+# Wave E: message-backup encrypted frame cases (E1)
+
+[[fixture]]
+path = "messagebackup/cases/valid/legacy_account_encrypted.json"
+upstream = "message-backup/tests/res/test-cases/valid-encrypted/legacy-account.binproto.encrypted"
+upstream_kind = "computed"
+sha256 = "74fc98e684e8cab1b1a05520be8835976260434b700554546eff6a711e9f6541"
+size = 1882
+purpose = "Valid legacy CBC+HMAC encrypted backup (no forward-secrecy token). HMAC verification passes and full frame decryption returns at least one frame: pkg/backup.FrameDecryptor disables gzip multistream so the trailing zeros from Rust's PadGzippedBucketed are tolerated cleanly."
+
+[[fixture]]
+path = "messagebackup/cases/valid/new_account_encrypted.json"
+upstream = "message-backup/tests/res/test-cases/valid-encrypted/new-account.binproto.encrypted"
+upstream_kind = "computed"
+sha256 = "439ba1f36bc47b63a3fc81b4f77d772877931454625de7bd7050041957dad87b"
+size = 2057
+purpose = "Valid newer SBACKUP\\x01 format encrypted backup (with forward-secrecy token). The Go FrameDecryptor implements the legacy CBC+HMAC format only; this fixture documents the magic header (53 42 41 43 4b 55 50 01) for future SBACKUP\\x01 support detection."
+
+[[fixture]]
+path = "messagebackup/cases/invalid_hmac/corrupted_last_byte.json"
+upstream = "message-backup/tests/res/test-cases/valid-encrypted/legacy-account.binproto.encrypted"
+upstream_kind = "computed"
+sha256 = "4090b7aeb38046a3f960a7838443fcaa32c05e4089e4af810aae53724ac8052b"
+size = 1693
+purpose = "Legacy encrypted backup with the final byte XORed with 0xFF (corrupted HMAC region). Validates that Go's pkg/backup.VerifyHMAC returns *backup.HMACMismatchError and DecryptFrames propagates the same error."
+
+[[fixture]]
+path = "messagebackup/cases/invalid_hmac/corrupted_first_hmac_byte.json"
+upstream = "message-backup/tests/res/test-cases/valid-encrypted/legacy-account.binproto.encrypted"
+upstream_kind = "computed"
+sha256 = "e6069e93660b6039c8b16670b0837d65b0caf81f0112fe68f5f8f9574196df8d"
+size = 1674
+purpose = "Legacy encrypted backup with byte data[-32] (first byte of the 32-byte HMAC trailer) XORed with 0x01. Validates that Go's pkg/backup.VerifyHMAC returns *backup.HMACMismatchError for a corrupted-HMAC-start case."
+
+[[fixture]]
+path = "messagebackup/cases/invalid_frame/too_short.json"
+upstream = ""
+upstream_kind = "synthetic"
+sha256 = "667977c52123053583e62ac6f9fadfa8bfbd94d02e9fbd4e29c73d9a86dcd454"
+size = 525
+purpose = "Synthetic 40-byte all-zeros input (below the 48-byte minimum: 16-byte IV + 32-byte HMAC). Validates that Go's pkg/backup returns *backup.ErrDataTooShort without panicking."
+
+[[fixture]]
+path = "messagebackup/cases/invalid_frame/empty_input.json"
+upstream = ""
+upstream_kind = "synthetic"
+sha256 = "554ea8bf8bb038c000cf10a59b4e865436265e989413cce923c3f9d013235ebd"
+size = 387
+purpose = "Synthetic empty-input case (0 bytes). Validates that Go's pkg/backup returns *backup.ErrDataTooShort for zero-length input without panicking."
+
+# Wave E: zkgroup crypto KAT fixtures (E2)
+
+[[fixture]]
+path = "zkgroup/crypto/signature.json"
+upstream = "zkgroup/src/crypto/signature.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "test_signature",
+  "Test_Signature",
+  "0xdb, 0x9b, 0xfb, 0xd6, 0x15, 0x26, 0xc3, 0x50",
+]
+sha256 = "b125cc507b0eb1f5cd11c21fe82bbbf8be8f4ac132c003a4680ac31df3a0f549"
+size = 1542
+purpose = "Hand-extracted Schnorr DLEQ signature KATs from rust/zkgroup/src/crypto/signature.rs::tests::test_signature. Two vectors: (1) sign+verify round-trip with pinned 64-byte Rust signature; (2) tamper-detection (bit flip must cause verify to fail). SHO initialized with label 'Test_Signature' + TEST_ARRAY_32 key absorb."
+
+[[fixture]]
+path = "zkgroup/crypto/profile_key_encryption.json"
+upstream = "zkgroup/src/crypto/profile_key_encryption.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "test_profile_key_encryption",
+  "Test_Profile_Key_Encryption",
+  "0x56, 0x18, 0xcb, 0x4c, 0x7d, 0x72, 0x1e",
+]
+sha256 = "7ad058285b89cab2abc6d3623c6944c464ee960b649e9ead20bc89875956013b"
+size = 1515
+purpose = "Hand-extracted profile-key encryption KAT from rust/zkgroup/src/crypto/profile_key_encryption.rs::tests::test_profile_key_encryption. ProfileKeyEncryptionDomain KeyPair derived from SHO('Test_Profile_Key_Encryption') + TEST_ARRAY_32_1 absorb; encrypts ProfileKeyStruct(profile_key=TEST_ARRAY_32_1, uid=TEST_ARRAY_16_1) to a 64-byte ciphertext. EncodeCiphertext/DecodeCiphertext round-trip is asserted; byte-identity with Rust is logged (SHO ratcheting may diverge)."
+
+[[fixture]]
+path = "zkgroup/crypto/uid_encryption.json"
+upstream = "zkgroup/src/crypto/uid_encryption.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "test_uid_encryption",
+  "Test_Uid_Encryption",
+  "0xf8, 0x9e, 0xe7, 0x70, 0x5a, 0x66",
+]
+sha256 = "55714c37f112db5424decedafb0dc519db06377d8f801d60348a4181ca9c4a23"
+size = 1813
+purpose = "Hand-extracted UID encryption KATs from rust/zkgroup/src/crypto/uid_encryption.rs::tests::test_uid_encryption (ACI pinned) and test_pni_encryption (PNI, property-based only). UIDEncryptionDomain KeyPair derived from SHO('Test_Uid_Encryption') + TEST_ARRAY_32 absorb; encrypts UidStruct(ACI(TEST_ARRAY_16)) to a 64-byte ciphertext. EncodeCiphertext/DecodeCiphertext round-trip is asserted."
+
+[[fixture]]
+path = "zkgroup/crypto/credentials.json"
+upstream = "zkgroup/src/crypto/credentials.rs"
+upstream_kind = "extracted"
+upstream_must_contain = [
+  "test_mac",
+  "Test_Credentials",
+  "ef47110715831160100f14d1936f4349c45b80ccaacd4edd9f949375d2d90a0",
+]
+sha256 = "ca3bf6b17bb0ba7b719a2e8e01bf51c040e0dbfe78499bb091bd5ae1b0164e7d"
+size = 1433
+purpose = "Hand-extracted credential MAC KAT from rust/zkgroup/src/crypto/credentials.rs::tests::test_mac. Pins the 160-byte bincode serialization (5 Ristretto255 scalars x 32 bytes) of a BlindedExpiringProfileKeyCredential. The full mac_bytes computation path is internal in Go; only fixture structure (mac_bytes_hex length == 320) is verified."
+
+[[fixture]]
+path = "wire/group_send_endorsements.json"
+upstream = "tests/interop/rust/src/bin/wire_emitter.rs::emit_group_send_endorsements (deterministic emission)"
+upstream_kind = "emitted"
+sha256 = "4574124043098a7e0ed7ac567f22579d967938f6e6d03978b9aa95e51c7217b2"
+size = 3686
+purpose = "GroupSendEndorsementsResponse wire vector. Rust emitter builds a response for 3 fixed member UUIDs (Alice/Bob/Carol) under pinned server_randomness=[0x42;32], group_randomness=[0x43;32], issue_randomness=[0x44;32], expiration=2*SECONDS_PER_DAY. response_hex is zkgroup::serialize(&response) — bincode with 0x00 reserved byte, 3 ristretto255 R points, a 64-byte poksho proof, and the expiration timestamp. Go's DeserializeGroupSendEndorsementsResponse + ReceiveWithServiceIDs must independently verify the embedded proof. Regenerate via `make interop-wire-emit`."

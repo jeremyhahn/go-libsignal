@@ -1,0 +1,74 @@
+# Baseline benchmarks captured at the v0.1.0 release. Use `make bench` to regenerate;
+# commits that regress hot paths by >10% should explain in the PR.
+#
+# Date:    2026-05-27
+# Go:      go version go1.26.2 linux/amd64
+# CPU:     Intel(R) Core(TM) Ultra 9 285K (24 logical cores)
+# Flags:   GOWORK=off go test -bench=. -benchmem -benchtime=1s
+# Scope:   crypto-heavy packages (cipher, kdf, incrementalmac, ecc, kem, mlkembraid, poksho, zkgroup)
+
+goos: linux
+goarch: amd64
+pkg: github.com/jeremyhahn/go-libsignal/pkg/cipher
+cpu: Intel(R) Core(TM) Ultra 9 285K
+BenchmarkAESGCMSIVEncrypt-24    	   51141	     22330 ns/op	  45.86 MB/s	    5168 B/op	      24 allocs/op
+BenchmarkAESGCMSIVDecrypt-24    	   53550	     22300 ns/op	  45.92 MB/s	    5040 B/op	      24 allocs/op
+PASS
+ok  	github.com/jeremyhahn/go-libsignal/pkg/cipher	2.819s
+
+goos: linux
+goarch: amd64
+pkg: github.com/jeremyhahn/go-libsignal/pkg/kdf
+cpu: Intel(R) Core(TM) Ultra 9 285K
+BenchmarkDeriveSecrets-24    	 1235060	       961.0 ns/op	    1426 B/op	      18 allocs/op
+BenchmarkExtract-24          	 3640144	       323.3 ns/op	     512 B/op	       6 allocs/op
+BenchmarkExpand-24           	 1867171	       646.8 ns/op	     938 B/op	      13 allocs/op
+PASS
+ok  	github.com/jeremyhahn/go-libsignal/pkg/kdf	5.546s
+
+goos: linux
+goarch: amd64
+pkg: github.com/jeremyhahn/go-libsignal/pkg/incrementalmac
+cpu: Intel(R) Core(TM) Ultra 9 285K
+BenchmarkUpdate-24    	   81532	     14823 ns/op	4421.25 MB/s	     557 B/op	       5 allocs/op
+PASS
+ok  	github.com/jeremyhahn/go-libsignal/pkg/incrementalmac	1.371s
+
+goos: linux
+goarch: amd64
+pkg: github.com/jeremyhahn/go-libsignal/pkg/ecc
+cpu: Intel(R) Core(TM) Ultra 9 285K
+BenchmarkGenerateKeyPair-24       	   22980	     53581 ns/op	    1135 B/op	      17 allocs/op
+BenchmarkCalculateSignature-24    	   50068	     22737 ns/op	     560 B/op	       8 allocs/op
+BenchmarkVerifySignature-24       	   38449	     31286 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/jeremyhahn/go-libsignal/pkg/ecc	6.111s
+
+goos: linux
+goarch: amd64
+pkg: github.com/jeremyhahn/go-libsignal/pkg/kem
+cpu: Intel(R) Core(TM) Ultra 9 285K
+BenchmarkMLKEM768KeyGen-24         	   29766	     42890 ns/op	    9624 B/op	       7 allocs/op
+BenchmarkMLKEM768Encapsulate-24    	   28524	     44026 ns/op	   10248 B/op	       8 allocs/op
+BenchmarkMLKEM768Decapsulate-24    	   14883	     78567 ns/op	    9512 B/op	       7 allocs/op
+PASS
+ok  	github.com/jeremyhahn/go-libsignal/pkg/kem	5.372s
+
+goos: linux
+goarch: amd64
+pkg: github.com/jeremyhahn/go-libsignal/pkg/mlkembraid/internal/gf
+cpu: Intel(R) Core(TM) Ultra 9 285K
+BenchmarkMul-24             	100000000	        10.21 ns/op	       0 B/op	       0 allocs/op
+BenchmarkInv-24             	 3871779	       308.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParallelMult-24    	   23545	     49865 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/jeremyhahn/go-libsignal/pkg/mlkembraid/internal/gf	3.424s
+
+goos: linux
+goarch: amd64
+pkg: github.com/jeremyhahn/go-libsignal/pkg/zkgroup
+cpu: Intel(R) Core(TM) Ultra 9 285K
+BenchmarkDeserializeAnyPresentationV1-24    	   26852	     48348 ns/op	    2456 B/op	      20 allocs/op
+BenchmarkDeserializeAnyPresentationV2-24    	   25537	     39526 ns/op	    2456 B/op	      20 allocs/op
+PASS
+ok  	github.com/jeremyhahn/go-libsignal/pkg/zkgroup	3.441s

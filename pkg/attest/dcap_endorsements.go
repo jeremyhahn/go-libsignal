@@ -27,15 +27,15 @@ const (
 type sgxEndorsementField int
 
 const (
-	fieldVersion          sgxEndorsementField = 0
-	fieldTCBInfo          sgxEndorsementField = 1
-	fieldTCBIssuerChain   sgxEndorsementField = 2
-	fieldCRLPCKCert       sgxEndorsementField = 3
-	fieldCRLPCKProcCA     sgxEndorsementField = 4
+	fieldVersion           sgxEndorsementField = 0
+	fieldTCBInfo           sgxEndorsementField = 1
+	fieldTCBIssuerChain    sgxEndorsementField = 2
+	fieldCRLPCKCert        sgxEndorsementField = 3
+	fieldCRLPCKProcCA      sgxEndorsementField = 4
 	fieldPCKCRLIssuerChain sgxEndorsementField = 5
-	fieldQEIDInfo         sgxEndorsementField = 6
-	fieldQEIDIssuerChain  sgxEndorsementField = 7
-	fieldCreationDatetime sgxEndorsementField = 8
+	fieldQEIDInfo          sgxEndorsementField = 6
+	fieldQEIDIssuerChain   sgxEndorsementField = 7
+	fieldCreationDatetime  sgxEndorsementField = 8
 )
 
 // sgxEndorsements contains data to verify DCAP Evidence.
@@ -302,15 +302,15 @@ func stripTrailingNull(data []byte) []byte {
 
 // enclaveIdentityJSON represents the QE identity JSON structure for safe unmarshaling.
 type enclaveIdentityJSON struct {
-	ID              string          `json:"id"`
-	Version         int             `json:"version"`
-	MRSigner        string          `json:"mrsigner"`
-	ISVProdID       uint16          `json:"isvprodid"`
-	Miscselect      string          `json:"miscselect"`
-	MiscselectMask  string          `json:"miscselectMask"`
-	Attributes      string          `json:"attributes"`
-	AttributesMask  string          `json:"attributesMask"`
-	TcbLevels       []qeTcbLevelJSON `json:"tcbLevels"`
+	ID             string           `json:"id"`
+	Version        int              `json:"version"`
+	MRSigner       string           `json:"mrsigner"`
+	ISVProdID      uint16           `json:"isvprodid"`
+	Miscselect     string           `json:"miscselect"`
+	MiscselectMask string           `json:"miscselectMask"`
+	Attributes     string           `json:"attributes"`
+	AttributesMask string           `json:"attributesMask"`
+	TcbLevels      []qeTcbLevelJSON `json:"tcbLevels"`
 }
 
 // qeTcbLevelJSON represents a single TCB level entry in the QE identity JSON.

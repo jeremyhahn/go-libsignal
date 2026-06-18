@@ -709,13 +709,11 @@ func TestFindUpdatedMapping(t *testing.T) {
 	})
 
 	t.Run("nil prefix returns error", func(t *testing.T) {
-		// Build a monitoring path for position 0 in tree starting at 0 with size 8
+		// Build a monitoring path for position 0 in tree starting at 0 with size 8.
+		// monitoringPath(0,0,8) always returns [1,3,7] (3 elements).
 		path, pathErr := monitoringPath(0, 0, 8)
 		if pathErr != nil {
 			t.Fatalf("unexpected error: %v", pathErr)
-		}
-		if len(path) == 0 {
-			t.Skip("no monitoring path entries to test")
 		}
 		entries := map[uint64]ProofStep{
 			path[0]: {Prefix: nil}, // nil prefix should cause error
@@ -727,12 +725,10 @@ func TestFindUpdatedMapping(t *testing.T) {
 	})
 
 	t.Run("lower version returns error", func(t *testing.T) {
+		// monitoringPath(0,0,8) always returns [1,3,7] (3 elements).
 		path, pathErr := monitoringPath(0, 0, 8)
 		if pathErr != nil {
 			t.Fatalf("unexpected error: %v", pathErr)
-		}
-		if len(path) == 0 {
-			t.Skip("no monitoring path entries to test")
 		}
 		entries := map[uint64]ProofStep{
 			path[0]: {Prefix: &PrefixProof{Counter: 0}}, // 0 < stored version 5
@@ -744,12 +740,10 @@ func TestFindUpdatedMapping(t *testing.T) {
 	})
 
 	t.Run("valid updated mapping", func(t *testing.T) {
+		// monitoringPath(0,0,8) always returns [1,3,7] (3 elements).
 		path, pathErr := monitoringPath(0, 0, 8)
 		if pathErr != nil {
 			t.Fatalf("unexpected error: %v", pathErr)
-		}
-		if len(path) == 0 {
-			t.Skip("no monitoring path entries to test")
 		}
 		entries := map[uint64]ProofStep{
 			path[0]: {Prefix: &PrefixProof{Counter: 10}},

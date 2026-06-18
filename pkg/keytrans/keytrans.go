@@ -21,7 +21,7 @@ type DeploymentMode struct {
 type deploymentKind int
 
 const (
-	deploymentContactMonitoring   deploymentKind = iota
+	deploymentContactMonitoring deploymentKind = iota
 	deploymentThirdPartyManagement
 	deploymentThirdPartyAuditing
 )
@@ -115,6 +115,9 @@ type MonitoringData struct {
 	Ptrs map[uint64]uint32
 	// Owned indicates whether this client owns the key.
 	Owned bool
+	// SearchKey is the raw search key associated with this monitoring entry,
+	// preserved from StoredMonitoringData for round-trip fidelity.
+	SearchKey []byte
 }
 
 // Clone creates a deep copy of MonitoringData.
@@ -123,11 +126,17 @@ func (md *MonitoringData) Clone() MonitoringData {
 	for k, v := range md.Ptrs {
 		ptrs[k] = v
 	}
+	var searchKey []byte
+	if len(md.SearchKey) > 0 {
+		searchKey = make([]byte, len(md.SearchKey))
+		copy(searchKey, md.SearchKey)
+	}
 	return MonitoringData{
-		Index: md.Index,
-		Pos:   md.Pos,
-		Ptrs:  ptrs,
-		Owned: md.Owned,
+		Index:     md.Index,
+		Pos:       md.Pos,
+		Ptrs:      ptrs,
+		Owned:     md.Owned,
+		SearchKey: searchKey,
 	}
 }
 
@@ -190,11 +199,17 @@ func MonitoringDataFromStored(smd *StoredMonitoringData) *MonitoringData {
 	}
 	var index [32]byte
 	copy(index[:], smd.Index)
+	var searchKey []byte
+	if len(smd.SearchKey) > 0 {
+		searchKey = make([]byte, len(smd.SearchKey))
+		copy(searchKey, smd.SearchKey)
+	}
 	return &MonitoringData{
-		Index: index,
-		Pos:   smd.Pos,
-		Ptrs:  smd.Ptrs,
-		Owned: smd.Owned,
+		Index:     index,
+		Pos:       smd.Pos,
+		Ptrs:      smd.Ptrs,
+		Owned:     smd.Owned,
+		SearchKey: searchKey,
 	}
 }
 

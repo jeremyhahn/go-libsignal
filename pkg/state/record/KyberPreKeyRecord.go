@@ -5,7 +5,13 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 )
 
-// KyberPreKeyID is a type alias for Kyber pre-key identifiers.
+// KyberPreKeyID is a typed identifier for Kyber pre-key records at the storage
+// layer. It mirrors the Rust KyberPreKeyId newtype at
+// rust/protocol/src/state/kyber_prekey.rs:18.
+//
+// Note: the protocol layer (pkg/protocol) also defines a KyberPreKeyID over the
+// same underlying uint32. Both represent the same wire value; they are separate
+// declarations to avoid a circular import between the protocol and record packages.
 type KyberPreKeyID uint32
 
 // KyberPreKeySerializer is an interface for serializing and deserializing
@@ -59,6 +65,8 @@ func NewKyberPreKey(id uint32, timestamp int64, keyPair *kem.KeyPair, signature 
 }
 
 // NewKyberPreKeyFromStructure reconstructs a KyberPreKey from a serializable structure.
+// It asserts that the public-key type tag in structure.PublicKey matches the
+// secret-key type, guarding against cross-type key pair loading.
 func NewKyberPreKeyFromStructure(structure KyberPreKeyStructure, serializer KyberPreKeySerializer) (*KyberPreKey, error) {
 	publicKey, err := kem.DeserializePublicKey(structure.PublicKey)
 	if err != nil {
@@ -68,6 +76,17 @@ func NewKyberPreKeyFromStructure(structure KyberPreKeyStructure, serializer Kybe
 	secretKey, skErr := kem.NewSecretKey(publicKey.Type(), structure.PrivateKey)
 	if skErr != nil {
 		return nil, &KyberPreKeyDeserializeError{Operation: "failed to create kyber pre-key secret key", Err: skErr}
+	}
+
+	// Guard: the type tag embedded in the serialized public key must match the
+	// type used to construct the secret key. NewSecretKey receives publicKey.Type()
+	// explicitly, so secretKey.Type() == publicKey.Type() is always true here;
+	// this assertion catches future API changes that could break the invariant.
+	if secretKey.Type() != publicKey.Type() {
+		return nil, &ErrKyberPreKeyTypeMismatch{
+			PublicKeyType: publicKey.Type(),
+			SecretKeyType: secretKey.Type(),
+		}
 	}
 
 	sig := make([]byte, len(structure.Signature))
@@ -123,6 +142,20 @@ func (k *KyberPreKey) GuardedKeyPair() (*kem.GuardedKeyPair, error) {
 // Timestamp returns the record's creation timestamp.
 func (k *KyberPreKey) Timestamp() int64 {
 	return k.structure.Timestamp
+}
+
+// SignatureBytes returns the signature as a plain byte slice, satisfying the
+// GenericSignedPreKey interface.  KyberPreKey already stores the signature as
+// []byte, so this delegates directly to Signature().
+func (k *KyberPreKey) SignatureBytes() []byte {
+	return k.Signature()
+}
+
+// SerializedPublicKey returns the type-prefixed serialized KEM public key bytes.
+// This satisfies the GenericSignedPreKey interface and gives polymorphic callers
+// access to the raw bytes without depending on *kem.PublicKey.
+func (k *KyberPreKey) SerializedPublicKey() []byte {
+	return k.keyPair.Public.Serialize()
 }
 
 // Serialize uses the KyberPreKey serializer to return the record as serialized bytes.

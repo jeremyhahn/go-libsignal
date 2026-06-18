@@ -38,10 +38,30 @@ var ErrBadResponse = &Error{kind: errBadResponse}
 // ErrNoUsableVersion indicates that no auth version was usable across all servers.
 var ErrNoUsableVersion = &Error{kind: errNoUsableVersion}
 
+// ErrNumServers is a sentinel matched by errors.Is for server-count mismatch
+// errors. Use newNumServersError to construct an error with the exact counts.
+//
+// Rust libsignal ref: rust/svrb/src/lib.rs Error
+var ErrNumServers = &Error{kind: errNumServers}
+
+// ErrBadResponseStatus is a sentinel matched by errors.Is for non-OK
+// response-status errors. Use newBadResponseStatusError to construct an error
+// with the specific status code.
+//
+// Rust libsignal ref: rust/svrb/src/lib.rs Error
+var ErrBadResponseStatus = &Error{kind: errBadResponseStatus}
+
+// ErrRestoreFailed is a sentinel matched by errors.Is for restore failures.
+// Use newRestoreFailedError to construct an error with the tries-remaining
+// count; inspect the count via (*Error).TriesRemaining().
+//
+// Rust libsignal ref: rust/svrb/src/lib.rs Error::RestoreFailed
+var ErrRestoreFailed = &Error{kind: errRestoreFailed}
+
 // ErrEmptyPIN indicates the PIN was empty.
 var ErrEmptyPIN = &Error{kind: errEmptyPIN}
 
-// ErrHKDFExpansion indicates HKDF expansion failed.
+// ErrHKDFExpansion indicates HKDF key expansion failed.
 var ErrHKDFExpansion = &Error{kind: errHKDFExpansion}
 
 // ErrCipherCreate indicates cipher creation failed.
@@ -57,13 +77,33 @@ var ErrSecretSize = &Error{kind: errSecretSize}
 type ResponseStatus int32
 
 const (
-	StatusUnset          ResponseStatus = 0
-	StatusOK             ResponseStatus = 1
-	StatusInvalidRequest ResponseStatus = 2
-	StatusMissing        ResponseStatus = 3
-	StatusError          ResponseStatus = 4
+	StatusUnset           ResponseStatus = 0
+	StatusOK              ResponseStatus = 1
+	StatusInvalidRequest  ResponseStatus = 2
+	StatusMissing         ResponseStatus = 3
+	StatusError           ResponseStatus = 4
 	StatusRestore1Missing ResponseStatus = 5
 	StatusVersionMismatch ResponseStatus = 6
+	// StatusNotRotating indicates a rotation-phase request arrived but no
+	// rotation is currently in progress.
+	//
+	// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.Status.NOT_ROTATING
+	StatusNotRotating ResponseStatus = 7
+	// StatusAlreadyRotating indicates a RotateStart was received while a
+	// rotation is already in progress.
+	//
+	// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.Status.ALREADY_ROTATING
+	StatusAlreadyRotating ResponseStatus = 8
+	// StatusMerkleFailure indicates the server failed a Merkle tree integrity
+	// check during rotation.
+	//
+	// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.Status.MERKLE_FAILURE
+	StatusMerkleFailure ResponseStatus = 9
+	// StatusDuplicateVersion indicates the version supplied in a RotateStart
+	// request already exists in the server's Merkle tree.
+	//
+	// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.Status.DUPLICATE_VERSION
+	StatusDuplicateVersion ResponseStatus = 10
 )
 
 func (s ResponseStatus) String() string {
@@ -82,6 +122,14 @@ func (s ResponseStatus) String() string {
 		return "RESTORE1_MISSING"
 	case StatusVersionMismatch:
 		return "VERSION_MISMATCH"
+	case StatusNotRotating:
+		return "NOT_ROTATING"
+	case StatusAlreadyRotating:
+		return "ALREADY_ROTATING"
+	case StatusMerkleFailure:
+		return "MERKLE_FAILURE"
+	case StatusDuplicateVersion:
+		return "DUPLICATE_VERSION"
 	default:
 		return fmt.Sprintf("UNKNOWN(%d)", s)
 	}

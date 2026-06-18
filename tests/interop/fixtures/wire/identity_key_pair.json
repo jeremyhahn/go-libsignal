@@ -1,0 +1,17 @@
+{
+  "source": "rust/protocol/src/identity_key.rs (libsignal v0.92.2)",
+  "rust_rev": "98915c442d",
+  "purpose": "IdentityKeyPair serialization KAT: Rust IdentityKeyPair::serialize produces IdentityKeyPairStructure protobuf. Go must round-trip via NewKeyPairFromBytes(serialized_hex) and recover public_hex / private_hex.",
+  "vectors": [
+    {
+      "name": "identity_key_pair_kat",
+      "inputs": {
+        "private_hex": "108e52456d3330fdb84330f2e1f1b966ad15d78700d8a37517f43c5e83c83868",
+        "public_hex": "056abca9d2ac83526aa425892b888faff220fdbfba00c2a4b36c9b88dd0e6c6877"
+      },
+      "expected": {
+        "serialized_hex": "0a21056abca9d2ac83526aa425892b888faff220fdbfba00c2a4b36c9b88dd0e6c68771220108e52456d3330fdb84330f2e1f1b966ad15d78700d8a37517f43c5e83c83868"
+      }
+    }
+  ]
+}

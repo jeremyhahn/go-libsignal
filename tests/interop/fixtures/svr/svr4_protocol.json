@@ -1,0 +1,49 @@
+{
+  "source": "rust/svrb/src/lib.rs:533-779",
+  "rust_rev": "98915c442d",
+  "purpose": "SVR4 OPRF protocol parity: encryption_key KDF label and passwordToUniformInput KDF label",
+  "vectors": [
+    {
+      "name": "encryption_key_zeros_ones",
+      "description": "Rust svrb::test::output_to_encryption (lib.rs:581-586): encryption_key(&[0u8;32], &[1u8;32]). Derives the 32-byte encryption key via HKDF-SHA256 over the concatenation of s_enc and k_auth, with info='Signal_SVR_EncryptionKey_20240823'. This is the only hardcoded KAT in the Rust svrb test module.",
+      "inputs": {
+        "s_enc": "0000000000000000000000000000000000000000000000000000000000000000",
+        "k_auth": "0101010101010101010101010101010101010101010101010101010101010101"
+      },
+      "expected": {
+        "encryption_key": "fd8d53d811528ba9510759ec665dacf31b747f5a94a58f4b84f5d5f40458b9e8"
+      }
+    },
+    {
+      "name": "password_to_uniform_input_known",
+      "description": "passwordToUniformInput derives 64 bytes from a password using HKDF-SHA256 with info='Signal_SVR_InputFromPassword_20240823', IKM=password, no salt. This verifies the KDF label and output length used before OPRF blinding.",
+      "inputs": {
+        "password": "746573742d70617373776f7264"
+      },
+      "expected": {
+        "uniform_input": "63cc36edaf6f8358d8e10aaa8ca717c4840053b466e030a5e9b3c4b638ba41790344c7c12f87eabbc032e46b1df7fbe7fe32ad03848b31d31ab76eecaf6446c4"
+      }
+    },
+    {
+      "name": "password_to_uniform_input_empty",
+      "description": "passwordToUniformInput with empty password. Verifies the KDF handles zero-length IKM correctly (HKDF-SHA256 with empty IKM is well-defined).",
+      "inputs": {
+        "password": ""
+      },
+      "expected": {
+        "uniform_input": "b3298395ec0c8202214ec79adf11379466c0e836e465951daf74e82d81ca82bf8f8e5fc43c737256bcc7947e034efb5ab9d0c1db7719f871b9242ee7e09acb9b"
+      }
+    },
+    {
+      "name": "encrypt_decrypt_secret_round_trip",
+      "description": "EncryptSecret + DecryptSecret round-trip using AES-256-GCM-SIV with a zero nonce. The key is a one-time derived key making nonce reuse safe per the SVR4 design. This exercises the same code path as the Rust svrb restore protocol's encryption_secretshare recovery.",
+      "inputs": {
+        "key": "0101010101010101010101010101010101010101010101010101010101010101",
+        "secret": "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+      },
+      "expected": {
+        "plaintext_after_decrypt": "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+      }
+    }
+  ]
+}

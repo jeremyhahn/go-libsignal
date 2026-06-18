@@ -210,7 +210,7 @@ func TestPaddedLength(t *testing.T) {
 		{1, 541},
 		{540, 541},
 		{541, 541},
-		{542, 542},      // should be >= 542
+		{542, 542},       // should be >= 542
 		{1000, 1000},     // should be >= 1000
 		{10000, 10000},   // should be >= 10000
 		{100000, 100000}, // should be >= 100000

@@ -245,12 +245,17 @@ func decodeUsernameData(data []byte) (string, error) {
 		wireType := tag & 0x07
 
 		switch wireType {
-		case 0: // varint
+		case 0: // varint — skip
 			_, n, err := readVarint(data[i:])
 			if err != nil {
 				return "", err
 			}
 			i += n
+		case 1: // 64-bit fixed — skip (8 bytes), per PROST unknown-field handling
+			if i+8 > len(data) {
+				return "", &ProtobufError{Detail: "truncated 64-bit field"}
+			}
+			i += 8
 		case 2: // length-delimited
 			length, n, err := readVarint(data[i:])
 			if err != nil {
@@ -265,6 +270,11 @@ func decodeUsernameData(data []byte) (string, error) {
 			}
 			// field 2 (padding) and unknown fields are skipped
 			i += int(length)
+		case 5: // 32-bit fixed — skip (4 bytes), per PROST unknown-field handling
+			if i+4 > len(data) {
+				return "", &ProtobufError{Detail: "truncated 32-bit field"}
+			}
+			i += 4
 		default:
 			return "", &ProtobufError{Detail: "unsupported wire type"}
 		}

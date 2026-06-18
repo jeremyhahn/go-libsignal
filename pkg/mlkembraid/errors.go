@@ -1,6 +1,24 @@
 // Package mlkembraid implements the ML-KEM Braid Sparse Continuous Key Agreement
-// (SCKA) protocol. It provides post-quantum key agreement using ML-KEM alongside
-// the EC Double Ratchet for hybrid post-quantum security in ongoing sessions.
+// (SCKA) protocol, porting the Rust sparsepostquantumratchet crate v1.5.1
+// (github.com/signalapp/sparsepostquantumratchet).
+//
+// It provides post-quantum key agreement using ML-KEM-768 alongside the EC
+// Double Ratchet for hybrid post-quantum security in ongoing sessions.
+//
+// The preferred KEM implementation is IncrementalMLKEM768KEM, which uses
+// internal/incremental_mlkem768 — a pure-Go, byte-wire-compatible port of the
+// libcrux-ml-kem `incremental` feature. It splits ML-KEM-768 encapsulation
+// into Encaps1 (using only pk1 = rho||H(ek), 64 bytes) and Encaps2 (using the
+// full t-vector, pk2, 1152 bytes), matching the Rust SPQR wire format exactly:
+//
+//   - Header:       pk1 = rho(32) || H(ek)(32)              64 bytes
+//   - EK vector:    pk2 = ByteEncode12(t_ntt)             1152 bytes
+//   - ct1:          ringCompressEncode10(u)                 960 bytes
+//   - ct2:          ringCompressEncode4(v)                  128 bytes
+//   - EncapsState:  r_as_ntt(1536) || error2(512) || rnd(32) 2080 bytes
+//
+// The legacy MLKEM768IncrementalKEM is retained for backward compatibility but
+// does not produce Rust-compatible wire bytes.
 package mlkembraid
 
 import "fmt"

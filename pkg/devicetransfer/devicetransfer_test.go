@@ -2,6 +2,7 @@ package devicetransfer
 
 import (
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/pem"
 	"testing"
 )
@@ -157,5 +158,53 @@ func TestCreateRSAPrivateKey_InvalidFormat(t *testing.T) {
 	_, err := CreateRSAPrivateKey(2048, KeyFormat(99))
 	if err == nil {
 		t.Fatal("expected error for invalid format")
+	}
+}
+
+// TestCreateSelfSignedCert_RDNOrder is the regression test for finding #32.
+// The Rust device-transfer build_self_signed_name appends RDNs in order CN, O, OU.
+// This test verifies the Go implementation produces the same OID sequence in the
+// Subject (and Issuer) of the DER-encoded certificate.
+//
+// Rust reference: rust/device-transfer/src/lib.rs build_self_signed_name
+func TestCreateSelfSignedCert_RDNOrder(t *testing.T) {
+	keyDER, err := CreateRSAPrivateKey(2048, KeyFormatPKCS8)
+	if err != nil {
+		t.Fatalf("CreateRSAPrivateKey: %v", err)
+	}
+
+	certDER, err := CreateSelfSignedCert(keyDER, "RDN Order Test", 30)
+	if err != nil {
+		t.Fatalf("CreateSelfSignedCert: %v", err)
+	}
+
+	cert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		t.Fatalf("ParseCertificate: %v", err)
+	}
+
+	// Extract raw RDNs from Subject in DER order.
+	names := cert.Subject.Names
+	if len(names) != 3 {
+		t.Fatalf("expected 3 RDN attributes, got %d", len(names))
+	}
+
+	// Expected OID order: CN (2.5.4.3), O (2.5.4.10), OU (2.5.4.11)
+	want := []asn1.ObjectIdentifier{oidCN, oidO, oidOU}
+	for i, attr := range names {
+		if !attr.Type.Equal(want[i]) {
+			t.Errorf("RDN[%d]: OID = %v, want %v", i, attr.Type, want[i])
+		}
+	}
+
+	// Verify values are correct.
+	if s, ok := names[0].Value.(string); !ok || s != "RDN Order Test" {
+		t.Errorf("CN = %v, want %q", names[0].Value, "RDN Order Test")
+	}
+	if s, ok := names[1].Value.(string); !ok || s != "Signal Foundation" {
+		t.Errorf("O = %v, want %q", names[1].Value, "Signal Foundation")
+	}
+	if s, ok := names[2].Value.(string); !ok || s != "Device Transfer" {
+		t.Errorf("OU = %v, want %q", names[2].Value, "Device Transfer")
 	}
 }

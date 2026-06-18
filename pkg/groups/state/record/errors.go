@@ -8,7 +8,7 @@ type SenderKeyRecordError struct {
 type senderKeyRecordErrorKind int
 
 const (
-	errNoSenderKeys     senderKeyRecordErrorKind = iota + 1
+	errNoSenderKeys senderKeyRecordErrorKind = iota + 1
 	errNoSenderKeyForID
 )
 

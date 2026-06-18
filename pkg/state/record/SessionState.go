@@ -467,26 +467,27 @@ func (s *State) RemoveMessageKeys(senderEphemeral ecc.ECPublicKeyable, counter u
 	// Delete the message key from the given position.
 	chainKey.messageKeys = append(chainKey.messageKeys[:rmIndex], chainKey.messageKeys[rmIndex+1:]...)
 
-	// Copy bytes out of guarded memory before passing to constructor.
+	// Seed-only form: the key was stored with seed material only (cipher/mac/iv
+	// are nil). The caller (decryptWithClonedState) will re-derive the actual
+	// keys from seed using DeriveMessageKeysFromSeed once the PQR salt is known.
+	// This matches Rust MessageKeyGenerator::Seed where keys are re-derived via
+	// MessageKeyGenerator::keys_and_pqr at rust/protocol/src/ratchet/keys.rs:33-43.
+	if seed := messageKey.SeedMaterial(); len(seed) > 0 {
+		seedCopy := make([]byte, len(seed))
+		copy(seedCopy, seed)
+		result := message.NewSeedOnlyKeys(messageKey.Index(), seedCopy)
+		return result
+	}
+
+	// Derived-keys form: copy bytes out of guarded memory before passing to
+	// constructor so we do not hold a reference into the now-removed chain entry.
 	cipherCopy := make([]byte, len(messageKey.CipherKey()))
 	copy(cipherCopy, messageKey.CipherKey())
 	macCopy := make([]byte, len(messageKey.MacKey()))
 	copy(macCopy, messageKey.MacKey())
 	ivCopy := make([]byte, len(messageKey.Iv()))
 	copy(ivCopy, messageKey.Iv())
-	result := message.NewKeys(
-		cipherCopy,
-		macCopy,
-		ivCopy,
-		messageKey.Index(),
-	)
-	// Propagate seed material for SPQR re-derivation of skipped keys.
-	if seed := messageKey.SeedMaterial(); len(seed) > 0 {
-		seedCopy := make([]byte, len(seed))
-		copy(seedCopy, seed)
-		result.SetSeedMaterial(seedCopy)
-	}
-	return result
+	return message.NewKeys(cipherCopy, macCopy, ivCopy, messageKey.Index())
 }
 
 // SetMessageKeys will update the chain associated with the given sender key with

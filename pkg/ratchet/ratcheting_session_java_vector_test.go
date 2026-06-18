@@ -1,3 +1,5 @@
+//go:build legacy_x3dh
+
 package ratchet
 
 import (
@@ -85,9 +87,9 @@ const expectedSenderChainKey = "6d4ab8eaa5b9045c0fb0916619bbfd3d22b85557ced68135
 //
 // This test constructs key pairs from known hex values, runs session initialization
 // as both Alice (sender) and Bob (receiver), and verifies that:
-//   1. Both sides derive identical root keys.
-//   2. Both sides derive identical chain keys.
-//   3. The derived chain key matches the expected value from the Java test vector.
+//  1. Both sides derive identical root keys.
+//  2. Both sides derive identical chain keys.
+//  3. The derived chain key matches the expected value from the Java test vector.
 func TestRatchetingSession_JavaVector(t *testing.T) {
 	// Construct Bob's key pairs from test vector private keys.
 	bobIdentity := makeIdentityKeyPair(t, bobIdentityPrivate)
@@ -103,9 +105,9 @@ func TestRatchetingSession_JavaVector(t *testing.T) {
 		aliceIdentity,
 		aliceBaseKey,
 		bobIdentity.PublicKey(),
-		bobSignedPreKey.PublicKey(),  // theirSignedPreKey
-		bobEphemeral.PublicKey(),     // theirRatchetKey
-		nil,                          // no one-time prekey
+		bobSignedPreKey.PublicKey(), // theirSignedPreKey
+		bobEphemeral.PublicKey(),    // theirRatchetKey
+		nil,                         // no one-time prekey
 	)
 
 	// Use legacy X3DH session derivation for Java test vector verification.
@@ -118,9 +120,9 @@ func TestRatchetingSession_JavaVector(t *testing.T) {
 	// Bob is the receiver: he uses Alice's public keys and his own private keys.
 	receiverParams := NewReceiverParameters(
 		bobIdentity,
-		bobSignedPreKey,  // ourSignedPreKey
-		nil,              // no one-time prekey
-		bobEphemeral,     // ourRatchetKey
+		bobSignedPreKey, // ourSignedPreKey
+		nil,             // no one-time prekey
+		bobEphemeral,    // ourRatchetKey
 		aliceBaseKey.PublicKey(),
 		aliceIdentity.PublicKey(),
 	)

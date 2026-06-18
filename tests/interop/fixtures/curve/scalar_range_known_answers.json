@@ -1,0 +1,43 @@
+{
+  "_provenance": {
+    "source": "rust/core/src/curve.rs",
+    "tests": [
+      "keys_with_the_high_bit_set_are_out_of_range",
+      "keys_above_the_prime_modulus_are_out_of_range"
+    ],
+    "rust_rev_pin": "/RUST_REV (root of go-libsignal repo)",
+    "note": "Hand-extracted Curve25519 public-key scalar-range KATs. The drift detector greps the upstream source for every literal."
+  },
+  "vectors": [
+    {
+      "name": "zero_in_range",
+      "key_hex": "0000000000000000000000000000000000000000000000000000000000000000",
+      "in_range": true
+    },
+    {
+      "name": "two_to_the_255_out_of_range",
+      "key_hex": "0000000000000000000000000000000000000000000000000000000000000080",
+      "in_range": false
+    },
+    {
+      "name": "two_to_the_256_minus_1_out_of_range",
+      "key_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "in_range": false
+    },
+    {
+      "name": "p_minus_0_out_of_range",
+      "key_hex": "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "in_range": false
+    },
+    {
+      "name": "p_plus_18_out_of_range",
+      "key_hex": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "in_range": false
+    },
+    {
+      "name": "p_minus_1_in_range",
+      "key_hex": "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+      "in_range": true
+    }
+  ]
+}

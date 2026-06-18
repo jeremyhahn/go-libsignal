@@ -245,8 +245,8 @@ func TestFirstParentToTheRight(t *testing.T) {
 		entry uint64
 		want  uint64
 	}{
-		{0, 2},  // parentStep(0)=1, 1>0 so out=1+1=2
-		{2, 4},  // parentStep(2)=1, 1<2 so parentStep(1)=3, 3>2 so out=3+1=4
+		{0, 2}, // parentStep(0)=1, 1>0 so out=1+1=2
+		{2, 4}, // parentStep(2)=1, 1<2 so parentStep(1)=3, 3>2 so out=3+1=4
 	}
 
 	for _, tt := range tests {

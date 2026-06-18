@@ -1,0 +1,16 @@
+{
+  "_provenance": {
+    "source": "rust/account-keys/src/backup.rs",
+    "test_module": "test",
+    "tests": [
+      "backup_key_known_from_account_entropy",
+      "backup_id_known_from_account_entropy"
+    ],
+    "rust_rev_pin": "/RUST_REV (root of go-libsignal repo)",
+    "note": "Hex byte values copied verbatim from inline Rust constants. The drift detector at tests/interop/scripts/check_fixtures.sh validates this file against the manifest sha256; a follow-up enhancement should also grep the Rust source at the pinned commit and fail if EXPECTED_KEY_BYTES / EXPECTED_ID_BYTES change."
+  },
+  "fake_account_entropy_pool": "dtjs858asj6tv0jzsqrsmj0ubp335pisj98e9ssnss8myoc08drhtcktyawvx45l",
+  "fake_aci_uuid_hex": "659aa5f4a28dfcc11ea1b997537a3d95",
+  "expected_backup_key_hex": "ea26a2ddb5dba5ef9e34e1b8dea1f5ae7f255306a6d2d883e542306eaa9fe985",
+  "expected_backup_id_hex": "8a624fbc45379043f39f1391cddc5fe8"
+}

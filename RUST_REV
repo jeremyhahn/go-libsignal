@@ -1,0 +1,7 @@
+98915c442d814cd420f4e1a15630ade0d48e66ae
+v0.92.2
+# Upstream Rust libsignal pinned at /mnt/vm-host-1/libsignal
+# This commit is the source of truth for every byte-wire format,
+# constant, DST, KDF info string, and serialization layout in this repo.
+# Bump only after regenerating tests/interop/ vectors and confirming
+# the full Go test suite passes against the new fixtures.

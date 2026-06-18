@@ -34,7 +34,7 @@ func TestSessionBuilder(t *testing.T) {
 
 	// Create a session cipher to encrypt messages to Bob.
 	plaintextMessage := []byte("Hello!")
-	sessionCipher := session.NewCipher(alice.sessionBuilder, bob.address)
+	sessionCipher := session.NewCipherWithLocalAddress(alice.sessionBuilder, alice.address, bob.address)
 	message, err := sessionCipher.Encrypt(plaintextMessage)
 	if err != nil {
 		t.Fatalf("Unable to encrypt message: %v", err)
@@ -54,7 +54,7 @@ func TestSessionBuilder(t *testing.T) {
 
 	// Create a session builder and decrypt the prekey message in one step.
 	// This uses the deferred pattern: Process + Decrypt + Complete atomically.
-	bobSessionCipher := session.NewCipher(bob.sessionBuilder, alice.address)
+	bobSessionCipher := session.NewCipherWithLocalAddress(bob.sessionBuilder, bob.address, alice.address)
 	msg, _, err := bobSessionCipher.DecryptPreKeyMessage(bob.sessionBuilder, receivedMessage)
 	if err != nil {
 		t.Fatalf("Unable to process/decrypt prekeysignal message: %v", err)
@@ -115,13 +115,13 @@ func TestSessionRoundtrip(t *testing.T) {
 	}
 
 	// Create a session cipher to encrypt messages to Bob.
-	aliceSessionCipher := session.NewCipher(alice.sessionBuilder, bob.address)
+	aliceSessionCipher := session.NewCipherWithLocalAddress(alice.sessionBuilder, alice.address, bob.address)
 	aliceMessageStrings1, aliceMessages1 := sendMessages(1000, aliceSessionCipher, serializer, t)
 
 	///////////// RECEIVER SESSION CREATION ///////////////
 
 	// Create a session builder
-	bobSessionCipher := session.NewCipher(bob.sessionBuilder, alice.address)
+	bobSessionCipher := session.NewCipherWithLocalAddress(bob.sessionBuilder, bob.address, alice.address)
 
 	// Process and decrypt the first prekey message using the deferred pattern.
 	firstPreKeyMsg := aliceMessages1[0].(*protocol.PreKeySignalMessage)
@@ -186,13 +186,13 @@ func TestSessionOutOfOrder(t *testing.T) {
 	}
 
 	// Create a session cipher to encrypt messages to Bob.
-	aliceSessionCipher := session.NewCipher(alice.sessionBuilder, bob.address)
+	aliceSessionCipher := session.NewCipherWithLocalAddress(alice.sessionBuilder, alice.address, bob.address)
 	aliceMessageStrings, aliceMessages := sendMessages(4, aliceSessionCipher, serializer, t)
 
 	///////////// RECEIVER SESSION CREATION ///////////////
 
 	// Create a session builder
-	bobSessionCipher := session.NewCipher(bob.sessionBuilder, alice.address)
+	bobSessionCipher := session.NewCipherWithLocalAddress(bob.sessionBuilder, bob.address, alice.address)
 
 	// Process and decrypt message [3] using the deferred pattern.
 	preKeyMsg3 := aliceMessages[3].(*protocol.PreKeySignalMessage)

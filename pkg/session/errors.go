@@ -22,7 +22,8 @@ const (
 	errMaxSkippedKeysExceeded
 	errDuplicateMessage
 	errUntrustedIdentity
-	errMissingPQPreKey
+	errMissingPQPreKeyID
+	errMissingPQCiphertext
 	errX3DHNoLongerSupported
 	errStaleSession
 	errNoSignedPreKey
@@ -62,9 +63,15 @@ var ErrDuplicateMessage = &Error{kind: errDuplicateMessage}
 // ErrUntrustedIdentity indicates the remote identity key is not trusted.
 var ErrUntrustedIdentity = &Error{kind: errUntrustedIdentity}
 
-// ErrMissingPQPreKey indicates a v4+ PreKey message is missing the required
-// Kyber pre-key ID or ciphertext.
-var ErrMissingPQPreKey = &Error{kind: errMissingPQPreKey}
+// ErrMissingPQPreKeyID indicates a v4+ PreKey message is missing the required
+// Kyber pre-key ID. Mirrors Rust's InvalidMessage(PreKey, "missing pq pre-key ID")
+// from process_prekey_impl in rust/protocol/src/session.rs.
+var ErrMissingPQPreKeyID = &Error{kind: errMissingPQPreKeyID}
+
+// ErrMissingPQCiphertext indicates a v4+ PreKey message is missing the required
+// Kyber ciphertext. Mirrors Rust's InvalidMessage(PreKey, "missing pq ciphertext")
+// from process_prekey_impl in rust/protocol/src/session.rs.
+var ErrMissingPQCiphertext = &Error{kind: errMissingPQCiphertext}
 
 // ErrX3DHNoLongerSupported indicates an X3DH (pre-Kyber version) PreKey message
 // was received, which is no longer supported.
@@ -120,8 +127,10 @@ func (e *Error) Error() string {
 			return fmt.Sprintf("session: untrusted identity for %s", e.address)
 		}
 		return "session: untrusted identity"
-	case errMissingPQPreKey:
-		return "session: missing post-quantum pre-key in v4+ message"
+	case errMissingPQPreKeyID:
+		return "session: missing pq pre-key ID"
+	case errMissingPQCiphertext:
+		return "session: missing pq ciphertext"
 	case errX3DHNoLongerSupported:
 		return "session: X3DH no longer supported"
 	case errStaleSession:

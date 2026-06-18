@@ -83,7 +83,6 @@ type PreKey struct {
 
 // ID returns the pre key record's id.
 func (p *PreKey) ID() *optional.Uint32 {
-	// TODO: manually set this to empty if empty
 	return optional.NewOptionalUint32(p.structure.ID)
 }
 

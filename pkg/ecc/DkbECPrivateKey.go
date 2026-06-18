@@ -2,11 +2,32 @@ package ecc
 
 import "runtime"
 
-// NewDjbECPrivateKey returns a new EC private key with the given bytes.
+// clampCurve25519 applies the Curve25519 clamping operation in-place.
+// Mirrors Rust libsignal's scalar::clamp_integer (curve25519.rs:172 / curve.rs:247).
+// Clamping ensures the scalar is a valid Curve25519 secret key:
+//
+//	key[0]  &= 248   — clear the three low bits
+//	key[31] &= 127   — clear the high bit (cofactor)
+//	key[31] |= 64    — set the second-highest bit (canonicalization)
+func clampCurve25519(key *[32]byte) {
+	key[0] &= 248
+	key[31] &= 127
+	key[31] |= 64
+}
+
+// NewDjbECPrivateKey returns a new EC private key with the given bytes after
+// applying Curve25519 clamping.  Rust PrivateKey::From<[u8;32]> and
+// PrivateKey::deserialize both call scalar::clamp_integer before storing the
+// key; this constructor matches that behaviour so that serialize→deserialize
+// round-trips are byte-for-byte identical to the Rust reference.
+//
+// Rust source: rust/core/src/curve/curve25519.rs:170-175; rust/core/src/curve.rs:246-247.
+//
 // WARNING: This constructor creates an unprotected DjbECPrivateKey and exists
 // only for test vector construction. Production code MUST use
 // NewGuardedECPrivateKey instead.
 func NewDjbECPrivateKey(key [32]byte) *DjbECPrivateKey {
+	clampCurve25519(&key)
 	private := DjbECPrivateKey{
 		privateKey: key,
 	}

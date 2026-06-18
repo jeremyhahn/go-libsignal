@@ -6,157 +6,146 @@ import (
 )
 
 const (
-	// TripleRatchetInfo is the HKDF info string for hybrid EC+PQ key derivation.
-	// Matches the Rust reference implementation which uses "WhisperMessageKeys"
-	// for both hybrid and EC-only paths.
-	TripleRatchetInfo = "WhisperMessageKeys"
+	// kdfInfoHybrid is the HKDF info string for hybrid key derivation.
+	// Matches the Rust reference: "WhisperMessageKeys" used in
+	// ratchet/keys.rs and confirmed by the triple ratchet hybrid path.
+	kdfInfoHybrid = "WhisperMessageKeys"
 
-	// TripleRatchetECOnlyInfo is the HKDF info string for EC-only fallback
-	// when the SPQR has not yet produced a key for the current epoch.
-	// The Rust reference uses the same info string regardless of whether
-	// a PQ key is present; the paths differ only in the salt value.
-	TripleRatchetECOnlyInfo = "WhisperMessageKeys"
-
-	// HybridKeySize is the total output length of the hybrid KDF:
-	// CipherKey(32) + MacKey(32) + IV(16) = 80 bytes.
+	// HybridKeySize is the total output length: CipherKey(32) + MacKey(32) + IV(16).
 	HybridKeySize = 80
 
-	// CipherKeySize is the size of the AES cipher key in bytes.
-	CipherKeySize = 32
+	// HMACSize is the HMAC-SHA256 tag size.
+	HMACSize = 32
 
-	// MacKeySize is the size of the MAC key in bytes.
-	MacKeySize = 32
-
-	// IVSize is the size of the initialization vector in bytes.
-	IVSize = 16
+	cipherKeySize = 32
+	macKeySize    = 32
+	ivSize        = 16
 )
 
-// zeroSalt returns a fresh 32-byte zero slice for use as HKDF salt.
-// A function is used instead of a package-level variable to prevent
-// accidental mutation of shared state.
-func zeroSalt() []byte {
-	return make([]byte, 32)
-}
-
-// HybridKeys holds the combined EC+PQ derived keys used for encrypting
-// and authenticating a single message. All fields are backed by memguard
-// protected memory.
+// HybridKeys holds the output of KDFHybrid or KDFHybridECOnly.
+// All fields are memguard-backed Secrets and must be destroyed after use.
+//
+// CipherKey: 32 bytes, AES-256 encryption key.
+// MacKey:    32 bytes, HMAC-SHA256 key.
+// IV:        16 bytes, AES initialization vector.
 type HybridKeys struct {
-	CipherKey *secret.Secret // 32 bytes - AES-256 encryption key
-	MacKey    *secret.Secret // 32 bytes - HMAC authentication key
-	IV        *secret.Secret // 16 bytes - initialization vector
+	CipherKey *secret.Secret
+	MacKey    *secret.Secret
+	IV        *secret.Secret
 }
 
-// Zeroize destroys all guarded key material. This method is idempotent
-// and safe to call multiple times.
-func (hk *HybridKeys) Zeroize() {
-	if hk == nil {
-		return
+// Zeroize destroys all key material in the HybridKeys.
+func (h *HybridKeys) Zeroize() {
+	if h.CipherKey != nil {
+		h.CipherKey.Destroy()
 	}
-	if hk.CipherKey != nil {
-		hk.CipherKey.Destroy()
+	if h.MacKey != nil {
+		h.MacKey.Destroy()
 	}
-	if hk.MacKey != nil {
-		hk.MacKey.Destroy()
-	}
-	if hk.IV != nil {
-		hk.IV.Destroy()
+	if h.IV != nil {
+		h.IV.Destroy()
 	}
 }
 
-// KDFHybrid combines an EC message key and a PQ message key using HKDF-SHA256
-// to produce the final encryption keys. The PQ key is used as the salt and
-// the EC key as the input key material, ensuring both contribute to the output.
+// KDFHybrid combines an EC message key and a PQ message key into hybrid keys
+// using HKDF-SHA256.
 //
-// Output: HKDF(salt=pqMK, ikm=ecMK, info="WhisperMessageKeys", length=80)
-// Split: CipherKey(32) || MacKey(32) || IV(16)
-func KDFHybrid(ecMK, pqMK []byte) (*HybridKeys, error) {
-	if len(ecMK) == 0 {
-		return nil, &ErrInvalidInput{Field: "ecMK", Reason: "must not be empty"}
-	}
-	if len(pqMK) == 0 {
-		return nil, &ErrInvalidInput{Field: "pqMK", Reason: "must not be empty"}
-	}
-
-	output, err := kdf.DeriveSecrets(ecMK, pqMK, []byte(TripleRatchetInfo), HybridKeySize)
-	if err != nil {
-		return nil, &ErrHybridKDFFailed{Err: err}
-	}
-
-	keys, splitErr := splitHybridOutput(output)
-	// Zeroize the raw HKDF output regardless of split outcome.
-	for i := range output {
-		output[i] = 0
-	}
-	if splitErr != nil {
-		return nil, splitErr
-	}
-
-	return keys, nil
-}
-
-// KDFHybridECOnly derives encryption keys from only the EC message key,
-// using a zero salt. This is the fallback path when the SPQR has not yet
-// produced a PQ key for the current epoch.
+// HKDF parameters:
+//   - salt:   pqMK (32 bytes) — the PQ message key
+//   - ikm:    ecMK           — the EC message key
+//   - info:   "WhisperMessageKeys"
+//   - length: 80 bytes
 //
-// Output: HKDF(salt=zeros(32), ikm=ecMK, info="WhisperMessageKeys", length=80)
-// Split: CipherKey(32) || MacKey(32) || IV(16)
-func KDFHybridECOnly(ecMK []byte) (*HybridKeys, error) {
-	if len(ecMK) == 0 {
-		return nil, &ErrInvalidInput{Field: "ecMK", Reason: "must not be empty"}
+// Output split: CipherKey(32) || MacKey(32) || IV(16)
+//
+// The PQ key is the HKDF salt and the EC key is the IKM, so both contribute
+// to the output. Matches the Rust reference hybrid KDF path.
+func KDFHybrid(ecMK, pqMK *secret.Secret) (*HybridKeys, error) {
+	if ecMK == nil || ecMK.IsDestroyed() {
+		return nil, &ErrInvalidInput{Field: "ecMK", Reason: "must not be nil or destroyed"}
+	}
+	if pqMK == nil || pqMK.IsDestroyed() {
+		return nil, &ErrInvalidInput{Field: "pqMK", Reason: "must not be nil or destroyed"}
 	}
 
-	output, err := kdf.DeriveSecrets(ecMK, zeroSalt(), []byte(TripleRatchetECOnlyInfo), HybridKeySize)
-	if err != nil {
-		return nil, &ErrHybridKDFFailed{Err: err}
+	output, err := kdf.DeriveSecrets(ecMK.Bytes(), pqMK.Bytes(), []byte(kdfInfoHybrid), HybridKeySize)
+	if err != nil { // coverage-exempt: DeriveSecrets only fails when outputLen > HKDF max (8160); HybridKeySize=80 is well below that
+		return nil, &ErrHybridKDFFailed{Cause: err}
 	}
 
-	keys, splitErr := splitHybridOutput(output)
-	// Zeroize the raw HKDF output regardless of split outcome.
-	for i := range output {
-		output[i] = 0
-	}
-	if splitErr != nil {
-		return nil, splitErr
-	}
-
-	return keys, nil
+	return splitHybridOutput(output)
 }
 
-// splitHybridOutput splits an 80-byte HKDF output into CipherKey, MacKey, and IV,
-// creating each as a memguard-backed Secret. The caller must zeroize the raw
-// output after this function returns.
+// KDFHybridECOnly derives hybrid keys using only the EC message key.
+// Used before the SPQR has produced a PQ key (epoch 0, counter 0).
+//
+// HKDF parameters:
+//   - salt:   zeros(32)
+//   - ikm:    ecMK
+//   - info:   "WhisperMessageKeys"
+//   - length: 80 bytes
+//
+// Same output split as KDFHybrid. The Rust reference uses the same info string
+// for both paths; only the salt differs.
+func KDFHybridECOnly(ecMK *secret.Secret) (*HybridKeys, error) {
+	if ecMK == nil || ecMK.IsDestroyed() {
+		return nil, &ErrInvalidInput{Field: "ecMK", Reason: "must not be nil or destroyed"}
+	}
+
+	salt := make([]byte, 32)
+	output, err := kdf.DeriveSecrets(ecMK.Bytes(), salt, []byte(kdfInfoHybrid), HybridKeySize)
+	if err != nil { // coverage-exempt: DeriveSecrets only fails when outputLen > HKDF max (8160); HybridKeySize=80 is well below that
+		return nil, &ErrHybridKDFFailed{Cause: err}
+	}
+
+	return splitHybridOutput(output)
+}
+
+// splitHybridOutput splits an 80-byte HKDF output into CipherKey(32), MacKey(32), IV(16).
 func splitHybridOutput(output []byte) (*HybridKeys, error) {
-	cipherKeyBytes := make([]byte, CipherKeySize)
-	copy(cipherKeyBytes, output[:CipherKeySize])
-
-	macKeyBytes := make([]byte, MacKeySize)
-	copy(macKeyBytes, output[CipherKeySize:CipherKeySize+MacKeySize])
-
-	ivBytes := make([]byte, IVSize)
-	copy(ivBytes, output[CipherKeySize+MacKeySize:])
-
-	cipherKey, err := secret.New(cipherKeyBytes)
-	if err != nil {
-		return nil, &ErrHybridKDFFailed{Err: err}
+	if len(output) < HybridKeySize {
+		return nil, &ErrHybridKDFFailed{Cause: &ErrInvalidInput{
+			Field:  "output",
+			Reason: "output too short",
+		}}
 	}
 
-	macKey, err := secret.New(macKeyBytes)
-	if err != nil {
-		cipherKey.Destroy()
-		return nil, &ErrHybridKDFFailed{Err: err}
+	// Wrap the raw output so it is zeroized when we finish splitting.
+	raw, err := secret.New(output)
+	if err != nil { // coverage-exempt: only reachable on memguard OOM
+		return nil, &ErrHybridKDFFailed{Cause: err}
+	}
+	defer raw.Destroy()
+
+	rawBytes := raw.Bytes()
+
+	ckBytes := make([]byte, cipherKeySize)
+	copy(ckBytes, rawBytes[:cipherKeySize])
+	ck, err := secret.New(ckBytes)
+	if err != nil { // coverage-exempt: only reachable on memguard OOM
+		return nil, &ErrHybridKDFFailed{Cause: err}
 	}
 
+	mkBytes := make([]byte, macKeySize)
+	copy(mkBytes, rawBytes[cipherKeySize:cipherKeySize+macKeySize])
+	mk, err := secret.New(mkBytes)
+	if err != nil { // coverage-exempt: only reachable on memguard OOM
+		ck.Destroy()
+		return nil, &ErrHybridKDFFailed{Cause: err}
+	}
+
+	ivBytes := make([]byte, ivSize)
+	copy(ivBytes, rawBytes[cipherKeySize+macKeySize:])
 	iv, err := secret.New(ivBytes)
-	if err != nil {
-		cipherKey.Destroy()
-		macKey.Destroy()
-		return nil, &ErrHybridKDFFailed{Err: err}
+	if err != nil { // coverage-exempt: only reachable on memguard OOM
+		ck.Destroy()
+		mk.Destroy()
+		return nil, &ErrHybridKDFFailed{Cause: err}
 	}
 
 	return &HybridKeys{
-		CipherKey: cipherKey,
-		MacKey:    macKey,
+		CipherKey: ck,
+		MacKey:    mk,
 		IV:        iv,
 	}, nil
 }

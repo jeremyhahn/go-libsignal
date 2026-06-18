@@ -3,13 +3,15 @@ package serialize
 import (
 	"testing"
 
-	groupRecord "github.com/jeremyhahn/go-libsignal/pkg/groups/state/record"
 	"github.com/jeremyhahn/go-libsignal/pkg/groups/ratchet"
+	groupRecord "github.com/jeremyhahn/go-libsignal/pkg/groups/state/record"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/chain"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/message"
+	"github.com/jeremyhahn/go-libsignal/pkg/proto/wirepb"
 	"github.com/jeremyhahn/go-libsignal/pkg/protocol"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/optional"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestNewProtobufSerializer(t *testing.T) {
@@ -198,9 +200,9 @@ func TestProtobufSenderKeyMessageSerializer_DeserializeInvalid(t *testing.T) {
 func TestProtobufSenderKeyDistributionMessageSerializer_RoundTrip(t *testing.T) {
 	s := &ProtobufSenderKeyDistributionMessageSerializer{}
 	original := &protocol.SenderKeyDistributionMessageStructure{
-		ID:        3,
-		Iteration: 15,
-		ChainKey:  make([]byte, 32),
+		ID:         3,
+		Iteration:  15,
+		ChainKey:   make([]byte, 32),
 		SigningKey: make([]byte, 33),
 	}
 
@@ -517,8 +519,8 @@ func TestProtobufSignedPreKeyRecordSerializer_DeserializeInvalid(t *testing.T) {
 func TestProtobufSenderKeyStateSerializer_RoundTrip(t *testing.T) {
 	s := &ProtobufSenderKeyStateSerializer{}
 	original := &groupRecord.SenderKeyStateStructure{
-		KeyID:            5,
-		SigningKeyPublic: []byte{0x01},
+		KeyID:             5,
+		SigningKeyPublic:  []byte{0x01},
 		SigningKeyPrivate: []byte{0x02},
 		SenderChainKey: &ratchet.SenderChainKeyStructure{
 			Iteration: 10,
@@ -921,6 +923,156 @@ func TestProtobufStateSerializer_WithNilChainKey(t *testing.T) {
 	}
 	if result.SenderChain.ChainKey != nil {
 		t.Fatal("chain key should be nil when not set")
+	}
+}
+
+// ================== Strict SKM / SKDM field-presence rejection tests ==================
+// These tests verify that missing required fields are rejected with
+// ErrInvalidProtobufEncoding, mirroring Rust's InvalidProtobufEncoding behavior
+// (rust/protocol/src/protocol.rs:614-657 for SKM, :748-800 for SKDM).
+
+// buildSKMBytes encodes a partial SenderKeyMessage protobuf, prepends the
+// version header byte, and appends 64 zero bytes as the signature.
+func buildSKMBytes(t *testing.T, chainID *uint32, iteration *uint32, distUUID []byte) []byte {
+	t.Helper()
+	pb := &wirepb.SenderKeyMessage{
+		ChainId:          chainID,
+		Iteration:        iteration,
+		DistributionUuid: distUUID,
+		Ciphertext:       []byte("ct"),
+	}
+	body, err := proto.Marshal(pb)
+	if err != nil {
+		t.Fatalf("buildSKMBytes marshal: %v", err)
+	}
+	// version byte (3<<4|3) + body + 64-byte zero signature
+	result := make([]byte, 0, 1+len(body)+64)
+	result = append(result, 0x33)
+	result = append(result, body...)
+	result = append(result, make([]byte, 64)...)
+	return result
+}
+
+// buildSKDMBytes encodes a partial SenderKeyDistributionMessage protobuf and
+// prepends the version header byte.
+func buildSKDMBytes(t *testing.T, chainID *uint32, iteration *uint32, chainKey []byte, signingKey []byte, distUUID []byte) []byte {
+	t.Helper()
+	pb := &wirepb.SenderKeyDistributionMessage{
+		ChainId:          chainID,
+		Iteration:        iteration,
+		ChainKey:         chainKey,
+		SigningKey:       signingKey,
+		DistributionUuid: distUUID,
+	}
+	body, err := proto.Marshal(pb)
+	if err != nil {
+		t.Fatalf("buildSKDMBytes marshal: %v", err)
+	}
+	result := make([]byte, 1+len(body))
+	result[0] = 0x33
+	copy(result[1:], body)
+	return result
+}
+
+func uint32Ptr(v uint32) *uint32 { return &v }
+
+var validDistUUID = []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+var validChainKey = make([]byte, 32)
+var validSigningKey = make([]byte, 33)
+
+func TestSenderKeyMessageDeserialize_MissingChainID(t *testing.T) {
+	s := &ProtobufSenderKeyMessageSerializer{}
+	data := buildSKMBytes(t, nil, uint32Ptr(0), validDistUUID)
+	_, err := s.Deserialize(data)
+	if err == nil {
+		t.Fatal("expected error for missing chain_id")
+	}
+	if _, ok := err.(*ErrInvalidProtobufEncoding); !ok {
+		t.Fatalf("expected *ErrInvalidProtobufEncoding, got %T: %v", err, err)
+	}
+}
+
+func TestSenderKeyMessageDeserialize_MissingIteration(t *testing.T) {
+	s := &ProtobufSenderKeyMessageSerializer{}
+	data := buildSKMBytes(t, uint32Ptr(1), nil, validDistUUID)
+	_, err := s.Deserialize(data)
+	if err == nil {
+		t.Fatal("expected error for missing iteration")
+	}
+	if _, ok := err.(*ErrInvalidProtobufEncoding); !ok {
+		t.Fatalf("expected *ErrInvalidProtobufEncoding, got %T: %v", err, err)
+	}
+}
+
+func TestSenderKeyMessageDeserialize_MissingDistributionUUID(t *testing.T) {
+	s := &ProtobufSenderKeyMessageSerializer{}
+	data := buildSKMBytes(t, uint32Ptr(1), uint32Ptr(0), nil)
+	_, err := s.Deserialize(data)
+	if err == nil {
+		t.Fatal("expected error for missing distribution_uuid")
+	}
+	if _, ok := err.(*ErrInvalidProtobufEncoding); !ok {
+		t.Fatalf("expected *ErrInvalidProtobufEncoding, got %T: %v", err, err)
+	}
+}
+
+func TestSenderKeyDistributionMessageDeserialize_MissingChainID(t *testing.T) {
+	s := &ProtobufSenderKeyDistributionMessageSerializer{}
+	data := buildSKDMBytes(t, nil, uint32Ptr(0), validChainKey, validSigningKey, validDistUUID)
+	_, err := s.Deserialize(data)
+	if err == nil {
+		t.Fatal("expected error for missing chain_id")
+	}
+	if _, ok := err.(*ErrInvalidProtobufEncoding); !ok {
+		t.Fatalf("expected *ErrInvalidProtobufEncoding, got %T: %v", err, err)
+	}
+}
+
+func TestSenderKeyDistributionMessageDeserialize_MissingIteration(t *testing.T) {
+	s := &ProtobufSenderKeyDistributionMessageSerializer{}
+	data := buildSKDMBytes(t, uint32Ptr(1), nil, validChainKey, validSigningKey, validDistUUID)
+	_, err := s.Deserialize(data)
+	if err == nil {
+		t.Fatal("expected error for missing iteration")
+	}
+	if _, ok := err.(*ErrInvalidProtobufEncoding); !ok {
+		t.Fatalf("expected *ErrInvalidProtobufEncoding, got %T: %v", err, err)
+	}
+}
+
+func TestSenderKeyDistributionMessageDeserialize_MissingChainKey(t *testing.T) {
+	s := &ProtobufSenderKeyDistributionMessageSerializer{}
+	data := buildSKDMBytes(t, uint32Ptr(1), uint32Ptr(0), nil, validSigningKey, validDistUUID)
+	_, err := s.Deserialize(data)
+	if err == nil {
+		t.Fatal("expected error for missing chain_key")
+	}
+	if _, ok := err.(*ErrInvalidProtobufEncoding); !ok {
+		t.Fatalf("expected *ErrInvalidProtobufEncoding, got %T: %v", err, err)
+	}
+}
+
+func TestSenderKeyDistributionMessageDeserialize_MissingSigningKey(t *testing.T) {
+	s := &ProtobufSenderKeyDistributionMessageSerializer{}
+	data := buildSKDMBytes(t, uint32Ptr(1), uint32Ptr(0), validChainKey, nil, validDistUUID)
+	_, err := s.Deserialize(data)
+	if err == nil {
+		t.Fatal("expected error for missing signing_key")
+	}
+	if _, ok := err.(*ErrInvalidProtobufEncoding); !ok {
+		t.Fatalf("expected *ErrInvalidProtobufEncoding, got %T: %v", err, err)
+	}
+}
+
+func TestSenderKeyDistributionMessageDeserialize_MissingDistributionUUID(t *testing.T) {
+	s := &ProtobufSenderKeyDistributionMessageSerializer{}
+	data := buildSKDMBytes(t, uint32Ptr(1), uint32Ptr(0), validChainKey, validSigningKey, nil)
+	_, err := s.Deserialize(data)
+	if err == nil {
+		t.Fatal("expected error for missing distribution_uuid")
+	}
+	if _, ok := err.(*ErrInvalidProtobufEncoding); !ok {
+		t.Fatalf("expected *ErrInvalidProtobufEncoding, got %T: %v", err, err)
 	}
 }
 

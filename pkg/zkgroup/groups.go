@@ -23,10 +23,10 @@ func NewGroupMasterKey(bytes GroupMasterKeyBytes) GroupMasterKey {
 // GroupSecretParams contains the secret parameters for a Signal group, derived
 // from the group master key.
 type GroupSecretParams struct {
-	MasterKey           GroupMasterKey
-	GroupID             GroupIdentifierBytes
-	BlobKey             AESKeyBytes
-	UIDEncKeyPair       *zkcredential.KeyPair
+	MasterKey            GroupMasterKey
+	GroupID              GroupIdentifierBytes
+	BlobKey              AESKeyBytes
+	UIDEncKeyPair        *zkcredential.KeyPair
 	ProfileKeyEncKeyPair *zkcredential.KeyPair
 }
 
@@ -68,10 +68,10 @@ func DeriveGroupSecretParams(masterKey GroupMasterKey) (*GroupSecretParams, erro
 	}
 
 	return &GroupSecretParams{
-		MasterKey:           masterKey,
-		GroupID:             groupID,
-		BlobKey:             blobKey,
-		UIDEncKeyPair:       uidKP,
+		MasterKey:            masterKey,
+		GroupID:              groupID,
+		BlobKey:              blobKey,
+		UIDEncKeyPair:        uidKP,
 		ProfileKeyEncKeyPair: pkKP,
 	}, nil
 }
@@ -89,8 +89,8 @@ func (g *GroupSecretParams) GetGroupIdentifier() GroupIdentifierBytes {
 // GetPublicParams derives the public parameters from the group secret params.
 func (g *GroupSecretParams) GetPublicParams() *GroupPublicParams {
 	return &GroupPublicParams{
-		GroupID:             g.GroupID,
-		UIDEncPublicKey:     g.UIDEncKeyPair.PublicKey,
+		GroupID:                g.GroupID,
+		UIDEncPublicKey:        g.UIDEncKeyPair.PublicKey,
 		ProfileKeyEncPublicKey: g.ProfileKeyEncKeyPair.PublicKey,
 	}
 }

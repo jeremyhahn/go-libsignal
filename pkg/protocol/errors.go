@@ -13,7 +13,7 @@ type Error struct {
 type errorKind int
 
 const (
-	errLegacyVersion       errorKind = iota + 1
+	errLegacyVersion errorKind = iota + 1
 	errUnrecognizedVersion
 	errIncompleteMessage
 	errMissingKyberPayload
@@ -21,6 +21,12 @@ const (
 	errInvalidMacKeyLength
 	errInvalidKeyLength
 	errMessageTooShort
+	errInvalidContentProto
+	errMissingDecryptionErrorMessage
+	errDecryptionErrorMessageDeserialize
+	errAddressMismatch
+	errInvalidArgumentPlaintext
+	errInvalidAddressForBinding
 )
 
 // ErrLegacyVersion indicates a message with an unsupported legacy version was received.
@@ -48,6 +54,42 @@ var ErrInvalidKeyLength = &Error{kind: errInvalidKeyLength}
 // ErrMessageTooShort indicates the serialized message is too short to be valid.
 var ErrMessageTooShort = &Error{kind: errMessageTooShort}
 
+// ErrInvalidContentProto indicates the body could not be parsed as a Content protobuf.
+var ErrInvalidContentProto = &Error{kind: errInvalidContentProto}
+
+// ErrMissingDecryptionErrorMessage indicates the Content proto has no decryption_error_message field.
+var ErrMissingDecryptionErrorMessage = &Error{kind: errMissingDecryptionErrorMessage}
+
+// ErrDecryptionErrorMessageDeserialize indicates the nested DecryptionErrorMessage bytes
+// could not be deserialized.
+var ErrDecryptionErrorMessageDeserialize = &Error{kind: errDecryptionErrorMessageDeserialize}
+
+// ErrAddressMismatch indicates that the addresses field carried in a SignalMessage
+// does not match the expected (sender, recipient) reserialization.
+var ErrAddressMismatch = &Error{kind: errAddressMismatch}
+
+// ErrInvalidArgumentPlaintext is returned by DecryptionErrorMessageForOriginal
+// when the caller passes PLAINTEXT_TYPE as the original message type. Rust returns
+// SignalProtocolError::InvalidArgument in this case; plaintext content is not
+// encrypted and therefore cannot produce a meaningful ratchet key for re-delivery.
+//
+// Mirrors Rust libsignal_protocol SignalProtocolError::InvalidArgument at
+// rust/protocol/src/protocol.rs:898-900.
+var ErrInvalidArgumentPlaintext = &Error{kind: errInvalidArgumentPlaintext}
+
+// ErrInvalidAddressForBinding is returned by NewSignalMessage when non-nil
+// addresses are provided but cannot be serialized into the addresses binding
+// field (proto field 6) because a device ID is outside the valid range [1, 127]
+// or an address name is not a valid ServiceId string.
+//
+// Passing nil for both addresses is the legacy unbound format and does not
+// return this error. Only asymmetric (one nil, one non-nil) or structurally
+// invalid addresses trigger this error.
+//
+// Mirrors Rust SignalProtocolError::InvalidArgument raised in
+// rust/protocol/src/protocol.rs when address serialization fails.
+var ErrInvalidAddressForBinding = &Error{kind: errInvalidAddressForBinding}
+
 func (e *Error) Error() string {
 	switch e.kind {
 	case errLegacyVersion:
@@ -69,6 +111,21 @@ func (e *Error) Error() string {
 		return fmt.Sprintf("protocol: invalid %s length: %s", e.msgType, e.detail)
 	case errMessageTooShort:
 		return fmt.Sprintf("protocol: %s too short", e.msgType)
+	case errInvalidContentProto:
+		return "protocol: body is not a valid Content protobuf"
+	case errMissingDecryptionErrorMessage:
+		return "protocol: Content does not contain a decryption_error_message field"
+	case errDecryptionErrorMessageDeserialize:
+		if e.detail != "" {
+			return fmt.Sprintf("protocol: failed to deserialize DecryptionErrorMessage: %s", e.detail)
+		}
+		return "protocol: failed to deserialize DecryptionErrorMessage"
+	case errAddressMismatch:
+		return "protocol: address mismatch: SignalMessage addresses field does not match expected sender/recipient"
+	case errInvalidArgumentPlaintext:
+		return "protocol: cannot create a DecryptionErrorMessage for plaintext content; it is not encrypted"
+	case errInvalidAddressForBinding:
+		return "protocol: non-nil addresses cannot be serialized into the address-binding field; device ID must be 1-127 and names must be valid ServiceId strings"
 	default:
 		return "protocol: unknown error"
 	}
@@ -123,6 +180,39 @@ func newMessageTooShortError(msgType string) *Error {
 	return &Error{kind: errMessageTooShort, msgType: msgType}
 }
 
+// newInvalidContentProtoError creates an invalid Content proto error.
+func newInvalidContentProtoError() *Error {
+	return &Error{kind: errInvalidContentProto}
+}
+
+// newMissingDecryptionErrorMessageError creates a missing decryption error message error.
+func newMissingDecryptionErrorMessageError() *Error {
+	return &Error{kind: errMissingDecryptionErrorMessage}
+}
+
+// newDecryptionErrorMessageDeserializeError creates a deserialization failure error
+// for the nested DecryptionErrorMessage, including the underlying cause as detail.
+func newDecryptionErrorMessageDeserializeError(detail string) *Error {
+	return &Error{kind: errDecryptionErrorMessageDeserialize, detail: detail}
+}
+
+// newAddressMismatchError creates an address mismatch error for VerifyMacWithAddresses.
+func newAddressMismatchError() *Error {
+	return &Error{kind: errAddressMismatch}
+}
+
+// newInvalidArgumentPlaintextError creates the error returned by
+// DecryptionErrorMessageForOriginal when the original message type is PLAINTEXT_TYPE.
+func newInvalidArgumentPlaintextError() *Error {
+	return &Error{kind: errInvalidArgumentPlaintext}
+}
+
+// newInvalidAddressForBindingError creates the error returned by NewSignalMessage
+// when non-nil addresses fail SerializeAddresses validation.
+func newInvalidAddressForBindingError() *Error {
+	return &Error{kind: errInvalidAddressForBinding}
+}
+
 // ServiceIdParseError indicates a failure parsing a ServiceId.
 type ServiceIdParseError struct {
 	Detail string
@@ -138,6 +228,46 @@ func (e *ServiceIdParseError) Error() string {
 
 func (e *ServiceIdParseError) Unwrap() error {
 	return e.Err
+}
+
+// ErrInvalidServiceIdLength indicates a ServiceId binary encoding has an
+// invalid length. For the variable-width format: ACI must be exactly 16 bytes;
+// PNI must be exactly 17 bytes (0x01 tag || 16-byte UUID).
+//
+// Mirrors Rust libsignal_core ServiceId::parse_from_service_id_binary at
+// rust/core/src/address.rs:230-245.
+var ErrInvalidServiceIdLength = &ServiceIdParseError{Detail: "invalid ServiceId binary length"}
+
+// ErrInvalidServiceIdString indicates a ServiceId string has an invalid format.
+// Accepted formats: bare hyphenated UUID (→ ACI), "ACI:<hyphenated-uuid>" (→ ACI,
+// legacy Go form), or "PNI:<hyphenated-uuid>" (→ PNI). The lowercase "aci:" prefix
+// and un-hyphenated (32-char) forms are rejected.
+//
+// Mirrors Rust libsignal_core ServiceId::parse_from_service_id_string at
+// rust/core/src/address.rs:263-279.
+var ErrInvalidServiceIdString = &ServiceIdParseError{Detail: "invalid ServiceId string"}
+
+// ErrInvalidDeviceID indicates a device ID is outside the valid range 1-127.
+// Signal protocol requires device IDs to be in [1, 127] (Java DeviceId int,
+// Rust DeviceId u8 constrained to non-zero ≤ 127).
+var ErrInvalidDeviceID = &DeviceIDError{}
+
+// DeviceIDError indicates a device ID is outside the valid Signal range 1-127.
+type DeviceIDError struct {
+	ID uint32
+}
+
+func (e *DeviceIDError) Error() string {
+	if e.ID == 0 {
+		return "protocol: device ID must be between 1 and 127 (got 0)"
+	}
+	return fmt.Sprintf("protocol: device ID must be between 1 and 127 (got %d)", e.ID)
+}
+
+// Is implements errors.Is matching for DeviceIDError sentinels.
+func (e *DeviceIDError) Is(target error) bool {
+	_, ok := target.(*DeviceIDError)
+	return ok
 }
 
 // EmptyMessageError indicates a message was empty when content was expected.

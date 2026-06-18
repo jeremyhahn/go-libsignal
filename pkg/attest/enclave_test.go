@@ -361,9 +361,9 @@ func TestHandshake_Complete_HappyPath(t *testing.T) {
 	// Responder side
 	responderHS, err := noise.NewHandshakeState(noise.Config{
 		CipherSuite:   cs,
-		Pattern:        noise.HandshakeNK,
-		Initiator:      false,
-		StaticKeypair:  responderKP,
+		Pattern:       noise.HandshakeNK,
+		Initiator:     false,
+		StaticKeypair: responderKP,
 	})
 	if err != nil {
 		t.Fatalf("failed to create responder handshake: %v", err)

@@ -10,6 +10,7 @@ package svr
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"io"
 
@@ -44,6 +45,17 @@ type Secret [secretSize]byte
 type EvaluationResult struct {
 	Value          Secret
 	TriesRemaining uint32
+}
+
+// Serialize encodes the EvaluationResult as the Rust wire format:
+// big-endian uint32 tries_remaining (4 bytes) followed by the 32-byte value.
+//
+// Rust libsignal ref: rust/svrb/src/lib.rs EvaluationResult::serialize
+func (er *EvaluationResult) Serialize() []byte {
+	out := make([]byte, 4+secretSize)
+	binary.BigEndian.PutUint32(out[:4], er.TriesRemaining)
+	copy(out[4:], er.Value[:])
+	return out
 }
 
 // Backup4 represents a v4 SVR backup request.
@@ -84,6 +96,49 @@ func NewBackup4(secret Secret, maxTries uint32) (*Backup4, error) {
 type Restore4 struct {
 	RequestID []byte
 	Entropy   []byte
+}
+
+// EncryptSecret encrypts a secret using AES-256-GCM-SIV with a zero nonce.
+// The key is expected to be a one-time derived key, making nonce reuse safe
+// due to the misuse-resistance property of GCM-SIV.
+func EncryptSecret(key [32]byte, secret Secret) ([]byte, error) {
+	aead, err := cipher.NewAESGCMSIV(key[:])
+	if err != nil {
+		return nil, &Error{kind: errCipherCreate, cause: err}
+	}
+
+	nonce := make([]byte, aead.NonceSize())             // zero nonce: SVR uses a unique key per encryption, so a fixed nonce is safe
+	ciphertext := aead.Seal(nil, nonce, secret[:], nil) // #nosec G407 -- zero nonce is intentional: each key is used exactly once
+
+	return ciphertext, nil
+}
+
+// DecryptSecret decrypts a secret using AES-256-GCM-SIV with a zero nonce.
+// Returns an error if the ciphertext is invalid or authentication fails.
+func DecryptSecret(key [32]byte, encrypted []byte) (Secret, error) {
+	var result Secret
+
+	aead, err := cipher.NewAESGCMSIV(key[:])
+	if err != nil {
+		return result, &Error{kind: errCipherCreate, cause: err}
+	}
+
+	nonce := make([]byte, aead.NonceSize()) // zero nonce
+	plaintext, err := aead.Open(nil, nonce, encrypted, nil)
+	if err != nil {
+		return result, &Error{kind: errDecryption, cause: err}
+	}
+	defer ucrypto.Zeroize(plaintext)
+
+	if len(plaintext) != secretSize {
+		return result, &Error{
+			kind:   errSecretSize,
+			detail: fmt.Sprintf("got %d, want %d", len(plaintext), secretSize),
+		}
+	}
+
+	copy(result[:], plaintext)
+	return result, nil
 }
 
 // MasterKey derives a master key from a PIN and SVR secret using HKDF-SHA256.
@@ -127,49 +182,6 @@ func MasterKeyGuarded(pin string, svrSecret Secret) (*cryptosecret.Secret, error
 		return nil, &Error{kind: errBadData, cause: serr}
 	}
 	return s, nil
-}
-
-// EncryptSecret encrypts a secret using AES-256-GCM-SIV with a zero nonce.
-// The key is expected to be a one-time derived key, making nonce reuse safe
-// due to the misuse-resistance property of GCM-SIV.
-func EncryptSecret(key [32]byte, secret Secret) ([]byte, error) {
-	aead, err := cipher.NewAESGCMSIV(key[:])
-	if err != nil {
-		return nil, &Error{kind: errCipherCreate, cause: err}
-	}
-
-	nonce := make([]byte, aead.NonceSize()) // zero nonce: SVR uses a unique key per encryption, so a fixed nonce is safe
-	ciphertext := aead.Seal(nil, nonce, secret[:], nil) // #nosec G407 -- zero nonce is intentional: each key is used exactly once
-
-	return ciphertext, nil
-}
-
-// DecryptSecret decrypts a secret using AES-256-GCM-SIV with a zero nonce.
-// Returns an error if the ciphertext is invalid or authentication fails.
-func DecryptSecret(key [32]byte, encrypted []byte) (Secret, error) {
-	var result Secret
-
-	aead, err := cipher.NewAESGCMSIV(key[:])
-	if err != nil {
-		return result, &Error{kind: errCipherCreate, cause: err}
-	}
-
-	nonce := make([]byte, aead.NonceSize()) // zero nonce
-	plaintext, err := aead.Open(nil, nonce, encrypted, nil)
-	if err != nil {
-		return result, &Error{kind: errDecryption, cause: err}
-	}
-	defer ucrypto.Zeroize(plaintext)
-
-	if len(plaintext) != secretSize {
-		return result, &Error{
-			kind:   errSecretSize,
-			detail: fmt.Sprintf("got %d, want %d", len(plaintext), secretSize),
-		}
-	}
-
-	copy(result[:], plaintext)
-	return result, nil
 }
 
 // DeriveStorageKey derives a storage key for SVR operations from a master

@@ -1,6 +1,7 @@
 package zkgroup
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/zkcredential"
@@ -337,5 +338,120 @@ func TestBackupAuthCredentialPresentation_Verify_BadTime(t *testing.T) {
 	err := pres.Verify(NewTimestamp(1000*SecondsPerDay), nil)
 	if err == nil {
 		t.Fatal("expected error for bad redemption time")
+	}
+}
+
+// TestNewBackupAuthCredentialRequestContext_Deterministic verifies that the
+// canonical constructor always produces the same output for the same inputs.
+// Mirrors the determinism requirement from Rust's BackupAuthCredentialRequestContext::new
+// at rust/zkgroup/src/api/backups/auth_credential.rs:118.
+func TestNewBackupAuthCredentialRequestContext_Deterministic(t *testing.T) {
+	var backupKey [32]byte
+	for i := range backupKey {
+		backupKey[i] = 0x46 // matches Rust test vector: [0x46u8; 32]
+	}
+	// ACI matching the Rust test vector: uuid!("c0fc16e4-bae5-4343-9f0d-e7ecf4251343")
+	aciBytes := [16]byte{
+		0xc0, 0xfc, 0x16, 0xe4, 0xba, 0xe5, 0x43, 0x43,
+		0x9f, 0x0d, 0xe7, 0xec, 0xf4, 0x25, 0x13, 0x43,
+	}
+	aci := NewACI(aciBytes)
+
+	ctx1, err := NewBackupAuthCredentialRequestContext(backupKey, aci)
+	if err != nil {
+		t.Fatalf("NewBackupAuthCredentialRequestContext: %v", err)
+	}
+	ctx2, err := NewBackupAuthCredentialRequestContext(backupKey, aci)
+	if err != nil {
+		t.Fatalf("NewBackupAuthCredentialRequestContext (2nd call): %v", err)
+	}
+
+	// Backup identifier must match (deterministic from key + ACI).
+	if ctx1.BackupIdentifier != ctx2.BackupIdentifier {
+		t.Error("BackupIdentifier is not deterministic")
+	}
+	// The blinded backup ID points must be equal.
+	if ctx1.BlindedBackupID.D1.Equal(ctx2.BlindedBackupID.D1) != 1 {
+		t.Error("BlindedBackupID.D1 is not deterministic")
+	}
+	if ctx1.BlindedBackupID.D2.Equal(ctx2.BlindedBackupID.D2) != 1 {
+		t.Error("BlindedBackupID.D2 is not deterministic")
+	}
+}
+
+// TestNewBackupAuthCredentialRequestContext_RejectsPNI verifies that a PNI
+// service ID is rejected with ErrInvalidServiceIDKind. Rust enforces this
+// structurally via the type system; Go validates at runtime.
+func TestNewBackupAuthCredentialRequestContext_RejectsPNI(t *testing.T) {
+	var backupKey [32]byte
+	pniID := NewPNI([16]byte{1})
+
+	_, err := NewBackupAuthCredentialRequestContext(backupKey, pniID)
+	if err == nil {
+		t.Fatal("expected error for PNI service ID")
+	}
+	var kindErr *ErrInvalidServiceIDKind
+	if !errors.As(err, &kindErr) {
+		t.Errorf("expected *ErrInvalidServiceIDKind, got %T: %v", err, err)
+	}
+}
+
+// TestNewBackupAuthCredentialRequestContext_EndToEnd runs the full backup auth
+// flow using the canonical constructor and verifies that the credential can be
+// issued, received, presented, and verified. Uses the same randomness as the
+// Rust integration test backup_auth_flow.rs with backup_key=[0x46;32],
+// ACI=c0fc16e4-bae5-4343-9f0d-e7ecf4251343.
+func TestNewBackupAuthCredentialRequestContext_EndToEnd(t *testing.T) {
+	var backupKey [32]byte
+	for i := range backupKey {
+		backupKey[i] = 0x46
+	}
+	aciBytes := [16]byte{
+		0xc0, 0xfc, 0x16, 0xe4, 0xba, 0xe5, 0x43, 0x43,
+		0x9f, 0x0d, 0xe7, 0xec, 0xf4, 0x25, 0x13, 0x43,
+	}
+	aci := NewACI(aciBytes)
+
+	var r1, r2, r3 RandomnessBytes
+	for i := range r1 {
+		r1[i] = 0x43 // matches Rust: randomness1 = [0x43u8; RANDOMNESS_LEN]
+		r2[i] = 0x44
+		r3[i] = 0x45
+	}
+
+	ctx, err := NewBackupAuthCredentialRequestContext(backupKey, aci)
+	if err != nil {
+		t.Fatalf("NewBackupAuthCredentialRequestContext: %v", err)
+	}
+
+	serverParams := GenerateGenericServerSecretParams(r1)
+	req := ctx.GetRequest()
+
+	// 2023-04-13 00:00:00 UTC — matches DAY_ALIGNED_TIMESTAMP in Rust test.
+	redemptionTime := NewTimestamp(1681344000)
+	resp, err := req.Issue(redemptionTime, BackupLevelFree, BackupCredentialTypeMessages, serverParams, r2)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+
+	publicParams := serverParams.GetPublicParams()
+	cred, err := ctx.Receive(resp, publicParams, redemptionTime)
+	if err != nil {
+		t.Fatalf("Receive: %v", err)
+	}
+	if cred.GetBackupLevel() != BackupLevelFree {
+		t.Error("backup level mismatch")
+	}
+	if cred.GetCredentialType() != BackupCredentialTypeMessages {
+		t.Error("credential type mismatch")
+	}
+
+	presentation, err := cred.Present(publicParams, r3)
+	if err != nil {
+		t.Fatalf("Present: %v", err)
+	}
+
+	if err := presentation.Verify(redemptionTime, serverParams); err != nil {
+		t.Fatalf("Verify: %v", err)
 	}
 }

@@ -241,3 +241,25 @@ func TestMessageKeysWithSalt_WithPQRSalt(t *testing.T) {
 		t.Error("PQR salt should alter derived cipher key")
 	}
 }
+
+// TestKeyStructureZeroize verifies that Zeroize overwrites all key bytes with zeros.
+func TestKeyStructureZeroize(t *testing.T) {
+	ks := &KeyStructure{
+		Key:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08},
+		Index: 7,
+	}
+
+	ks.Zeroize()
+
+	for i, b := range ks.Key {
+		if b != 0 {
+			t.Errorf("Key[%d] = 0x%02x after Zeroize, want 0x00", i, b)
+		}
+	}
+}
+
+// TestKeyStructureZeroizeEmptyKey verifies Zeroize is safe on an empty key slice.
+func TestKeyStructureZeroizeEmptyKey(t *testing.T) {
+	ks := &KeyStructure{Key: nil, Index: 0}
+	ks.Zeroize() // must not panic
+}

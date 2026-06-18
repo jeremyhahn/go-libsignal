@@ -88,4 +88,3 @@ func TestProfileKey_GetProfileKeyVersion(t *testing.T) {
 		t.Error("not deterministic")
 	}
 }
-

@@ -1,0 +1,22 @@
+{
+  "source": "rust/zkgroup/src/crypto/profile_key_encryption.rs:119-215",
+  "rust_rev": "98915c442d",
+  "purpose": "ProfileKeyEncryptionDomain encrypt+decrypt round-trip. key_pair derived from TEST_ARRAY_32_1 via Sho(HMAC-SHA256, b'Test_Profile_Key_Encryption'). The expected ciphertext bytes are pinned from Rust's assert!(ciphertext_bytes == vec![...]) in test_profile_key_encryption().",
+  "vectors": [
+    {
+      "name": "encrypt_profile_key_array_32_1_with_uid_16_1",
+      "inputs": {
+        "sho_label": "Test_Profile_Key_Encryption",
+        "sho_key_hex": "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283",
+        "profile_key_hex": "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283",
+        "uid_hex": "6465666768696a6b6c6d6e6f70717273",
+        "system_params_hardcoded_hex": "f6baa317ce1839c93d617e0cd837d19da9c8a4c520bf7c51b1e6c2cb2a049c612e0175894c8730b203ab3bd98ecb2d81abacb65f8a6124f49771d14a9852120c"
+      },
+      "expected": {
+        "ciphertext_hex": "5618cb4c7d721e012b22f077ef1264f6b143bb597a1d665a70aa84245f246d20badb97474a56f4b5361aeca9d118b7004e140971990aab2af2432d3f8f7d213a",
+        "note": "64-byte bincode serialization of Ciphertext<ProfileKeyEncryptionDomain>. Decrypt round-trip must recover original profile_key_hex."
+      }
+    }
+  ],
+  "skipped": "Round-trip with TEST_ARRAY_32, TEST_ARRAY_32_2, TEST_ARRAY_32_3, TEST_ARRAY_32_4 are property-based (no pinned ciphertext in Rust source); only the first vector has a hardcoded expected."
+}

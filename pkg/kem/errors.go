@@ -90,17 +90,21 @@ func (e *DecapsulationError) Unwrap() error {
 }
 
 // KeyTypeMismatchError indicates a key type does not match the expected algorithm.
+//
+// Both Expected and Actual carry KeyType byte values, matching Rust's
+// WrongKEMKeyType(u8, u8) (error.rs:101). KeyKind names the role of the
+// mismatched key (e.g., "secret key", "ciphertext") for human-readable output.
 type KeyTypeMismatchError struct {
-	Expected string
+	Expected KeyType
 	Actual   KeyType
 	KeyKind  string
 }
 
 func (e *KeyTypeMismatchError) Error() string {
 	if e.KeyKind != "" {
-		return fmt.Sprintf("kem: key type mismatch: %s expected %s, got 0x%02x", e.KeyKind, e.Expected, e.Actual)
+		return fmt.Sprintf("kem: key type mismatch: %s expected 0x%02x, got 0x%02x", e.KeyKind, e.Expected, e.Actual)
 	}
-	return fmt.Sprintf("kem: key type mismatch: expected %s, got 0x%02x", e.Expected, e.Actual)
+	return fmt.Sprintf("kem: key type mismatch: expected 0x%02x, got 0x%02x", e.Expected, e.Actual)
 }
 
 // GuardedKeyAllocationError indicates a failure allocating guarded key memory.

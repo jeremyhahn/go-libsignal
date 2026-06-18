@@ -24,7 +24,6 @@
 package spqr
 
 import (
-	"encoding/binary"
 	"fmt"
 	"math"
 
@@ -36,11 +35,6 @@ import (
 // MessageKey is the PQR key used as HKDF salt for message key derivation.
 // nil means no PQR key (V0 / pre-negotiation fallback).
 type MessageKey = []byte
-
-const (
-	// pqrMsgSize is the wire size of a PQR message: epoch(8) + counter(4).
-	pqrMsgSize = 12
-)
 
 // ErrPQRMessage is returned when a PQR message is malformed.
 type ErrPQRMessage struct {
@@ -60,6 +54,11 @@ func (e *ErrPQRMessage) Error() string {
 // NOT initialized immediately; instead, it defers chain creation until the first
 // Recv() call resolves the version negotiation. During the pending state, Send()
 // returns empty PQR messages and nil message keys.
+//
+// MinVersion is set to VersionV1, matching the Rust libsignal policy of
+// "Require that all clients speak SPQR" (ratchet.rs:88, 152). Pass
+// InitialStateWithParams with MinVersion: VersionV0 only when V0 downgrade is
+// explicitly required after a security audit.
 func InitialState(sharedSecret []byte, direction Direction, selfSession bool) (serializedState []byte, err error) {
 	maxJumpLimit := uint32(maxJump)
 	if selfSession {
@@ -70,7 +69,7 @@ func InitialState(sharedSecret []byte, direction Direction, selfSession bool) (s
 		AuthKey:    sharedSecret,
 		Version:    VersionV1,
 		Direction:  direction,
-		MinVersion: VersionV0,
+		MinVersion: VersionV1,
 		MaxJump:    maxJumpLimit,
 		MaxOOOKeys: maxSkippedKeys,
 	})
@@ -159,7 +158,7 @@ func InitialStateWithBraid(sharedSecret []byte, direction Direction, selfSession
 		maxJump:     maxJumpLimit,
 		negotiation: negotiationPending,
 		version:     VersionV1,
-		minVersion:  VersionV0,
+		minVersion:  VersionV1,
 		authKey:     authKey,
 		braid:       braid,
 	}
@@ -245,12 +244,10 @@ func (s *SPQR) resolveNegotiation(pqrData []byte) error {
 // updated serialized state, the PQR message bytes, and the message key to use
 // as HKDF salt.
 //
-// When braid state is present in the serialized state (V4 format), Send
-// transparently uses the braid-integrated path: chain key derivation + SCKA
-// chunk piggybacking + epoch advancement + variable-length wire format.
-//
-// When no braid is present (V3 or earlier), Send uses the legacy chain-only
-// path with 12-byte fixed wire format.
+// Both the braid-integrated and chain-only paths produce a Rust-compatible SCKA
+// variable-length wire format: version(0x01) + varint(epoch) + varint(counter)
+// + msgType(1) + [chunk_data]. The epoch in wire messages is 1-indexed (SCKA
+// convention); chainToSckaEpoch handles the 0→1 offset for the chain-only path.
 //
 // During version negotiation (pending state), Send returns an empty PQR message
 // ([]byte{}) and nil message key. The caller should include the empty PQR
@@ -306,16 +303,20 @@ func Send(serializedState []byte) (newState []byte, pqrMsg []byte, messageKey Me
 		return newState, pqrMsg, messageKey, nil
 	}
 
-	// Legacy chain-only path: derive message key and build 12-byte wire message.
+	// Chain-only path: derive message key and build Rust-compatible SCKA wire message.
+	// The SCKA epoch is 1-indexed (chainToSckaEpoch), while Go chains are 0-indexed.
 	mk, counter, encErr := s.Encrypt(s.epoch)
 	if encErr != nil {
 		return nil, nil, nil, encErr
 	}
 	defer mk.Destroy()
 
-	pqrMsg = make([]byte, pqrMsgSize)
-	binary.BigEndian.PutUint64(pqrMsg[0:8], s.epoch)
-	binary.BigEndian.PutUint32(pqrMsg[8:12], counter)
+	// Build a MessageTypeNone SCKA wire message carrying the chain epoch and counter.
+	noneMsg := &mlkembraid.Message{
+		Epoch: chainToSckaEpoch(s.epoch),
+		Type:  mlkembraid.MessageTypeNone,
+	}
+	pqrMsg = noneMsg.SerializeSCKA(counter)
 
 	messageKey = make([]byte, mk.Size())
 	copy(messageKey, mk.Bytes())
@@ -487,13 +488,7 @@ func (s *SPQR) RecvBraid(pqrMsg []byte) (messageKey MessageKey, err error) {
 		return nil, nil
 	}
 
-	// Parse the wire message.
-	// Legacy 12-byte format: fall back to chain-only decryption.
-	if len(pqrMsg) == legacyPQRMsgSize {
-		return s.recvLegacy(pqrMsg)
-	}
-
-	// Variable-length format: decode using the braid's SCKA wire format.
+	// Parse the SCKA wire message using the braid's SCKA wire format.
 	braidMsg, chainCounter, decErr := mlkembraid.DeserializeSCKA(pqrMsg)
 	if decErr != nil {
 		return nil, &ErrPQRMessage{Reason: decErr.Error()}
@@ -547,33 +542,14 @@ func (s *SPQR) RecvBraid(pqrMsg []byte) (messageKey MessageKey, err error) {
 	return messageKey, nil
 }
 
-// recvLegacy handles the legacy 12-byte fixed wire format for backward
-// compatibility. Legacy messages carry epoch(8 BE) + counter(4 BE) with
-// no SCKA data.
-func (s *SPQR) recvLegacy(pqrMsg []byte) (MessageKey, error) {
-	epoch := binary.BigEndian.Uint64(pqrMsg[0:8])
-	counter := binary.BigEndian.Uint32(pqrMsg[8:12])
-
-	mk, err := s.Decrypt(epoch, counter)
-	if err != nil {
-		return nil, err
-	}
-	defer mk.Destroy()
-
-	messageKey := make([]byte, mk.Size())
-	copy(messageKey, mk.Bytes())
-	return messageKey, nil
-}
-
 // Recv processes a received PQR message and returns the updated serialized state
 // and the message key to use as HKDF salt for decryption.
 //
-// When braid state is present in the serialized state (V4 format), Recv
-// transparently uses the braid-integrated path: variable-length wire format
-// parsing + chain key derivation + SCKA chunk processing + epoch advancement.
-//
-// When no braid is present (V3 or earlier), Recv uses the legacy chain-only
-// path with 12-byte fixed wire format.
+// Both the braid-integrated and chain-only paths use the Rust-compatible SCKA
+// variable-length wire format: version(0x01) + varint(epoch) + varint(counter)
+// + msgType(1) + [chunk_data]. The epoch in wire messages is 1-indexed (SCKA
+// convention); Go's chain epochs are 0-indexed. sckaToChainEpoch handles
+// the conversion.
 //
 // If version negotiation is pending:
 //   - Empty pqrMsg (len 0): resolves to V0 (disabled), returns nil key
@@ -616,19 +592,20 @@ func Recv(serializedState []byte, pqrMsg []byte) (newState []byte, messageKey Me
 			return newState, messageKey, nil
 		}
 
-		// Legacy path: first message must be 12 bytes.
-		if len(pqrMsg) != pqrMsgSize {
-			return nil, nil, &ErrPQRMessage{
-				Reason: fmt.Sprintf("expected %d bytes, got %d", pqrMsgSize, len(pqrMsg)),
-			}
-		}
-
-		epoch := binary.BigEndian.Uint64(pqrMsg[0:8])
-		counter := binary.BigEndian.Uint32(pqrMsg[8:12])
-
-		mk, decErr := s.Decrypt(epoch, counter)
+		// Parse the SCKA wire message to extract the chain epoch and counter.
+		braidMsg, chainCounter, decErr := mlkembraid.DeserializeSCKA(pqrMsg)
 		if decErr != nil {
-			return nil, nil, decErr
+			return nil, nil, &ErrPQRMessage{Reason: decErr.Error()}
+		}
+		if braidMsg.Epoch == 0 {
+			return nil, nil, &ErrPQRMessage{Reason: "braid epoch must be >= 1"}
+		}
+		// Map SCKA 1-indexed epoch to Go 0-indexed chain epoch.
+		chainEpoch := sckaToChainEpoch(braidMsg.Epoch)
+
+		mk, decErr2 := s.Decrypt(chainEpoch, chainCounter)
+		if decErr2 != nil {
+			return nil, nil, decErr2
 		}
 		defer mk.Destroy()
 
@@ -665,19 +642,20 @@ func Recv(serializedState []byte, pqrMsg []byte) (newState []byte, messageKey Me
 		return newState, messageKey, nil
 	}
 
-	// Legacy chain-only path: 12-byte fixed wire format.
-	if len(pqrMsg) != pqrMsgSize {
-		return nil, nil, &ErrPQRMessage{
-			Reason: fmt.Sprintf("expected %d bytes, got %d", pqrMsgSize, len(pqrMsg)),
-		}
-	}
-
-	epoch := binary.BigEndian.Uint64(pqrMsg[0:8])
-	counter := binary.BigEndian.Uint32(pqrMsg[8:12])
-
-	mk, decErr := s.Decrypt(epoch, counter)
+	// Chain-only path: parse Rust-compatible SCKA wire message.
+	braidMsg, chainCounter, decErr := mlkembraid.DeserializeSCKA(pqrMsg)
 	if decErr != nil {
-		return nil, nil, decErr
+		return nil, nil, &ErrPQRMessage{Reason: decErr.Error()}
+	}
+	if braidMsg.Epoch == 0 {
+		return nil, nil, &ErrPQRMessage{Reason: "braid epoch must be >= 1"}
+	}
+	// Map SCKA 1-indexed epoch to Go 0-indexed chain epoch.
+	chainEpoch := sckaToChainEpoch(braidMsg.Epoch)
+
+	mk, decErr2 := s.Decrypt(chainEpoch, chainCounter)
+	if decErr2 != nil {
+		return nil, nil, decErr2
 	}
 	defer mk.Destroy()
 

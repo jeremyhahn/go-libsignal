@@ -1,0 +1,32 @@
+{
+  "source": "rust/zkgroup/src/crypto/signature.rs:73-115",
+  "rust_rev": "98915c442d",
+  "purpose": "Schnorr-style DLEQ signature (poksho::sign) over TEST_ARRAY_32_1 using a key pair derived from TEST_ARRAY_32 via Sho(HMAC-SHA256, label=b'Test_Signature'). The expected signature bytes are pinned from Rust's assert!(signature[..] == signature_result[..]) in test_signature().",
+  "vectors": [
+    {
+      "name": "sign_and_verify",
+      "inputs": {
+        "sho_label": "Test_Signature",
+        "sho_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "message_hex": "6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283"
+      },
+      "expected": {
+        "signature_hex": "db9bfbd61526c350f9be95171106d0065288cb33031be71725243780532caa07cbda74c4193b6ee6e95faecd41fb4419ceae3f4d63b9475927e110eeb7720b06",
+        "verify_result": "success"
+      }
+    },
+    {
+      "name": "verify_fails_on_tampered_message",
+      "inputs": {
+        "sho_label": "Test_Signature",
+        "sho_key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        "message_hex": "6565666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283"
+      },
+      "expected": {
+        "signature_hex": "db9bfbd61526c350f9be95171106d0065288cb33031be71725243780532caa07cbda74c4193b6ee6e95faecd41fb4419ceae3f4d63b9475927e110eeb7720b06",
+        "verify_result": "failure",
+        "note": "message_hex is TEST_ARRAY_32_1 with byte[0] XOR 0x01; same signature must fail"
+      }
+    }
+  ]
+}

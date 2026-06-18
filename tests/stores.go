@@ -14,7 +14,8 @@ import (
 
 // Define some in-memory stores for testing.
 
-// IdentityKeyStore
+// NewInMemoryIdentityKey returns an in-memory IdentityKey store populated
+// with the given identity key pair and local registration ID.
 func NewInMemoryIdentityKey(identityKey *identity.KeyPair, localRegistrationID uint32) *InMemoryIdentityKey {
 	return &InMemoryIdentityKey{
 		trustedKeys:         make(map[*protocol.SignalAddress]*identity.Key),
@@ -37,20 +38,28 @@ func (i *InMemoryIdentityKey) GetLocalRegistrationId() uint32 {
 	return i.localRegistrationID
 }
 
-func (i *InMemoryIdentityKey) SaveIdentity(address *protocol.SignalAddress, identityKey *identity.Key) {
+func (i *InMemoryIdentityKey) SaveIdentity(address *protocol.SignalAddress, identityKey *identity.Key) (store.IdentityChange, error) {
+	prev, existed := i.trustedKeys[address]
 	i.trustedKeys[address] = identityKey
+	if existed && prev != identityKey && prev.Fingerprint() != identityKey.Fingerprint() {
+		return store.IdentityChangeReplacedExisting, nil
+	}
+	return store.IdentityChangeNewOrUnchanged, nil
 }
 
-func (i *InMemoryIdentityKey) IsTrustedIdentity(address *protocol.SignalAddress, identityKey *identity.Key, direction store.Direction) bool {
+func (i *InMemoryIdentityKey) IsTrustedIdentity(address *protocol.SignalAddress, identityKey *identity.Key, direction store.Direction) (bool, error) {
 	trusted := i.trustedKeys[address]
-	return (trusted == nil || trusted.Fingerprint() == identityKey.Fingerprint())
+	return (trusted == nil || trusted.Fingerprint() == identityKey.Fingerprint()), nil
 }
 
 func (i *InMemoryIdentityKey) GetIdentity(address *protocol.SignalAddress) (*identity.Key, error) {
 	return i.trustedKeys[address], nil
 }
 
-// PreKeyStore
+// Compile-time interface check.
+var _ store.IdentityKey = (*InMemoryIdentityKey)(nil)
+
+// NewInMemoryPreKey returns an in-memory PreKey store.
 func NewInMemoryPreKey() *InMemoryPreKey {
 	return &InMemoryPreKey{
 		store: make(map[uint32]*record.PreKey),
@@ -61,24 +70,29 @@ type InMemoryPreKey struct {
 	store map[uint32]*record.PreKey
 }
 
-func (i *InMemoryPreKey) LoadPreKey(preKeyID uint32) *record.PreKey {
-	return i.store[preKeyID]
+func (i *InMemoryPreKey) LoadPreKey(preKeyID uint32) (*record.PreKey, error) {
+	return i.store[preKeyID], nil
 }
 
-func (i *InMemoryPreKey) StorePreKey(preKeyID uint32, preKeyRecord *record.PreKey) {
+func (i *InMemoryPreKey) StorePreKey(preKeyID uint32, preKeyRecord *record.PreKey) error {
 	i.store[preKeyID] = preKeyRecord
+	return nil
 }
 
-func (i *InMemoryPreKey) ContainsPreKey(preKeyID uint32) bool {
+func (i *InMemoryPreKey) ContainsPreKey(preKeyID uint32) (bool, error) {
 	_, ok := i.store[preKeyID]
-	return ok
+	return ok, nil
 }
 
-func (i *InMemoryPreKey) RemovePreKey(preKeyID uint32) {
+func (i *InMemoryPreKey) RemovePreKey(preKeyID uint32) error {
 	delete(i.store, preKeyID)
+	return nil
 }
 
-// SessionStore
+// Compile-time interface check.
+var _ store.PreKey = (*InMemoryPreKey)(nil)
+
+// NewInMemorySession returns an in-memory Session store using the provided serializer.
 func NewInMemorySession(serializer *serialize.Serializer) *InMemorySession {
 	return &InMemorySession{
 		sessions:   make(map[*protocol.SignalAddress]*record.Session),
@@ -91,46 +105,53 @@ type InMemorySession struct {
 	serializer *serialize.Serializer
 }
 
-func (i *InMemorySession) LoadSession(address *protocol.SignalAddress) *record.Session {
-	if i.ContainsSession(address) {
-		return i.sessions[address]
+func (i *InMemorySession) LoadSession(address *protocol.SignalAddress) (*record.Session, error) {
+	ok, err := i.ContainsSession(address)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return i.sessions[address], nil
 	}
 	sessionRecord := record.NewSession(i.serializer.Session, i.serializer.State)
 	i.sessions[address] = sessionRecord
-
-	return sessionRecord
+	return sessionRecord, nil
 }
 
-func (i *InMemorySession) GetSubDeviceSessions(name string) []uint32 {
+func (i *InMemorySession) GetSubDeviceSessions(name string) ([]uint32, error) {
 	var deviceIDs []uint32
-
 	for key := range i.sessions {
 		if key.Name() == name && key.DeviceID() != 1 {
 			deviceIDs = append(deviceIDs, key.DeviceID())
 		}
 	}
-
-	return deviceIDs
+	return deviceIDs, nil
 }
 
-func (i *InMemorySession) StoreSession(remoteAddress *protocol.SignalAddress, record *record.Session) {
+func (i *InMemorySession) StoreSession(remoteAddress *protocol.SignalAddress, record *record.Session) error {
 	i.sessions[remoteAddress] = record
+	return nil
 }
 
-func (i *InMemorySession) ContainsSession(remoteAddress *protocol.SignalAddress) bool {
+func (i *InMemorySession) ContainsSession(remoteAddress *protocol.SignalAddress) (bool, error) {
 	_, ok := i.sessions[remoteAddress]
-	return ok
+	return ok, nil
 }
 
-func (i *InMemorySession) DeleteSession(remoteAddress *protocol.SignalAddress) {
+func (i *InMemorySession) DeleteSession(remoteAddress *protocol.SignalAddress) error {
 	delete(i.sessions, remoteAddress)
+	return nil
 }
 
-func (i *InMemorySession) DeleteAllSessions() {
+func (i *InMemorySession) DeleteAllSessions() error {
 	i.sessions = make(map[*protocol.SignalAddress]*record.Session)
+	return nil
 }
 
-// SignedPreKeyStore
+// Compile-time interface check.
+var _ store.Session = (*InMemorySession)(nil)
+
+// NewInMemorySignedPreKey returns an in-memory SignedPreKey store.
 func NewInMemorySignedPreKey() *InMemorySignedPreKey {
 	return &InMemorySignedPreKey{
 		store: make(map[uint32]*record.SignedPreKey),
@@ -141,32 +162,35 @@ type InMemorySignedPreKey struct {
 	store map[uint32]*record.SignedPreKey
 }
 
-func (i *InMemorySignedPreKey) LoadSignedPreKey(signedPreKeyID uint32) *record.SignedPreKey {
-	return i.store[signedPreKeyID]
+func (i *InMemorySignedPreKey) LoadSignedPreKey(signedPreKeyID uint32) (*record.SignedPreKey, error) {
+	return i.store[signedPreKeyID], nil
 }
 
-func (i *InMemorySignedPreKey) LoadSignedPreKeys() []*record.SignedPreKey {
+func (i *InMemorySignedPreKey) LoadSignedPreKeys() ([]*record.SignedPreKey, error) {
 	var preKeys []*record.SignedPreKey
-
 	for _, record := range i.store {
 		preKeys = append(preKeys, record)
 	}
-
-	return preKeys
+	return preKeys, nil
 }
 
-func (i *InMemorySignedPreKey) StoreSignedPreKey(signedPreKeyID uint32, record *record.SignedPreKey) {
+func (i *InMemorySignedPreKey) StoreSignedPreKey(signedPreKeyID uint32, record *record.SignedPreKey) error {
 	i.store[signedPreKeyID] = record
+	return nil
 }
 
-func (i *InMemorySignedPreKey) ContainsSignedPreKey(signedPreKeyID uint32) bool {
+func (i *InMemorySignedPreKey) ContainsSignedPreKey(signedPreKeyID uint32) (bool, error) {
 	_, ok := i.store[signedPreKeyID]
-	return ok
+	return ok, nil
 }
 
-func (i *InMemorySignedPreKey) RemoveSignedPreKey(signedPreKeyID uint32) {
+func (i *InMemorySignedPreKey) RemoveSignedPreKey(signedPreKeyID uint32) error {
 	delete(i.store, signedPreKeyID)
+	return nil
 }
+
+// Compile-time interface check.
+var _ store.SignedPreKey = (*InMemorySignedPreKey)(nil)
 
 func NewInMemorySenderKey() *InMemorySenderKey {
 	return &InMemorySenderKey{
@@ -226,10 +250,10 @@ func (i *InMemoryKyberPreKey) MarkKyberPreKeyUsed(kyberPreKeyID uint32, _ uint32
 	return nil
 }
 
-// ContainsKyberPreKey returns true if the store contains a Kyber pre-key with the given ID.
-func (i *InMemoryKyberPreKey) ContainsKyberPreKey(kyberPreKeyID uint32) bool {
+// ContainsKyberPreKey returns (true, nil) if the store contains a Kyber pre-key with the given ID.
+func (i *InMemoryKyberPreKey) ContainsKyberPreKey(kyberPreKeyID uint32) (bool, error) {
 	_, ok := i.store[kyberPreKeyID]
-	return ok
+	return ok, nil
 }
 
 // Verify interface compliance.

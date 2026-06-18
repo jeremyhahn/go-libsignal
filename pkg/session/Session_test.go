@@ -43,13 +43,18 @@ func (i *inMemoryIdentityKey) GetLocalRegistrationId() uint32 {
 	return i.localRegistrationID
 }
 
-func (i *inMemoryIdentityKey) SaveIdentity(address *protocol.SignalAddress, identityKey *identity.Key) {
+func (i *inMemoryIdentityKey) SaveIdentity(address *protocol.SignalAddress, identityKey *identity.Key) (store.IdentityChange, error) {
+	prev, existed := i.trustedKeys[address.String()]
 	i.trustedKeys[address.String()] = identityKey
+	if existed && prev != identityKey {
+		return store.IdentityChangeReplacedExisting, nil
+	}
+	return store.IdentityChangeNewOrUnchanged, nil
 }
 
-func (i *inMemoryIdentityKey) IsTrustedIdentity(address *protocol.SignalAddress, identityKey *identity.Key, direction store.Direction) bool {
+func (i *inMemoryIdentityKey) IsTrustedIdentity(address *protocol.SignalAddress, identityKey *identity.Key, direction store.Direction) (bool, error) {
 	trusted := i.trustedKeys[address.String()]
-	return trusted == nil || trusted.Fingerprint() == identityKey.Fingerprint()
+	return trusted == nil || trusted.Fingerprint() == identityKey.Fingerprint(), nil
 }
 
 func (i *inMemoryIdentityKey) GetIdentity(address *protocol.SignalAddress) (*identity.Key, error) {
@@ -64,21 +69,23 @@ func newInMemoryPreKey() *inMemoryPreKey {
 	return &inMemoryPreKey{store: make(map[uint32]*record.PreKey)}
 }
 
-func (i *inMemoryPreKey) LoadPreKey(preKeyID uint32) *record.PreKey {
-	return i.store[preKeyID]
+func (i *inMemoryPreKey) LoadPreKey(preKeyID uint32) (*record.PreKey, error) {
+	return i.store[preKeyID], nil
 }
 
-func (i *inMemoryPreKey) StorePreKey(preKeyID uint32, preKeyRecord *record.PreKey) {
+func (i *inMemoryPreKey) StorePreKey(preKeyID uint32, preKeyRecord *record.PreKey) error {
 	i.store[preKeyID] = preKeyRecord
+	return nil
 }
 
-func (i *inMemoryPreKey) ContainsPreKey(preKeyID uint32) bool {
+func (i *inMemoryPreKey) ContainsPreKey(preKeyID uint32) (bool, error) {
 	_, ok := i.store[preKeyID]
-	return ok
+	return ok, nil
 }
 
-func (i *inMemoryPreKey) RemovePreKey(preKeyID uint32) {
+func (i *inMemoryPreKey) RemovePreKey(preKeyID uint32) error {
 	delete(i.store, preKeyID)
+	return nil
 }
 
 type inMemorySession struct {
@@ -93,34 +100,41 @@ func newInMemorySession(serializer *serialize.Serializer) *inMemorySession {
 	}
 }
 
-func (i *inMemorySession) LoadSession(address *protocol.SignalAddress) *record.Session {
-	if i.ContainsSession(address) {
-		return i.sessions[address.String()]
+func (i *inMemorySession) LoadSession(address *protocol.SignalAddress) (*record.Session, error) {
+	ok, err := i.ContainsSession(address)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return i.sessions[address.String()], nil
 	}
 	sessionRecord := record.NewSession(i.serializer.Session, i.serializer.State)
 	i.sessions[address.String()] = sessionRecord
-	return sessionRecord
+	return sessionRecord, nil
 }
 
-func (i *inMemorySession) GetSubDeviceSessions(name string) []uint32 {
+func (i *inMemorySession) GetSubDeviceSessions(name string) ([]uint32, error) {
+	return nil, nil
+}
+
+func (i *inMemorySession) StoreSession(remoteAddress *protocol.SignalAddress, record *record.Session) error {
+	i.sessions[remoteAddress.String()] = record
 	return nil
 }
 
-func (i *inMemorySession) StoreSession(remoteAddress *protocol.SignalAddress, record *record.Session) {
-	i.sessions[remoteAddress.String()] = record
-}
-
-func (i *inMemorySession) ContainsSession(remoteAddress *protocol.SignalAddress) bool {
+func (i *inMemorySession) ContainsSession(remoteAddress *protocol.SignalAddress) (bool, error) {
 	_, ok := i.sessions[remoteAddress.String()]
-	return ok
+	return ok, nil
 }
 
-func (i *inMemorySession) DeleteSession(remoteAddress *protocol.SignalAddress) {
+func (i *inMemorySession) DeleteSession(remoteAddress *protocol.SignalAddress) error {
 	delete(i.sessions, remoteAddress.String())
+	return nil
 }
 
-func (i *inMemorySession) DeleteAllSessions() {
+func (i *inMemorySession) DeleteAllSessions() error {
 	i.sessions = make(map[string]*record.Session)
+	return nil
 }
 
 type inMemorySignedPreKey struct {
@@ -131,29 +145,31 @@ func newInMemorySignedPreKey() *inMemorySignedPreKey {
 	return &inMemorySignedPreKey{store: make(map[uint32]*record.SignedPreKey)}
 }
 
-func (i *inMemorySignedPreKey) LoadSignedPreKey(signedPreKeyID uint32) *record.SignedPreKey {
-	return i.store[signedPreKeyID]
+func (i *inMemorySignedPreKey) LoadSignedPreKey(signedPreKeyID uint32) (*record.SignedPreKey, error) {
+	return i.store[signedPreKeyID], nil
 }
 
-func (i *inMemorySignedPreKey) LoadSignedPreKeys() []*record.SignedPreKey {
+func (i *inMemorySignedPreKey) LoadSignedPreKeys() ([]*record.SignedPreKey, error) {
 	var preKeys []*record.SignedPreKey
 	for _, r := range i.store {
 		preKeys = append(preKeys, r)
 	}
-	return preKeys
+	return preKeys, nil
 }
 
-func (i *inMemorySignedPreKey) StoreSignedPreKey(signedPreKeyID uint32, record *record.SignedPreKey) {
+func (i *inMemorySignedPreKey) StoreSignedPreKey(signedPreKeyID uint32, record *record.SignedPreKey) error {
 	i.store[signedPreKeyID] = record
+	return nil
 }
 
-func (i *inMemorySignedPreKey) ContainsSignedPreKey(signedPreKeyID uint32) bool {
+func (i *inMemorySignedPreKey) ContainsSignedPreKey(signedPreKeyID uint32) (bool, error) {
 	_, ok := i.store[signedPreKeyID]
-	return ok
+	return ok, nil
 }
 
-func (i *inMemorySignedPreKey) RemoveSignedPreKey(signedPreKeyID uint32) {
+func (i *inMemorySignedPreKey) RemoveSignedPreKey(signedPreKeyID uint32) error {
 	delete(i.store, signedPreKeyID)
+	return nil
 }
 
 // inMemorySignalProtocol combines all stores to implement store.SignalProtocol.
@@ -209,9 +225,9 @@ func (i *inMemoryKyberPreKey) MarkKyberPreKeyUsed(kyberPreKeyID uint32, _ uint32
 	return nil
 }
 
-func (i *inMemoryKyberPreKey) ContainsKyberPreKey(kyberPreKeyID uint32) bool {
+func (i *inMemoryKyberPreKey) ContainsKyberPreKey(kyberPreKeyID uint32) (bool, error) {
 	_, ok := i.store[kyberPreKeyID]
-	return ok
+	return ok, nil
 }
 
 // Verify interface compliance.
@@ -271,13 +287,15 @@ func newTestUser(t *testing.T, name string, deviceID uint32, serializer *seriali
 	u.kyberPreKeyStore = newInMemoryKyberPreKey()
 
 	for _, pk := range u.preKeys {
-		u.preKeyStore.StorePreKey(
+		if err := u.preKeyStore.StorePreKey(
 			pk.ID().Value,
 			record.NewPreKey(pk.ID().Value, pk.KeyPair(), serializer.PreKeyRecord),
-		)
+		); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	u.signedPreKeyStore.StoreSignedPreKey(
+	if err := u.signedPreKeyStore.StoreSignedPreKey(
 		u.signedPreKey.ID(),
 		record.NewSignedPreKey(
 			u.signedPreKey.ID(),
@@ -286,7 +304,9 @@ func newTestUser(t *testing.T, name string, deviceID uint32, serializer *seriali
 			u.signedPreKey.Signature(),
 			serializer.SignedPreKeyRecord,
 		),
-	)
+	); err != nil {
+		t.Fatal(err)
+	}
 
 	if err := u.kyberPreKeyStore.StoreKyberPreKey(42, u.kyberPreKey); err != nil {
 		t.Fatal(err)
@@ -445,7 +465,7 @@ func TestProcessBundle(t *testing.T) {
 	}
 
 	// Verify session was stored.
-	if !alice.sessionStore.ContainsSession(bob.address) {
+	if ok, _ := alice.sessionStore.ContainsSession(bob.address); !ok {
 		t.Fatal("session should exist after ProcessBundle")
 	}
 }
@@ -459,7 +479,9 @@ func TestProcessBundleUntrustedIdentity(t *testing.T) {
 
 	// Save a different identity for Bob to make his real key untrusted.
 	otherIdentity, _ := keyhelper.GenerateIdentityKeyPair()
-	alice.identityStore.SaveIdentity(bob.address, otherIdentity.PublicKey())
+	if _, err := alice.identityStore.SaveIdentity(bob.address, otherIdentity.PublicKey()); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	bundle := bob.kyberBundle()
 
@@ -902,7 +924,9 @@ func TestProcessUntrustedIdentity(t *testing.T) {
 
 	// Save a different identity for alice to make untrusted.
 	otherIdentity, _ := keyhelper.GenerateIdentityKeyPair()
-	bob.identityStore.SaveIdentity(alice.address, otherIdentity.PublicKey())
+	if _, err := bob.identityStore.SaveIdentity(alice.address, otherIdentity.PublicKey()); err != nil {
+		t.Fatalf("setup: SaveIdentity: %v", err)
+	}
 
 	_, err = bob.sessionBuilder.Process(preKeyMsg)
 	if err == nil {
@@ -1351,7 +1375,6 @@ func TestMultipleEncryptDecrypt(t *testing.T) {
 	}
 }
 
-
 // ============= DecryptWithState Version Mismatch =============
 
 func TestDecryptWithStateVersionMismatch(t *testing.T) {
@@ -1388,7 +1411,7 @@ func TestDecryptWithStateVersionMismatch(t *testing.T) {
 
 	// Construct a signal message with a different version to trigger version mismatch.
 	// We use a version 2 message against a version 3 session.
-	bobSessionRecord := bob.sessionStore.LoadSession(alice.address)
+	bobSessionRecord, _ := bob.sessionStore.LoadSession(alice.address)
 	bobState := bobSessionRecord.SessionState()
 
 	// Create a fake SignalMessage with version 2.
@@ -1408,7 +1431,8 @@ func TestDecryptWithStateVersionMismatch(t *testing.T) {
 		bobState.LocalIdentityKey(),
 		bobState.RemoteIdentityKey(),
 		serializer.SignalMessage,
-		nil, // pqRatchetMsg
+		nil,      // pqRatchetMsg
+		nil, nil, // localAddress, remoteAddress (no binding)
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1483,7 +1507,7 @@ func TestDecryptWithRecordNoValidSessions(t *testing.T) {
 
 	// Try to decrypt Carol's message using Bob's cipher that only has
 	// a session with Alice -- the SignalMessage won't match any session.
-	sessionRec := bob.sessionStore.LoadSession(alice.address)
+	sessionRec, _ := bob.sessionStore.LoadSession(alice.address)
 	_, _, err = bobCipher.DecryptWithRecord(sessionRec, carolPreKeyMsg.WhisperMessage())
 	if err == nil {
 		t.Fatal("expected 'No valid sessions' error")
@@ -1520,7 +1544,9 @@ func TestProcessNilOneTimePreKey(t *testing.T) {
 	}
 
 	// Remove the one-time pre-key from Bob's store before processing.
-	bob.preKeyStore.RemovePreKey(bob.preKeys[0].ID().Value)
+	if err := bob.preKeyStore.RemovePreKey(bob.preKeys[0].ID().Value); err != nil {
+		t.Fatalf("setup: RemovePreKey: %v", err)
+	}
 
 	_, err = bob.sessionBuilder.Process(preKeyMsg)
 	if err == nil {
@@ -2035,7 +2061,7 @@ func TestProcessBundleWithKyberNotFreshSession(t *testing.T) {
 	}
 
 	// Verify session was stored.
-	if !alice.sessionStore.ContainsSession(bob.address) {
+	if ok, _ := alice.sessionStore.ContainsSession(bob.address); !ok {
 		t.Fatal("session should exist after ProcessBundle with Kyber")
 	}
 }
@@ -2236,10 +2262,9 @@ func TestDecryptWithRecordPromotesPreviousState(t *testing.T) {
 	// Manually archive the current session state on Bob's side so that
 	// it becomes a previous state. This simulates what normally happens
 	// when IsFresh() returns false in processV3.
-	bobSessionRec := bob.sessionStore.LoadSession(alice.address)
+	bobSessionRec, _ := bob.sessionStore.LoadSession(alice.address)
 	bobSessionRec.ArchiveCurrentState()
-	bob.sessionStore.StoreSession(alice.address, bobSessionRec)
-
+	_ = bob.sessionStore.StoreSession(alice.address, bobSessionRec)
 	// Now set up a second session.
 	bundle2 := bob.kyberBundleWithPreKeyIndex(1)
 	if err := alice.sessionBuilder.ProcessBundle(bundle2); err != nil {
@@ -2261,7 +2286,7 @@ func TestDecryptWithRecordPromotesPreviousState(t *testing.T) {
 	delayedBytes, _ := delayedMsg.Serialize()
 	delayedPreKeyMsg, _ := protocol.NewPreKeySignalMessageFromBytes(delayedBytes, serializer.PreKeySignalMessage, serializer.SignalMessage)
 
-	sessionRec := bob.sessionStore.LoadSession(alice.address)
+	sessionRec, _ := bob.sessionStore.LoadSession(alice.address)
 	decDelayed, _, err := bobCipher.DecryptWithRecord(sessionRec, delayedPreKeyMsg.WhisperMessage())
 	if err != nil {
 		t.Fatal(err)
@@ -2768,7 +2793,7 @@ func TestDecryptWithStateSkippedMessageKeys(t *testing.T) {
 
 	// Now use DecryptWithState directly on the session state to exercise
 	// the skipped key retrieval path.
-	bobSessionRec := bob.sessionStore.LoadSession(bob.address)
+	bobSessionRec, _ := bob.sessionStore.LoadSession(bob.address)
 	_ = bobSessionRec // just validate it's loadable
 
 	// Decrypt msg0 using the stored skipped key.
@@ -2912,7 +2937,7 @@ func TestDecryptWithRecordAllPreviousStatesFail(t *testing.T) {
 
 	// Try to decrypt Carol's message with Bob's session record for Alice.
 	// Both current and archived states should fail.
-	sessionRec := bob.sessionStore.LoadSession(alice.address)
+	sessionRec, _ := bob.sessionStore.LoadSession(alice.address)
 	_, _, err = bobCipher.DecryptWithRecord(sessionRec, carolPreKeyMsg.WhisperMessage())
 	if err == nil {
 		t.Fatal("expected ErrNoValidSessions")
@@ -3083,7 +3108,7 @@ func TestDecryptWithRecordContinueThroughPreviousStates(t *testing.T) {
 	delayedBytes, _ := delayedMsg.Serialize()
 	delayedPreKeyMsg, _ := protocol.NewPreKeySignalMessageFromBytes(delayedBytes, serializer.PreKeySignalMessage, serializer.SignalMessage)
 
-	sessionRec := bob.sessionStore.LoadSession(alice.address)
+	sessionRec, _ := bob.sessionStore.LoadSession(alice.address)
 	decDelayed, _, err := bobCipher.DecryptWithRecord(sessionRec, delayedPreKeyMsg.WhisperMessage())
 	if err != nil {
 		t.Fatal(err)
@@ -3134,7 +3159,7 @@ func TestDecryptCounterTooFarIntoFuture(t *testing.T) {
 	msg2Signal, _ := protocol.NewSignalMessageFromBytes(msg2Bytes, serializer.SignalMessage)
 
 	// Get the ratchet key from Alice's message to forge a high-counter message.
-	bobSessionRec := bob.sessionStore.LoadSession(alice.address)
+	bobSessionRec, _ := bob.sessionStore.LoadSession(alice.address)
 	bobState := bobSessionRec.SessionState()
 
 	// Create a forged message with the same ratchet key but counter=26000.
@@ -3148,7 +3173,8 @@ func TestDecryptCounterTooFarIntoFuture(t *testing.T) {
 		bob.identityKeyPair.PublicKey(),
 		alice.identityKeyPair.PublicKey(),
 		serializer.SignalMessage,
-		nil, // pqRatchetMsg
+		nil,      // pqRatchetMsg
+		nil, nil, // localAddress, remoteAddress (no binding)
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -3224,7 +3250,7 @@ func TestDecryptWithStateMacVerificationError(t *testing.T) {
 	signalMsg, _ := protocol.NewSignalMessageFromBytes(msgBytes, serializer.SignalMessage)
 
 	// Get Bob's session state to call DecryptWithState directly.
-	bobSessionRec := bob.sessionStore.LoadSession(alice.address)
+	bobSessionRec, _ := bob.sessionStore.LoadSession(alice.address)
 	bobState := bobSessionRec.SessionState()
 
 	// Create a forged signal message using Bob's chain key and ratchet key
@@ -3247,7 +3273,8 @@ func TestDecryptWithStateMacVerificationError(t *testing.T) {
 		bobState.LocalIdentityKey(),
 		bobState.RemoteIdentityKey(),
 		serializer.SignalMessage,
-		nil, // pqRatchetMsg
+		nil,      // pqRatchetMsg
+		nil, nil, // localAddress, remoteAddress (no binding)
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -3322,43 +3349,48 @@ func newSerializingSessionStore(serializer *serialize.Serializer) *serializingSe
 	}
 }
 
-func (s *serializingSessionStore) LoadSession(address *protocol.SignalAddress) *record.Session {
+func (s *serializingSessionStore) LoadSession(address *protocol.SignalAddress) (*record.Session, error) {
 	key := address.String()
 	data, ok := s.data[key]
 	if !ok {
-		return record.NewSession(s.serializer.Session, s.serializer.State)
+		return record.NewSession(s.serializer.Session, s.serializer.State), nil
 	}
 	sess, err := record.NewSessionFromBytes(data, s.serializer.Session, s.serializer.State)
 	if err != nil {
-		return record.NewSession(s.serializer.Session, s.serializer.State)
+		return record.NewSession(s.serializer.Session, s.serializer.State), nil
 	}
-	return sess
+	return sess, nil
 }
 
-func (s *serializingSessionStore) GetSubDeviceSessions(name string) []uint32 { return nil }
+func (s *serializingSessionStore) GetSubDeviceSessions(name string) ([]uint32, error) {
+	return nil, nil
+}
 
-func (s *serializingSessionStore) StoreSession(address *protocol.SignalAddress, r *record.Session) {
+func (s *serializingSessionStore) StoreSession(address *protocol.SignalAddress, r *record.Session) error {
 	defer func() {
 		_ = recover() // Handle nil pointer panics during serialization
 	}()
 	data, err := r.Serialize()
 	if err != nil {
-		return
+		return nil
 	}
 	s.data[address.String()] = data
+	return nil
 }
 
-func (s *serializingSessionStore) ContainsSession(address *protocol.SignalAddress) bool {
+func (s *serializingSessionStore) ContainsSession(address *protocol.SignalAddress) (bool, error) {
 	_, ok := s.data[address.String()]
-	return ok
+	return ok, nil
 }
 
-func (s *serializingSessionStore) DeleteSession(address *protocol.SignalAddress) {
+func (s *serializingSessionStore) DeleteSession(address *protocol.SignalAddress) error {
 	delete(s.data, address.String())
+	return nil
 }
 
-func (s *serializingSessionStore) DeleteAllSessions() {
+func (s *serializingSessionStore) DeleteAllSessions() error {
 	s.data = make(map[string][]byte)
+	return nil
 }
 
 // ============= ProcessBundle with non-fresh (deserialized) session =============
@@ -3576,7 +3608,7 @@ func TestDecryptTooFarIntoFuture(t *testing.T) {
 	signalMsg, _ := protocol.NewSignalMessageFromBytes(msgBytes, serializer.SignalMessage)
 
 	// Get Bob's session state.
-	bobSessionRec := bob.sessionStore.LoadSession(alice.address)
+	bobSessionRec, _ := bob.sessionStore.LoadSession(alice.address)
 	bobState := bobSessionRec.SessionState()
 
 	// Create a forged message with counter far in the future (> maxFutureMessages=25000).
@@ -3596,7 +3628,8 @@ func TestDecryptTooFarIntoFuture(t *testing.T) {
 		bobState.LocalIdentityKey(),
 		bobState.RemoteIdentityKey(),
 		serializer.SignalMessage,
-		nil, // pqRatchetMsg
+		nil,      // pqRatchetMsg
+		nil, nil, // localAddress, remoteAddress (no binding)
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -3630,7 +3663,7 @@ func TestProcessBundleArchivesNonFreshSession(t *testing.T) {
 	}
 
 	// Verify session exists.
-	if !alice.sessionStore.ContainsSession(bob.address) {
+	if ok, _ := alice.sessionStore.ContainsSession(bob.address); !ok {
 		t.Fatal("session should exist after first ProcessBundle")
 	}
 
@@ -3931,7 +3964,7 @@ func TestPreviousCounterSpecCompliance(t *testing.T) {
 	}
 
 	// Verify Bob's sender chain index is now 3.
-	bobSession := bob.sessionStore.LoadSession(alice.address)
+	bobSession, _ := bob.sessionStore.LoadSession(alice.address)
 	bobSenderChainIndex := bobSession.SessionState().SenderChainKey().Index()
 	if bobSenderChainIndex != 3 {
 		t.Fatalf("expected Bob's sender chain index 3, got %d", bobSenderChainIndex)
@@ -3951,7 +3984,7 @@ func TestPreviousCounterSpecCompliance(t *testing.T) {
 	// Check Alice's previous counter after the DH ratchet.
 	// Alice's sender chain index before the ratchet was 1 (she sent 1 message: "setup").
 	// Per spec, PN = Ns (the number of messages sent on the previous chain).
-	aliceSession := alice.sessionStore.LoadSession(bob.address)
+	aliceSession, _ := alice.sessionStore.LoadSession(bob.address)
 	previousCounter := aliceSession.SessionState().PreviousCounter()
 
 	// Per Rust reference, previous_counter = max(current_index - 1, 0).
@@ -3969,7 +4002,7 @@ func TestPreviousCounterSpecCompliance(t *testing.T) {
 	}
 
 	// Alice's sender chain index should be 5.
-	aliceSession = alice.sessionStore.LoadSession(bob.address)
+	aliceSession, _ = alice.sessionStore.LoadSession(bob.address)
 	aliceSenderChainIndex := aliceSession.SessionState().SenderChainKey().Index()
 	if aliceSenderChainIndex != 5 {
 		t.Fatalf("expected Alice's sender chain index 5, got %d", aliceSenderChainIndex)
@@ -3986,7 +4019,7 @@ func TestPreviousCounterSpecCompliance(t *testing.T) {
 	}
 
 	// Previous counter should still be 0 (no new DH ratchet step happened).
-	aliceSession = alice.sessionStore.LoadSession(bob.address)
+	aliceSession, _ = alice.sessionStore.LoadSession(bob.address)
 	previousCounter = aliceSession.SessionState().PreviousCounter()
 	if previousCounter != 0 {
 		t.Fatalf("expected previous counter still 0 after same-chain message, got %d", previousCounter)
@@ -4024,7 +4057,7 @@ func TestPreviousCounterNotOffByOne(t *testing.T) {
 	}
 
 	// After sending 2 messages, Alice's sender chain index is 2.
-	aliceSession := alice.sessionStore.LoadSession(bob.address)
+	aliceSession, _ := alice.sessionStore.LoadSession(bob.address)
 	senderIdx := aliceSession.SessionState().SenderChainKey().Index()
 	if senderIdx != 2 {
 		t.Fatalf("expected sender chain index 2, got %d", senderIdx)
@@ -4076,7 +4109,7 @@ func TestDecryptStateRollbackOnFailure(t *testing.T) {
 	processAndComplete(t, bob.sessionBuilder, receivedMsg)
 
 	// Capture Bob's session state before attempted decryption of tampered message.
-	bobSession := bob.sessionStore.LoadSession(alice.address)
+	bobSession, _ := bob.sessionStore.LoadSession(alice.address)
 	bobState := bobSession.SessionState()
 	prevCounterBefore := bobState.PreviousCounter()
 	versionBefore := bobState.Version()
@@ -4113,7 +4146,7 @@ func TestDecryptStateRollbackOnFailure(t *testing.T) {
 	}
 
 	// Capture state before the failed decryption attempt.
-	bobSession = bob.sessionStore.LoadSession(alice.address)
+	bobSession, _ = bob.sessionStore.LoadSession(alice.address)
 	stateBeforeFail := bobSession.SessionState()
 	prevCounterBeforeFail := stateBeforeFail.PreviousCounter()
 
@@ -4131,7 +4164,7 @@ func TestDecryptStateRollbackOnFailure(t *testing.T) {
 	}
 
 	// Verify Bob's session state was NOT mutated by the failed decryption.
-	bobSession = bob.sessionStore.LoadSession(alice.address)
+	bobSession, _ = bob.sessionStore.LoadSession(alice.address)
 	stateAfterFail := bobSession.SessionState()
 	prevCounterAfterFail := stateAfterFail.PreviousCounter()
 	versionAfterFail := stateAfterFail.Version()
@@ -4329,7 +4362,7 @@ func TestDeferredActionsPreKeysPreservedOnDecryptFailure(t *testing.T) {
 	if preKeyID == nil {
 		t.Fatal("expected pre-key ID in message")
 	}
-	if !bob.preKeyStore.ContainsPreKey(preKeyID.Value) {
+	if ok, _ := bob.preKeyStore.ContainsPreKey(preKeyID.Value); !ok {
 		t.Fatal("pre-key should exist before Process")
 	}
 
@@ -4338,7 +4371,7 @@ func TestDeferredActionsPreKeysPreservedOnDecryptFailure(t *testing.T) {
 	if kyberID == nil {
 		t.Fatal("expected Kyber pre-key ID in message")
 	}
-	if !bob.kyberPreKeyStore.ContainsKyberPreKey(kyberID.Value) {
+	if ok, _ := bob.kyberPreKeyStore.ContainsKyberPreKey(kyberID.Value); !ok {
 		t.Fatal("Kyber pre-key should exist before Process")
 	}
 
@@ -4371,7 +4404,7 @@ func TestDeferredActionsPreKeysPreservedOnDecryptFailure(t *testing.T) {
 	// The critical assertion: pre-keys must still exist because Complete was
 	// never called. This simulates a decrypt failure scenario where the caller
 	// discards the DeferredActions without committing.
-	if !bob.preKeyStore.ContainsPreKey(preKeyID.Value) {
+	if ok, _ := bob.preKeyStore.ContainsPreKey(preKeyID.Value); !ok {
 		t.Fatal("one-time pre-key was burned despite no Complete() call")
 	}
 
@@ -4433,7 +4466,7 @@ func TestDeferredActionsCompleteCommitsSideEffects(t *testing.T) {
 	}
 
 	// Before Complete: pre-keys still exist, Kyber not marked.
-	if !bob.preKeyStore.ContainsPreKey(preKeyID.Value) {
+	if ok, _ := bob.preKeyStore.ContainsPreKey(preKeyID.Value); !ok {
 		t.Fatal("pre-key should exist before Complete")
 	}
 	if bob.kyberPreKeyStore.marked[kyberID.Value] {
@@ -4446,7 +4479,7 @@ func TestDeferredActionsCompleteCommitsSideEffects(t *testing.T) {
 	}
 
 	// After Complete: pre-keys consumed, Kyber marked.
-	if bob.preKeyStore.ContainsPreKey(preKeyID.Value) {
+	if ok, _ := bob.preKeyStore.ContainsPreKey(preKeyID.Value); ok {
 		t.Fatal("one-time pre-key should be removed after Complete")
 	}
 	if !bob.kyberPreKeyStore.marked[kyberID.Value] {
@@ -4502,10 +4535,10 @@ func TestDecryptPreKeyMessageAtomicFlow(t *testing.T) {
 	}
 
 	// After DecryptPreKeyMessage, all side effects should be committed.
-	if !bob.sessionStore.ContainsSession(alice.address) {
+	if ok, _ := bob.sessionStore.ContainsSession(alice.address); !ok {
 		t.Fatal("session should exist after DecryptPreKeyMessage")
 	}
-	if bob.preKeyStore.ContainsPreKey(preKeyID.Value) {
+	if ok, _ := bob.preKeyStore.ContainsPreKey(preKeyID.Value); ok {
 		t.Fatal("one-time pre-key should be removed after DecryptPreKeyMessage")
 	}
 
@@ -4567,4 +4600,3 @@ func TestDeferredActionsNilPreKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-

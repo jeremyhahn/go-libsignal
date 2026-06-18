@@ -175,7 +175,7 @@ func keyPairFromScalars(a1, a2 *ristretto255.Scalar, domain Domain) *KeyPair {
 	return &KeyPair{
 		A1:        a1,
 		A2:        a2,
-		PublicKey:  pk,
+		PublicKey: pk,
 		domain:    domain,
 	}
 }

@@ -51,7 +51,7 @@ func (k *MLKEM1024KEM) Generate() (*KeyPair, error) {
 // The public key must be of type KeyTypeMLKEM1024.
 func (k *MLKEM1024KEM) Encapsulate(publicKey *PublicKey) (*SharedSecret, *Ciphertext, error) {
 	if publicKey.Type() != KeyTypeMLKEM1024 {
-		return nil, nil, &KeyTypeMismatchError{Expected: "MLKEM1024", Actual: publicKey.Type()}
+		return nil, nil, &KeyTypeMismatchError{Expected: KeyTypeMLKEM1024, Actual: publicKey.Type()}
 	}
 
 	ek, err := mlkem.NewEncapsulationKey1024(publicKey.Data())
@@ -73,10 +73,10 @@ func (k *MLKEM1024KEM) Encapsulate(publicKey *PublicKey) (*SharedSecret, *Cipher
 // secret key. Both the secret key and ciphertext must be of type KeyTypeMLKEM1024.
 func (k *MLKEM1024KEM) Decapsulate(secretKey *SecretKey, ciphertext *Ciphertext) (*SharedSecret, error) {
 	if secretKey.Type() != KeyTypeMLKEM1024 {
-		return nil, &KeyTypeMismatchError{Expected: "MLKEM1024", Actual: secretKey.Type(), KeyKind: "secret key"}
+		return nil, &KeyTypeMismatchError{Expected: KeyTypeMLKEM1024, Actual: secretKey.Type(), KeyKind: "secret key"}
 	}
 	if ciphertext.Type() != KeyTypeMLKEM1024 {
-		return nil, &KeyTypeMismatchError{Expected: "MLKEM1024", Actual: ciphertext.Type(), KeyKind: "ciphertext"}
+		return nil, &KeyTypeMismatchError{Expected: KeyTypeMLKEM1024, Actual: ciphertext.Type(), KeyKind: "ciphertext"}
 	}
 
 	// Reconstruct the decapsulation key from the 64-byte seed.

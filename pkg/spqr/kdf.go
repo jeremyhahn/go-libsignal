@@ -10,11 +10,17 @@ import (
 const (
 	// ChainStartInfo is the HKDF info string for session initialization.
 	// Note the double space before "Start" which matches the Rust reference.
+	// Verified byte-identical to signalapp/SparsePostQuantumRatchet v1.5.1
+	// at src/chain.rs:334.
 	ChainStartInfo = "Signal PQ Ratchet V1 Chain  Start"
 	// ChainAddEpochInfo is the HKDF info string for adding a new epoch.
+	// Verified byte-identical to SparsePostQuantumRatchet v1.5.1
+	// src/chain.rs:360.
 	ChainAddEpochInfo = "Signal PQ Ratchet V1 Chain Add Epoch"
 	// ChainNextInfo is the HKDF info label for chain key stepping.
 	// The full info is: counter_be32 || ChainNextInfo.
+	// Verified byte-identical to SparsePostQuantumRatchet v1.5.1
+	// src/chain.rs:237.
 	ChainNextInfo = "Signal PQ Ratchet V1 Chain Next"
 
 	// kdfOutputLen is the total output length: RK(32) + CKs(32) + CKr(32).

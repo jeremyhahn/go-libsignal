@@ -148,14 +148,14 @@ func TestBobCompleteEncapsulationDeferredTwoPhase(t *testing.T) {
 	}
 
 	state := &State{
-		kind:          StateCt1Sampled,
-		epoch:         5,
-		auth:          auth,
-		bobEkSeed:     mustSecret(t, ekSeed),
-		bobHek:        mustSecret(t, hek),
+		kind:           StateCt1Sampled,
+		epoch:          5,
+		auth:           auth,
+		bobEkSeed:      mustSecret(t, ekSeed),
+		bobHek:         mustSecret(t, hek),
 		bobEncapSecret: encapsSecret,
-		ekDecoder:     ekDec,
-		chunkSize:     testChunkSize,
+		ekDecoder:      ekDec,
+		chunkSize:      testChunkSize,
 	}
 
 	receivingEpoch, outputKey, err := state.bobCompleteEncapsulationDeferred(kemImpl, testChunkSize)

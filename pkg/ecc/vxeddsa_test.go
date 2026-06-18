@@ -662,3 +662,35 @@ func TestXEdDSA_RatchetingSessionKeyVector(t *testing.T) {
 		}
 	})
 }
+
+// TestHashToPoint_NeverReturnsError documents ECC-11: per the Elligator 2 spec
+// the constructed y-coordinate is always a valid Edwards point, so the error
+// branch inside hashToPoint (vxeddsa.go:187-190) is unreachable in practice.
+// This test exercises a wide range of inputs and asserts no error is returned,
+// validating the contract.  A future regression that breaks the algorithm
+// (producing an off-curve y) would surface here rather than silently swallowing
+// the failure as a "hash to point failed" error downstream.
+func TestHashToPoint_NeverReturnsError(t *testing.T) {
+	inputs := [][]byte{
+		{},
+		{0x00},
+		{0xFF},
+		{0x7F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+			0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+			0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+			0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F}, // near p-1
+		[]byte("hash to point boundary test — all-zeros SHA-512 prefix"),
+	}
+
+	// Also exercise all single-byte values.
+	for i := 0; i < 256; i++ {
+		inputs = append(inputs, []byte{byte(i)})
+	}
+
+	for _, in := range inputs {
+		_, err := hashToPoint(in)
+		if err != nil {
+			t.Fatalf("hashToPoint returned unexpected error for input %x: %v", in, err)
+		}
+	}
+}

@@ -77,13 +77,13 @@ func TestSerializeBraidBob_RoundTrip(t *testing.T) {
 	if bob.state.headerDecoder == nil {
 		t.Fatal("original Bob should have a headerDecoder")
 	}
-	if restored.state.headerDecoder.expectedSize != bob.state.headerDecoder.expectedSize {
-		t.Errorf("headerDecoder expectedSize mismatch: got %d, want %d",
-			restored.state.headerDecoder.expectedSize, bob.state.headerDecoder.expectedSize)
+	if restored.state.headerDecoder.originalLen != bob.state.headerDecoder.originalLen {
+		t.Errorf("headerDecoder originalLen mismatch: got %d, want %d",
+			restored.state.headerDecoder.originalLen, bob.state.headerDecoder.originalLen)
 	}
-	if restored.state.headerDecoder.totalChunks != bob.state.headerDecoder.totalChunks {
-		t.Errorf("headerDecoder totalChunks mismatch: got %d, want %d",
-			restored.state.headerDecoder.totalChunks, bob.state.headerDecoder.totalChunks)
+	if restored.state.headerDecoder.TotalChunks() != bob.state.headerDecoder.TotalChunks() {
+		t.Errorf("headerDecoder TotalChunks mismatch: got %d, want %d",
+			restored.state.headerDecoder.TotalChunks(), bob.state.headerDecoder.TotalChunks())
 	}
 }
 
@@ -310,14 +310,22 @@ func TestSerializeState_EncoderPreservation(t *testing.T) {
 		t.Errorf("consumed %d bytes, expected %d", consumed, len(buf))
 	}
 
-	if !bytes.Equal(restored.data, enc.data) {
-		t.Error("encoder data mismatch")
+	// Verify the restored encoder produces the same chunks as the original
+	// from their current position onward.
+	if restored.TotalChunks() != enc.TotalChunks() {
+		t.Errorf("encoder TotalChunks mismatch: got %d, want %d", restored.TotalChunks(), enc.TotalChunks())
 	}
-	if restored.offset != enc.offset {
-		t.Errorf("encoder offset mismatch: got %d, want %d", restored.offset, enc.offset)
+	if restored.sent != enc.sent {
+		t.Errorf("encoder sent mismatch: got %d, want %d", restored.sent, enc.sent)
 	}
-	if restored.total != enc.total {
-		t.Errorf("encoder total mismatch: got %d, want %d", restored.total, enc.total)
+	if restored.HasMore() != enc.HasMore() {
+		t.Errorf("encoder HasMore mismatch: got %v, want %v", restored.HasMore(), enc.HasMore())
+	}
+	// Both encoders should emit the same next chunk.
+	nextRestored := restored.NextChunk()
+	nextOrig := enc.NextChunk()
+	if !bytes.Equal(nextRestored, nextOrig) {
+		t.Errorf("next chunk mismatch after round-trip: restored=%x orig=%x", nextRestored, nextOrig)
 	}
 }
 
@@ -355,14 +363,14 @@ func TestSerializeState_DecoderPreservation(t *testing.T) {
 		t.Errorf("consumed %d bytes, expected %d", consumed, len(buf))
 	}
 
-	if restored.expectedSize != dec.expectedSize {
-		t.Errorf("expectedSize mismatch: got %d, want %d", restored.expectedSize, dec.expectedSize)
+	if restored.originalLen != dec.originalLen {
+		t.Errorf("originalLen mismatch: got %d, want %d", restored.originalLen, dec.originalLen)
 	}
-	if restored.totalChunks != dec.totalChunks {
-		t.Errorf("totalChunks mismatch: got %d, want %d", restored.totalChunks, dec.totalChunks)
+	if restored.TotalChunks() != dec.TotalChunks() {
+		t.Errorf("TotalChunks mismatch: got %d, want %d", restored.TotalChunks(), dec.TotalChunks())
 	}
-	if len(restored.chunks) != len(dec.chunks) {
-		t.Errorf("chunks count mismatch: got %d, want %d", len(restored.chunks), len(dec.chunks))
+	if restored.ReceivedCount() != dec.ReceivedCount() {
+		t.Errorf("ReceivedCount mismatch: got %d, want %d", restored.ReceivedCount(), dec.ReceivedCount())
 	}
 }
 

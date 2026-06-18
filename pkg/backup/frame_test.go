@@ -2,6 +2,7 @@ package backup
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
@@ -154,6 +155,34 @@ func TestVerifyHMAC(t *testing.T) {
 	data[len(data)-1] ^= 0xFF
 	if err := VerifyHMAC(key, bytes.NewReader(data)); err == nil {
 		t.Fatal("VerifyHMAC should fail with corrupted data")
+	}
+}
+
+// TestStripModernHeaderMetaLenOverflow is a regression test for the uint64
+// addition overflow in stripModernHeader. A maximal-varint metaLen
+// (0xFFFFFFFFFFFFFFFF) previously caused `uint64(off) + metaLen` to wrap
+// around and pass the bounds check, leading to a slice-bounds panic.
+// The fix uses `metaLen > uint64(len(data)-off)` which is overflow-safe.
+func TestStripModernHeaderMetaLenOverflow(t *testing.T) {
+	// Build a minimal modern header:
+	//   8-byte magic + 10-byte maximal varint (metaLen = 2^64-1) + no payload.
+	// Before the fix this panicked; after the fix it must return *ErrReadingMetadata.
+	header := make([]byte, 0, 18)
+	header = append(header, []byte(MagicNumber)...)
+	// Encode 0xFFFFFFFFFFFFFFFF as a 10-byte uvarint.
+	maxVarint := []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01}
+	header = append(header, maxVarint...)
+
+	key := testKey()
+	defer key.Zeroize()
+	dec := NewFrameDecryptor(key)
+	_, err := dec.DecryptFrames(bytes.NewReader(header))
+	if err == nil {
+		t.Fatal("expected error for maximal-varint metaLen overflow, got nil")
+	}
+	var metaErr *ErrReadingMetadata
+	if !errors.As(err, &metaErr) {
+		t.Errorf("expected *ErrReadingMetadata (directly or wrapped), got %T: %v", err, err)
 	}
 }
 

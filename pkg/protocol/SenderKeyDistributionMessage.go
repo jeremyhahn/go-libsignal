@@ -166,7 +166,7 @@ func (p *SenderKeyDistributionMessage) Serialize() ([]byte, error) {
 		ID:             p.id,
 		Iteration:      p.iteration,
 		ChainKey:       p.chainKey,
-		SigningKey:      p.signatureKey.Serialize(),
+		SigningKey:     p.signatureKey.Serialize(),
 		Version:        p.version,
 	}
 	return p.serializer.Serialize(structure)

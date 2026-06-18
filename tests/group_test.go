@@ -46,7 +46,7 @@ func TestGroupSessionBuilder(t *testing.T) {
 	aliceSendingCipher := groups.NewGroupCipher(alice.groupBuilder, aliceSenderKeyName, alice.senderKeyStore)
 
 	// Create a one-to-one session cipher to encrypt the skdm to Bob.
-	aliceBobSessionCipher := session.NewCipher(alice.sessionBuilder, bob.address)
+	aliceBobSessionCipher := session.NewCipherWithLocalAddress(alice.sessionBuilder, alice.address, bob.address)
 	aliceSkdmBytes, err := aliceSkdm.Serialize()
 	if err != nil {
 		t.Fatalf("Unable to serialize skdm: %v", err)
@@ -69,7 +69,7 @@ func TestGroupSessionBuilder(t *testing.T) {
 	}
 
 	// Create a session builder and decrypt the prekey message using the deferred pattern.
-	bobAliceSessionCipher := session.NewCipher(bob.sessionBuilder, alice.address)
+	bobAliceSessionCipher := session.NewCipherWithLocalAddress(bob.sessionBuilder, bob.address, alice.address)
 	msg, _, err := bobAliceSessionCipher.DecryptPreKeyMessage(bob.sessionBuilder, receivedMessage)
 	if err != nil {
 		t.Fatalf("Unable to process/decrypt prekeysignal message: %v", err)

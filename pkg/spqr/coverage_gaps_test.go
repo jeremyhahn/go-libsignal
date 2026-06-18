@@ -628,59 +628,6 @@ func TestRecvBraidInvalidWireMessage(t *testing.T) {
 	}
 }
 
-// ---- recvLegacy path ----
-
-// TestRecvLegacyPath exercises the recvLegacy function via RecvBraid with a
-// 12-byte (legacy) message. We use the braid-integrated SPQR and supply
-// a 12-byte message which triggers the legacy dispatch.
-func TestRecvLegacyPath(t *testing.T) {
-	ss := randomBytes(t, 32)
-	ssCopy := make([]byte, 32)
-	copy(ssCopy, ss)
-
-	kem := mlkembraid.NewMLKEM768IncrementalKEM()
-	braid, err := mlkembraid.InitBob(ss, kem, mlkembraid.DefaultChunkSize)
-	if err != nil {
-		t.Fatalf("InitBob: %v", err)
-	}
-
-	s, err := InitWithBraid(ss, DirectionB2A, maxJump, braid)
-	if err != nil {
-		t.Fatalf("InitWithBraid: %v", err)
-	}
-	defer s.Zeroize()
-
-	// Build a sender (no braid) that will produce a 12-byte legacy message.
-	sender, err := Init(ssCopy, DirectionA2B, maxJump)
-	if err != nil {
-		t.Fatalf("Init sender: %v", err)
-	}
-	defer sender.Zeroize()
-
-	mk, counter, err := sender.Encrypt(0)
-	if err != nil {
-		t.Fatalf("Encrypt: %v", err)
-	}
-	defer mk.Destroy()
-
-	// Build legacy 12-byte wire message.
-	legacyMsg := make([]byte, legacyPQRMsgSize)
-	binary.BigEndian.PutUint64(legacyMsg[0:8], 0)
-	binary.BigEndian.PutUint32(legacyMsg[8:12], counter)
-
-	// RecvBraid should dispatch to recvLegacy for 12-byte messages.
-	recvMK, err := s.RecvBraid(legacyMsg)
-	if err != nil {
-		t.Fatalf("RecvBraid (legacy): %v", err)
-	}
-	if len(recvMK) == 0 {
-		t.Fatal("expected non-nil message key from legacy path")
-	}
-	if !bytes.Equal(mk.Bytes(), recvMK) {
-		t.Error("legacy path: message key mismatch")
-	}
-}
-
 // ---- InitialStateWithParams unsupported version ----
 
 func TestInitialStateWithParamsUnsupportedVersion(t *testing.T) {
@@ -702,10 +649,11 @@ func TestInitialStateWithParamsUnsupportedVersion(t *testing.T) {
 
 // ---- Deserialize edge cases ----
 
-func TestDeserializeEmptyData(t *testing.T) {
-	_, err := Deserialize([]byte{})
+// TestDeserializeGarbageProtoData verifies that garbage bytes return ErrDeserialize.
+func TestDeserializeGarbageProtoData(t *testing.T) {
+	_, err := Deserialize([]byte{0xFF, 0xFE, 0xFD, 0x00, 0x01, 0x02})
 	if err == nil {
-		t.Fatal("expected error for empty data")
+		t.Fatal("expected error for garbage proto bytes")
 	}
 	var e *ErrDeserialize
 	if !errors.As(err, &e) {
@@ -713,305 +661,12 @@ func TestDeserializeEmptyData(t *testing.T) {
 	}
 }
 
-func TestDeserializeUnsupportedVersion(t *testing.T) {
-	_, err := Deserialize([]byte{0xAA})
-	if err == nil {
-		t.Fatal("expected error for unknown version")
-	}
-	var e *ErrDeserialize
-	if !errors.As(err, &e) {
-		t.Errorf("expected *ErrDeserialize, got %T: %v", err, err)
-	}
-}
-
-// TestDeserializeV3InvalidNegotiationByte tests the V3 invalid negotiation byte path.
-func TestDeserializeV3InvalidNegotiationByte(t *testing.T) {
-	data := []byte{serializeVersionV3, 0x02} // 0x02 is invalid
-	_, err := Deserialize(data)
-	if err == nil {
-		t.Fatal("expected error for invalid V3 negotiation byte")
-	}
-}
-
-// TestDeserializeV3ResolvedInvalidVersion tests V3 with unsupported resolved version.
-func TestDeserializeV3ResolvedInvalidVersion(t *testing.T) {
-	data := []byte{serializeVersionV3, 0x01, 0xAA} // 0xAA is unknown version
-	_, err := Deserialize(data)
-	if err == nil {
-		t.Fatal("expected error for unsupported V3 resolved version")
-	}
-}
-
-// TestDeserializeV3PendingTrailingData tests V3 pending with extra trailing bytes.
-func TestDeserializeV3PendingTrailingData(t *testing.T) {
-	// Build a valid V3 pending buffer, then add extra bytes.
-	ss := randomBytes(t, 32)
-	state, err := InitialState(ss, DirectionA2B, false)
-	if err != nil {
-		t.Fatalf("InitialState: %v", err)
-	}
-	// state[0] should be serializeVersionV3.
-	if state[0] != serializeVersionV3 {
-		t.Skip("state is not V3 format, skipping")
-	}
-	// Append a trailing byte.
-	corrupted := append(state, 0xFF)
-	_, err = Deserialize(corrupted)
-	if err == nil {
-		t.Fatal("expected error for V3 pending trailing data")
-	}
-}
-
-// TestDeserializeV3DisabledWrongSize tests V3 disabled with wrong size.
-func TestDeserializeV3DisabledWrongSize(t *testing.T) {
-	// 4 bytes: version + negotiated + resolvedVersion + extra
-	data := []byte{serializeVersionV3, 0x01, byte(VersionV0), 0xFF}
-	_, err := Deserialize(data)
-	if err == nil {
-		t.Fatal("expected error for V3 disabled with trailing data")
-	}
-}
-
-// TestDeserializeV4InvalidNegotiationByte tests V4 invalid negotiation byte.
-func TestDeserializeV4InvalidNegotiationByte(t *testing.T) {
-	data := []byte{serializeVersionV4, 0x02}
-	_, err := Deserialize(data)
-	if err == nil {
-		t.Fatal("expected error for V4 invalid negotiation byte")
-	}
-}
-
-// TestDeserializeV4ResolvedUnsupportedVersion tests V4 with unsupported resolved version.
-func TestDeserializeV4ResolvedUnsupportedVersion(t *testing.T) {
-	data := []byte{serializeVersionV4, 0x01, 0xFF}
-	_, err := Deserialize(data)
-	if err == nil {
-		t.Fatal("expected error for V4 unsupported resolved version")
-	}
-}
-
-// TestDeserializeV4PendingTooShort tests V4 pending data that is too short.
-func TestDeserializeV4PendingTooShort(t *testing.T) {
-	// V4 pending requires at least 41 bytes; provide less.
-	data := []byte{serializeVersionV4, 0x00, 0x01}
-	_, err := Deserialize(data)
-	if err == nil {
-		t.Fatal("expected error for V4 pending too short")
-	}
-}
-
-// TestDeserializeV4PendingInvalidDirection tests V4 pending with invalid direction.
-func TestDeserializeV4PendingInvalidDirection(t *testing.T) {
-	// Build a V4 pending buffer with invalid direction byte.
-	buf := make([]byte, 1+1+keyLen+1+1+4+1) // minimum for V4 pending
-	buf[0] = serializeVersionV4
-	buf[1] = 0x00           // pending
-	buf[1+1+keyLen] = 0x00  // minVersion = V0
-	buf[1+1+keyLen+1] = 0x05 // invalid direction (> 1)
-	binary.BigEndian.PutUint32(buf[1+1+keyLen+2:], uint32(maxJump))
-	buf[1+1+keyLen+2+4] = 0x00 // hasBraid = false
-
-	_, err := Deserialize(buf)
-	if err == nil {
-		t.Fatal("expected error for V4 pending invalid direction")
-	}
-}
-
-// TestDeserializeV4PendingTrailingData tests V4 pending with trailing data.
-func TestDeserializeV4PendingTrailingData(t *testing.T) {
-	// Build a valid V4 pending buffer without braid, then add extra bytes.
-	buf := make([]byte, 1+1+keyLen+1+1+4+1+1) // extra byte at end
-	buf[0] = serializeVersionV4
-	buf[1] = 0x00 // pending
-	// authKey at [2:2+32] stays zero
-	buf[2+keyLen] = 0x00 // minVersion = V0
-	buf[2+keyLen+1] = 0x00 // direction = A2B
-	binary.BigEndian.PutUint32(buf[2+keyLen+2:], uint32(maxJump))
-	buf[2+keyLen+6] = 0x00 // hasBraid = false
-	buf[2+keyLen+7] = 0xFF // trailing data
-
-	_, err := Deserialize(buf)
-	if err == nil {
-		t.Fatal("expected error for V4 pending trailing data")
-	}
-}
-
-// TestDeserializeV4PendingBraidTooLarge tests V4 pending with braid length > maxBraidSerializedLen.
-func TestDeserializeV4PendingBraidTooLarge(t *testing.T) {
-	// Build V4 pending with hasBraid=1 and braidLen > maxBraidSerializedLen.
-	size := 1 + 1 + keyLen + 1 + 1 + 4 + 1 + 4 // header + hasBraid + braidLen(4)
-	buf := make([]byte, size)
-	buf[0] = serializeVersionV4
-	buf[1] = 0x00 // pending
-	// authKey stays zero
-	off := 2 + keyLen
-	buf[off] = 0x00 // minVersion
-	off++
-	buf[off] = 0x00 // direction A2B
-	off++
-	binary.BigEndian.PutUint32(buf[off:], uint32(maxJump))
-	off += 4
-	buf[off] = 0x01 // hasBraid
-	off++
-	binary.BigEndian.PutUint32(buf[off:], uint32(maxBraidSerializedLen+1)) // too large
-
-	_, err := Deserialize(buf)
-	if err == nil {
-		t.Fatal("expected error for V4 pending braid too large")
-	}
-	var e *ErrBraidTooLarge
-	if !errors.As(err, &e) {
-		t.Errorf("expected *ErrBraidTooLarge, got %T: %v", err, err)
-	}
-}
-
-// TestDeserializeV4ResolvedTooShort tests V4 resolved data that is too short.
-func TestDeserializeV4ResolvedTooShort(t *testing.T) {
-	data := []byte{serializeVersionV4, 0x01, byte(VersionV1), 0x00} // V4 resolved but too short
-	_, err := Deserialize(data)
-	if err == nil {
-		t.Fatal("expected error for V4 resolved too short")
-	}
-}
-
-// TestDeserializeV4ResolvedInvalidDirection tests V4 resolved with invalid direction.
-func TestDeserializeV4ResolvedInvalidDirection(t *testing.T) {
-	// Minimum valid V4 resolved header size: 3 (V4 hdr) + 1+8+8+32+4+4 = 60
-	buf := make([]byte, 3+1+8+8+keyLen+4+4)
-	buf[0] = serializeVersionV4
-	buf[1] = 0x01          // resolved
-	buf[2] = byte(VersionV1)
-	buf[3] = 0x05           // invalid direction
-	// rest stays zero (numChains=0, numSkipped=0 would be fine but direction is rejected first)
-
-	_, err := Deserialize(buf)
-	if err == nil {
-		t.Fatal("expected error for V4 resolved invalid direction")
-	}
-}
-
-// TestDeserializeV4ResolvedChainCountExceedsMax tests V4 resolved with too many chains.
-func TestDeserializeV4ResolvedChainCountExceedsMax(t *testing.T) {
-	buf := make([]byte, 3+1+8+8+keyLen+4+4)
-	buf[0] = serializeVersionV4
-	buf[1] = 0x01
-	buf[2] = byte(VersionV1)
-	buf[3] = 0x00 // direction A2B
-	// epoch and sendEpoch stay 0
-	// rootKey stays zero
-	off := 3 + 1 + 8 + 8 + keyLen
-	binary.BigEndian.PutUint32(buf[off:], uint32(maxJump)) // maxJump
-	off += 4
-	binary.BigEndian.PutUint32(buf[off:], uint32(maxDeserializedChains+1)) // too many chains
-
-	_, err := Deserialize(buf)
-	if err == nil {
-		t.Fatal("expected error for V4 resolved chain count too large")
-	}
-}
-
-// TestDeserializeV4ResolvedBraidTooLarge tests V4 resolved with braid length exceeding max.
-func TestDeserializeV4ResolvedBraidTooLarge(t *testing.T) {
-	// Use InitialStateWithBraidResolved to get a valid V4 resolved state,
-	// then corrupt the braid length field.
-	ss := randomBytes(t, 32)
-	kem := mlkembraid.NewMLKEM768IncrementalKEM()
-	braid, err := mlkembraid.InitAlice(ss, kem, mlkembraid.DefaultChunkSize)
-	if err != nil {
-		t.Fatalf("InitAlice: %v", err)
-	}
-
-	state, err := InitialStateWithBraidResolved(ss, DirectionA2B, false, braid)
-	if err != nil {
-		t.Fatalf("InitialStateWithBraidResolved: %v", err)
-	}
-	if state[0] != serializeVersionV4 {
-		t.Skip("state not V4 format")
-	}
-
-	// Locate the hasBraid byte and braidLen field by scanning for 0x01 after chains/skippedKeys.
-	// The V4 resolved format ends with: hasBraid(1) + braidLen(4) + braidData.
-	// We know the last 5+ bytes encode hasBraid+braidLen+braidData.
-	// Find position: len(state) - braidDataLen - 4 - 1.
-	// Instead, just corrupt with a fresh oversized state.
-	// Build minimal V4 resolved with 0 chains, 0 skipped keys, hasBraid=1, braidLen=maxBraidSerializedLen+1.
-	headerSize := 3 + 1 + 8 + 8 + keyLen + 4 + 4 + 4 // V4 hdr + direction + epoch + sendEpoch + rk + maxJump + numChains + numSkipped
-	buf := make([]byte, headerSize+1+4)
-	buf[0] = serializeVersionV4
-	buf[1] = 0x01
-	buf[2] = byte(VersionV1)
-	buf[3] = 0x00 // direction
-	off := 3 + 1 + 8 + 8 + keyLen
-	binary.BigEndian.PutUint32(buf[off:], uint32(maxJump))
-	off += 4
-	// numChains = 0
-	off += 4
-	// numSkipped = 0
-	off += 4
-	buf[off] = 0x01 // hasBraid
-	off++
-	binary.BigEndian.PutUint32(buf[off:], uint32(maxBraidSerializedLen+1)) // too large
-
-	_, err = Deserialize(buf)
-	if err == nil {
-		t.Fatal("expected error for V4 resolved braid too large")
-	}
-	var e *ErrBraidTooLarge
-	if !errors.As(err, &e) {
-		t.Errorf("expected *ErrBraidTooLarge, got %T: %v", err, err)
-	}
-}
-
-// TestDeserializeV4ResolvedTrailingData tests V4 resolved with trailing data.
-func TestDeserializeV4ResolvedTrailingData(t *testing.T) {
-	// Minimal V4 resolved with 0 chains, 0 skipped, hasBraid=0, then extra byte.
-	headerSize := 3 + 1 + 8 + 8 + keyLen + 4 + 4 + 4 + 1 + 1 // +hasBraid + trailing
-	buf := make([]byte, headerSize)
-	buf[0] = serializeVersionV4
-	buf[1] = 0x01
-	buf[2] = byte(VersionV1)
-	buf[3] = 0x00 // direction A2B
-	off := 3 + 1 + 8 + 8 + keyLen
-	binary.BigEndian.PutUint32(buf[off:], uint32(maxJump))
-	off += 4
-	// numChains = 0 (already zero)
-	off += 4
-	// numSkipped = 0
-	off += 4
-	buf[off] = 0x00 // hasBraid = false
-	off++
-	buf[off] = 0xFF // trailing data
-
-	_, err := Deserialize(buf)
-	if err == nil {
-		t.Fatal("expected error for V4 resolved trailing data")
-	}
-}
-
-// TestDeserializeV4ResolvedSkippedKeyCountExceedsMax tests V4 with too many skipped keys.
-func TestDeserializeV4ResolvedSkippedKeyCountExceedsMax(t *testing.T) {
-	buf := make([]byte, 3+1+8+8+keyLen+4+4+4)
-	buf[0] = serializeVersionV4
-	buf[1] = 0x01
-	buf[2] = byte(VersionV1)
-	buf[3] = 0x00 // direction
-	off := 3 + 1 + 8 + 8 + keyLen
-	binary.BigEndian.PutUint32(buf[off:], uint32(maxJump))
-	off += 4
-	// numChains = 0
-	off += 4
-	binary.BigEndian.PutUint32(buf[off:], uint32(maxDeserializedSkippedKeys+1)) // too many
-
-	_, err := Deserialize(buf)
-	if err == nil {
-		t.Fatal("expected error for V4 resolved skipped key count too large")
-	}
-}
-
-// ---- V4 Disabled round-trip ----
+// ---- V0-disabled round-trip ----
 
 // TestV4DisabledSerializeDeserializeRoundTrip verifies that serializeV4Disabled
 // produces bytes that Deserialize reads back as a V0 disabled state.
+// Uses InitialStateWithParams with MinVersion=V0 (opt-in downgrade path) because
+// the default InitialStateWithBraid now enforces MinVersion=V1.
 func TestV4DisabledSerializeDeserializeRoundTrip(t *testing.T) {
 	// Create a braid-aware SPQR in V0 disabled state (e.g. after receiving empty msg).
 	ss := randomBytes(t, 32)
@@ -1021,11 +676,24 @@ func TestV4DisabledSerializeDeserializeRoundTrip(t *testing.T) {
 		t.Fatalf("InitAlice: %v", err)
 	}
 
-	// Create pending state with braid.
-	pendingState, err := InitialStateWithBraid(ss, DirectionA2B, false, braid)
+	// Create pending state with explicit MinVersion=V0 (opt-in downgrade path).
+	// Copy the auth key since InitialStateWithParams takes ownership.
+	ssCopy := make([]byte, len(ss))
+	copy(ssCopy, ss)
+	pendingState, err := InitialStateWithParams(Params{
+		AuthKey:    ssCopy,
+		Version:    VersionV1,
+		Direction:  DirectionA2B,
+		MinVersion: VersionV0,
+		MaxJump:    uint32(maxJump),
+		MaxOOOKeys: maxSkippedKeys,
+	})
 	if err != nil {
-		t.Fatalf("InitialStateWithBraid: %v", err)
+		t.Fatalf("InitialStateWithParams: %v", err)
 	}
+	// Attach braid separately since InitialStateWithParams doesn't take one.
+	// For this test we only need the V0 resolution path (no braid needed).
+	_ = braid
 
 	// Resolve to V0 by receiving empty pqrMsg.
 	resolvedState, _, err := Recv(pendingState, []byte{})
@@ -1099,11 +767,19 @@ func TestSendWithMinVersionV1ResolvedImmediately(t *testing.T) {
 // ---- Recv on already-disabled path (V0) with legacy message ----
 
 // TestRecvAlreadyDisabledV0 tests Recv on an already-disabled V0 state.
+// Uses InitialStateWithParams with MinVersion=V0 (opt-in downgrade path).
 func TestRecvAlreadyDisabledV0(t *testing.T) {
 	ss := randomBytes(t, 32)
-	state, err := InitialState(ss, DirectionA2B, false)
+	state, err := InitialStateWithParams(Params{
+		AuthKey:    ss,
+		Version:    VersionV1,
+		Direction:  DirectionA2B,
+		MinVersion: VersionV0,
+		MaxJump:    uint32(maxJump),
+		MaxOOOKeys: maxSkippedKeys,
+	})
 	if err != nil {
-		t.Fatalf("InitialState: %v", err)
+		t.Fatalf("InitialStateWithParams: %v", err)
 	}
 
 	// Resolve to V0.
@@ -1113,6 +789,7 @@ func TestRecvAlreadyDisabledV0(t *testing.T) {
 	}
 
 	// Call Recv again — should return nil key without error.
+	// V0-disabled states serialize as empty bytes (Rust empty_state() convention).
 	newState, mk, err := Recv(state, []byte{})
 	if err != nil {
 		t.Fatalf("Recv on disabled V0: %v", err)
@@ -1120,8 +797,8 @@ func TestRecvAlreadyDisabledV0(t *testing.T) {
 	if mk != nil {
 		t.Error("expected nil key for V0 disabled Recv")
 	}
-	if len(newState) == 0 {
-		t.Error("state must not be empty")
+	if len(newState) != 0 {
+		t.Errorf("V0 state must be empty bytes, got %d bytes", len(newState))
 	}
 }
 
@@ -1170,14 +847,12 @@ func TestDecodeWireMessageEmpty(t *testing.T) {
 
 func TestDecodeWireMessageInvalidEpochVarint(t *testing.T) {
 	// wireVersion byte followed by an invalid varint (all-0x80 bytes, no terminator).
-	data := make([]byte, 12)
+	// All continuation bits set with no terminating byte — must fail varint decode.
+	data := make([]byte, 13)
 	data[0] = wireVersion
-	for i := 1; i < 12; i++ {
+	for i := 1; i < 13; i++ {
 		data[i] = 0x80 // continuation bits set, no terminator
 	}
-	// Since this is exactly 12 bytes, it is treated as legacy format, not variable-length.
-	// Use 13 bytes to avoid the legacy path.
-	data = append(data, 0x80)
 	_, err := decodeWireMessage(data)
 	if err == nil {
 		t.Fatal("expected error for invalid varint")
@@ -1228,24 +903,6 @@ func TestDecodeWireMessageUnknownMsgType(t *testing.T) {
 	_, err := decodeWireMessage(buf)
 	if err == nil {
 		t.Fatal("expected error for unknown message type")
-	}
-}
-
-// TestDecodeWireMessageLegacyFormat verifies the legacy 12-byte parsing path.
-func TestDecodeWireMessageLegacyFormat(t *testing.T) {
-	msg := encodeLegacyMessage(42, 7)
-	wm, err := decodeWireMessage(msg)
-	if err != nil {
-		t.Fatalf("decodeWireMessage legacy: %v", err)
-	}
-	if wm.Epoch != 42 {
-		t.Errorf("epoch = %d, want 42", wm.Epoch)
-	}
-	if wm.Counter != 7 {
-		t.Errorf("counter = %d, want 7", wm.Counter)
-	}
-	if wm.MsgType != mlkembraid.MessageTypeNone {
-		t.Errorf("msgType = %v, want None", wm.MsgType)
 	}
 }
 

@@ -2,6 +2,19 @@ package net
 
 import "fmt"
 
+// CdsiSerializeError is returned when a CDSI fixed-length serialization or
+// deserialization operation fails.
+type CdsiSerializeError struct {
+	// Field identifies which DTO field caused the error.
+	Field string
+	// Msg describes the failure.
+	Msg string
+}
+
+func (e *CdsiSerializeError) Error() string {
+	return fmt.Sprintf("cdsi: serialize error on %s: %s", e.Field, e.Msg)
+}
+
 // ErrCdsiNoTokenInResponseType is the typed error for a missing CDSI token.
 type ErrCdsiNoTokenInResponseType struct{}
 

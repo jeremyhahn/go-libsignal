@@ -20,7 +20,7 @@ func TestDeserializeStateSecretLoopError(t *testing.T) {
 	header[0] = byte(StateKeysUnsampled) // valid kind
 	// epoch = 1, chunkSize = 32 (DefaultChunkSize), rest = 0
 
-	putU64BE(header[1:], 1)                    // epoch
+	putU64BE(header[1:], 1)                        // epoch
 	putU32BE(header[9:], uint32(DefaultChunkSize)) // chunkSize
 	// ct1Ack = 0x00 (false), headerMACEpoch = 0, lastReceivedEpoch = 0
 

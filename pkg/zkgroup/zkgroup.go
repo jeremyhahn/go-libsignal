@@ -23,36 +23,36 @@ import (
 
 // Standard byte lengths for zkgroup types.
 const (
-	RandomnessLen              = 32
-	UUIDLen                    = 16
-	ProfileKeyLen              = 32
-	ProfileKeyVersionLen       = 32
+	RandomnessLen               = 32
+	UUIDLen                     = 16
+	ProfileKeyLen               = 32
+	ProfileKeyVersionLen        = 32
 	ProfileKeyVersionEncodedLen = 64
 	GroupMasterKeyLen           = 32
 	GroupIdentifierLen          = 32
-	AESKeyLen                  = 32
-	AESGCMNonceLen             = 12
-	AESGCMTagLen               = 16
-	SignatureLen               = 64
-	AccessKeyLen               = 16
-	ReceiptSerialLen           = 16
-	ReservedLen                = 1
-	SecondsPerDay              = 86400
+	AESKeyLen                   = 32
+	AESGCMNonceLen              = 12
+	AESGCMTagLen                = 16
+	SignatureLen                = 64
+	AccessKeyLen                = 16
+	ReceiptSerialLen            = 16
+	ReservedLen                 = 1
+	SecondsPerDay               = 86400
 )
 
 // Standard type aliases for byte arrays used throughout zkgroup.
 type (
-	RandomnessBytes              [RandomnessLen]byte
-	UIDBytes                     [UUIDLen]byte
-	ProfileKeyBytes              [ProfileKeyLen]byte
-	ProfileKeyVersionBytes       [ProfileKeyVersionLen]byte
+	RandomnessBytes               [RandomnessLen]byte
+	UIDBytes                      [UUIDLen]byte
+	ProfileKeyBytes               [ProfileKeyLen]byte
+	ProfileKeyVersionBytes        [ProfileKeyVersionLen]byte
 	ProfileKeyVersionEncodedBytes [ProfileKeyVersionEncodedLen]byte
-	GroupMasterKeyBytes          [GroupMasterKeyLen]byte
-	GroupIdentifierBytes         [GroupIdentifierLen]byte
-	AESKeyBytes                  [AESKeyLen]byte
-	SignatureBytes               [SignatureLen]byte
-	NotarySignatureBytes         [SignatureLen]byte
-	ReceiptSerialBytes           [ReceiptSerialLen]byte
+	GroupMasterKeyBytes           [GroupMasterKeyLen]byte
+	GroupIdentifierBytes          [GroupIdentifierLen]byte
+	AESKeyBytes                   [AESKeyLen]byte
+	SignatureBytes                [SignatureLen]byte
+	NotarySignatureBytes          [SignatureLen]byte
+	ReceiptSerialBytes            [ReceiptSerialLen]byte
 )
 
 // ReceiptLevel is used to tell the server what to redeem a receipt for.
@@ -121,6 +121,19 @@ func (t Timestamp) ToBeBytes() [8]byte {
 	var b [8]byte
 	binary.BigEndian.PutUint64(b[:], t.seconds)
 	return b
+}
+
+// ToLeBytes returns the little-endian byte representation, matching the Rust
+// bincode wire format (with_little_endian + with_fixint_encoding).
+func (t Timestamp) ToLeBytes() [8]byte {
+	var b [8]byte
+	binary.LittleEndian.PutUint64(b[:], t.seconds)
+	return b
+}
+
+// TimestampFromLeBytes decodes a Timestamp from 8 little-endian bytes.
+func TimestampFromLeBytes(b [8]byte) Timestamp {
+	return Timestamp{seconds: binary.LittleEndian.Uint64(b[:])}
 }
 
 // SaturatingSecondsSince returns the number of seconds between t and before,

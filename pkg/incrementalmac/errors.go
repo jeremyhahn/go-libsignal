@@ -11,8 +11,9 @@ func (e *Error) Error() string {
 }
 
 var (
-	// ErrChunkSizeTooSmall is returned when the chunk size is below MinChunkSize.
-	ErrChunkSizeTooSmall = &Error{msg: "incrementalmac: chunk size below minimum"}
+	// ErrChunkSizeTooSmall is returned when the chunk size is not positive (must be > 0).
+	// Matches Rust's assert!(chunk_size > 0) in incremental_mac.rs:50.
+	ErrChunkSizeTooSmall = &Error{msg: "incrementalmac: chunk size must be positive"}
 
 	// ErrChunkSizeTooLarge is returned when the chunk size exceeds MaxChunkSize.
 	ErrChunkSizeTooLarge = &Error{msg: "incrementalmac: chunk size exceeds maximum"}
@@ -29,4 +30,8 @@ var (
 	// ErrAlreadyFinalized is returned when Update or Finalize is called after
 	// the incremental MAC has already been finalized.
 	ErrAlreadyFinalized = &Error{msg: "incrementalmac: already finalized"}
+
+	// ErrUnsupportedHash is returned when a hash function other than SHA-256 or
+	// SHA-512 is passed to NewWithHash, NewValidatingWithHash, or hashParamsFor.
+	ErrUnsupportedHash = &Error{msg: "incrementalmac: unsupported hash function; use crypto.SHA256 or crypto.SHA512"}
 )

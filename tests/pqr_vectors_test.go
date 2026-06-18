@@ -14,14 +14,14 @@ import (
 
 // PQRMessageKeysVector holds test vector data for a single MessageKeys derivation.
 type PQRMessageKeysVector struct {
-	Description   string  `json:"description"`
-	ChainKeySeed  string  `json:"chain_key_seed"`
-	PQRKey        *string `json:"pqr_key"`
-	Counter       uint32  `json:"counter"`
-	CipherKey     string  `json:"cipher_key"`
-	MacKey        string  `json:"mac_key"`
-	IV            string  `json:"iv"`
-	InputKeyMaterial string `json:"input_key_material"`
+	Description      string  `json:"description"`
+	ChainKeySeed     string  `json:"chain_key_seed"`
+	PQRKey           *string `json:"pqr_key"`
+	Counter          uint32  `json:"counter"`
+	CipherKey        string  `json:"cipher_key"`
+	MacKey           string  `json:"mac_key"`
+	IV               string  `json:"iv"`
+	InputKeyMaterial string  `json:"input_key_material"`
 }
 
 // PQRVectorSuite holds the complete set of PQR integration test vectors.
@@ -322,13 +322,13 @@ func TestPQRMessageKeysIntegrationWithChainKey(t *testing.T) {
 	}
 
 	type messageVector struct {
-		Index     int    `json:"index"`
-		ChainKey  string `json:"chain_key"`
-		IKM       string `json:"input_key_material"`
+		Index     int     `json:"index"`
+		ChainKey  string  `json:"chain_key"`
+		IKM       string  `json:"input_key_material"`
 		PQRKey    *string `json:"pqr_key"`
-		CipherKey string `json:"cipher_key"`
-		MacKey    string `json:"mac_key"`
-		IV        string `json:"iv"`
+		CipherKey string  `json:"cipher_key"`
+		MacKey    string  `json:"mac_key"`
+		IV        string  `json:"iv"`
 	}
 
 	vectors := make([]messageVector, 0, len(pqrKeys))

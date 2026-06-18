@@ -1,6 +1,10 @@
 package tests
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+
 	"github.com/jeremyhahn/go-libsignal/pkg/groups"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/identity"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/prekey"
@@ -11,6 +15,19 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/keyhelper"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/optional"
 )
+
+// uuidFromName derives a deterministic UUID-format string from an arbitrary
+// name. This ensures test addresses pass ServiceId validation, which is required
+// by SerializeAddresses when address binding is in effect (proto field 6).
+func uuidFromName(name string) string {
+	h := sha256.Sum256([]byte(name))
+	b := h[:16]
+	// Force RFC 4122 version 4 and variant bits for a well-formed UUID.
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	s := hex.EncodeToString(b)
+	return fmt.Sprintf("%s-%s-%s-%s-%s", s[0:8], s[8:12], s[12:16], s[16:20], s[20:32])
+}
 
 // user is a structure for a signal user.
 type user struct {
@@ -101,14 +118,16 @@ func newUser(name string, deviceID uint32, serializer *serialize.Serializer) *us
 
 	// Put all our pre keys in our local stores.
 	for i := range signalUser.preKeys {
-		signalUser.preKeyStore.StorePreKey(
+		if err := signalUser.preKeyStore.StorePreKey(
 			signalUser.preKeys[i].ID().Value,
 			record.NewPreKey(signalUser.preKeys[i].ID().Value, signalUser.preKeys[i].KeyPair(), serializer.PreKeyRecord),
-		)
+		); err != nil {
+			panic(err)
+		}
 	}
 
 	// Store our own signed prekey
-	signalUser.signedPreKeyStore.StoreSignedPreKey(
+	if err := signalUser.signedPreKeyStore.StoreSignedPreKey(
 		signalUser.signedPreKey.ID(),
 		record.NewSignedPreKey(
 			signalUser.signedPreKey.ID(),
@@ -117,7 +136,9 @@ func newUser(name string, deviceID uint32, serializer *serialize.Serializer) *us
 			signalUser.signedPreKey.Signature(),
 			serializer.SignedPreKeyRecord,
 		),
-	)
+	); err != nil {
+		panic(err)
+	}
 
 	// Store our Kyber pre-key.
 	if err := signalUser.kyberPreKeyStore.StoreKyberPreKey(42, signalUser.kyberPreKey); err != nil {
@@ -125,9 +146,12 @@ func newUser(name string, deviceID uint32, serializer *serialize.Serializer) *us
 	}
 
 	// Create a remote address that we'll be building our session with.
+	// Convert the human-readable name to a UUID-format string so that
+	// SerializeAddresses (proto field 6 address binding) succeeds for all
+	// test scenarios that supply both local and remote addresses to the cipher.
 	signalUser.name = name
 	signalUser.deviceID = deviceID
-	signalUser.address = protocol.NewSignalAddress(name, deviceID)
+	signalUser.address = protocol.NewSignalAddress(uuidFromName(name), deviceID)
 
 	// Create a group session builder
 	signalUser.buildGroupSession(serializer)

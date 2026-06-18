@@ -182,6 +182,45 @@ func TestNewSenderKeyMessageSerializeError(t *testing.T) {
 	}
 }
 
+// TestNewSenderKeyMessageWithVersion_StoresVersionParameter verifies that the
+// version parameter supplied to NewSenderKeyMessageWithVersion is stored in the
+// struct's version field so the wire byte high nibble encodes it correctly.
+// Rust reference: protocol.rs:551 encodes message_version in the high nibble;
+// the struct stores SENDERKEY_MESSAGE_CURRENT_VERSION (protocol.rs:558), but Go
+// exposes version via Version() which must reflect the caller-supplied value.
+// Latent while only v3 exists; critical once a v4 is introduced.
+func TestNewSenderKeyMessageWithVersion_StoresVersionParameter(t *testing.T) {
+	serializer := &jsonSenderKeyMessageSerializer{}
+	signingKey, err := ecc.GenerateKeyPair()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg, err := NewSenderKeyMessageWithVersion(
+		SenderKeyCurrentVersion, [16]byte{}, 1, 0, []byte("cipher"),
+		signingKey.PrivateKey(), serializer,
+	)
+	if err != nil {
+		t.Fatalf("NewSenderKeyMessageWithVersion error: %v", err)
+	}
+	if msg.Version() != SenderKeyCurrentVersion {
+		t.Errorf("Version() = %d, want %d", msg.Version(), SenderKeyCurrentVersion)
+	}
+}
+
+// TestNewSenderKeyMessageWithVersion_NilKey verifies that a nil signing key
+// returns an error.
+func TestNewSenderKeyMessageWithVersion_NilKey(t *testing.T) {
+	serializer := &jsonSenderKeyMessageSerializer{}
+
+	_, err := NewSenderKeyMessageWithVersion(
+		SenderKeyCurrentVersion, [16]byte{}, 1, 0, []byte("cipher"), nil, serializer,
+	)
+	if err == nil {
+		t.Fatal("expected error for nil signing key")
+	}
+}
+
 func TestSenderKeyMessageFromBytes(t *testing.T) {
 	serializer := &jsonSenderKeyMessageSerializer{}
 

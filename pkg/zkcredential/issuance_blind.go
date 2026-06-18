@@ -1,6 +1,8 @@
 package zkcredential
 
 import (
+	"encoding/binary"
+
 	"github.com/gtank/ristretto255"
 	"github.com/jeremyhahn/go-libsignal/pkg/poksho"
 )
@@ -427,6 +429,25 @@ func EncodeBlindedIssuanceProof(p *BlindedIssuanceProof) []byte {
 	return out
 }
 
+// DecodeBlindedIssuanceProof deserializes a BlindedIssuanceProof from bytes.
+// The layout is: BlindedCredential (128 bytes) || poksho_proof (remaining bytes).
+func DecodeBlindedIssuanceProof(data []byte) (*BlindedIssuanceProof, error) {
+	const credLen = 128
+	if len(data) < credLen {
+		return nil, ErrVerification
+	}
+	cred, err := DecodeBlindedCredential(data[:credLen])
+	if err != nil {
+		return nil, err
+	}
+	proof := make([]byte, len(data)-credLen)
+	copy(proof, data[credLen:])
+	return &BlindedIssuanceProof{
+		Credential:  cred,
+		PokshoProof: proof,
+	}, nil
+}
+
 // DecodeBlindedPoint decodes a BlindedPoint (without nonce) from bytes.
 // The serialized form is D1 (32 bytes) + D2 (32 bytes).
 func DecodeBlindedPoint(data []byte) (*BlindedPoint, error) {
@@ -467,4 +488,58 @@ func EncodeBlindedPoint(bp *BlindedPoint) []byte {
 // EncodeBlindingPublicKey encodes a BlindingPublicKey to bytes.
 func EncodeBlindingPublicKey(pk *BlindingPublicKey) []byte {
 	return pk.Ypoint.Bytes()
+}
+
+// EncodeBlindedIssuanceProofBincode serializes a [BlindedIssuanceProof] to
+// the Rust bincode wire format. Differs from [EncodeBlindedIssuanceProof]
+// by including the 8-byte LE u64 length prefix on the poksho_proof Vec<u8>,
+// which is required when the proof is embedded inside a larger struct
+// (otherwise the decoder can't tell where the proof ends).
+//
+// Layout:
+//
+//	[128]       BlindedCredential (T + U + S1 + S2, 32 bytes each)
+//	[8 LE u64]  poksho_proof vec length
+//	[len]       poksho_proof bytes
+func EncodeBlindedIssuanceProofBincode(p *BlindedIssuanceProof) []byte {
+	cred := EncodeBlindedCredential(p.Credential)
+	proofLen := len(p.PokshoProof)
+	out := make([]byte, 0, len(cred)+8+proofLen)
+	out = append(out, cred...)
+	var lenBuf [8]byte
+	binary.LittleEndian.PutUint64(lenBuf[:], uint64(proofLen))
+	out = append(out, lenBuf[:]...)
+	out = append(out, p.PokshoProof...)
+	return out
+}
+
+// DecodeBlindedIssuanceProofBincode deserializes a [BlindedIssuanceProof]
+// from the Rust bincode wire format produced by
+// [EncodeBlindedIssuanceProofBincode]. Returns the decoded proof and the
+// number of bytes consumed from data.
+func DecodeBlindedIssuanceProofBincode(data []byte) (*BlindedIssuanceProof, int, error) {
+	const credLen = 128
+	if len(data) < credLen+8 {
+		return nil, 0, ErrVerification
+	}
+	cred, err := DecodeBlindedCredential(data[:credLen])
+	if err != nil {
+		return nil, 0, err
+	}
+	off := credLen
+	// readBincodeU64Len guards against u64 values >= 2^63 (negative after int
+	// cast) and against lengths that claim more data than the input contains,
+	// matching Rust's reject_trailing_bytes + bounded-alloc behavior.
+	proofLen, err := readBincodeU64Len(data, off, 1, "poksho_proof")
+	if err != nil {
+		return nil, 0, ErrVerification
+	}
+	off += 8
+	proof := make([]byte, proofLen)
+	copy(proof, data[off:off+proofLen])
+	off += proofLen
+	return &BlindedIssuanceProof{
+		Credential:  cred,
+		PokshoProof: proof,
+	}, off, nil
 }

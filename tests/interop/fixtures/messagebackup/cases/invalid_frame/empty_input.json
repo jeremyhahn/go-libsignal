@@ -1,0 +1,9 @@
+{
+  "source": "synthetic: empty input",
+  "rust_rev": "98915c442d",
+  "purpose": "Empty input: DecryptFrames must return rejected_frame immediately.",
+  "input_bytes_hex": "",
+  "expected_outcome": "rejected_frame",
+  "hmac_key_hex": "bfb00e1f5fb1db5e59fef8f9b11deb32cf75a7344a0b909f9ebbb3c0a31461a7",
+  "aes_key_hex": "0127f5d81d408be7a96de0217db1b03f3d5be252f5654470d476d39249269d40"
+}

@@ -5,14 +5,14 @@ package attest
 
 // Enclave IDs (MRENCLAVE values) for known Signal enclaves.
 var (
-	EnclaveIDSVR2_2025Q3Prod = mustDecodeHex("29cd63c87bea751e3bfd0fbd401279192e2e5c99948b4ee9437eafc4968355fb")
-	EnclaveIDSVRB_2025Q3Prod = mustDecodeHex("aa906dbc85965d37accb660b65a8c224f037b0e7cfd034532acada3592e5b446")
+	EnclaveIDSVR2_2025Q3Prod    = mustDecodeHex("29cd63c87bea751e3bfd0fbd401279192e2e5c99948b4ee9437eafc4968355fb")
+	EnclaveIDSVRB_2025Q3Prod    = mustDecodeHex("aa906dbc85965d37accb660b65a8c224f037b0e7cfd034532acada3592e5b446")
 	EnclaveIDSVR2_2026Q1Staging = mustDecodeHex("97f151f6ed078edbbfd72fa9cae694dcc08353f1f5e8d9ccd79a971b10ffc535")
-	EnclaveIDSVR2_2026Q1Prod = mustDecodeHex("1240acbd4aa26974184844c8a46b1022d3957ac8a76c1fd8f5b1a15141ee0708")
+	EnclaveIDSVR2_2026Q1Prod    = mustDecodeHex("1240acbd4aa26974184844c8a46b1022d3957ac8a76c1fd8f5b1a15141ee0708")
 	EnclaveIDSVRB_2026Q1Staging = mustDecodeHex("97f151f6ed078edbbfd72fa9cae694dcc08353f1f5e8d9ccd79a971b10ffc535")
-	EnclaveIDSVRB_2026Q1Prod = mustDecodeHex("bee62050df1072e3d9fdf7660bfaf4e4b71f5622db9de8b30fc5f4b9852d8359")
-	EnclaveIDCDSIStaging = mustDecodeHex("3ded708ca5a42fd84b4639dc661a7ec4b9c9f1b92809c0fc91da2349a5a89d05")
-	EnclaveIDCDSIProd = mustDecodeHex("ee9503070127120074612b6688e593b67e486b1541449f54d71e387484eb40a3")
+	EnclaveIDSVRB_2026Q1Prod    = mustDecodeHex("bee62050df1072e3d9fdf7660bfaf4e4b71f5622db9de8b30fc5f4b9852d8359")
+	EnclaveIDCDSIStaging        = mustDecodeHex("3a1ac5e5b07c3f01d0b8074687616082a618e0a7f69a2f558e0f6fe4965db4e1")
+	EnclaveIDCDSIProd           = mustDecodeHex("ee9503070127120074612b6688e593b67e486b1541449f54d71e387484eb40a3")
 )
 
 // Common SW advisories known to be mitigated.

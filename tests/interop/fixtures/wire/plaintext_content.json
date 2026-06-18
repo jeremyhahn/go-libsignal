@@ -1,0 +1,23 @@
+{
+  "source": "rust/protocol/src/protocol.rs:837 From<DecryptionErrorMessage> for PlaintextContent (libsignal v0.92.2)",
+  "rust_rev": "98915c442d",
+  "purpose": "PlaintextContent wire vector: identifier 0xC0 || Content proto body || padding 0x80. Go must parse with NewPlaintextContentFromBytes, assert identifier byte, and round-trip ExtractDecryptionErrorMessageFromSerializedContent.",
+  "vectors": [
+    {
+      "name": "plaintext_content",
+      "inputs": {
+        "identifier_byte": "0xC0",
+        "original_device_id": 2,
+        "original_message_hex": "340a2105ca30c563ae5a941d39a3f727660b2866f1bec0c8d8f45efe6d55b3a74792034f1005180422109fc4ac25a34adfda4a9d97f4007f17dc69db18c796f368f6",
+        "original_timestamp_ms": 1600000000000,
+        "padding_byte": "0x80"
+      },
+      "expected": {
+        "body_hex": "422c0a2105ca30c563ae5a941d39a3f727660b2866f1bec0c8d8f45efe6d55b3a74792034f108080babbc82e180280",
+        "first_byte": "0xc0",
+        "last_byte": "0x80",
+        "serialized": "c0422c0a2105ca30c563ae5a941d39a3f727660b2866f1bec0c8d8f45efe6d55b3a74792034f108080babbc82e180280"
+      }
+    }
+  ]
+}

@@ -50,9 +50,9 @@ func TestSendRecvBraidViaPackageLevelAPI(t *testing.T) {
 		t.Fatal("expected non-nil message key")
 	}
 
-	// Wire message should NOT be 12 bytes (braid uses variable-length format).
-	if len(pqrMsg) == pqrMsgSize {
-		t.Error("braid path should use variable-length wire format, not legacy 12-byte format")
+	// Wire message must be in SCKA format (version byte 0x01).
+	if len(pqrMsg) < 1 || pqrMsg[0] != 0x01 {
+		t.Errorf("braid path must use SCKA wire format (version 0x01), got %x", pqrMsg)
 	}
 
 	// Bob receives via package-level Recv().
@@ -65,12 +65,23 @@ func TestSendRecvBraidViaPackageLevelAPI(t *testing.T) {
 		t.Errorf("message keys do not match:\n  alice: %x\n  bob:   %x", aliceKey, bobKey)
 	}
 
-	// Verify states were updated and are V4 format.
-	if newAliceState[0] != serializeVersionV4 {
-		t.Errorf("alice state version: got %d, want V4 (%d)", newAliceState[0], serializeVersionV4)
+	// Verify braid is still present after serialization (proto format).
+	s, err := Deserialize(newAliceState)
+	if err != nil {
+		t.Fatalf("Deserialize newAliceState: %v", err)
 	}
-	if newBobState[0] != serializeVersionV4 {
-		t.Errorf("bob state version: got %d, want V4 (%d)", newBobState[0], serializeVersionV4)
+	defer s.Zeroize()
+	if s.braid == nil {
+		t.Error("alice state should retain braid after Send/Serialize")
+	}
+
+	s2, err := Deserialize(newBobState)
+	if err != nil {
+		t.Fatalf("Deserialize newBobState: %v", err)
+	}
+	defer s2.Zeroize()
+	if s2.braid == nil {
+		t.Error("bob state should retain braid after Recv/Serialize")
 	}
 }
 
@@ -134,14 +145,15 @@ func TestSendRecvBraidMultipleRoundTrips(t *testing.T) {
 	}
 }
 
-// TestSendRecvNoBraidLegacyPath tests that the package-level Send()/Recv()
-// still works correctly with V3 state (no braid) using 12-byte wire format.
-func TestSendRecvNoBraidLegacyPath(t *testing.T) {
+// TestSendRecvNoBraidSCKAPath tests that the package-level Send()/Recv()
+// works correctly for the chain-only path (no braid) using the Rust-compatible
+// SCKA wire format (Phase E). Both paths now produce/consume SCKA format.
+func TestSendRecvNoBraidSCKAPath(t *testing.T) {
 	sharedSecret := randomBytes(t, 32)
 	sharedCopy := make([]byte, 32)
 	copy(sharedCopy, sharedSecret)
 
-	// Pre-resolve both sides without braid (V3 format).
+	// Pre-resolve both sides without braid using proto serialization.
 	aliceSPQR, err := Init(sharedSecret, DirectionA2B, maxJump)
 	if err != nil {
 		t.Fatalf("Init alice: %v", err)
@@ -162,36 +174,26 @@ func TestSendRecvNoBraidLegacyPath(t *testing.T) {
 	}
 	bobSPQR.Zeroize()
 
-	// Verify V3 format.
-	if aliceState[0] != serializeVersionV3 {
-		t.Errorf("expected V3 format, got version %d", aliceState[0])
-	}
-
-	// Send/Recv should use legacy 12-byte wire format.
+	// Send/Recv should use SCKA wire format (version byte 0x01).
 	var pqrMsg []byte
 	var aliceKey, bobKey MessageKey
-	aliceState, pqrMsg, aliceKey, err = Send(aliceState)
+	_, pqrMsg, aliceKey, err = Send(aliceState)
 	if err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	if len(pqrMsg) != pqrMsgSize {
-		t.Errorf("legacy path should produce %d-byte message, got %d", pqrMsgSize, len(pqrMsg))
+	if len(pqrMsg) < 1 || pqrMsg[0] != 0x01 {
+		t.Errorf("chain-only path must use SCKA wire format (version 0x01), got %x", pqrMsg)
+	}
+	if aliceKey == nil {
+		t.Fatal("expected non-nil message key from chain-only Send")
 	}
 
-	bobState, bobKey, err = Recv(bobState, pqrMsg)
+	_, bobKey, err = Recv(bobState, pqrMsg)
 	if err != nil {
 		t.Fatalf("Recv: %v", err)
 	}
 	if !bytes.Equal(aliceKey, bobKey) {
-		t.Error("key mismatch on legacy path")
-	}
-
-	// States remain V3.
-	if aliceState[0] != serializeVersionV3 {
-		t.Errorf("alice state should remain V3, got version %d", aliceState[0])
-	}
-	if bobState[0] != serializeVersionV3 {
-		t.Errorf("bob state should remain V3, got version %d", bobState[0])
+		t.Errorf("key mismatch on chain-only SCKA path:\n  alice: %x\n  bob:   %x", aliceKey, bobKey)
 	}
 }
 
@@ -233,9 +235,8 @@ func TestV4SerializationRoundTrip(t *testing.T) {
 	}
 	s.Zeroize()
 
-	if state2[0] != serializeVersionV4 {
-		t.Errorf("re-serialized version: got %d, want V4 (%d)", state2[0], serializeVersionV4)
-	}
+	// After Phase E, states are proto-encoded; the first byte is a proto field tag,
+	// not a version byte. Verify by deserializing and checking braid presence.
 
 	// Deserialize again and verify braid is still intact.
 	s2, err := Deserialize(state2)
@@ -277,9 +278,7 @@ func TestV4PendingWithBraidRoundTrip(t *testing.T) {
 		t.Fatalf("InitialStateWithBraid: %v", err)
 	}
 
-	if state[0] != serializeVersionV4 {
-		t.Errorf("expected V4 format, got version %d", state[0])
-	}
+	// After Phase E, states are proto-encoded; verify by deserializing.
 
 	// Deserialize and verify.
 	s, err := Deserialize(state)
@@ -370,38 +369,58 @@ func TestInitialStateWithBraidSelfSession(t *testing.T) {
 	}
 }
 
-// TestV3BackwardCompatibilityWithUpdatedSendRecv tests that existing V3 states
-// continue to work correctly with the updated Send()/Recv() functions.
-func TestV3BackwardCompatibilityWithUpdatedSendRecv(t *testing.T) {
+// TestNegotiationPendingAndV0Behavior tests that pending states with MinVersion=V0
+// (opt-in downgrade, audit-required) correctly negotiate to V0 when an empty
+// message is received, and that V0 states return empty messages and nil keys.
+// This uses InitialStateWithParams explicitly, because the default InitialState
+// sets MinVersion=V1 (matching Rust's "require SPQR" policy).
+func TestNegotiationPendingAndV0Behavior(t *testing.T) {
 	sharedSecret := randomBytes(t, 32)
 	sharedCopy := make([]byte, 32)
 	copy(sharedCopy, sharedSecret)
 
-	// Create V3 pending states (no braid).
-	aliceState, err := InitialState(sharedSecret, DirectionA2B, false)
+	// Create pending states with explicit V0 minimum (opt-in downgrade path).
+	aliceState, err := InitialStateWithParams(Params{
+		AuthKey:    sharedSecret,
+		Version:    VersionV1,
+		Direction:  DirectionA2B,
+		MinVersion: VersionV0,
+		MaxJump:    maxJump,
+		MaxOOOKeys: maxSkippedKeys,
+	})
 	if err != nil {
-		t.Fatalf("InitialState alice: %v", err)
+		t.Fatalf("InitialStateWithParams alice: %v", err)
 	}
-	bobState, err := InitialState(sharedCopy, DirectionB2A, false)
+	bobState, err := InitialStateWithParams(Params{
+		AuthKey:    sharedCopy,
+		Version:    VersionV1,
+		Direction:  DirectionB2A,
+		MinVersion: VersionV0,
+		MaxJump:    maxJump,
+		MaxOOOKeys: maxSkippedKeys,
+	})
 	if err != nil {
-		t.Fatalf("InitialState bob: %v", err)
+		t.Fatalf("InitialStateWithParams bob: %v", err)
 	}
 
-	// Verify V3 format.
-	if aliceState[0] != serializeVersionV3 {
-		t.Fatalf("expected V3, got %d", aliceState[0])
+	// Verify states are valid proto bytes (non-empty).
+	if len(aliceState) == 0 {
+		t.Fatal("alice state should not be empty")
+	}
+	if len(bobState) == 0 {
+		t.Fatal("bob state should not be empty")
 	}
 
-	// Alice sends (pending -> empty).
+	// Alice sends (pending -> empty message, nil key because MinVersion=V0).
 	_, pqrMsg, aliceKey, err := Send(aliceState)
 	if err != nil {
 		t.Fatalf("Alice Send: %v", err)
 	}
 	if len(pqrMsg) != 0 || aliceKey != nil {
-		t.Error("pending Send should return empty msg and nil key")
+		t.Error("pending Send with MinVersion=V0 should return empty msg and nil key")
 	}
 
-	// Bob receives empty msg -> V0.
+	// Bob receives empty msg -> negotiates to V0.
 	bobState, bobKey, err := Recv(bobState, pqrMsg)
 	if err != nil {
 		t.Fatalf("Bob Recv: %v", err)
@@ -489,34 +508,24 @@ func TestBraidStatePersistedAcrossMessages(t *testing.T) {
 	}
 }
 
-// TestV4DeserializeInvalidData tests V4 deserialization error handling.
-func TestV4DeserializeInvalidData(t *testing.T) {
-	tests := []struct {
-		name string
-		data []byte
-	}{
-		{"v4 too short", []byte{serializeVersionV4}},
-		{"v4 invalid negotiation byte", []byte{serializeVersionV4, 0x05}},
-		{"v4 resolved too short", []byte{serializeVersionV4, 0x01}},
-		{"v4 resolved unsupported version", []byte{serializeVersionV4, 0x01, 0x05}},
+// TestDeserializeInvalidProtoData tests that garbage proto bytes are rejected
+// with a typed error. Deserialize wraps proto errors in ErrDeserialize.
+func TestDeserializeInvalidProtoData(t *testing.T) {
+	// These bytes are structurally invalid for protobuf decoding.
+	garbled := []byte{0xFF, 0xFE, 0xFD, 0x80, 0x01, 0x02, 0x03}
+	_, err := Deserialize(garbled)
+	if err == nil {
+		t.Fatal("expected error for invalid proto bytes")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := Deserialize(tt.data)
-			if err == nil {
-				t.Fatal("expected error for invalid V4 data")
-			}
-			var deserErr *ErrDeserialize
-			if !errors.As(err, &deserErr) {
-				t.Errorf("expected *ErrDeserialize, got %T: %v", err, err)
-			}
-		})
+	var deserErr *ErrDeserialize
+	if !errors.As(err, &deserErr) {
+		t.Errorf("expected *ErrDeserialize, got %T: %v", err, err)
 	}
 }
 
-// TestV4PendingTruncatedBraid tests that truncated braid data is rejected.
-func TestV4PendingTruncatedBraid(t *testing.T) {
+// TestDeserializeTruncatedProto tests that a truncated valid proto is either
+// accepted (proto partial decode) or rejected cleanly — never panics.
+func TestDeserializeTruncatedProto(t *testing.T) {
 	sharedSecret := make([]byte, 32)
 	for i := range sharedSecret {
 		sharedSecret[i] = byte(i + 1)
@@ -532,15 +541,17 @@ func TestV4PendingTruncatedBraid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InitialStateWithBraid: %v", err)
 	}
+	if len(state) < 10 {
+		t.Fatalf("state too short for truncation test: %d bytes", len(state))
+	}
 
-	// Truncate after hasBraid byte.
-	truncated := state[:len(state)-10]
-	_, err = Deserialize(truncated)
-	if err == nil {
-		t.Fatal("expected error for truncated braid data")
+	// Truncate significantly — the truncated proto may or may not be parseable.
+	// The key invariant: no panic.
+	truncated := state[:len(state)/2]
+	s, deserErr := Deserialize(truncated)
+	if deserErr == nil && s != nil {
+		// If decode succeeded, the result must at least be valid enough to zeroize.
+		s.Zeroize()
 	}
-	var deserErr *ErrDeserialize
-	if !errors.As(err, &deserErr) {
-		t.Errorf("expected *ErrDeserialize, got %T: %v", err, err)
-	}
+	// No assertion on success/failure — proto is lenient; truncated proto may succeed.
 }

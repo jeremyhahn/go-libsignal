@@ -303,25 +303,44 @@ func TestDecoderRejectsWrongDataSize(t *testing.T) {
 	}
 }
 
-func TestDecoderRejectsIndexOutOfRange(t *testing.T) {
-	// 32 bytes data -> 1 chunk. Index 5 is out of range.
+func TestDecoderAcceptsRedundancyChunks(t *testing.T) {
+	// With polynomial encoding, chunk indices beyond TotalChunks() are valid
+	// redundancy chunks that can still reconstruct the message. The decoder
+	// accepts any index in the u16 range and performs polynomial interpolation.
+	data := make([]byte, 32) // 1 chunk
+	for i := range data {
+		data[i] = byte(i)
+	}
+
+	enc, err := NewEncoder(data, DefaultChunkSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Skip the first-pass chunk (index 0) and use a redundancy chunk (index 1).
+	_ = enc.NextChunk()                // index 0 — discard
+	redundancyChunk := enc.NextChunk() // index 1 — polynomial redundancy
+
 	dec, err := NewDecoder(32, DefaultChunkSize)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Build a valid wire chunk with index=5.
-	var varintBuf [binary.MaxVarintLen64]byte
-	n := binary.PutUvarint(varintBuf[:], 5)
-	chunk := make([]byte, n+ChunkDataSize)
-	copy(chunk[:n], varintBuf[:n])
-
-	err = dec.AddChunk(chunk)
-	if err == nil {
-		t.Fatal("expected error for index out of range")
+	// Add only the redundancy chunk; the decoder should still reconstruct.
+	if err := dec.AddChunk(redundancyChunk); err != nil {
+		t.Fatalf("AddChunk(redundancy): unexpected error: %v", err)
 	}
-	if _, ok := err.(*ErrChunkFormat); !ok {
-		t.Errorf("expected ErrChunkFormat, got %T", err)
+
+	if !dec.HasMessage() {
+		t.Fatal("decoder should be complete with one redundancy chunk for a 1-chunk message")
+	}
+
+	result, err := dec.Message()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(result, data) {
+		t.Errorf("round-trip with redundancy chunk failed: got %x, want %x", result, data)
 	}
 }
 
@@ -412,6 +431,11 @@ func TestEncoderDecoderRoundTripVariousSizes(t *testing.T) {
 // --- Encoder wraparound with varint indices ---
 
 func TestEncoderWraparoundProducesCorrectIndices(t *testing.T) {
+	// With polynomial encoding, the encoder emits sequential chunk indices
+	// without wrapping. After the first pass (HasMore returns false), subsequent
+	// NextChunk calls emit redundancy chunks with higher indices. This is the
+	// correct Rust SPQR behavior: any TotalChunks() distinct indices suffice for
+	// decoding, so redundancy chunks beyond the first pass still reconstruct.
 	data := make([]byte, 64) // 2 chunks
 	for i := range data {
 		data[i] = byte(i)
@@ -444,14 +468,16 @@ func TestEncoderWraparoundProducesCorrectIndices(t *testing.T) {
 		t.Error("encoder should not have more after first pass")
 	}
 
-	// Wraparound: chunks 0, 1 again.
+	// Polynomial redundancy: indices continue sequentially (2, 3, ...).
+	// These are valid erasure-coding redundancy chunks that a decoder with
+	// only chunks 2 and 3 can still use to reconstruct the original message.
 	c2 := enc.NextChunk()
 	c3 := enc.NextChunk()
-	if decodeIndex(c2) != 0 {
-		t.Errorf("wraparound chunk 0: index = %d, want 0", decodeIndex(c2))
+	if decodeIndex(c2) != 2 {
+		t.Errorf("redundancy chunk 2: index = %d, want 2", decodeIndex(c2))
 	}
-	if decodeIndex(c3) != 1 {
-		t.Errorf("wraparound chunk 1: index = %d, want 1", decodeIndex(c3))
+	if decodeIndex(c3) != 3 {
+		t.Errorf("redundancy chunk 3: index = %d, want 3", decodeIndex(c3))
 	}
 }
 

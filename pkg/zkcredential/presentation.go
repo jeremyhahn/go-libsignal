@@ -1,6 +1,7 @@
 package zkcredential
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	"github.com/gtank/ristretto255"
@@ -51,7 +52,7 @@ type mayHavePublicKey interface {
 }
 
 func (k *anyKeyPair) id() string            { return k.domainID }
-func (k *anyKeyPair) pubKey() *anyPublicKey  { return k.publicKey }
+func (k *anyKeyPair) pubKey() *anyPublicKey { return k.publicKey }
 
 type presentationVerifierKey struct {
 	domainID  string
@@ -59,7 +60,7 @@ type presentationVerifierKey struct {
 }
 
 func (k *presentationVerifierKey) id() string            { return k.domainID }
-func (k *presentationVerifierKey) pubKey() *anyPublicKey  { return k.publicKey }
+func (k *presentationVerifierKey) pubKey() *anyPublicKey { return k.publicKey }
 
 // presentationCore contains the common logic for building presentation statements.
 type presentationCore struct {
@@ -513,4 +514,141 @@ func EncodePresentationProof(p *PresentationProof) []byte {
 	}
 	out = append(out, p.PokshoProof...)
 	return out
+}
+
+// EncodePresentationProofBincode encodes a PresentationProof to Rust bincode
+// wire format. This is the inverse of DecodePresentationProofBincode and produces
+// byte-identical output to Rust's bincode::serialize on a PresentationProof.
+//
+// Layout (matches Rust zkcredential PresentationProof serde/bincode):
+//
+//	[0..32]     Cx0 (compressed Ristretto255 point)
+//	[32..64]    Cx1
+//	[64..96]    CV
+//	[96..104]   Cy vec length (8-byte LE u64)
+//	[104..104+32*n] Cy[0..n] (n compressed Ristretto255 points)
+//	[104+32*n..112+32*n] poksho_proof vec length (8-byte LE u64)
+//	[112+32*n..]  poksho_proof bytes
+func EncodePresentationProofBincode(p *PresentationProof) []byte {
+	cyLen := len(p.Commitments.Cy)
+	proofLen := len(p.PokshoProof)
+	out := make([]byte, 0, 32*3+8+32*cyLen+8+proofLen)
+
+	out = append(out, p.Commitments.Cx0.Bytes()...)
+	out = append(out, p.Commitments.Cx1.Bytes()...)
+	out = append(out, p.Commitments.CV.Bytes()...)
+
+	var lenBuf [8]byte
+	binary.LittleEndian.PutUint64(lenBuf[:], uint64(cyLen))
+	out = append(out, lenBuf[:]...)
+	for _, cy := range p.Commitments.Cy {
+		out = append(out, cy.Bytes()...)
+	}
+
+	binary.LittleEndian.PutUint64(lenBuf[:], uint64(proofLen))
+	out = append(out, lenBuf[:]...)
+	out = append(out, p.PokshoProof...)
+
+	return out
+}
+
+// DecodePresentationProofBincode decodes a PresentationProof from Rust bincode
+// wire format. This differs from the Go-native encoding (EncodePresentationProof)
+// in that vec lengths are 8-byte little-endian u64 values rather than 4-byte
+// big-endian values.
+//
+// Layout (matches Rust zkcredential PresentationProof serde/bincode):
+//
+//	[0..32]     Cx0 (compressed Ristretto255 point)
+//	[32..64]    Cx1
+//	[64..96]    CV
+//	[96..104]   Cy vec length (8-byte LE u64)
+//	[104..104+32*n] Cy[0..n] (n compressed Ristretto255 points)
+//	[104+32*n..112+32*n] poksho_proof vec length (8-byte LE u64)
+//	[112+32*n..]  poksho_proof bytes
+//
+// Returns the decoded proof and the number of bytes consumed from data.
+func DecodePresentationProofBincode(data []byte) (*PresentationProof, int, error) {
+	const minLen = 32 + 32 + 32 + 8 // Cx0 + Cx1 + CV + Cy vec len
+	if len(data) < minLen {
+		return nil, 0, &ErrInvalidEncoding{Field: "PresentationProof", Err: &ErrSizeConstraint{Min: minLen, Got: len(data)}}
+	}
+
+	off := 0
+	decodePoint := func(name string) (*ristretto255.Element, error) {
+		el := ristretto255.NewIdentityElement()
+		if _, err := el.SetCanonicalBytes(data[off : off+32]); err != nil {
+			return nil, &ErrInvalidEncoding{Field: name, Err: err}
+		}
+		return el, nil
+	}
+
+	cx0, err := decodePoint("Cx0")
+	if err != nil {
+		return nil, 0, err
+	}
+	off += 32
+
+	cx1, err := decodePoint("Cx1")
+	if err != nil {
+		return nil, 0, err
+	}
+	off += 32
+
+	cv, err := decodePoint("CV")
+	if err != nil {
+		return nil, 0, err
+	}
+	off += 32
+
+	if len(data) < off+8 {
+		return nil, 0, &ErrInvalidEncoding{Field: "Cy vec length", Err: &ErrTruncated{}}
+	}
+	// readBincodeU64Len guards against u64 values >= 2^63 (negative after int cast)
+	// and against lengths that claim more data than the input contains, matching
+	// Rust's reject_trailing_bytes + bounded-alloc behavior.
+	cyLen, err := readBincodeU64Len(data, off, 32, "Cy")
+	if err != nil {
+		return nil, 0, err
+	}
+	off += 8
+
+	if len(data) < off+cyLen*32+8 {
+		return nil, 0, &ErrInvalidEncoding{Field: "Cy points", Err: &ErrTruncatedNeed{Need: cyLen*32 + 8}}
+	}
+	cy := make([]*ristretto255.Element, cyLen)
+	for i := range cy {
+		cy[i], err = decodePoint(fmt.Sprintf("Cy[%d]", i))
+		if err != nil {
+			return nil, 0, err
+		}
+		off += 32
+	}
+
+	if len(data) < off+8 {
+		return nil, 0, &ErrInvalidEncoding{Field: "poksho_proof vec length", Err: &ErrTruncated{}}
+	}
+	proofLen, err := readBincodeU64Len(data, off, 1, "poksho_proof")
+	if err != nil {
+		return nil, 0, err
+	}
+	off += 8
+
+	if len(data) < off+proofLen {
+		return nil, 0, &ErrInvalidEncoding{Field: "poksho_proof", Err: &ErrTruncatedNeed{Need: proofLen}}
+	}
+	pokshoProof := make([]byte, proofLen)
+	copy(pokshoProof, data[off:off+proofLen])
+	off += proofLen
+
+	proof := &PresentationProof{
+		Commitments: PresentationProofCommitments{
+			Cx0: cx0,
+			Cx1: cx1,
+			CV:  cv,
+			Cy:  cy,
+		},
+		PokshoProof: pokshoProof,
+	}
+	return proof, off, nil
 }

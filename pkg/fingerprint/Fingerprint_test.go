@@ -411,13 +411,22 @@ func TestFingerprintMismatchingVersions(t *testing.T) {
 		t.Fatal("scannable fingerprints should differ across versions")
 	}
 
-	// Cross-version comparison should return (false, nil) per Rust Ok(false) semantics.
+	// Cross-version comparison must return (false, *VersionMismatchError), matching
+	// Rust's Err(FingerprintError::VersionMismatch { theirs, ours }) semantics
+	// (rust/protocol/src/fingerprint.rs:130-135).
 	match, err := aFPv1.Scannable().Compare(v2Scan)
-	if err != nil {
-		t.Fatalf("expected nil error for version mismatch, got: %v", err)
-	}
 	if match {
 		t.Fatal("expected false for version mismatch comparison")
+	}
+	vmErr, ok := err.(*VersionMismatchError)
+	if !ok {
+		t.Fatalf("expected *VersionMismatchError, got %T: %v", err, err)
+	}
+	if vmErr.Ours != 1 {
+		t.Fatalf("expected Ours=1, got %d", vmErr.Ours)
+	}
+	if vmErr.Theirs != 2 {
+		t.Fatalf("expected Theirs=2, got %d", vmErr.Theirs)
 	}
 }
 
@@ -533,13 +542,22 @@ func TestScannableCompare_VersionMismatch(t *testing.T) {
 		t.Fatalf("serialize error: %v", err)
 	}
 
-	// Version mismatch returns (false, nil), matching Rust's Ok(false) semantics.
+	// Version mismatch returns (false, &VersionMismatchError{...}), matching
+	// Rust's Err(FingerprintError::VersionMismatch { theirs, ours }) semantics
+	// (rust/protocol/src/fingerprint.rs:130-135).
 	match, err := s1.Compare(data)
-	if err != nil {
-		t.Fatalf("expected nil error for version mismatch, got: %v", err)
-	}
 	if match {
 		t.Fatal("expected false for version mismatch comparison")
+	}
+	vmErr, ok := err.(*VersionMismatchError)
+	if !ok {
+		t.Fatalf("expected *VersionMismatchError, got %T: %v", err, err)
+	}
+	if vmErr.Ours != 1 {
+		t.Fatalf("expected Ours=1, got %d", vmErr.Ours)
+	}
+	if vmErr.Theirs != 2 {
+		t.Fatalf("expected Theirs=2, got %d", vmErr.Theirs)
 	}
 }
 
@@ -740,6 +758,35 @@ func TestCreateForMultiple_EmptyKeys(t *testing.T) {
 	}
 	if _, ok := err.(*ParsingError); !ok {
 		t.Fatalf("expected ParsingError, got %T: %v", err, err)
+	}
+}
+
+// TestCreateForMultiple_DoesNotMutateCallerSlice verifies that
+// CreateForMultiple does not reorder the caller's key slice (F4 fix).
+func TestCreateForMultiple_DoesNotMutateCallerSlice(t *testing.T) {
+	gen, err := NewNumericFingerprintGenerator(DefaultIterations)
+	if err != nil {
+		t.Fatalf("NewNumericFingerprintGenerator error: %v", err)
+	}
+
+	k1 := generateRandomIdentityKey(t)
+	k2 := generateRandomIdentityKey(t)
+	// Force a known order by ensuring k2 serializes < k1 so sort would
+	// swap them; we detect mutation by checking the slice order afterwards.
+	// Use two distinct keys; the original order is [k1, k2].
+	original := []*identity.Key{k1, k2}
+	callerSlice := []*identity.Key{k1, k2}
+
+	_, err = gen.CreateForMultiple(1,
+		[]byte("alice"), callerSlice,
+		[]byte("bob"), []*identity.Key{generateRandomIdentityKey(t)},
+	)
+	if err != nil {
+		t.Fatalf("CreateForMultiple error: %v", err)
+	}
+
+	if callerSlice[0] != original[0] || callerSlice[1] != original[1] {
+		t.Error("CreateForMultiple must not reorder the caller's key slice")
 	}
 }
 

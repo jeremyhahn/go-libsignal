@@ -77,4 +77,3 @@ func (u *UnackPreKeyMessageItems) KyberPreKeyID() *optional.Uint32 {
 func (u *UnackPreKeyMessageItems) KyberCiphertext() []byte {
 	return u.kyberCiphertext
 }
-

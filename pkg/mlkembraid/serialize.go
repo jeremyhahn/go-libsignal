@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/jeremyhahn/go-libsignal/pkg/mlkembraid/internal/polynomial"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
@@ -46,6 +47,12 @@ func (e *ErrDeserialize) Error() string {
 //	kemType(1) = 0x00 for MLKEM768
 //	chunkSize(4, big-endian)
 //	stateLen(4, big-endian) + stateBytes(N)
+//
+// Deprecated: This method emits a Go-only binary format (version byte 0x01)
+// that is NOT byte-compatible with the Rust sparsepostquantumratchet crate.
+// For Rust-interop serialization, use pkg/spqr proto_codec.go MarshalStateProto /
+// UnmarshalStateProto, which encodes state as a prost-compatible PqRatchetState
+// protobuf message. This method is retained for existing callers only.
 func (b *Braid) Serialize() ([]byte, error) {
 	if b.state == nil {
 		return nil, &ErrSerialize{Reason: "nil state"}
@@ -68,6 +75,12 @@ func (b *Braid) Serialize() ([]byte, error) {
 }
 
 // DeserializeBraid reconstructs a Braid from binary data produced by Serialize.
+//
+// Deprecated: This function reads the Go-only binary format (version byte 0x01)
+// that is NOT byte-compatible with the Rust sparsepostquantumratchet crate.
+// For Rust-interop deserialization, use pkg/spqr proto_codec.go UnmarshalStateProto,
+// which decodes a prost-compatible PqRatchetState protobuf message. This function
+// is retained for existing callers only.
 func DeserializeBraid(data []byte) (*Braid, error) {
 	if len(data) < 10 { // version(1) + kemType(1) + chunkSize(4) + stateLen(4)
 		return nil, &ErrDeserialize{Reason: "data too short for braid header"}
@@ -374,16 +387,24 @@ func readOptionalSecret(data []byte) (*secret.Secret, int, error) {
 
 // appendOptionalEncoder serializes an optional Encoder as:
 //
-//	hasEncoder(1) + [dataLen(4, BE) + data(N) + offset(4, BE) + total(4, BE)]
+//	hasEncoder(1) + [msgLen(4, BE) + msg(N) + sent(4, BE) + total(4, BE) + innerIdx(4, BE)]
+//
+// msg is the original (padded-if-needed) message that was passed to
+// polynomial.NewPolyEncoder. innerIdx is the next chunk index the inner
+// PolyEncoder will emit, allowing exact resume after deserialization.
 func appendOptionalEncoder(buf []byte, e *Encoder) []byte {
 	if e == nil {
 		return append(buf, 0x00)
 	}
 	buf = append(buf, 0x01)
-	buf = appendU32BE(buf, uint32(len(e.data)))
-	buf = append(buf, e.data...)
-	buf = appendU32BE(buf, uint32(e.offset))
+
+	// Reconstruct the message from the inner encoder's points (first-pass data).
+	msg := encoderMessage(e.inner)
+	buf = appendU32BE(buf, uint32(len(msg)))
+	buf = append(buf, msg...)
+	buf = appendU32BE(buf, uint32(e.sent))
 	buf = appendU32BE(buf, uint32(e.total))
+	buf = appendU32BE(buf, e.inner.Idx())
 	return buf
 }
 
@@ -397,58 +418,76 @@ func readOptionalEncoder(data []byte) (*Encoder, int, error) {
 		return nil, 1, nil
 	}
 
-	if len(data) < 5 { // flag(1) + dataLen(4)
+	// flag(1) + msgLen(4) = 5 minimum to read the length field.
+	if len(data) < 5 {
 		return nil, 0, &ErrDeserialize{Reason: "data too short for encoder data length"}
 	}
 
-	offset := 1
-	dataLen := int(readU32BE(data[offset:]))
-	offset += 4
+	at := 1
+	msgLen := int(readU32BE(data[at:]))
+	at += 4
 
-	// Encoder data holds serialized key material (e.g., ML-KEM public keys
-	// or ciphertexts). Apply the same upper bound as secrets.
-	if dataLen > maxSecretLength {
-		return nil, 0, &ErrDeserialize{Reason: fmt.Sprintf("encoder data length %d exceeds maximum %d", dataLen, maxSecretLength)}
+	if msgLen > maxSecretLength {
+		return nil, 0, &ErrDeserialize{Reason: fmt.Sprintf("encoder message length %d exceeds maximum %d", msgLen, maxSecretLength)}
 	}
 
-	if len(data) < offset+dataLen+8 { // data + offset(4) + total(4)
+	// msg(N) + sent(4) + total(4) + innerIdx(4) = N+12
+	if len(data) < at+msgLen+12 {
 		return nil, 0, &ErrDeserialize{Reason: "data too short for encoder fields"}
 	}
 
-	encData := make([]byte, dataLen)
-	copy(encData, data[offset:offset+dataLen])
-	offset += dataLen
+	msg := make([]byte, msgLen)
+	copy(msg, data[at:at+msgLen])
+	at += msgLen
 
-	encOffset := int(readU32BE(data[offset:]))
-	offset += 4
-	encTotal := int(readU32BE(data[offset:]))
-	offset += 4
+	sent := int(readU32BE(data[at:]))
+	at += 4
+	total := int(readU32BE(data[at:]))
+	at += 4
+	innerIdx := readU32BE(data[at:])
+	at += 4
+
+	// Re-create the polynomial encoder from the original message.
+	inner, err := polynomial.NewPolyEncoder(msg)
+	if err != nil {
+		return nil, 0, &ErrDeserialize{Reason: "encoder message invalid: " + err.Error()}
+	}
+
+	// Fast-forward the inner encoder to the saved chunk index by calling
+	// ChunkAt directly (avoids re-emitting chunks via NextChunk).
+	// We set idx by pre-advancing: call NextChunk innerIdx times.
+	// For large innerIdx this is cheap because ChunkAt is O(1) after the
+	// first polynomial interpolation.
+	for i := uint32(0); i < innerIdx; i++ {
+		inner.NextChunk()
+	}
 
 	return &Encoder{
-		data:   encData,
-		offset: encOffset,
-		total:  encTotal,
-	}, offset, nil
+		inner: inner,
+		sent:  sent,
+		total: total,
+	}, at, nil
 }
 
 // appendOptionalDecoder serializes an optional Decoder as:
 //
-//	hasDecoder(1) + [expectedSize(4, BE) + totalChunks(2, BE) +
-//	numReceivedChunks(4, BE) + [index(2, BE) + chunkData(32)] * numReceived]
+//	hasDecoder(1) + [originalLen(4, BE) + received(4, BE) +
+//	numLoggedChunks(4, BE) + [chunkWireLen(2, BE) + chunkWireBytes(N)] * numLogged]
+//
+// The decoder's chunkLog (the exact wire bytes fed to AddChunk, in order)
+// is stored verbatim so deserialization can replay them.
 func appendOptionalDecoder(buf []byte, d *Decoder) []byte {
 	if d == nil {
 		return append(buf, 0x00)
 	}
 	buf = append(buf, 0x01)
-	buf = appendU32BE(buf, uint32(d.expectedSize))
-	buf = appendU16BE(buf, d.totalChunks)
-	buf = appendU32BE(buf, uint32(len(d.chunks)))
-
-	for idx, chunk := range d.chunks {
-		buf = appendU16BE(buf, idx)
-		buf = append(buf, chunk...)
+	buf = appendU32BE(buf, uint32(d.originalLen))
+	buf = appendU32BE(buf, uint32(d.ReceivedCount()))
+	buf = appendU32BE(buf, uint32(len(d.chunkLog)))
+	for _, wc := range d.chunkLog {
+		buf = appendU16BE(buf, uint16(len(wc)))
+		buf = append(buf, wc...)
 	}
-
 	return buf
 }
 
@@ -462,43 +501,54 @@ func readOptionalDecoder(data []byte) (*Decoder, int, error) {
 		return nil, 1, nil
 	}
 
-	// flag(1) + expectedSize(4) + totalChunks(2) + numReceived(4) = 11
-	if len(data) < 11 {
+	// flag(1) + originalLen(4) + received(4) + numLogged(4) = 13 minimum.
+	if len(data) < 13 {
 		return nil, 0, &ErrDeserialize{Reason: "data too short for decoder header"}
 	}
 
-	offset := 1
-	expectedSize := int(readU32BE(data[offset:]))
-	offset += 4
-	totalChunks := readU16BE(data[offset:])
-	offset += 2
-	numReceived := int(readU32BE(data[offset:]))
-	offset += 4
+	at := 1
+	originalLen := int(readU32BE(data[at:]))
+	at += 4
+	received := int(readU32BE(data[at:]))
+	at += 4
+	numLogged := int(readU32BE(data[at:]))
+	at += 4
 
-	// Bound the allocation to the maximum chunk count to prevent DoS
-	// from malformed data.
-	if numReceived > MaxChunkIndex+1 {
-		return nil, 0, &ErrDeserialize{Reason: fmt.Sprintf("decoder chunk count %d exceeds maximum %d", numReceived, MaxChunkIndex+1)}
+	if numLogged > MaxChunkIndex+1 {
+		return nil, 0, &ErrDeserialize{Reason: fmt.Sprintf("decoder logged chunk count %d exceeds maximum %d", numLogged, MaxChunkIndex+1)}
 	}
 
-	chunks := make(map[uint16][]byte, numReceived)
-	for i := 0; i < numReceived; i++ {
-		if len(data) < offset+2+ChunkDataSize {
-			return nil, 0, &ErrDeserialize{Reason: "data too short for decoder chunk entry"}
+	// Reconstruct the Decoder and replay the logged wire chunks.
+	d, err := NewDecoder(originalLen, 0)
+	if err != nil {
+		return nil, 0, &ErrDeserialize{Reason: "decoder init failed: " + err.Error()}
+	}
+
+	for i := 0; i < numLogged; i++ {
+		if len(data) < at+2 {
+			return nil, 0, &ErrDeserialize{Reason: "data too short for decoder chunk length"}
 		}
-		idx := readU16BE(data[offset:])
-		offset += 2
-		chunkData := make([]byte, ChunkDataSize)
-		copy(chunkData, data[offset:offset+ChunkDataSize])
-		offset += ChunkDataSize
-		chunks[idx] = chunkData
+		chunkLen := int(readU16BE(data[at:]))
+		at += 2
+
+		if len(data) < at+chunkLen {
+			return nil, 0, &ErrDeserialize{Reason: "data too short for decoder chunk data"}
+		}
+		wireChunk := make([]byte, chunkLen)
+		copy(wireChunk, data[at:at+chunkLen])
+		at += chunkLen
+
+		if addErr := d.AddChunk(wireChunk); addErr != nil {
+			return nil, 0, &ErrDeserialize{Reason: "decoder chunk replay failed: " + addErr.Error()}
+		}
 	}
 
-	return &Decoder{
-		expectedSize: expectedSize,
-		chunks:       chunks,
-		totalChunks:  totalChunks,
-	}, offset, nil
+	// received is not separately restored: AddChunk replay above naturally
+	// rebuilds seenIndices, so ReceivedCount() will match the original.
+	// Suppress the unused variable warning.
+	_ = received
+
+	return d, at, nil
 }
 
 // Binary encoding helpers.

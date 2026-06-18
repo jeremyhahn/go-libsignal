@@ -1,0 +1,31 @@
+{
+  "source": "rust/protocol/src/fingerprint.rs (libsignal v0.92.2)",
+  "rust_rev": "98915c442d",
+  "purpose": "DisplayableFingerprint and ScannableFingerprint for pinned alice/bob identity keys at 5200 iterations, versions 1 and 2.",
+  "vectors": [
+    {
+      "name": "fingerprint_v1_and_v2",
+      "inputs": {
+        "alice_generated_private": "20391ffd75e516e6ab88d3c3fd2dafdb63ebf5b68b814a0586a52d98fb456c59",
+        "alice_generated_public": "05bbc143ac5b26868d2512e8165a3d209d10a9c163331daea22d506ab8310d6974",
+        "alice_identity_public": "0506863bc66d02b40d27b8d49ca7c09e9239236f9d7d25d6fcca5ce13c7064d868",
+        "alice_stable_id": "+14152222222",
+        "bob_generated_private": "b8ff8da95a4762860d4474f48dd49225db5f848d5c1fce4c1fd12eff4d92f55e",
+        "bob_generated_public": "05d851c75d4aa73991c0b74b2b4c0f1154644f49052e862ef51e706884daba5110",
+        "bob_identity_public": "05f781b6fb32fed9ba1cf2de978d4d5da28dc34046ae814402b5c0dbd96fda907b",
+        "bob_stable_id": "+14153333333",
+        "iterations": 5200
+      },
+      "expected": {
+        "alice_generated_displayable_v2": "323851099705841297215257875324717987030519698364118675916769",
+        "alice_generated_scannable_v2_hex": "080212220a204921170e96a6a91c394138f166e0326c1d7d913b9e014142271377a58ca1b4461a220a20dcde8f35610b7e548e951fa3d314f104d32421d993d6f943e2b564c5f45c5f59",
+        "alice_scannable_v1_hex": "080112220a201e301a0353dce3dbe7684cb8336e85136cdc0ee96219494ada305d62a7bd61df1a220a20d62cbf73a11592015b6b9f1682ac306fea3aaf3885b84d12bca631e9d4fb3a4d",
+        "alice_scannable_v2_hex": "080212220a201e301a0353dce3dbe7684cb8336e85136cdc0ee96219494ada305d62a7bd61df1a220a20d62cbf73a11592015b6b9f1682ac306fea3aaf3885b84d12bca631e9d4fb3a4d",
+        "bob_scannable_v1_hex": "080112220a20d62cbf73a11592015b6b9f1682ac306fea3aaf3885b84d12bca631e9d4fb3a4d1a220a201e301a0353dce3dbe7684cb8336e85136cdc0ee96219494ada305d62a7bd61df",
+        "bob_scannable_v2_hex": "080212220a20d62cbf73a11592015b6b9f1682ac306fea3aaf3885b84d12bca631e9d4fb3a4d1a220a201e301a0353dce3dbe7684cb8336e85136cdc0ee96219494ada305d62a7bd61df",
+        "displayable_v1": "300354477692869396892869876765458257569162576843440918079131",
+        "displayable_v2": "300354477692869396892869876765458257569162576843440918079131"
+      }
+    }
+  ]
+}

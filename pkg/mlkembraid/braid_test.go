@@ -560,14 +560,25 @@ func TestBraidReceiveReplayedEpoch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Send a message at epoch 2 (one ahead of Bob's epoch 1, valid).
+	// Bob starts at epoch 1 in NoHeaderReceived. Per F4 fix (matching Rust),
+	// non-Ct2Sampled states reject epoch > state.epoch with ErrEpochOutOfRange.
+	// Send at epoch 2 (future epoch) must be rejected.
 	_, _, err = bob.Receive(&Message{Epoch: 2, Type: MessageTypeNone})
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected ErrEpochOutOfRange for future epoch in non-Ct2Sampled state")
+	}
+	if _, ok := err.(*ErrEpochOutOfRange); !ok {
+		t.Errorf("expected ErrEpochOutOfRange, got %T: %v", err, err)
 	}
 
-	// Replay at epoch 1 should fail (behind lastReceivedEpoch=2).
+	// Send at current epoch 1 (accepted). Advances lastReceivedEpoch to 1.
 	_, _, err = bob.Receive(&Message{Epoch: 1, Type: MessageTypeNone})
+	if err != nil {
+		t.Fatalf("expected no error for same-epoch message, got: %v", err)
+	}
+
+	// Replay at epoch 0 (below lastReceivedEpoch=1) should fail with ErrInvalidEpoch.
+	_, _, err = bob.Receive(&Message{Epoch: 0, Type: MessageTypeNone})
 	if err == nil {
 		t.Fatal("expected error for replayed epoch")
 	}
@@ -795,13 +806,15 @@ func TestDecoderAddChunkAfterComplete(t *testing.T) {
 		t.Fatal("decoder should be complete")
 	}
 
-	// Adding another valid chunk (duplicate of index 0) should be silently ignored.
-	dupChunk := enc.NextChunk() // wraps around to index 0
-	if err := dec.AddChunk(dupChunk); err != nil {
+	// With polynomial encoding, NextChunk() after HasMore()==false emits a
+	// polynomial redundancy chunk (index 1, not a duplicate of index 0).
+	// Adding it increments ReceivedCount to 2.
+	redundancyChunk := enc.NextChunk() // index 1 — polynomial redundancy
+	if err := dec.AddChunk(redundancyChunk); err != nil {
 		t.Fatal(err)
 	}
-	if dec.ReceivedCount() != 1 {
-		t.Errorf("received count should still be 1, got %d", dec.ReceivedCount())
+	if dec.ReceivedCount() != 2 {
+		t.Errorf("received count should be 2 after adding redundancy chunk, got %d", dec.ReceivedCount())
 	}
 }
 
@@ -1394,5 +1407,88 @@ func TestBobEncapSecretZeroizedAfterCompletion(t *testing.T) {
 
 	if !bobHadEncapSecret {
 		t.Error("Bob should have had a non-nil encapSecret at some point during the protocol")
+	}
+}
+
+// ============================================================================
+// Polynomial encoder integration tests
+// ============================================================================
+
+// TestPolynomialSCKAHandshakeSharedKey verifies that after swapping to the
+// polynomial encoder, Alice and Bob still derive an identical shared output key.
+// This is a behavioral test — it does NOT assert on specific chunk byte values.
+func TestPolynomialSCKAHandshakeSharedKey(t *testing.T) {
+	alice, bob := newAliceBob(t)
+
+	aliceKey, bobKey := runProtocol(t, alice, bob, 300)
+
+	if aliceKey == nil {
+		t.Fatal("Alice did not produce an output key")
+	}
+	if bobKey == nil {
+		t.Fatal("Bob did not produce an output key")
+	}
+
+	// The keys must agree.
+	if !bytes.Equal(aliceKey.Key.Bytes(), bobKey.Key.Bytes()) {
+		t.Errorf("polynomial SCKA shared keys do not match:\n  Alice: %x\n  Bob:   %x",
+			aliceKey.Key.Bytes(), bobKey.Key.Bytes())
+	}
+
+	// Both keys must be for the same epoch.
+	if aliceKey.Epoch != bobKey.Epoch {
+		t.Errorf("output key epochs do not match: Alice=%d, Bob=%d", aliceKey.Epoch, bobKey.Epoch)
+	}
+
+	aliceKey.Key.Destroy()
+	bobKey.Key.Destroy()
+}
+
+// TestPolynomialSCKARedundancyChunksDecodable verifies that the polynomial
+// decoder reconstructs a message from redundancy chunks (indices beyond
+// TotalChunks) emitted by the encoder after HasMore is false. This exercises
+// the encoder/decoder contract without going through the full state machine.
+func TestPolynomialSCKARedundancyChunksDecodable(t *testing.T) {
+	// Use a realistic KEM ciphertext size.
+	msg := make([]byte, MLKEM768CT1Size)
+	for i := range msg {
+		msg[i] = byte(i & 0xFF)
+	}
+
+	enc, err := NewEncoder(msg, DefaultChunkSize)
+	if err != nil {
+		t.Fatalf("NewEncoder: %v", err)
+	}
+
+	dec, err := NewDecoder(len(msg), DefaultChunkSize)
+	if err != nil {
+		t.Fatalf("NewDecoder: %v", err)
+	}
+
+	total := enc.TotalChunks()
+
+	// Drain the first pass so HasMore() becomes false.
+	for enc.HasMore() {
+		enc.NextChunk()
+	}
+
+	// Now collect only redundancy chunks (indices >= total).
+	for i := 0; i < total; i++ {
+		chunk := enc.NextChunk()
+		if err := dec.AddChunk(chunk); err != nil {
+			t.Fatalf("AddChunk(redundancy %d): %v", i, err)
+		}
+	}
+
+	if !dec.HasMessage() {
+		t.Fatal("decoder should reconstruct from polynomial redundancy chunks")
+	}
+
+	result, err := dec.Message()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(result, msg) {
+		t.Error("redundancy-only reconstruction failed")
 	}
 }

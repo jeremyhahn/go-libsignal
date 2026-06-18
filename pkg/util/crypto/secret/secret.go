@@ -25,6 +25,8 @@ func New(data []byte) (s *Secret, err error) {
 	if data == nil {
 		return nil, &Error{kind: errNilInput}
 	}
+	// coverage-exempt: defensive OOM panic-recovery for memguard.NewBufferFromBytes;
+	// cannot be unit-tested without modifying the host (see CLAUDE.md).
 	defer func() {
 		if r := recover(); r != nil {
 			s = nil
@@ -39,6 +41,8 @@ func New(data []byte) (s *Secret, err error) {
 //
 // Returns ErrSecretAlloc if the underlying memguard allocation fails.
 func NewRandom(size int) (s *Secret, err error) {
+	// coverage-exempt: defensive OOM panic-recovery for memguard.NewBufferRandom;
+	// cannot be unit-tested without modifying the host (see CLAUDE.md).
 	defer func() {
 		if r := recover(); r != nil {
 			s = nil
@@ -53,6 +57,8 @@ func NewRandom(size int) (s *Secret, err error) {
 //
 // Returns ErrSecretAlloc if the underlying memguard allocation fails.
 func NewEmpty(size int) (s *Secret, err error) {
+	// coverage-exempt: defensive OOM panic-recovery for memguard.NewBuffer;
+	// cannot be unit-tested without modifying the host (see CLAUDE.md).
 	defer func() {
 		if r := recover(); r != nil {
 			s = nil

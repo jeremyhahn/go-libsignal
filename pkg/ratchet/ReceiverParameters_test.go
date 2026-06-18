@@ -157,15 +157,6 @@ func TestReceiverParametersNilOneTimePreKey(t *testing.T) {
 	if params.OurOneTimePreKey() != nil {
 		t.Fatal("one time pre key should be nil")
 	}
-
-	// Verify that CalculateLegacyReceiverSession works with nil one-time prekey.
-	sessionKeys, err := CalculateLegacyReceiverSession(params)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sessionKeys == nil {
-		t.Fatal("session keys should not be nil")
-	}
 }
 
 // Helper re-exports for tests in this package.

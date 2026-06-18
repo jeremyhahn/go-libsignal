@@ -1,0 +1,52 @@
+version: 2
+
+updates:
+  # Go module dependencies
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    target-branch: main
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "chore(deps)"
+    open-pull-requests-limit: 10
+    groups:
+      minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # cloudflare/circl is a pinned-API dependency for Kyber-1024.
+      # Major bumps require manual triage against the ML-KEM braid implementation.
+      - dependency-name: "github.com/cloudflare/circl"
+        update-types:
+          - version-update:semver-major
+
+  # Rust interop test harness
+  - package-ecosystem: cargo
+    directory: /tests/interop/rust
+    schedule:
+      interval: weekly
+    target-branch: main
+    labels:
+      - dependencies
+      - interop
+    commit-message:
+      prefix: "chore(interop)"
+    open-pull-requests-limit: 10
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    target-branch: main
+    labels:
+      - ci
+    commit-message:
+      prefix: "chore(ci)"
+    open-pull-requests-limit: 10

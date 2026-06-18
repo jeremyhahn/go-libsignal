@@ -93,12 +93,12 @@ func NewOPRFBackup4(serverIDs []uint64, password []byte, maxTries uint32) (*OPRF
 		req := &svrpb.Request4{
 			Inner: &svrpb.Request4_Create_{
 				Create: &svrpb.Request4_Create{
-					Version:              version,
-					MaxTries:             maxTries,
-					OprfSecretshare:      oprfShares[i].Bytes(),
-					AuthCommitment:       commitments[i].point.Bytes(),
+					Version:               version,
+					MaxTries:              maxTries,
+					OprfSecretshare:       oprfShares[i].Bytes(),
+					AuthCommitment:        commitments[i].point.Bytes(),
 					EncryptionSecretshare: encShares[i],
-					ZeroSecretshare:      zeroShares[i].Bytes(),
+					ZeroSecretshare:       zeroShares[i].Bytes(),
 				},
 			},
 		}

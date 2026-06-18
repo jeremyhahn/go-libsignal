@@ -1,6 +1,7 @@
 package zkgroup
 
 import (
+	"encoding/hex"
 	"testing"
 )
 
@@ -322,6 +323,89 @@ func TestCheckAuthCredentialRedemptionTime_ExactBoundary(t *testing.T) {
 	err = CheckAuthCredentialRedemptionTime(redemptionTime, NewTimestamp(4*SecondsPerDay))
 	if err != nil {
 		t.Fatalf("should accept exact end boundary: %v", err)
+	}
+}
+
+// TestServerSecretParams_Sign exercises the Sign method (line 116) against the
+// KAT vector from tests/interop/fixtures/zkgroup/server_sig_known_answers.json.
+// The expected_signature_hex was extracted from
+// rust/zkgroup/tests/integration_tests.rs::test_server_sigs.
+func TestServerSecretParams_Sign(t *testing.T) {
+	// Server params generated from TEST_ARRAY_32 (0x00..0x1f).
+	var serverRandomness RandomnessBytes
+	for i := range serverRandomness {
+		serverRandomness[i] = byte(i)
+	}
+	params, err := GenerateServerSecretParams(serverRandomness)
+	if err != nil {
+		t.Fatalf("GenerateServerSecretParams: %v", err)
+	}
+
+	// Message = TEST_ARRAY_32_1 (0x64..0x83); sign randomness = TEST_ARRAY_32_2 (0xc8..0xe7).
+	message, err := hex.DecodeString("6465666768696a6b6c6d6e6f707172737475767778797a7b7c7d7e7f80818283")
+	if err != nil {
+		t.Fatalf("decode message: %v", err)
+	}
+	var signRandomness RandomnessBytes
+	r2, err := hex.DecodeString("c8c9cacbcccdcecfd0d1d2d3d4d5d6d7d8d9dadbdcdddedfe0e1e2e3e4e5e6e7")
+	if err != nil {
+		t.Fatalf("decode randomness: %v", err)
+	}
+	copy(signRandomness[:], r2)
+
+	sig, err := params.Sign(signRandomness, message)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	want, err := hex.DecodeString("87d354564d35ef91edba851e0815612e864c227a0471d50c270698604406d003a55473f576cf241fc6b41c6b16e5e63b333c02fe4a33858022fdd7a4ab367b06")
+	if err != nil {
+		t.Fatalf("decode want: %v", err)
+	}
+	if len(sig) != len(want) {
+		t.Fatalf("signature length mismatch: got %d, want %d", len(sig), len(want))
+	}
+	for i := range want {
+		if sig[i] != want[i] {
+			t.Fatalf("signature byte %d mismatch: got %02x, want %02x", i, sig[i], want[i])
+		}
+	}
+}
+
+// TestServerSecretParams_Sign_Verify confirms that Sign output passes
+// verification with the corresponding public key, and that a tampered
+// message does not verify.
+func TestServerSecretParams_Sign_Verify(t *testing.T) {
+	var randomness RandomnessBytes
+	for i := range randomness {
+		randomness[i] = byte(i + 5)
+	}
+	params, err := GenerateServerSecretParams(randomness)
+	if err != nil {
+		t.Fatalf("GenerateServerSecretParams: %v", err)
+	}
+
+	message := []byte("test message for sign verify")
+	var signRand RandomnessBytes
+	for i := range signRand {
+		signRand[i] = byte(i + 200)
+	}
+
+	sig, err := params.Sign(signRand, message)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	pub := params.GetPublicParams()
+	if err := pub.SigPublicKey.Verify(message, sig); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	// Tampered message must not verify.
+	tampered := append([]byte(nil), message...)
+	tampered[0] ^= 0xFF
+	if err := pub.SigPublicKey.Verify(tampered, sig); err == nil {
+		t.Fatal("Verify of tampered message unexpectedly succeeded")
 	}
 }
 

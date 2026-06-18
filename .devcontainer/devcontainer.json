@@ -1,0 +1,19 @@
+{
+  "name": "go-libsignal dev",
+  "image": "golang:1.23-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/rust:1": {
+      "version": "1.84"
+    }
+  },
+  "workspaceFolder": "/workspaces/go-libsignal",
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspaces/go-libsignal,type=bind,consistency=cached"
+  ],
+  "remoteEnv": {
+    "GOWORK": "off",
+    "LIBSIGNAL_INTEROP_BIN": "/workspaces/go-libsignal/tests/interop/rust/target/release/libsignal-interop"
+  },
+  "postCreateCommand": "go mod download",
+  "postStartCommand": "go build ./..."
+}

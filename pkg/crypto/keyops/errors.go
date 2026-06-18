@@ -9,7 +9,7 @@ type Error struct {
 type errorKind int
 
 const (
-	errKeyDestroyed          errorKind = iota + 1
+	errKeyDestroyed errorKind = iota + 1
 	errUnsupportedOperation
 	errHardwareKeyExport
 	errSignatureFailed

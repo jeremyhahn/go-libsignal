@@ -1,4 +1,11 @@
-// Package session provides the methods necessary to build sessions
+// Package session provides the methods necessary to build Signal Protocol
+// sessions and encrypt/decrypt messages. Callers should use the
+// ...WithLocalAddress constructor variants (NewCipherWithLocalAddress,
+// NewCipherFromSessionWithLocalAddress, NewCipherWithIdentityAndLocalAddress)
+// to enable address binding (SignalMessage field 6), which Rust libsignal
+// always populates and which prevents address-substitution downgrade attacks.
+// The legacy constructors without a local-address parameter leave field 6
+// unpopulated and are deprecated.
 package session
 
 import (
@@ -17,7 +24,6 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/state/store"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/optional"
 )
-
 
 // NewBuilder constructs a session builder.
 func NewBuilder(sessionStore store.Session, preKeyStore store.PreKey,
@@ -79,9 +85,9 @@ func NewBuilderFromSignal(signalStore store.SignalProtocol,
 // used to encrypt/decrypt messages in that session.
 //
 // Sessions are built from one of three different vectors:
-//   * PreKeyBundle retrieved from a server.
-//   * PreKeySignalMessage received from a client.
-//   * KeyExchangeMessage sent to or received from a client.
+//   - PreKeyBundle retrieved from a server.
+//   - PreKeySignalMessage received from a client.
+//   - KeyExchangeMessage sent to or received from a client.
 //
 // Sessions are constructed per recipientId + deviceId tuple.
 // Remote logical users are identified by their recipientId,
@@ -129,10 +135,14 @@ type DeferredActions struct {
 // only after the inner SignalMessage decryption succeeds.
 func (d *DeferredActions) Complete() error {
 	// Store the updated session record.
-	d.builder.sessionStore.StoreSession(d.builder.remoteAddress, d.SessionRecord)
+	if err := d.builder.sessionStore.StoreSession(d.builder.remoteAddress, d.SessionRecord); err != nil {
+		return err
+	}
 
 	// Save the identity key to our identity store.
-	d.builder.identityKeyStore.SaveIdentity(d.builder.remoteAddress, d.TheirIdentityKey)
+	if _, err := d.builder.identityKeyStore.SaveIdentity(d.builder.remoteAddress, d.TheirIdentityKey); err != nil {
+		return err
+	}
 
 	// Mark Kyber pre-key as used if present.
 	if d.KyberPreKeyID != nil && d.builder.kyberPreKeyStore != nil {
@@ -146,7 +156,9 @@ func (d *DeferredActions) Complete() error {
 	// Remove the one-time pre-key if present.
 	if d.UnsignedPreKeyID != nil {
 		logger.Debug("Removing preKey from our prekey store: ", d.UnsignedPreKeyID.Value)
-		d.builder.preKeyStore.RemovePreKey(d.UnsignedPreKeyID.Value)
+		if err := d.builder.preKeyStore.RemovePreKey(d.UnsignedPreKeyID.Value); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -160,11 +172,18 @@ func (d *DeferredActions) Complete() error {
 func (b *Builder) Process(message *protocol.PreKeySignalMessage) (*DeferredActions, error) {
 
 	// Load or create session record for this session.
-	sessionRecord := b.sessionStore.LoadSession(b.remoteAddress)
+	sessionRecord, err := b.sessionStore.LoadSession(b.remoteAddress)
+	if err != nil {
+		return nil, err
+	}
 
 	// Check to see if the keys are trusted.
 	theirIdentityKey := message.IdentityKey()
-	if !(b.identityKeyStore.IsTrustedIdentity(b.remoteAddress, theirIdentityKey, store.DirectionReceiving)) {
+	trusted, err := b.identityKeyStore.IsTrustedIdentity(b.remoteAddress, theirIdentityKey, store.DirectionReceiving)
+	if err != nil {
+		return nil, err
+	}
+	if !trusted {
 		return nil, &Error{kind: errUntrustedIdentity}
 	}
 
@@ -212,16 +231,23 @@ func (b *Builder) processV3(sessionRecord *record.Session,
 	}
 
 	// H4: For v4+ messages, the Kyber pre-key ID and ciphertext MUST be present.
-	// This matches Rust which returns "missing pq pre-key ID" and "missing pq ciphertext".
+	// Matches Rust process_prekey_impl which returns distinct errors:
+	// "missing pq pre-key ID" and "missing pq ciphertext".
 	if message.KyberPreKeyID() == nil {
-		return nil, nil, &Error{kind: errMissingPQPreKey}
+		return nil, nil, &Error{kind: errMissingPQPreKeyID}
 	}
 	if message.KyberCiphertext() == nil {
-		return nil, nil, &Error{kind: errMissingPQPreKey}
+		return nil, nil, &Error{kind: errMissingPQCiphertext}
 	}
 
 	// Load our signed prekey from our signed prekey store.
-	ourSignedPreKeyRecord := b.signedPreKeyStore.LoadSignedPreKey(message.SignedPreKeyID())
+	ourSignedPreKeyRecord, err := b.signedPreKeyStore.LoadSignedPreKey(message.SignedPreKeyID())
+	if err != nil {
+		return nil, nil, err
+	}
+	if ourSignedPreKeyRecord == nil {
+		return nil, nil, &Error{kind: errNoSignedPreKey}
+	}
 	ourSignedPreKey := ourSignedPreKeyRecord.KeyPair()
 
 	// Build the parameters of the session.
@@ -235,7 +261,10 @@ func (b *Builder) processV3(sessionRecord *record.Session,
 	// Set our one time pre key with the one from our prekey store
 	// if the message contains a valid pre key id
 	if message.PreKeyID() != nil {
-		oneTimePreKey := b.preKeyStore.LoadPreKey(message.PreKeyID().Value)
+		oneTimePreKey, pkErr := b.preKeyStore.LoadPreKey(message.PreKeyID().Value)
+		if pkErr != nil {
+			return nil, nil, pkErr
+		}
 		if oneTimePreKey == nil {
 			logger.Error("pre-key store returned nil one-time pre-key")
 			return nil, nil, &Error{kind: errNilOneTimePreKey}
@@ -346,7 +375,11 @@ func (b *Builder) processV3(sessionRecord *record.Session,
 // from a server.
 func (b *Builder) ProcessBundle(preKey *prekey.Bundle) error {
 	// Check to see if the keys are trusted.
-	if !(b.identityKeyStore.IsTrustedIdentity(b.remoteAddress, preKey.IdentityKey(), store.DirectionSending)) {
+	trusted, err := b.identityKeyStore.IsTrustedIdentity(b.remoteAddress, preKey.IdentityKey(), store.DirectionSending)
+	if err != nil {
+		return err
+	}
+	if !trusted {
 		return &Error{kind: errUntrustedIdentity}
 	}
 
@@ -389,7 +422,10 @@ func (b *Builder) ProcessBundle(preKey *prekey.Bundle) error {
 	}
 
 	// Load our session and generate keys.
-	sessionRecord := b.sessionStore.LoadSession(b.remoteAddress)
+	sessionRecord, err := b.sessionStore.LoadSession(b.remoteAddress)
+	if err != nil {
+		return err
+	}
 	ourBaseKey, err := ecc.GenerateKeyPair()
 	if err != nil {
 		return err
@@ -496,8 +532,12 @@ func (b *Builder) ProcessBundle(preKey *prekey.Bundle) error {
 	)
 
 	// Store the session in our session store and save the identity in our identity store.
-	b.sessionStore.StoreSession(b.remoteAddress, sessionRecord)
-	b.identityKeyStore.SaveIdentity(b.remoteAddress, preKey.IdentityKey())
+	if err := b.sessionStore.StoreSession(b.remoteAddress, sessionRecord); err != nil {
+		return err
+	}
+	if _, err := b.identityKeyStore.SaveIdentity(b.remoteAddress, preKey.IdentityKey()); err != nil {
+		return err
+	}
 
 	return nil
 }

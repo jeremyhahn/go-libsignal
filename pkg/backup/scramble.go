@@ -77,7 +77,28 @@ func NewScramblerWithSeed(seed uint64) *Scrambler {
 }
 
 // nextUint64 returns the next pseudorandom uint64 from the scrambler's PRNG.
-// Uses a simple xoshiro256-style algorithm for determinism.
+//
+// PRNG algorithm: XorShift-64 (Marsaglia 2003).  Three operations are applied
+// in sequence, matching the standard (13, 7, 17) parameter triple.
+//
+// PRNG DIVERGENCE NOTE (MEDIUM #5):
+// The Rust scrambler uses rand::rngs::StdRng::seed_from_u64(0), which in
+// rand 0.9 is ChaCha12 (128-bit state, 12 rounds).  The Go implementation
+// uses XorShift-64 (64-bit state, 3 xor-shifts).  The two algorithms produce
+// different output sequences.
+//
+// This divergence is intentional and safe because the scrambler is a
+// testing/anonymization tool — NOT a wire-format primitive.  Its output is
+// never transmitted on the wire, stored in interop fixtures, or compared
+// between implementations.  There is therefore no correctness requirement for
+// byte-identical PRNG output between Rust and Go.
+//
+// Aligning to ChaCha12 would require importing an external pure-Go ChaCha20
+// library or writing the block function from scratch purely to match an
+// internal test tool, which violates YAGNI.  If cross-language scramble
+// output parity ever becomes a requirement, this function should be replaced
+// with a ChaCha12 seeded via seed_from_u64 semantics (using 16 little-endian
+// bytes derived from the u64 seed with an empty 12-byte nonce).
 func (s *Scrambler) nextUint64() uint64 {
 	s.state ^= s.state << 13
 	s.state ^= s.state >> 7

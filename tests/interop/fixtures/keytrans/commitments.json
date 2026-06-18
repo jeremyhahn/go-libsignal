@@ -1,0 +1,51 @@
+{
+  "source": "rust/keytrans/src/commitments.rs:37-51",
+  "rust_rev": "98915c442d",
+  "purpose": "Merkle commitment hash parity (HMAC-SHA256 with fixed key). Each vector calls commit(search_key, data, nonce=[0u8;16]) and asserts the 32-byte output. Go Commit must produce byte-identical output.",
+  "vectors": [
+    {
+      "name": "empty",
+      "inputs": {
+        "search_key_hex": "",
+        "data_hex": "",
+        "nonce_hex": "00000000000000000000000000000000"
+      },
+      "expected": {
+        "commitment_hex": "edc3f59798cd87f2f48ec8836e2b6ef425cde9ab121ffdefc93d769db7cebabf"
+      }
+    },
+    {
+      "name": "case_1",
+      "inputs": {
+        "search_key_hex": "666f6f",
+        "data_hex": "626172",
+        "nonce_hex": "00000000000000000000000000000000"
+      },
+      "expected": {
+        "commitment_hex": "25df431e884358826fe66f96d65702580104240abd63fa741d9ea3f32914bbf5"
+      }
+    },
+    {
+      "name": "case_2",
+      "inputs": {
+        "search_key_hex": "666f6f31",
+        "data_hex": "626172",
+        "nonce_hex": "00000000000000000000000000000000"
+      },
+      "expected": {
+        "commitment_hex": "6c31a163a7660d1467fc1c997bd78b0a70b8921ca76b7eb0c6ca077f1e5e121e"
+      }
+    },
+    {
+      "name": "case_3",
+      "inputs": {
+        "search_key_hex": "666f6f",
+        "data_hex": "62617231",
+        "nonce_hex": "00000000000000000000000000000000"
+      },
+      "expected": {
+        "commitment_hex": "5de6c6c9ed4bf48122f6c851c80e6eacbf885947f02f974cdc794b14c8e975f1"
+      }
+    }
+  ]
+}

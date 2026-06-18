@@ -285,11 +285,11 @@ func TestJSONSessionSerializer_DeserializeInvalid(t *testing.T) {
 func TestJSONSenderKeyDistributionMessageSerializer_RoundTrip(t *testing.T) {
 	s := &JSONSenderKeyDistributionMessageSerializer{}
 	original := &protocol.SenderKeyDistributionMessageStructure{
-		ID:        1,
-		Iteration: 5,
-		ChainKey:  []byte{0x01},
+		ID:         1,
+		Iteration:  5,
+		ChainKey:   []byte{0x01},
 		SigningKey: []byte{0x02},
-		Version:   3,
+		Version:    3,
 	}
 
 	serialized, err := s.Serialize(original)

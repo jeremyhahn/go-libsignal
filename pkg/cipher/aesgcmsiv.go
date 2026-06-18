@@ -31,6 +31,18 @@ const (
 
 	// aesGCMSIVKeySize is the key size for AES-256-GCM-SIV.
 	aesGCMSIVKeySize = 32
+
+	// AESGCMSIVNonceSize is the nonce size for AES-256-GCM-SIV (96 bits).
+	// Mirrors Rust aes_gcm_siv nonce size per RFC 8452 §4.
+	AESGCMSIVNonceSize = aesGCMSIVNonceSize
+
+	// AESGCMSIVTagSize is the authentication tag size for AES-256-GCM-SIV (128 bits).
+	// Mirrors Rust aes_gcm_siv tag size per RFC 8452 §4.
+	AESGCMSIVTagSize = aesGCMSIVTagSize
+
+	// AESGCMSIVKeySize is the key size for AES-256-GCM-SIV (256 bits = 32 bytes).
+	// Mirrors Rust aes_gcm_siv key size per RFC 8452 §4.
+	AESGCMSIVKeySize = aesGCMSIVKeySize
 )
 
 // aesGCMSIV implements the crypto/cipher.AEAD interface for AES-256-GCM-SIV.
@@ -92,6 +104,14 @@ func (a *aesGCMSIV) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
 		// interface contract; nonce must be exactly NonceSize() bytes.
 		panic("aesgcmsiv: incorrect nonce length")
 	}
+	if int64(len(plaintext)) > aesGCMSIVMaxPlaintextLen {
+		// panic: cryptographic invariant violation — plaintext exceeds the
+		// RFC 8452 §6 maximum (2^36 - 32). Inputs equal to the limit are
+		// permitted; only strictly larger inputs are rejected (matching the
+		// aesGCMSIVEncryptInternal bound). Checked here (not in aesGCMSIVCTR)
+		// so the panic is attributed to the public entry point.
+		panic("aesgcmsiv: plaintext exceeds RFC 8452 §6 maximum length")
+	}
 
 	ct, err := aesGCMSIVEncryptInternal(a.key.Bytes(), nonce, plaintext, additionalData)
 	if err != nil {
@@ -126,14 +146,21 @@ func (a *aesGCMSIV) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte,
 // AESGCMSIVEncrypt encrypts plaintext with the given key, nonce, and
 // additional authenticated data using AES-256-GCM-SIV.
 //
-// The key must be 32 bytes, the nonce must be 12 bytes. Returns the
-// ciphertext with the 16-byte authentication tag appended.
+// The key must be 32 bytes, the nonce must be 12 bytes. The plaintext must
+// not exceed aesGCMSIVMaxPlaintextLen (2^36 - 32) bytes per RFC 8452 §6.
+// Returns the ciphertext with the 16-byte authentication tag appended.
 func AESGCMSIVEncrypt(key, nonce, plaintext, aad []byte) ([]byte, error) {
 	if len(key) != aesGCMSIVKeySize {
 		return nil, &ErrAESGCMSIVKeySize{Expected: aesGCMSIVKeySize, Got: len(key)}
 	}
 	if len(nonce) != aesGCMSIVNonceSize {
 		return nil, &ErrAESGCMSIVNonceSize{Expected: aesGCMSIVNonceSize, Got: len(nonce)}
+	}
+	// RFC 8452 §6: plaintext length MUST NOT exceed aesGCMSIVMaxPlaintextLen
+	// (2^36 - 32). Inputs equal to the limit are permitted; only strictly
+	// greater inputs are rejected.
+	if int64(len(plaintext)) > aesGCMSIVMaxPlaintextLen {
+		return nil, &ErrAESGCMSIVPlaintextTooLong{Length: len(plaintext)}
 	}
 
 	return aesGCMSIVEncryptInternal(key, nonce, plaintext, aad)
@@ -289,19 +316,20 @@ func padToBlockSize(data []byte) []byte {
 	return result
 }
 
+// aesGCMSIVMaxPlaintextLen is the maximum plaintext length for AES-GCM-SIV per
+// RFC 8452 §6: 2^36 - 32 bytes. The -32 ensures the last counter block cannot
+// wrap back to the initial value, which would allow the 32-bit counter to alias.
+const aesGCMSIVMaxPlaintextLen = (1 << 36) - 32
+
 // aesGCMSIVCTR encrypts or decrypts data using AES-CTR mode with the
 // authentication tag as the initial counter value, per RFC 8452 Section 4.
 //
 // The counter is formed from the tag with the most significant bit of the
 // last byte set to 1, and only the first 32 bits are incremented.
+//
+// The caller is responsible for enforcing the plaintext length limit before
+// calling this function (see aesGCMSIVMaxPlaintextLen).
 func aesGCMSIVCTR(encKey, tag, input, output []byte) {
-	// RFC 8452: plaintext is limited to 2^36 bytes to prevent counter wrap.
-	// Use >= to reject inputs of exactly maxPlaintextLen, which would cause
-	// the 32-bit CTR counter to wrap back to its initial value on the last block.
-	const maxPlaintextLen = 1 << 36
-	if len(input) >= maxPlaintextLen {
-		panic("aesgcmsiv: plaintext exceeds RFC 8452 maximum length")
-	}
 
 	block, err := aes.NewCipher(encKey)
 	if err != nil {

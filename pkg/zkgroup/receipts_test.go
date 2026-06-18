@@ -11,7 +11,7 @@ func TestReceiptCredential(t *testing.T) {
 	ts := NewTimestamp(86400)
 	rc := &ReceiptCredential{
 		ReceiptExpirationTime: ts,
-		ReceiptLvl:           42,
+		ReceiptLvl:            42,
 	}
 	if rc.GetReceiptExpirationTime() != ts {
 		t.Error("expiration time mismatch")
@@ -63,8 +63,8 @@ func TestReceiptCredentialPresentation(t *testing.T) {
 
 	pres := &ReceiptCredentialPresentation{
 		ReceiptExpirationTime: ts,
-		ReceiptLvl:           10,
-		ReceiptSerialBuf:     serial,
+		ReceiptLvl:            10,
+		ReceiptSerialBuf:      serial,
 	}
 
 	if pres.GetReceiptExpirationTime() != ts {

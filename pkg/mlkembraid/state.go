@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 
+	imlkem "github.com/jeremyhahn/go-libsignal/pkg/mlkembraid/internal/incremental_mlkem768"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
@@ -190,10 +191,21 @@ func (s *State) Receive(msg *Message, kemImpl IncrementalKEM, chunkSize int) (ui
 	if msg.Epoch < s.lastReceivedEpoch {
 		return 0, nil, &ErrInvalidEpoch{Expected: s.lastReceivedEpoch, Received: msg.Epoch}
 	}
-	// Reject messages with epochs too far in the future. A valid message can
-	// be at most one epoch ahead (the next pending key agreement round).
-	if msg.Epoch > s.epoch+1 {
-		return 0, nil, &ErrEpochOutOfRange{Expected: s.epoch, Got: msg.Epoch}
+	// Per Rust spqr states.rs: only Ct2Sampled accepts epoch+1 (next-epoch trigger).
+	// Every other state rejects msg.epoch > state.epoch with EpochOutOfRange.
+	// This matches `match msg.epoch.cmp(&state.epoch()) { Ordering::Greater => Err(...) }`
+	// in all non-Ct2Sampled arms of States::recv.
+	if s.kind == StateCt2Sampled {
+		// Ct2Sampled allows exactly epoch+1 (handled in receiveCt2Sampled);
+		// anything further ahead is still out of range.
+		if msg.Epoch > s.epoch+1 {
+			return 0, nil, &ErrEpochOutOfRange{Expected: s.epoch, Got: msg.Epoch}
+		}
+	} else {
+		// All other states reject any future-epoch message.
+		if msg.Epoch > s.epoch {
+			return 0, nil, &ErrEpochOutOfRange{Expected: s.epoch, Got: msg.Epoch}
+		}
 	}
 	s.lastReceivedEpoch = msg.Epoch
 
@@ -994,7 +1006,12 @@ func (s *State) receiveCt1Acknowledged(msg *Message, kemImpl IncrementalKEM, chu
 	}
 }
 
-// verifyEkVector verifies hek = SHA3-256(ek_seed || ek_vector) against stored bobHek.
+// verifyEkVector verifies that ekVector (pk2) is consistent with the stored
+// bobEkSeed (pk1) and bobHek. Accepts both KEM implementations:
+//
+//   - Legacy (MLKEM768IncrementalKEM): hek = SHA3-256(ek_seed[0:32] || ekVector)
+//   - Incremental (IncrementalMLKEM768KEM): uses ValidatePKBytes(pk1, pk2) which
+//     checks SHA3-256(pk2 || pk1[:32]) == pk1[32:64].
 func (s *State) verifyEkVector(ekVector []byte) error {
 	if s.bobEkSeed == nil || s.bobHek == nil {
 		return &ErrInvalidState{
@@ -1004,7 +1021,17 @@ func (s *State) verifyEkVector(ekVector []byte) error {
 		}
 	}
 
-	computedHEK := computeHEK(s.bobEkSeed.Bytes(), ekVector)
+	// If bobEkSeed is 64 bytes (pk1 format), use IncrementalVerifyEKVector.
+	// If bobEkSeed is 32 bytes (legacy format), use the legacy SHA3-256 check.
+	pk1 := s.bobEkSeed.Bytes()
+	if len(pk1) == imlkem.PublicKey1Size {
+		if err := IncrementalVerifyEKVector(pk1, ekVector); err != nil {
+			return &ErrHeaderFormat{Reason: "pk2 does not match pk1 for incremental KEM"}
+		}
+		return nil
+	}
+
+	computedHEK := computeHEK(pk1, ekVector)
 	if subtle.ConstantTimeCompare(computedHEK, s.bobHek.Bytes()) != 1 {
 		return &ErrHeaderFormat{Reason: "hek does not match received ek_vector"}
 	}
@@ -1039,10 +1066,10 @@ func (s *State) bobCompleteEncapsulationDeferred(kemImpl IncrementalKEM, chunkSi
 		}
 	}
 
-	kyberKEM, ok := kemImpl.(*MLKEM768IncrementalKEM)
+	completer, ok := kemImpl.(kemCompleter)
 	if !ok {
 		return 0, nil, &ErrKEMOperation{Op: "FullEncaps", Err: &ErrInvalidInput{
-			Field: "kemImpl", Reason: "must be *MLKEM768IncrementalKEM",
+			Field: "kemImpl", Reason: "must implement kemCompleter (MLKEM768IncrementalKEM or IncrementalMLKEM768KEM)",
 		}}
 	}
 
@@ -1051,7 +1078,7 @@ func (s *State) bobCompleteEncapsulationDeferred(kemImpl IncrementalKEM, chunkSi
 
 	if s.bobEncapSecret != nil {
 		// Two-phase path: Encaps1 was called in sendHeaderReceived.
-		ct1, ct2, ss, err = kyberKEM.CompleteEncaps2(s.bobEncapSecret.Bytes(), s.bobEkSeed.Bytes(), ekVector)
+		ct1, ct2, ss, err = completer.CompleteEncaps2(s.bobEncapSecret.Bytes(), s.bobEkSeed.Bytes(), ekVector)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -1061,7 +1088,7 @@ func (s *State) bobCompleteEncapsulationDeferred(kemImpl IncrementalKEM, chunkSi
 		if err := s.verifyEkVector(ekVector); err != nil {
 			return 0, nil, err
 		}
-		ct1, ct2, ss, err = kyberKEM.FullEncaps(s.bobEkSeed.Bytes(), ekVector)
+		ct1, ct2, ss, err = completer.FullEncaps(s.bobEkSeed.Bytes(), ekVector)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -1145,9 +1172,10 @@ func (s *State) receiveCt2Sampled(msg *Message, _ IncrementalKEM, _ int) (uint64
 	receivingEpoch := s.epoch - 1
 
 	// Check for Transition (13): next epoch has begun.
-	// Per spec Figure 1, this transition triggers only when receiving an Hdr
-	// message for the next epoch (Alice starting a new key exchange).
-	if msg.Epoch == s.epoch+1 && msg.Type == MessageTypeHdr {
+	// Per Rust spqr states.rs Ct2Sampled arm: ANY message with epoch == state.epoch+1
+	// triggers recv_next_epoch regardless of message type. The type-gate was a
+	// divergence from Rust; removed to match the Rust state machine exactly.
+	if msg.Epoch == s.epoch+1 {
 		// Destroy secrets from the completed epoch before transitioning.
 		destroySecret(&s.bobCt1)
 		destroySecret(&s.bobCt2)

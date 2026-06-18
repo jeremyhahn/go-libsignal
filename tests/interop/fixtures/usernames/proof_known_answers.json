@@ -1,0 +1,104 @@
+{
+  "source": "rust/usernames/src/username.rs:135-266",
+  "rust_rev": "98915c44",
+  "purpose": "Username scalar hashing and poksho ZK proof KATs. scalar_kats verify that nickname_scalar, username_sha_scalar, and discriminator_scalar match Rust's make_scalars output byte-for-byte (little-endian Ristretto scalar encoding). The _z9_ nickname_scalar must equal 74656 (Rust: valid_nickname_scalar test). proof_kats verify that Proof(randomness) and VerifyProof round-trip correctly for fixed deterministic inputs.",
+  "scalar_kats": [
+    {
+      "name": "_z9_",
+      "nickname": "_z9_",
+      "discriminator": 42,
+      "sha_scalar_hex": "748c4422b9e3728aadf87de7104409c10a08f9cd7efc23194bc31c823fbe2b03",
+      "nickname_scalar_hex": "a023010000000000000000000000000000000000000000000000000000000000",
+      "discriminator_scalar_hex": "2a00000000000000000000000000000000000000000000000000000000000000",
+      "hash_hex": "b662682a462b1d1fe597576d83011232d8bfe9fba1613eac5e0cb8c8f3ead97f",
+      "note": "nickname_scalar = 74656 = 0x123a0; verified by Rust valid_nickname_scalar test"
+    },
+    {
+      "name": "he110",
+      "nickname": "he110",
+      "discriminator": 1,
+      "sha_scalar_hex": "e7c79a25dbe721ca1c15000c9f130a3bf56f50f262f2fcae8428a050a904350a",
+      "nickname_scalar_hex": "b11d590200000000000000000000000000000000000000000000000000000000",
+      "discriminator_scalar_hex": "0100000000000000000000000000000000000000000000000000000000000000",
+      "hash_hex": "40bb2ef5ee0623030702e2fe4968b8ecd7362f429dd9435ae4c4616458394e77",
+      "note": "He110.01 is one of the canonical valid_usernames test cases in Rust"
+    },
+    {
+      "name": "usr",
+      "nickname": "usr",
+      "discriminator": 999999999,
+      "sha_scalar_hex": "ba536814ba858d1154d9eba6aae224b509e1f068865b81a9bdf558240483980c",
+      "nickname_scalar_hex": "574c000000000000000000000000000000000000000000000000000000000000",
+      "discriminator_scalar_hex": "ffc99a3b00000000000000000000000000000000000000000000000000000000",
+      "hash_hex": "ee73aba64f73a01d76f60dd228806c6b4941a0db1381d3e85fba4c87160d9215",
+      "note": "usr.999999999 is one of the canonical valid_usernames test cases in Rust"
+    },
+    {
+      "name": "identifier",
+      "nickname": "identifier",
+      "discriminator": 42,
+      "sha_scalar_hex": "21c1c31ea32d62a88ba4342aa4299b904cb50269fe7a7b6beb75c1a565128c0b",
+      "nickname_scalar_hex": "cbf2e62773750600000000000000000000000000000000000000000000000000",
+      "discriminator_scalar_hex": "2a00000000000000000000000000000000000000000000000000000000000000",
+      "hash_hex": "5c0bcda1be69a9f9a1b21d301c5c4f7b8e2af4f7f7bfd77227495edb5c7b032d",
+      "note": "_identifier.42 is one of the canonical valid_usernames test cases in Rust (lowercase)"
+    },
+    {
+      "name": "loud",
+      "nickname": "loud",
+      "discriminator": 700,
+      "sha_scalar_hex": "0607921ab79941be5fd542fcb0174effbca9bd8a0d564d70f004063a8b1d8209",
+      "nickname_scalar_hex": "8629030000000000000000000000000000000000000000000000000000000000",
+      "discriminator_scalar_hex": "bc02000000000000000000000000000000000000000000000000000000000000",
+      "hash_hex": "4ee6243df79ec22d8da80aa8b4a834ed56d911a165490fa90199135e7888314e",
+      "note": "LOUD.700 is one of the canonical valid_usernames test cases in Rust (lowercase for hash)"
+    }
+  ],
+  "proof_kats": [
+    {
+      "name": "he110.01",
+      "nickname": "he110",
+      "discriminator": 1,
+      "randomness_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "hash_hex": "40bb2ef5ee0623030702e2fe4968b8ecd7362f429dd9435ae4c4616458394e77",
+      "proof_hex": "6c47fb56c384df4bfa3a769bd6ba9905013a3bed4e184e035afdfb38affb920bbe34c4d29b77cf192e55546fe997c2734d4fb48622228a491aa50404e0bd6007e9eb9fdad677eaaee4a323b26525d3fd7463a7ff32e086f620f3634bb5a4e502d3aab87c7ff7e74292e415f3f4bf69a3b65fae499bdde405480c56fa4143fc09",
+      "note": "Deterministic randomness: byte i = i+1 for i in 0..31"
+    },
+    {
+      "name": "usr.999999999",
+      "nickname": "usr",
+      "discriminator": 999999999,
+      "randomness_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "hash_hex": "ee73aba64f73a01d76f60dd228806c6b4941a0db1381d3e85fba4c87160d9215",
+      "proof_hex": "2f2a71f5ce0dd119ca20fb2bfadd2f48e9fed7d8cb3ec4b0bd6dc6fd5eb9ca0dfefe4dbe0dfbe771a96b30593bd7204624d2d5797c01b758ec8af4920c68280456872c2387a264315213f4c4394866ef57de664a7c15d325822d4f4ca3e90908ac1dfcfd78e386806f6df709aeca521a3c03303355e1d4c634fb4becd64d7c06",
+      "note": "Deterministic randomness: byte i = i+1 for i in 0..31"
+    },
+    {
+      "name": "identifier.42",
+      "nickname": "identifier",
+      "discriminator": 42,
+      "randomness_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "hash_hex": "5c0bcda1be69a9f9a1b21d301c5c4f7b8e2af4f7f7bfd77227495edb5c7b032d",
+      "proof_hex": "70e23d056231bbe9b00f3b3b6ccf1ee462ee35a81f71624a6332a865322f120092125ed1b0ecb5f7049923677d8022bc2447c12dbdfaf4630bb65ed2c6eecf030bcb118e2e298828360ab04c64364361564e4d69d100d1748708950487dad80754551f9774596c272af5534f4f1a2445b387834f346e77531c90a84d0816680d",
+      "note": "Deterministic randomness: byte i = i+1 for i in 0..31"
+    },
+    {
+      "name": "loud.700",
+      "nickname": "loud",
+      "discriminator": 700,
+      "randomness_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "hash_hex": "4ee6243df79ec22d8da80aa8b4a834ed56d911a165490fa90199135e7888314e",
+      "proof_hex": "63134b00a41853f13c1d536fe4666dddf039f9e43555406596becf62a196cd0b942abdffdacb6fb96eec6a892ca76599fed05ce75af366ba8e23d9c2b411850cbca1def2877b2637f1efa00672346a428bc2dd0268711251e9cee6fb85adab0d03cec85ee96e4b7f23474563fe3a73ce4eb006afe0148358c1b7d24cbe288a01",
+      "note": "Deterministic randomness: byte i = i+1 for i in 0..31"
+    },
+    {
+      "name": "_z9_.42",
+      "nickname": "_z9_",
+      "discriminator": 42,
+      "randomness_hex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+      "hash_hex": "b662682a462b1d1fe597576d83011232d8bfe9fba1613eac5e0cb8c8f3ead97f",
+      "proof_hex": "43771996577a42d340649a918aabc884364f6c1ea72a215b07811bcca52048099cd6a4173f67735e25122fbc3a26f879ff88a54e834d41fff4d05b11b9c0c60580f99dc033179a9b03b78c76c6b1ef82e2d967b362e4e20c8a8ac49056884a0082cda193adf38cfc9ead1b46125aec470570efdad6978640688340e4cd2ee503",
+      "note": "Deterministic randomness: byte i = i+1 for i in 0..31; nickname_scalar = 74656"
+    }
+  ]
+}

@@ -1,11 +1,16 @@
 package backup
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io"
 	"math"
 	"strings"
 )
+
+// BackupInfoVersion1 is the only supported BackupInfo version.
+// Rust libsignal ref: rust/message-backup/src/backup.rs BackupInfo.version
+const BackupInfoVersion1 = uint64(1)
 
 // Error represents an error encountered during backup reading or validation.
 type Error struct {
@@ -117,6 +122,315 @@ func (br *BackupReader) ReadAll() ([][]byte, error) {
 			return frames, nil
 		}
 		frames = append(frames, frame)
+	}
+}
+
+// BackupInfoRaw contains the decoded fields of the first frame (BackupInfo
+// protobuf) of a backup stream.
+//
+// Rust libsignal ref: rust/message-backup/src/backup.rs BackupInfo / BackupMeta
+type BackupInfoRaw struct {
+	// Version is the backup format version (must be 1).
+	Version uint64
+	// BackupTimeMs is the backup creation timestamp in milliseconds since epoch.
+	BackupTimeMs uint64
+	// MediaRootBackupKey is the 32-byte media root backup key.
+	MediaRootBackupKey []byte
+}
+
+// ValidatedReadResult is the result of ValidatedReadAll.
+type ValidatedReadResult struct {
+	// Info is the parsed first-frame BackupInfo.
+	Info BackupInfoRaw
+	// Frames contains the raw bytes of all subsequent frames (excluding BackupInfo).
+	Frames [][]byte
+	// FoundUnknownFields records unknown protobuf field numbers encountered
+	// in any frame.
+	FoundUnknownFields []FoundUnknownField
+}
+
+// ValidatedReadAll reads all frames, parses the first frame as BackupInfo,
+// parses each subsequent frame as a Frame protobuf, and enforces the Purpose.
+// It returns ErrInvalidBackupInfo if the first frame cannot be decoded or
+// fails basic validation, ErrInvalidFrame for subsequent frame parse errors,
+// and ErrPurposeMismatch if the BackupInfo version does not correspond to the
+// expected purpose constraints.
+//
+// Unknown field numbers in any frame are recorded in ValidatedReadResult.FoundUnknownFields
+// rather than causing an error, matching proto3 forward-compatibility rules.
+//
+// Rust libsignal ref: rust/message-backup/src/backup.rs BackupReader::read_all
+func (br *BackupReader) ValidatedReadAll(purpose Purpose) (*ValidatedReadResult, error) {
+	result := &ValidatedReadResult{}
+
+	// Read and parse the first frame as BackupInfo.
+	firstRaw, err := br.ReadNext()
+	if err != nil {
+		return nil, &ErrInvalidBackupInfo{Err: err}
+	}
+	if firstRaw == nil {
+		return nil, &ErrInvalidBackupInfo{Err: nil}
+	}
+
+	info, unknownFields, err := parseBackupInfo(firstRaw)
+	if err != nil {
+		return nil, &ErrInvalidBackupInfo{Err: err}
+	}
+	for i, f := range unknownFields {
+		f.FrameIndex = 0
+		unknownFields[i] = f
+	}
+	result.FoundUnknownFields = append(result.FoundUnknownFields, unknownFields...)
+
+	// Validate version.
+	if info.Version != BackupInfoVersion1 {
+		return nil, &ErrInvalidBackupInfo{
+			Err: &ErrUnsupportedBackupInfoVersion{Got: info.Version, Want: BackupInfoVersion1},
+		}
+	}
+
+	// Validate purpose: the Purpose field is passed by the caller; for remote
+	// backups we require that mediaRootBackupKey is present (32 bytes).
+	// Device-transfer backups do not require the key.
+	if purpose == PurposeRemoteBackup && len(info.MediaRootBackupKey) != 32 {
+		return nil, &ErrPurposeMismatch{Want: purpose, Got: br.Purpose}
+	}
+
+	result.Info = *info
+
+	// Read and parse all subsequent frames.
+	for frameIdx := 1; ; frameIdx++ {
+		raw, err := br.ReadNext()
+		if err != nil {
+			return nil, &ErrInvalidFrame{Index: frameIdx, Err: err}
+		}
+		if raw == nil {
+			break
+		}
+
+		unknown, err := parseFrame(raw)
+		if err != nil {
+			return nil, &ErrInvalidFrame{Index: frameIdx, Err: err}
+		}
+		for _, f := range unknown {
+			result.FoundUnknownFields = append(result.FoundUnknownFields, FoundUnknownField{
+				FrameIndex: frameIdx,
+				Path:       f.Path,
+				Value:      f.Value,
+			})
+		}
+
+		result.Frames = append(result.Frames, raw)
+	}
+
+	return result, nil
+}
+
+// parseBackupInfo decodes the BackupInfo protobuf from raw bytes.
+// It returns the decoded fields, any unknown field numbers found, and any
+// parse error.
+//
+// BackupInfo wire format (rust/message-backup/src/proto/backup.proto):
+//
+//	message BackupInfo {
+//	  uint64 version = 1;           // varint
+//	  uint64 backupTimeMs = 2;      // varint
+//	  bytes mediaRootBackupKey = 3; // bytes (32 bytes)
+//	  string currentAppVersion = 4; // bytes
+//	  string firstAppVersion = 5;   // bytes
+//	  bytes debugInfo = 6;          // bytes
+//	}
+func parseBackupInfo(b []byte) (*BackupInfoRaw, []FoundUnknownField, error) {
+	info := &BackupInfoRaw{}
+	var unknowns []FoundUnknownField
+	data := b
+	for len(data) > 0 {
+		tag, n := binary.Uvarint(data)
+		if n <= 0 {
+			return nil, nil, &ErrInvalidProtoWireFormat{WireType: 0, Reason: "truncated tag varint in BackupInfo"}
+		}
+		data = data[n:]
+		fieldNum := tag >> 3
+		wireType := tag & 7
+
+		switch fieldNum {
+		case 1: // version, varint
+			if wireType != 0 {
+				return nil, nil, &ErrUnexpectedWireType{Field: "BackupInfo.version", WireType: wireType}
+			}
+			val, n := binary.Uvarint(data)
+			if n <= 0 {
+				return nil, nil, &ErrInvalidProtoWireFormat{WireType: wireType, Reason: "truncated varint for BackupInfo.version"}
+			}
+			data = data[n:]
+			info.Version = val
+		case 2: // backupTimeMs, varint
+			if wireType != 0 {
+				return nil, nil, &ErrUnexpectedWireType{Field: "BackupInfo.backupTimeMs", WireType: wireType}
+			}
+			val, n := binary.Uvarint(data)
+			if n <= 0 {
+				return nil, nil, &ErrInvalidProtoWireFormat{WireType: wireType, Reason: "truncated varint for BackupInfo.backupTimeMs"}
+			}
+			data = data[n:]
+			info.BackupTimeMs = val
+		case 3: // mediaRootBackupKey, bytes
+			if wireType != 2 {
+				return nil, nil, &ErrUnexpectedWireType{Field: "BackupInfo.mediaRootBackupKey", WireType: wireType}
+			}
+			length, n := binary.Uvarint(data)
+			if n <= 0 {
+				return nil, nil, &ErrInvalidProtoWireFormat{WireType: wireType, Reason: "truncated length varint for BackupInfo.mediaRootBackupKey"}
+			}
+			data = data[n:]
+			if uint64(len(data)) < length {
+				return nil, nil, &ErrTruncatedField{Field: "BackupInfo.mediaRootBackupKey"}
+			}
+			info.MediaRootBackupKey = make([]byte, length)
+			copy(info.MediaRootBackupKey, data[:length])
+			data = data[length:]
+		case 4: // currentAppVersion, string (length-delimited)
+			if wireType != 2 {
+				return nil, nil, &ErrUnexpectedWireType{Field: "BackupInfo.currentAppVersion", WireType: wireType}
+			}
+			var err error
+			data, err = skipBackupProtoField(data, wireType)
+			if err != nil {
+				return nil, nil, err
+			}
+		case 5: // firstAppVersion, string (length-delimited)
+			if wireType != 2 {
+				return nil, nil, &ErrUnexpectedWireType{Field: "BackupInfo.firstAppVersion", WireType: wireType}
+			}
+			var err error
+			data, err = skipBackupProtoField(data, wireType)
+			if err != nil {
+				return nil, nil, err
+			}
+		case 6: // debugInfo, bytes (length-delimited)
+			if wireType != 2 {
+				return nil, nil, &ErrUnexpectedWireType{Field: "BackupInfo.debugInfo", WireType: wireType}
+			}
+			var err error
+			data, err = skipBackupProtoField(data, wireType)
+			if err != nil {
+				return nil, nil, err
+			}
+		default:
+			// Unknown field: record it and skip.
+			unknowns = append(unknowns, FoundUnknownField{
+				Value: UnknownValue{Kind: UnknownValueField, Tag: uint32(tag)},
+			})
+			var err error
+			data, err = skipBackupProtoField(data, wireType)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+	return info, unknowns, nil
+}
+
+// parseFrame performs a minimal parse of a Frame protobuf to detect unknown
+// field numbers at the top level. It does not recursively validate sub-messages.
+//
+// Frame wire format (rust/message-backup/src/proto/backup.proto):
+//
+//	message Frame {
+//	  oneof item {
+//	    AccountData account = 1;
+//	    Recipient recipient = 2;
+//	    Chat chat = 3;
+//	    ChatItem chatItem = 4;
+//	    StickerPack stickerPack = 5;
+//	    AdHocCall adHocCall = 6;
+//	    NotificationProfile notificationProfile = 7;
+//	    ChatFolder chatFolder = 8;
+//	  }
+//	}
+//
+// frameKnownFieldNames maps Frame oneof field numbers (1-8) to their proto
+// names for use in *ErrUnexpectedWireType messages.
+//
+// Rust libsignal ref: rust/message-backup/src/proto/backup.proto Frame.item
+var frameKnownFieldNames = map[uint64]string{
+	1: "Frame.account",
+	2: "Frame.recipient",
+	3: "Frame.chat",
+	4: "Frame.chatItem",
+	5: "Frame.stickerPack",
+	6: "Frame.adHocCall",
+	7: "Frame.notificationProfile",
+	8: "Frame.chatFolder",
+}
+
+func parseFrame(b []byte) ([]FoundUnknownField, error) {
+	const maxKnownField = 8
+	var unknowns []FoundUnknownField
+	data := b
+	for len(data) > 0 {
+		tag, n := binary.Uvarint(data)
+		if n <= 0 {
+			return nil, &ErrInvalidProtoWireFormat{WireType: 0, Reason: "truncated tag varint in Frame"}
+		}
+		data = data[n:]
+		fieldNum := tag >> 3
+		wireType := tag & 7
+
+		if fieldName, known := frameKnownFieldNames[fieldNum]; known {
+			// All Frame oneof branches are submessages: wire type 2 is required.
+			if wireType != 2 {
+				return nil, &ErrUnexpectedWireType{Field: fieldName, WireType: wireType}
+			}
+		}
+
+		var err error
+		data, err = skipBackupProtoField(data, wireType)
+		if err != nil {
+			return nil, err
+		}
+		if fieldNum > maxKnownField {
+			unknowns = append(unknowns, FoundUnknownField{
+				Value: UnknownValue{Kind: UnknownValueField, Tag: uint32(tag)},
+			})
+		}
+	}
+	return unknowns, nil
+}
+
+// skipBackupProtoField skips one protobuf field value of the given wire type.
+// Returns the remaining bytes after the field, or an *ErrInvalidProtoWireFormat
+// if the wire type is unsupported or the encoded value is truncated.
+func skipBackupProtoField(b []byte, wireType uint64) ([]byte, error) {
+	switch wireType {
+	case 0: // varint
+		_, n := binary.Uvarint(b)
+		if n <= 0 {
+			return b, &ErrInvalidProtoWireFormat{WireType: wireType, Reason: "truncated varint"}
+		}
+		return b[n:], nil
+	case 1: // 64-bit
+		if len(b) < 8 {
+			return b, &ErrInvalidProtoWireFormat{WireType: wireType, Reason: "truncated 64-bit field"}
+		}
+		return b[8:], nil
+	case 2: // length-delimited
+		length, n := binary.Uvarint(b)
+		if n <= 0 {
+			return b, &ErrInvalidProtoWireFormat{WireType: wireType, Reason: "truncated length varint"}
+		}
+		b = b[n:]
+		if uint64(len(b)) < length {
+			return b, &ErrInvalidProtoWireFormat{WireType: wireType, Reason: "length-delimited field truncated"}
+		}
+		return b[length:], nil
+	case 5: // 32-bit
+		if len(b) < 4 {
+			return b, &ErrInvalidProtoWireFormat{WireType: wireType, Reason: "truncated 32-bit field"}
+		}
+		return b[4:], nil
+	default:
+		return b, &ErrInvalidProtoWireFormat{WireType: wireType, Reason: "unsupported wire type"}
 	}
 }
 

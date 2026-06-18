@@ -7,6 +7,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/net/embeddedcerts"
 )
 
 // RootCertificates represents the set of root certificates to use when
@@ -191,6 +193,53 @@ func (p *StaticCertificatePinner) PinCertificates(certs RootCertificates) *tls.C
 			MinVersion: tls.VersionTLS12,
 		}
 	}
+}
+
+// EmbeddedPinnerError is returned when the embedded certificates cannot be
+// loaded during NewEmbeddedCertificatePinner construction.
+type EmbeddedPinnerError struct {
+	// Err is the underlying error from the embeddedcerts package.
+	Err error
+}
+
+func (e *EmbeddedPinnerError) Error() string {
+	return "net: failed to load embedded certificates: " + e.Err.Error()
+}
+
+func (e *EmbeddedPinnerError) Unwrap() error {
+	return e.Err
+}
+
+// NewEmbeddedCertificatePinner returns a StaticCertificatePinner pre-loaded
+// with the Signal and Google proxy root CA certificates embedded at compile
+// time by the embeddedcerts subpackage.
+//
+// This is the recommended production CertificatePinner. It mirrors the Rust
+// libsignal SIGNAL_ROOT_CERTIFICATES and PROXY_G_ROOT_CERTIFICATES constants
+// defined in rust/net/src/certs.rs.
+func NewEmbeddedCertificatePinner() (*StaticCertificatePinner, error) {
+	signalCAs, err := embeddedcerts.SignalCAs()
+	if err != nil {
+		return nil, &EmbeddedPinnerError{Err: err}
+	}
+	proxyCAs, err := embeddedcerts.GoogleProxyCAs()
+	if err != nil {
+		return nil, &EmbeddedPinnerError{Err: err}
+	}
+
+	signalDERs := make([][]byte, len(signalCAs))
+	for i, c := range signalCAs {
+		signalDERs[i] = c.Raw
+	}
+	proxyDERs := make([][]byte, len(proxyCAs))
+	for i, c := range proxyCAs {
+		proxyDERs[i] = c.Raw
+	}
+
+	return &StaticCertificatePinner{
+		SignalCerts: signalDERs,
+		ProxyCerts:  proxyDERs,
+	}, nil
 }
 
 // NewCertPoolFromDER creates an x509.CertPool from one or more DER-encoded

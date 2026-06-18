@@ -18,6 +18,10 @@ func TestResponseStatusString(t *testing.T) {
 		{StatusError, "ERROR"},
 		{StatusRestore1Missing, "RESTORE1_MISSING"},
 		{StatusVersionMismatch, "VERSION_MISMATCH"},
+		{StatusNotRotating, "NOT_ROTATING"},
+		{StatusAlreadyRotating, "ALREADY_ROTATING"},
+		{StatusMerkleFailure, "MERKLE_FAILURE"},
+		{StatusDuplicateVersion, "DUPLICATE_VERSION"},
 		{ResponseStatus(99), "UNKNOWN(99)"},
 	}
 	for _, tt := range tests {

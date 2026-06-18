@@ -5,12 +5,49 @@ package net
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"time"
 )
 
+// Wire-format sizes for CDSI fixed-length serialization.
+// These must match the Rust FixedLengthSerializable constants in
+// rust/net/src/cdsi.rs exactly.
+const (
+	// E164SerializedLen is the wire size of an E.164 phone number: 8-byte big-endian uint64.
+	E164SerializedLen = 8
+	// UUIDSerializedLen is the wire size of a UUID: 16 raw bytes.
+	UUIDSerializedLen = 16
+	// AciAndAccessKeySerializedLen is the wire size of an ACI + access key pair: 32 bytes.
+	AciAndAccessKeySerializedLen = UUIDSerializedLen + 16
+	// LookupResponseEntrySerializedLen is the wire size of a response entry: E164 + PNI UUID + ACI UUID.
+	LookupResponseEntrySerializedLen = E164SerializedLen + UUIDSerializedLen*2
+)
+
 // E164 represents an E.164 phone number as its numeric value.
 type E164 uint64
+
+// Bytes returns the E.164 number as an 8-byte big-endian encoded value.
+// This matches the Rust FixedLengthSerializable implementation for E164
+// in rust/net/src/cdsi.rs.
+func (e E164) Bytes() [E164SerializedLen]byte {
+	var b [E164SerializedLen]byte
+	binary.BigEndian.PutUint64(b[:], uint64(e))
+	return b
+}
+
+// E164FromBytes decodes an E.164 number from its 8-byte big-endian wire form.
+// Returns an error if the decoded value is zero (not a valid E.164 number).
+func E164FromBytes(b [E164SerializedLen]byte) (E164, error) {
+	v := binary.BigEndian.Uint64(b[:])
+	if v == 0 {
+		return 0, &CdsiSerializeError{
+			Field: "E164",
+			Msg:   "zero is not a valid E.164 phone number",
+		}
+	}
+	return E164(v), nil
+}
 
 // AciAndAccessKey pairs an ACI (Account Contact Identifier) UUID with its
 // associated profile access key.
@@ -19,6 +56,17 @@ type AciAndAccessKey struct {
 	ACI [16]byte
 	// AccessKey is the 16-byte profile access key.
 	AccessKey [16]byte
+}
+
+// Bytes returns the ACI+AccessKey pair as a 32-byte wire encoding: ACI bytes
+// followed by the 16-byte access key.
+// This matches the Rust FixedLengthSerializable for AciAndAccessKey
+// in rust/net/src/cdsi.rs.
+func (a *AciAndAccessKey) Bytes() [AciAndAccessKeySerializedLen]byte {
+	var b [AciAndAccessKeySerializedLen]byte
+	copy(b[:UUIDSerializedLen], a.ACI[:])
+	copy(b[UUIDSerializedLen:], a.AccessKey[:])
+	return b
 }
 
 // CdsiLookupRequest contains the parameters for a CDSI lookup operation.
@@ -66,6 +114,96 @@ func (e *CdsiLookupResponseEntry) HasACI() bool {
 func (e *CdsiLookupResponseEntry) HasPNI() bool {
 	var zero [16]byte
 	return e.PNI != zero
+}
+
+// Bytes serializes the response entry to its 40-byte wire encoding:
+// 8 bytes E164 (big-endian) || 16 bytes PNI UUID || 16 bytes ACI UUID.
+// All-zero UUID bytes indicate an absent optional field.
+//
+// This matches the Rust FixedLengthSerializable for LookupResponseEntry
+// in rust/net/src/cdsi.rs (SERIALIZED_LEN = 8 + 16 + 16 = 40).
+func (e *CdsiLookupResponseEntry) Bytes() [LookupResponseEntrySerializedLen]byte {
+	var b [LookupResponseEntrySerializedLen]byte
+	e164b := e.E164.Bytes()
+	copy(b[:E164SerializedLen], e164b[:])
+	copy(b[E164SerializedLen:E164SerializedLen+UUIDSerializedLen], e.PNI[:])
+	copy(b[E164SerializedLen+UUIDSerializedLen:], e.ACI[:])
+	return b
+}
+
+// LookupResponseEntryFromBytes deserializes a response entry from its 40-byte
+// wire encoding. It mirrors LookupResponseEntry::try_parse_from in Rust:
+// a zero E164 returns an error; all-zero UUID bytes decode to the zero [16]byte
+// (callers should use HasACI/HasPNI to distinguish absent from present).
+func LookupResponseEntryFromBytes(b [LookupResponseEntrySerializedLen]byte) (CdsiLookupResponseEntry, error) {
+	var e164b [E164SerializedLen]byte
+	copy(e164b[:], b[:E164SerializedLen])
+	e164, err := E164FromBytes(e164b)
+	if err != nil {
+		return CdsiLookupResponseEntry{}, err
+	}
+
+	var pni [16]byte
+	copy(pni[:], b[E164SerializedLen:E164SerializedLen+UUIDSerializedLen])
+
+	var aci [16]byte
+	copy(aci[:], b[E164SerializedLen+UUIDSerializedLen:])
+
+	return CdsiLookupResponseEntry{
+		E164: e164,
+		PNI:  pni,
+		ACI:  aci,
+	}, nil
+}
+
+// SerializeE164s encodes a slice of E.164 numbers into a packed big-endian
+// byte slice suitable for sending in a CDSI client request.
+// The returned length is always len(e164s)*8.
+func SerializeE164s(e164s []E164) []byte {
+	out := make([]byte, len(e164s)*E164SerializedLen)
+	for i, e := range e164s {
+		b := e.Bytes()
+		copy(out[i*E164SerializedLen:], b[:])
+	}
+	return out
+}
+
+// SerializeAciAndAccessKeys encodes a slice of ACI+access-key pairs into a
+// packed byte slice suitable for sending in a CDSI client request.
+// The returned length is always len(pairs)*32.
+func SerializeAciAndAccessKeys(pairs []AciAndAccessKey) []byte {
+	out := make([]byte, len(pairs)*AciAndAccessKeySerializedLen)
+	for i := range pairs {
+		b := pairs[i].Bytes()
+		copy(out[i*AciAndAccessKeySerializedLen:], b[:])
+	}
+	return out
+}
+
+// DeserializeLookupResponseEntries decodes a packed byte slice from a CDSI
+// server response into individual response entries.
+// It returns an error if the byte slice length is not a multiple of
+// LookupResponseEntrySerializedLen, or if any entry has a zero E164.
+func DeserializeLookupResponseEntries(data []byte) ([]CdsiLookupResponseEntry, error) {
+	if len(data)%LookupResponseEntrySerializedLen != 0 {
+		return nil, &CdsiSerializeError{
+			Field: "e164_pni_aci_triples",
+			Msg:   fmt.Sprintf("length %d is not a multiple of %d", len(data), LookupResponseEntrySerializedLen),
+		}
+	}
+	count := len(data) / LookupResponseEntrySerializedLen
+	entries := make([]CdsiLookupResponseEntry, 0, count)
+	for i := range count {
+		var chunk [LookupResponseEntrySerializedLen]byte
+		copy(chunk[:], data[i*LookupResponseEntrySerializedLen:])
+		entry, err := LookupResponseEntryFromBytes(chunk)
+		if err != nil {
+			// Rust's try_parse_from silently skips zero-E164 entries; we do the same.
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
 }
 
 // CdsiToken is a continuation token from a CDSI lookup that can be reused

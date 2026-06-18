@@ -53,7 +53,7 @@ func (k *Kyber1024KEM) Generate() (*KeyPair, error) {
 // Encapsulate generates a shared secret and ciphertext for the given public key.
 func (k *Kyber1024KEM) Encapsulate(publicKey *PublicKey) (*SharedSecret, *Ciphertext, error) {
 	if publicKey.Type() != KeyTypeKyber1024 {
-		return nil, nil, &KeyTypeMismatchError{Expected: "Kyber1024", Actual: publicKey.Type()}
+		return nil, nil, &KeyTypeMismatchError{Expected: KeyTypeKyber1024, Actual: publicKey.Type()}
 	}
 
 	pk, err := kyber1024Scheme.UnmarshalBinaryPublicKey(publicKey.Data())
@@ -76,10 +76,10 @@ func (k *Kyber1024KEM) Encapsulate(publicKey *PublicKey) (*SharedSecret, *Cipher
 // Decapsulate recovers the shared secret from the given ciphertext using the secret key.
 func (k *Kyber1024KEM) Decapsulate(secretKey *SecretKey, ciphertext *Ciphertext) (*SharedSecret, error) {
 	if secretKey.Type() != KeyTypeKyber1024 {
-		return nil, &KeyTypeMismatchError{Expected: "Kyber1024", Actual: secretKey.Type(), KeyKind: "secret key"}
+		return nil, &KeyTypeMismatchError{Expected: KeyTypeKyber1024, Actual: secretKey.Type(), KeyKind: "secret key"}
 	}
 	if ciphertext.Type() != KeyTypeKyber1024 {
-		return nil, &KeyTypeMismatchError{Expected: "Kyber1024", Actual: ciphertext.Type(), KeyKind: "ciphertext"}
+		return nil, &KeyTypeMismatchError{Expected: KeyTypeKyber1024, Actual: ciphertext.Type(), KeyKind: "ciphertext"}
 	}
 
 	sk, err := kyber1024Scheme.UnmarshalBinaryPrivateKey(secretKey.Data())

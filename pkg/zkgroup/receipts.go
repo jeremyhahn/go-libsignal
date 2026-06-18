@@ -259,11 +259,19 @@ func (s *ServerSecretParams) IssueReceiptCredential(
 // ReceiveReceiptCredential verifies the server's response and unblinds the
 // credential. This is a client-side operation.
 //
+// Returns ErrVerificationFailure if the receipt expiration time is not
+// day-aligned, matching Rust's is_day_aligned() guard in
+// rust/zkgroup/src/api/server_params.rs.
+//
 // Matches Rust ServerPublicParams::receive_receipt_credential.
 func (pub *ServerPublicParams) ReceiveReceiptCredential(
 	ctx *ReceiptCredentialRequestContext,
 	response *ReceiptCredentialResponse,
 ) (*ReceiptCredential, error) {
+	if !response.ReceiptExpirationTime.IsDayAligned() {
+		return nil, ErrVerificationFailure
+	}
+
 	receiptStruct := NewReceiptStruct(
 		ctx.ReceiptSerialBuf,
 		response.ReceiptExpirationTime,

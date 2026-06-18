@@ -129,9 +129,9 @@ func TestSendBraidProducesBraidMessage(t *testing.T) {
 	if len(pqrMsg) == 0 {
 		t.Fatal("SendBraid should produce non-empty wire message")
 	}
-	// Variable-length format: should NOT be exactly 12 bytes.
-	if len(pqrMsg) == legacyPQRMsgSize {
-		t.Error("braid path should use variable-length format, not 12-byte legacy format")
+	// SCKA format: must start with version byte 0x01.
+	if len(pqrMsg) < 1 || pqrMsg[0] != 0x01 {
+		t.Errorf("braid path must use SCKA wire format (version 0x01), got %x", pqrMsg)
 	}
 	if len(mk) == 0 {
 		t.Error("SendBraid should return non-nil message key")

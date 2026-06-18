@@ -19,6 +19,10 @@ func init() {
 // ScalarFromSliceWide converts a 64-byte wide value to a canonical scalar
 // by reducing modulo the Ed25519 group order L.
 //
+// Deprecated: Rust marks the equivalent scalar_from_slice_wide as deprecated
+// ("use Scalar::from_bytes_mod_order_wide directly instead"). Prefer the
+// ristretto255 package's scalar API when possible.
+//
 // The input must be exactly 64 bytes. The 512-bit value is interpreted as
 // a little-endian integer and reduced modulo L to produce a 256-bit scalar.
 func ScalarFromSliceWide(input []byte) ([32]byte, error) {
@@ -49,6 +53,10 @@ func ScalarFromSliceWide(input []byte) ([32]byte, error) {
 
 // ScalarFromSliceCanonical converts a 32-byte value to a scalar, verifying
 // it is already in canonical form (strictly less than the group order L).
+//
+// Deprecated: Rust marks the equivalent scalar_from_slice_canonical as
+// deprecated ("use Scalar::from_bytes_mod_order_wide directly instead").
+// Prefer the ristretto255 package's scalar API when possible.
 //
 // Returns an error if the input is not exactly 32 bytes or if its value
 // is greater than or equal to L.

@@ -34,14 +34,12 @@ func TestReceiveCt2SampledEpochOverflow(t *testing.T) {
 	// Trigger Transition 13 with epoch+1, but epoch is MaxUint64 so addition overflows.
 	// math.MaxUint64 + 1 wraps to 0, so msg.Epoch = 0, but state.epoch+1 = 0 (overflow).
 	// This should trigger the ErrEpochOverflow guard.
+	// Any message type at epoch+1 triggers Transition 13 (F3 fix: type gate removed).
 	msg := &Message{Epoch: 0, Type: MessageTypeHdr} // 0 == MaxUint64+1 (wrapped)
 	_, _, err = state.Receive(msg, NewMLKEM768IncrementalKEM(), DefaultChunkSize)
-	// The epoch check at the top (msg.Epoch > s.epoch+1) would be 0 > 0 = false.
-	// The epoch check s.epoch+1 wraps to 0, and msg.Epoch = 0 matches.
-	// But first, Receive checks msg.Epoch <= s.lastReceivedEpoch, then > s.epoch+1.
-	// With s.epoch=MaxUint64, s.epoch+1 = 0 (overflow), so msg.Epoch=0 is not > 0.
-	// Then in receiveCt2Sampled: msg.Epoch == s.epoch+1 (0 == 0) && msg.Type == Hdr -> true.
-	// Then s.epoch == MaxUint64 -> return ErrEpochOverflow.
+	// Top-level guard for Ct2Sampled: msg.Epoch(0) > s.epoch+1(0 wrapped) is false.
+	// receiveCt2Sampled: msg.Epoch(0) == s.epoch+1(0 wrapped) -> true.
+	// s.epoch == MaxUint64 -> return ErrEpochOverflow.
 	if err == nil {
 		t.Fatal("expected ErrEpochOverflow for MaxUint64 epoch")
 	}
@@ -75,8 +73,8 @@ func TestReadOptionalDecoderTooShortForData(t *testing.T) {
 	buf[0] = 0x01             // hasDecoder=true
 	// expectedSize = 1, totalChunks = 1, numReceived = 1
 	buf[1], buf[2], buf[3], buf[4] = 0, 0, 0, 1  // expectedSize=1
-	buf[5], buf[6] = 0, 1                          // totalChunks=1
-	buf[7], buf[8], buf[9], buf[10] = 0, 0, 0, 1  // numReceived=1
+	buf[5], buf[6] = 0, 1                        // totalChunks=1
+	buf[7], buf[8], buf[9], buf[10] = 0, 0, 0, 1 // numReceived=1
 	// Only 1 byte for chunk data (need 34: 2 index + 32 data)
 	buf[11] = 0x00
 
@@ -245,4 +243,76 @@ func TestSerializeBraidRoundTripAfterSend(t *testing.T) {
 	if restored.StateKind() != alice.StateKind() {
 		t.Errorf("state kind mismatch: got %s, want %s", restored.StateKind(), alice.StateKind())
 	}
+}
+
+// ================== DeserializeSCKA: chunk index > 65535 ==================
+
+// TestDeserializeSCKAChunkIndexTooLarge verifies that a chunk index exceeding
+// 65535 is rejected by DeserializeSCKA. Matches Rust's serialize.rs:196
+// decode_chunk check: index > 65535 → MsgDecode error.
+func TestDeserializeSCKAChunkIndexTooLarge(t *testing.T) {
+	// Build a MessageTypeHdr wire message with a chunk index of 65536 (> 65535).
+	// Wire format: [ver(1)][varint(epoch)][varint(chainIdx)][msgType(1)][varint(chunkIdx)][data(32)]
+	buf := make([]byte, 0, 60)
+	var tmp [10]byte
+
+	// Version
+	buf = append(buf, SPQRVersion)
+	// Epoch = 1
+	n := putUvarint(tmp[:], 1)
+	buf = append(buf, tmp[:n]...)
+	// Chain index = 0
+	n = putUvarint(tmp[:], 0)
+	buf = append(buf, tmp[:n]...)
+	// MessageType = Hdr (has chunk)
+	buf = append(buf, byte(MessageTypeHdr))
+	// Chunk index = 65536 (> 65535) encoded as varint
+	// 65536 = 0x10000 → LEB128: 0x80, 0x80, 0x04
+	n = putUvarint(tmp[:], 65536)
+	buf = append(buf, tmp[:n]...)
+	// 32 bytes of chunk data (zero)
+	buf = append(buf, make([]byte, ChunkDataSize)...)
+
+	_, _, err := DeserializeSCKA(buf)
+	if err == nil {
+		t.Fatal("expected error for chunk index > 65535, got nil")
+	}
+	if _, ok := err.(*ErrSCKADecode); !ok {
+		t.Errorf("expected *ErrSCKADecode, got %T: %v", err, err)
+	}
+}
+
+// TestDeserializeSCKAChunkIndexAtLimit verifies that a chunk index of exactly
+// 65535 is accepted by DeserializeSCKA (boundary: just within the Rust limit).
+func TestDeserializeSCKAChunkIndexAtLimit(t *testing.T) {
+	buf := make([]byte, 0, 60)
+	var tmp [10]byte
+
+	buf = append(buf, SPQRVersion)
+	n := putUvarint(tmp[:], 1) // epoch = 1
+	buf = append(buf, tmp[:n]...)
+	n = putUvarint(tmp[:], 0) // chain index = 0
+	buf = append(buf, tmp[:n]...)
+	buf = append(buf, byte(MessageTypeHdr))
+	n = putUvarint(tmp[:], 65535) // chunk index at limit
+	buf = append(buf, tmp[:n]...)
+	buf = append(buf, make([]byte, ChunkDataSize)...)
+
+	_, _, err := DeserializeSCKA(buf)
+	if err != nil {
+		t.Fatalf("unexpected error for chunk index = 65535: %v", err)
+	}
+}
+
+// putUvarint is a test helper that encodes v as a uvarint into buf and
+// returns the number of bytes written.
+func putUvarint(buf []byte, v uint64) int {
+	i := 0
+	for v >= 0x80 {
+		buf[i] = byte(v) | 0x80
+		v >>= 7
+		i++
+	}
+	buf[i] = byte(v)
+	return i + 1
 }

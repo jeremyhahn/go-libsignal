@@ -311,3 +311,69 @@ func TestErrReadingHMACData(t *testing.T) {
 		t.Error("ErrReadingHMACData.Unwrap() should expose inner via errors.Is")
 	}
 }
+
+func TestErrBackupTooLarge(t *testing.T) {
+	err := &ErrBackupTooLarge{MaxBytes: 1024}
+	msg := err.Error()
+	if !strings.Contains(msg, "1024") {
+		t.Errorf("ErrBackupTooLarge.Error() = %q, want to contain max size", msg)
+	}
+	if !strings.Contains(msg, "maximum") {
+		t.Errorf("ErrBackupTooLarge.Error() = %q, want to mention maximum", msg)
+	}
+}
+
+func TestErrBackupTooLarge_Error(t *testing.T) {
+	err := &ErrInvalidBackupMagic{Got: []byte{0x53, 0x42, 0x41, 0x43}}
+	msg := err.Error()
+	if !strings.Contains(msg, "magic") {
+		t.Errorf("ErrInvalidBackupMagic.Error() = %q, want to mention magic", msg)
+	}
+	if !strings.Contains(msg, "53424143") {
+		t.Errorf("ErrInvalidBackupMagic.Error() = %q, want to contain got bytes hex", msg)
+	}
+}
+
+func TestErrReadingMetadataLength(t *testing.T) {
+	inner := io.ErrUnexpectedEOF
+	err := &ErrReadingMetadataLength{Err: inner}
+	if !strings.Contains(err.Error(), "metadata") {
+		t.Errorf("ErrReadingMetadataLength.Error() = %q, want metadata", err.Error())
+	}
+	if !errors.Is(err, inner) {
+		t.Error("ErrReadingMetadataLength.Unwrap() should expose inner via errors.Is")
+	}
+}
+
+func TestErrReadingMetadata(t *testing.T) {
+	inner := io.ErrUnexpectedEOF
+	err := &ErrReadingMetadata{Err: inner}
+	if !strings.Contains(err.Error(), "metadata") {
+		t.Errorf("ErrReadingMetadata.Error() = %q, want metadata", err.Error())
+	}
+	if !errors.Is(err, inner) {
+		t.Error("ErrReadingMetadata.Unwrap() should expose inner via errors.Is")
+	}
+}
+
+func TestErrInvalidKeyLength(t *testing.T) {
+	err := &ErrInvalidKeyLength{Field: "hmac_key", Got: 16, Want: 32}
+	msg := err.Error()
+	if !strings.Contains(msg, "hmac_key") {
+		t.Errorf("ErrInvalidKeyLength.Error() = %q, want field name", msg)
+	}
+	if !strings.Contains(msg, "32") {
+		t.Errorf("ErrInvalidKeyLength.Error() = %q, want want-size 32", msg)
+	}
+	if !strings.Contains(msg, "16") {
+		t.Errorf("ErrInvalidKeyLength.Error() = %q, want got-size 16", msg)
+	}
+}
+
+func TestFrameTooLargeError(t *testing.T) {
+	err := &FrameTooLargeError{Size: 20 * 1024 * 1024, Max: maxFrameSize}
+	msg := err.Error()
+	if !strings.Contains(msg, "exceeds") {
+		t.Errorf("FrameTooLargeError.Error() = %q, want 'exceeds'", msg)
+	}
+}

@@ -38,9 +38,9 @@ func TestAttestationError_Error(t *testing.T) {
 
 func TestEnclaveError_Error(t *testing.T) {
 	tests := []struct {
-		name    string
-		err     *EnclaveError
-		want    string
+		name string
+		err  *EnclaveError
+		want string
 	}{
 		{
 			name: "with wrapped error",
@@ -228,9 +228,9 @@ func TestHSMError_Unwrap(t *testing.T) {
 
 func TestDcapError_Error(t *testing.T) {
 	tests := []struct {
-		name    string
-		err     *DcapError
-		want    string
+		name string
+		err  *DcapError
+		want string
 	}{
 		{
 			name: "no context",
@@ -362,4 +362,30 @@ func TestQETCBLevelNotFoundError(t *testing.T) {
 	if got != "no matching QE TCB level found for isvsvn 7" {
 		t.Errorf("Error() = %q", got)
 	}
+}
+
+// TestRaftConfigDecodeError covers Error() and Unwrap() on RaftConfigDecodeError.
+func TestRaftConfigDecodeError(t *testing.T) {
+	t.Run("with inner error", func(t *testing.T) {
+		inner := errors.New("json decode: unexpected EOF")
+		e := &RaftConfigDecodeError{Err: inner}
+		msg := e.Error()
+		if msg == "" {
+			t.Fatal("Error() returned empty string")
+		}
+		if !errors.Is(e, inner) {
+			t.Error("Unwrap should expose inner error via errors.Is")
+		}
+	})
+
+	t.Run("nil inner error", func(t *testing.T) {
+		e := &RaftConfigDecodeError{}
+		msg := e.Error()
+		if msg == "" {
+			t.Fatal("Error() returned empty string for nil inner")
+		}
+		if e.Unwrap() != nil {
+			t.Error("Unwrap() should return nil when Err is nil")
+		}
+	})
 }

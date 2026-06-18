@@ -1,0 +1,21 @@
+{
+  "_provenance": {
+    "source": "rust/zkgroup/src/crypto/uid_encryption.rs::tests",
+    "rust_rev_pin": "/RUST_REV (root of go-libsignal repo)",
+    "note": "Hand-extracted UID encryption KATs for both ACI (test_uid_encryption) and PNI (test_pni_encryption) paths. Drift detector greps the upstream source for every byte literal in the expected ciphertext."
+  },
+  "aci": {
+    "rust_test": "test_uid_encryption",
+    "sho_label": "Test_Uid_Encryption",
+    "master_key_seed": "test_array_32",
+    "uuid_seed": "test_array_16",
+    "expected_ciphertext_hex": "f89ee7705a66036b908db884211b773ac543ee35c4a3086220fc3e1e35b4234cfa1d2eea2cc2f4b4c42cff39a9dceb57293b5f8770ca60f9e9b74447bfd3bd3d"
+  },
+  "pni": {
+    "rust_test": "test_pni_encryption",
+    "sho_label": "Test_Pni_Encryption",
+    "master_key_seed": "empty",
+    "uuid_seed": "test_array_16",
+    "expected_ciphertext_hex": "2cb1f32c4a8df2da0516b4e045b80ede9a67e44eca102fea8f864e1a8419c556d6c0610f0572142bbe34b4962b3bd76e6742aa9bc0137b986d5324fde2dca02a"
+  }
+}

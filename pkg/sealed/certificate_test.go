@@ -76,11 +76,16 @@ func TestServerCertificateValidateInvalidSignature(t *testing.T) {
 	trustRoot := newTestTrustRoot(t)
 	cert, _ := newTestServerCertificate(t, trustRoot)
 
-	// Tamper with signature
+	// Tamper with signature length. Rust's verify_signature returns false
+	// (not error) for wrong-length signatures (try_into fails → returns false).
+	// Go matches: wrong-length sig is a failed verification, not a struct error.
 	cert.signature = make([]byte, 10) // wrong length
-	_, err := cert.Validate(trustRoot.PublicKey())
-	if err == nil {
-		t.Error("Validate with invalid signature length should return error")
+	valid, err := cert.Validate(trustRoot.PublicKey())
+	if err != nil {
+		t.Errorf("Validate with wrong-length signature should not error: %v", err)
+	}
+	if valid {
+		t.Error("Validate with wrong-length signature should return false")
 	}
 }
 
@@ -242,11 +247,15 @@ func TestSenderCertificateValidateInvalidSignature(t *testing.T) {
 	trustRoot := newTestTrustRoot(t)
 	cert, _ := newTestSenderCertificate(t, trustRoot)
 
-	// Tamper with signature to have wrong length
+	// Tamper with signature to have wrong length. Rust's verify_signature
+	// returns false (not error) for wrong-length sigs. Go matches.
 	cert.signature = make([]byte, 10)
-	_, err := cert.Validate(trustRoot.PublicKey(), 1000)
-	if err == nil {
-		t.Error("Validate with invalid signature length should return error")
+	valid, err := cert.Validate(trustRoot.PublicKey(), 1000)
+	if err != nil {
+		t.Errorf("Validate with wrong-length sender sig should not error: %v", err)
+	}
+	if valid {
+		t.Error("Validate with wrong-length sender sig should return false")
 	}
 }
 
@@ -488,16 +497,19 @@ func TestServerCertificateValidateReturnsFalse(t *testing.T) {
 }
 
 func TestSenderCertificateValidateServerSignatureInvalid(t *testing.T) {
-	// Cover the branch where server cert Validate returns err (invalid sig length).
+	// When the embedded server cert's signature has wrong length, Rust
+	// verify_signature returns false (not error). ValidateWithTrustRoots
+	// sees serverValid=0 and returns (false, nil) with a log line.
 	trustRoot := newTestTrustRoot(t)
 	cert, _ := newTestSenderCertificate(t, trustRoot)
 
-	// Tamper with the signer's signature length to trigger an error from
-	// ServerCertificate.Validate.
-	cert.signer.embedded.signature = make([]byte, 10) // invalid length
-	_, err := cert.Validate(trustRoot.PublicKey(), 1000)
-	if err == nil {
-		t.Error("Validate should fail when server cert has invalid signature length")
+	cert.signer.embedded.signature = make([]byte, 10) // wrong length
+	valid, err := cert.Validate(trustRoot.PublicKey(), 1000)
+	if err != nil {
+		t.Errorf("Validate should not error when server cert has wrong-length sig: %v", err)
+	}
+	if valid {
+		t.Error("Validate should return false when server cert has wrong-length sig")
 	}
 }
 
@@ -589,5 +601,417 @@ func TestDeserializeSenderCertificateRoundTrip(t *testing.T) {
 	}
 	if !valid {
 		t.Error("Restored cert should validate successfully")
+	}
+}
+
+// --- ValidateWithTrustRoots tests (#23) ---
+
+// TestValidateWithTrustRoots_FirstRootMatches verifies that a sender certificate
+// validates successfully when the first root in the list matches the server cert.
+func TestValidateWithTrustRoots_FirstRootMatches(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	cert, _ := newTestSenderCertificate(t, trustRoot)
+
+	other1, _ := ecc.GenerateKeyPair()
+	other2, _ := ecc.GenerateKeyPair()
+
+	roots := []ecc.ECPublicKeyable{trustRoot.PublicKey(), other1.PublicKey(), other2.PublicKey()}
+	valid, err := cert.ValidateWithTrustRoots(roots, 1000)
+	if err != nil {
+		t.Fatalf("ValidateWithTrustRoots() error: %v", err)
+	}
+	if !valid {
+		t.Error("ValidateWithTrustRoots() should return true when first root matches")
+	}
+}
+
+// TestValidateWithTrustRoots_LastRootMatches verifies that a sender certificate
+// validates when only the last root in the list matches. This exercises the
+// constant-time accumulation across multiple non-matching roots.
+func TestValidateWithTrustRoots_LastRootMatches(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	cert, _ := newTestSenderCertificate(t, trustRoot)
+
+	other1, _ := ecc.GenerateKeyPair()
+	other2, _ := ecc.GenerateKeyPair()
+
+	roots := []ecc.ECPublicKeyable{other1.PublicKey(), other2.PublicKey(), trustRoot.PublicKey()}
+	valid, err := cert.ValidateWithTrustRoots(roots, 1000)
+	if err != nil {
+		t.Fatalf("ValidateWithTrustRoots() error: %v", err)
+	}
+	if !valid {
+		t.Error("ValidateWithTrustRoots() should return true when last root matches")
+	}
+}
+
+// TestValidateWithTrustRoots_NoRootMatches verifies that the cert is rejected
+// when no root in the list matches the server certificate.
+func TestValidateWithTrustRoots_NoRootMatches(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	cert, _ := newTestSenderCertificate(t, trustRoot)
+
+	wrong1, _ := ecc.GenerateKeyPair()
+	wrong2, _ := ecc.GenerateKeyPair()
+
+	roots := []ecc.ECPublicKeyable{wrong1.PublicKey(), wrong2.PublicKey()}
+	valid, err := cert.ValidateWithTrustRoots(roots, 1000)
+	if err != nil {
+		t.Fatalf("ValidateWithTrustRoots() unexpected error: %v", err)
+	}
+	if valid {
+		t.Error("ValidateWithTrustRoots() should return false when no root matches")
+	}
+}
+
+// TestValidateWithTrustRoots_EmptyRoots verifies that an empty root list
+// returns (false, nil) without panicking.
+func TestValidateWithTrustRoots_EmptyRoots(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	cert, _ := newTestSenderCertificate(t, trustRoot)
+
+	valid, err := cert.ValidateWithTrustRoots([]ecc.ECPublicKeyable{}, 1000)
+	if err != nil {
+		t.Fatalf("ValidateWithTrustRoots() unexpected error: %v", err)
+	}
+	if valid {
+		t.Error("ValidateWithTrustRoots() should return false for empty root list")
+	}
+}
+
+// TestValidateWithTrustRoots_AllRootsEvaluated verifies that all roots are
+// evaluated (constant-time) even when the first root already matches.
+// Indirectly verified by confirming the result is correct for a 1-of-3 case.
+func TestValidateWithTrustRoots_AllRootsEvaluated(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	cert, _ := newTestSenderCertificate(t, trustRoot)
+
+	wrong, _ := ecc.GenerateKeyPair()
+
+	// Two wrong roots flanking the real root.
+	roots := []ecc.ECPublicKeyable{wrong.PublicKey(), trustRoot.PublicKey(), wrong.PublicKey()}
+	valid, err := cert.ValidateWithTrustRoots(roots, 1000)
+	if err != nil {
+		t.Fatalf("ValidateWithTrustRoots() error: %v", err)
+	}
+	if !valid {
+		t.Error("ValidateWithTrustRoots() should return true when middle root matches")
+	}
+}
+
+// TestValidateWithTrustRoots_Expired verifies that an expired certificate is
+// rejected even when the root matches.
+func TestValidateWithTrustRoots_Expired(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	cert, _ := newTestSenderCertificate(t, trustRoot)
+
+	// validationTime > cert.Expiration() (9999999999).
+	valid, err := cert.ValidateWithTrustRoots([]ecc.ECPublicKeyable{trustRoot.PublicKey()}, 99999999999)
+	if err != nil {
+		t.Fatalf("ValidateWithTrustRoots() unexpected error: %v", err)
+	}
+	if valid {
+		t.Error("ValidateWithTrustRoots() should return false for expired certificate")
+	}
+}
+
+// TestValidateWithTrustRoots_InvalidSignatureLength verifies that a wrong-length
+// sender cert signature returns (false, nil), matching Rust's verify_signature
+// which returns false (not error) when try_into for the [u8;64] array fails.
+func TestValidateWithTrustRoots_InvalidSignatureLength(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	cert, _ := newTestSenderCertificate(t, trustRoot)
+
+	cert.signature = make([]byte, 10) // wrong length
+	valid, err := cert.ValidateWithTrustRoots([]ecc.ECPublicKeyable{trustRoot.PublicKey()}, 1000)
+	if err != nil {
+		t.Errorf("ValidateWithTrustRoots() must not error for wrong-length sig: %v", err)
+	}
+	if valid {
+		t.Error("ValidateWithTrustRoots() must return false for wrong-length sig")
+	}
+}
+
+// --- PNI sender certificate decrypt tests (#22) ---
+
+// newTestPNISenderCertificate creates a sender certificate whose UUID field
+// is a PNI-prefixed ServiceId string (e.g. "PNI:9d0652a3-...").
+// This tests that the Step 7.5 validation in v2 decrypt accepts PNI senders.
+func newTestPNISenderCertificate(t *testing.T, trustRoot *ecc.ECKeyPair) *SenderCertificate {
+	t.Helper()
+	serverCert, serverKey := newTestServerCertificate(t, trustRoot)
+
+	senderKey, err := ecc.GenerateKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+
+	// A PNI-prefixed UUID string, matching Rust's PNI ServiceId format.
+	pniUUID := "PNI:9d0652a3-5b24-4e0d-b88e-8e1b2a4f8b1a"
+
+	cert, err := NewSenderCertificate(
+		pniUUID,
+		nil,
+		senderKey.PublicKey(),
+		1,
+		9999999999,
+		serverCert,
+		serverKey.PrivateKey(),
+	)
+	if err != nil {
+		t.Fatalf("NewSenderCertificate (PNI): %v", err)
+	}
+	return cert
+}
+
+// TestPNISenderCertificateValidate verifies that a sender certificate carrying
+// a PNI-prefixed UUID validates correctly against the trust root.
+// This is the precondition for the v2 Step 7.5 PNI acceptance fix.
+func TestPNISenderCertificateValidate(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	cert := newTestPNISenderCertificate(t, trustRoot)
+
+	valid, err := cert.Validate(trustRoot.PublicKey(), 1000)
+	if err != nil {
+		t.Fatalf("Validate() error: %v", err)
+	}
+	if !valid {
+		t.Error("Validate() should return true for a PNI-keyed sender certificate")
+	}
+}
+
+// TestPNISenderCertificateRoundTrip verifies that a PNI sender certificate
+// serializes and deserializes correctly, preserving the PNI UUID string.
+func TestPNISenderCertificateRoundTrip(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	cert := newTestPNISenderCertificate(t, trustRoot)
+
+	serialized := cert.Serialize()
+	restored, err := DeserializeSenderCertificate(serialized)
+	if err != nil {
+		t.Fatalf("DeserializeSenderCertificate: %v", err)
+	}
+
+	if got := restored.SenderUUID(); got != "PNI:9d0652a3-5b24-4e0d-b88e-8e1b2a4f8b1a" {
+		t.Errorf("SenderUUID: got %q, want %q", got, "PNI:9d0652a3-5b24-4e0d-b88e-8e1b2a4f8b1a")
+	}
+	valid, err := restored.Validate(trustRoot.PublicKey(), 1000)
+	if err != nil {
+		t.Fatalf("Validate() error: %v", err)
+	}
+	if !valid {
+		t.Error("Restored PNI sender certificate should validate successfully")
+	}
+}
+
+// TestServerCertificateCertificateAndSignatureAccessors verifies that the raw
+// certificate and signature bytes are accessible, mirroring Rust's
+// ServerCertificate::certificate and ServerCertificate::signature at
+// rust/protocol/src/sealed_sender.rs.
+func TestServerCertificateCertificateAndSignatureAccessors(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	cert, _ := newTestServerCertificate(t, trustRoot)
+
+	if len(cert.Certificate()) == 0 {
+		t.Error("Certificate() must return non-empty inner certificate bytes")
+	}
+	if len(cert.Signature()) != 64 {
+		t.Errorf("Signature() must return 64 bytes, got %d", len(cert.Signature()))
+	}
+
+	// Round-trip: deserialise and confirm accessors are preserved.
+	restored, err := DeserializeServerCertificate(cert.Serialize())
+	if err != nil {
+		t.Fatalf("DeserializeServerCertificate: %v", err)
+	}
+	if string(restored.Certificate()) != string(cert.Certificate()) {
+		t.Error("Restored Certificate() bytes differ from original")
+	}
+	if string(restored.Signature()) != string(cert.Signature()) {
+		t.Error("Restored Signature() bytes differ from original")
+	}
+}
+
+// TestSenderCertificateCertificateAndSignatureAccessors verifies that the raw
+// inner certificate and signature bytes are accessible, mirroring Rust's
+// SenderCertificate::certificate and SenderCertificate::signature at
+// rust/protocol/src/sealed_sender.rs.
+func TestSenderCertificateCertificateAndSignatureAccessors(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	cert, _ := newTestSenderCertificate(t, trustRoot)
+
+	if len(cert.Certificate()) == 0 {
+		t.Error("Certificate() must return non-empty inner certificate bytes")
+	}
+	if len(cert.Signature()) != 64 {
+		t.Errorf("Signature() must return 64 bytes, got %d", len(cert.Signature()))
+	}
+
+	// Round-trip: deserialise and confirm accessors are preserved.
+	restored, err := DeserializeSenderCertificate(cert.Serialize())
+	if err != nil {
+		t.Fatalf("DeserializeSenderCertificate: %v", err)
+	}
+	if string(restored.Certificate()) != string(cert.Certificate()) {
+		t.Error("Restored Certificate() bytes differ from original")
+	}
+	if string(restored.Signature()) != string(cert.Signature()) {
+		t.Error("Restored Signature() bytes differ from original")
+	}
+}
+
+// TestDeserializeSenderCertificate_EmptyUuidString verifies that a sender
+// certificate whose oneof SenderUuid is set to the UuidString variant with an
+// empty string value "" is accepted verbatim.
+//
+// Rust libsignal (rust/protocol/src/sealed_sender.rs:246-248) takes the
+// UuidString value as-is without rejecting empty strings, so Go must match.
+// The type-switch on GetSenderUuid() still distinguishes the UuidString variant
+// from an absent oneof (which returns *CertificateError via the default case).
+func TestDeserializeSenderCertificate_EmptyUuidString(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	serverCert, serverKey := newTestServerCertificate(t, trustRoot)
+
+	senderKey, _ := ecc.GenerateKeyPair()
+	inner := &sealedpb.SenderCertificate_Certificate{
+		// Explicitly set the UuidString variant to empty string "".
+		SenderUuid:   &sealedpb.SenderCertificate_Certificate_UuidString{UuidString: ""},
+		SenderDevice: proto.Uint32(1),
+		Expires:      proto.Uint64(9999999999),
+		IdentityKey:  senderKey.PublicKey().Serialize(),
+		Signer: &sealedpb.SenderCertificate_Certificate_Certificate{
+			Certificate: serverCert.Serialize(),
+		},
+	}
+	innerBytes, _ := proto.Marshal(inner)
+
+	sig, _ := ecc.CalculateSignature(serverKey.PrivateKey(), innerBytes)
+	outer := &sealedpb.SenderCertificate{
+		Certificate: innerBytes,
+		Signature:   sig[:],
+	}
+	data, _ := proto.Marshal(outer)
+
+	cert, err := DeserializeSenderCertificate(data)
+	if err != nil {
+		t.Fatalf("DeserializeSenderCertificate should accept UuidString = \"\", got error: %v", err)
+	}
+	if cert.SenderUUID() != "" {
+		t.Errorf("SenderUUID: got %q, want empty string", cert.SenderUUID())
+	}
+}
+
+// TestDeserializeSenderCertificate_UuidBytesVariant verifies that the
+// UuidBytes oneof variant is decoded correctly when present.
+func TestDeserializeSenderCertificate_UuidBytesVariant(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	serverCert, serverKey := newTestServerCertificate(t, trustRoot)
+
+	senderKey, _ := ecc.GenerateKeyPair()
+	uuidBytes := []byte{
+		0x11, 0x11, 0x11, 0x11,
+		0x11, 0x11,
+		0x11, 0x11,
+		0x11, 0x11,
+		0x11, 0x11, 0x11, 0x11, 0x11, 0x11,
+	}
+	inner := &sealedpb.SenderCertificate_Certificate{
+		// Use UuidBytes variant (not UuidString).
+		SenderUuid:   &sealedpb.SenderCertificate_Certificate_UuidBytes{UuidBytes: uuidBytes},
+		SenderDevice: proto.Uint32(1),
+		Expires:      proto.Uint64(9999999999),
+		IdentityKey:  senderKey.PublicKey().Serialize(),
+		Signer: &sealedpb.SenderCertificate_Certificate_Certificate{
+			Certificate: serverCert.Serialize(),
+		},
+	}
+	innerBytes, _ := proto.Marshal(inner)
+
+	sig, _ := ecc.CalculateSignature(serverKey.PrivateKey(), innerBytes)
+	outer := &sealedpb.SenderCertificate{
+		Certificate: innerBytes,
+		Signature:   sig[:],
+	}
+	data, _ := proto.Marshal(outer)
+
+	cert, err := DeserializeSenderCertificate(data)
+	if err != nil {
+		t.Fatalf("DeserializeSenderCertificate with UuidBytes failed: %v", err)
+	}
+
+	// The UUID should have been formatted as "11111111-1111-1111-1111-111111111111"
+	expectedUUID := "11111111-1111-1111-1111-111111111111"
+	if cert.SenderUUID() != expectedUUID {
+		t.Errorf("SenderUUID() = %q, want %q", cert.SenderUUID(), expectedUUID)
+	}
+}
+
+// TestDeserializeSenderCertificate_UuidBytesInvalidLength verifies that
+// UuidBytes with an invalid length is rejected with a CertificateError.
+func TestDeserializeSenderCertificate_UuidBytesInvalidLength(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	serverCert, serverKey := newTestServerCertificate(t, trustRoot)
+
+	senderKey, _ := ecc.GenerateKeyPair()
+	inner := &sealedpb.SenderCertificate_Certificate{
+		SenderUuid:   &sealedpb.SenderCertificate_Certificate_UuidBytes{UuidBytes: []byte{0x01, 0x02}},
+		SenderDevice: proto.Uint32(1),
+		Expires:      proto.Uint64(9999999999),
+		IdentityKey:  senderKey.PublicKey().Serialize(),
+		Signer: &sealedpb.SenderCertificate_Certificate_Certificate{
+			Certificate: serverCert.Serialize(),
+		},
+	}
+	innerBytes, _ := proto.Marshal(inner)
+
+	sig, _ := ecc.CalculateSignature(serverKey.PrivateKey(), innerBytes)
+	outer := &sealedpb.SenderCertificate{
+		Certificate: innerBytes,
+		Signature:   sig[:],
+	}
+	data, _ := proto.Marshal(outer)
+
+	_, err := DeserializeSenderCertificate(data)
+	if err == nil {
+		t.Fatal("expected error for UuidBytes with wrong length")
+	}
+	var certErr *CertificateError
+	if !errors.As(err, &certErr) {
+		t.Errorf("expected *CertificateError, got %T: %v", err, err)
+	}
+}
+
+// TestDeserializeSenderCertificate_MissingSenderUuid verifies that a sender
+// certificate with no SenderUuid oneof set is rejected.
+func TestDeserializeSenderCertificate_MissingSenderUuid(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	serverCert, serverKey := newTestServerCertificate(t, trustRoot)
+
+	senderKey, _ := ecc.GenerateKeyPair()
+	inner := &sealedpb.SenderCertificate_Certificate{
+		// SenderUuid is nil / not set
+		SenderDevice: proto.Uint32(1),
+		Expires:      proto.Uint64(9999999999),
+		IdentityKey:  senderKey.PublicKey().Serialize(),
+		Signer: &sealedpb.SenderCertificate_Certificate_Certificate{
+			Certificate: serverCert.Serialize(),
+		},
+	}
+	innerBytes, _ := proto.Marshal(inner)
+
+	sig, _ := ecc.CalculateSignature(serverKey.PrivateKey(), innerBytes)
+	outer := &sealedpb.SenderCertificate{
+		Certificate: innerBytes,
+		Signature:   sig[:],
+	}
+	data, _ := proto.Marshal(outer)
+
+	_, err := DeserializeSenderCertificate(data)
+	if err == nil {
+		t.Fatal("expected error when SenderUuid is not set")
+	}
+	var certErr *CertificateError
+	if !errors.As(err, &certErr) {
+		t.Errorf("expected *CertificateError, got %T: %v", err, err)
 	}
 }

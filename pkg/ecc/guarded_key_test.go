@@ -17,7 +17,13 @@ func TestNewGuardedECPrivateKey_Success(t *testing.T) {
 	if _, err := io.ReadFull(rand.Reader, data[:]); err != nil {
 		t.Fatalf("failed to generate random data: %v", err)
 	}
-	dataCopy := data
+	// Apply clamping to the copy so we can compare against the clamped form
+	// stored by NewGuardedECPrivateKey (ECC-3: constructor now clamps on
+	// construction, matching Rust PrivateKey::deserialize).
+	clampedCopy := data
+	clampedCopy[0] &= 248
+	clampedCopy[31] &= 127
+	clampedCopy[31] |= 64
 
 	key, err := NewGuardedECPrivateKey(data)
 	if err != nil {
@@ -26,8 +32,8 @@ func TestNewGuardedECPrivateKey_Success(t *testing.T) {
 	defer key.Destroy()
 
 	serialized := key.Serialize()
-	if serialized != dataCopy {
-		t.Fatal("serialized key does not match original data")
+	if serialized != clampedCopy {
+		t.Fatal("serialized key does not match clamped data")
 	}
 }
 

@@ -1,0 +1,30 @@
+{
+  "source": "rust/protocol/src/protocol.rs:352 PreKeySignalMessage::new (libsignal v0.92.2)",
+  "rust_rev": "98915c442d",
+  "purpose": "PreKeySignalMessage wire vector (version 3, no Kyber payload). Go must parse with NewPreKeySignalMessageFromBytes, assert all fields round-trip, and verify the inner SignalMessage MAC with the supplied mac_key.",
+  "vectors": [
+    {
+      "name": "prekey_signal_message",
+      "inputs": {
+        "base_key_public": "055241fb052c5dc080dcc8c0573af75e69e41d5b9db8ed2bbd5692ee6a7e284e1b",
+        "identity_key_public": "05162f3ea332b73bbdf13b3d3ebd46123d86a02c0d23a81b826f7ee0e88072e10b",
+        "inner_ciphertext": "05e7483fb3a7538d979002cb70446fe4dd4dc433",
+        "inner_counter": 7,
+        "inner_previous_counter": 6,
+        "mac_key": "a5462d2f349460ab92cadfdd505ecc8d45e3bb7b729e83c650ffe6dfbece6064",
+        "message_version": 3,
+        "pre_key_id": 23,
+        "ratchet_key_public": "05c7e920271c12f5aa73ecda1385a1aaadc45bbe0f5326683e032ccebb733cb506",
+        "receiver_identity_private": "60497facab1ce6c68199518754648ece175fe860c12e59248568bcb57a6b9743",
+        "receiver_identity_public": "056377310e9ed83d1b0d2c521823beecc5d4500246d452101f2eb3b825e4cabc36",
+        "registration_id": 1234,
+        "sender_identity_private": "588066dd3e12be722d46d5cf079dac886fdb9a1267539eb5e687533fbaf08659",
+        "sender_identity_public": "054058ed6131d88411805a971a6a48337f4a0fe0393f49e6ff07a5290daa868508",
+        "signed_pre_key_id": 42
+      },
+      "expected": {
+        "serialized": "3408171221055241fb052c5dc080dcc8c0573af75e69e41d5b9db8ed2bbd5692ee6a7e284e1b1a2105162f3ea332b73bbdf13b3d3ebd46123d86a02c0d23a81b826f7ee0e88072e10b2246340a2105c7e920271c12f5aa73ecda1385a1aaadc45bbe0f5326683e032ccebb733cb50610071806221405e7483fb3a7538d979002cb70446fe4dd4dc4339062f188ae3d884728d209302a"
+      }
+    }
+  ]
+}

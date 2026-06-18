@@ -247,7 +247,8 @@ func TestNewSignalMessage(t *testing.T) {
 		CurrentVersion, 1, 0, macKey,
 		ratchetKey.PublicKey(), []byte("ciphertext"),
 		senderIdentity, receiverIdentity, serializer,
-		nil, // pqRatchetMsg
+		nil,      // pqRatchetMsg
+		nil, nil, // localAddress, remoteAddress (no binding)
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -279,7 +280,8 @@ func TestSignalMessageVerifyMac(t *testing.T) {
 		CurrentVersion, 1, 0, macKey,
 		ratchetKey.PublicKey(), []byte("ciphertext"),
 		senderIdentity, receiverIdentity, serializer,
-		nil, // pqRatchetMsg
+		nil,      // pqRatchetMsg
+		nil, nil, // localAddress, remoteAddress (no binding)
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -330,7 +332,8 @@ func TestNewSignalMessageSerializeError(t *testing.T) {
 		CurrentVersion, 1, 0, macKey,
 		ratchetKey.PublicKey(), []byte("ciphertext"),
 		senderIdentity, receiverIdentity, serializer,
-		nil, // pqRatchetMsg
+		nil,      // pqRatchetMsg
+		nil, nil, // localAddress, remoteAddress (no binding)
 	)
 	if err == nil {
 		t.Fatal("expected error when serializer fails")
@@ -350,7 +353,8 @@ func TestSignalMessageVerifyMacSerializeError(t *testing.T) {
 		CurrentVersion, 1, 0, macKey,
 		ratchetKey.PublicKey(), []byte("ciphertext"),
 		senderIdentity, receiverIdentity, goodSerializer,
-		nil, // pqRatchetMsg
+		nil,      // pqRatchetMsg
+		nil, nil, // localAddress, remoteAddress (no binding)
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -394,7 +398,8 @@ func TestSignalMessageVerifyMacWithSwappedIdentities(t *testing.T) {
 		CurrentVersion, 1, 0, macKey,
 		ratchetKey.PublicKey(), []byte("ciphertext"),
 		senderIdentity, receiverIdentity, serializer,
-		nil, // pqRatchetMsg
+		nil,      // pqRatchetMsg
+		nil, nil, // localAddress, remoteAddress (no binding)
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -524,9 +529,13 @@ func TestSignalMessageVersionValidation(t *testing.T) {
 	})
 }
 
-func TestSignalMessageVerifyMacVersion2(t *testing.T) {
-	// Version < 3 skips the identity key prefix in MAC calculation.
-	// This exercises the version < 3 branch in getMac.
+// TestSignalMessageVerifyMacAlwaysIncludesIdentityKeys verifies that getMac
+// unconditionally includes sender and receiver identity keys in the HMAC input,
+// matching Rust's SignalMessage::get_mac which always writes both keys
+// (rust/protocol/src/protocol.rs:230-246). The legacy v2 branch that omitted
+// identity keys has been removed; all supported versions (>= PreKyberVersion)
+// include identity keys.
+func TestSignalMessageVerifyMacAlwaysIncludesIdentityKeys(t *testing.T) {
 	serializer := &jsonSignalMessageSerializer{}
 	ratchetKey := newTestKeyPair(t)
 	senderIdentity := newTestIdentityKey(t)
@@ -537,20 +546,147 @@ func TestSignalMessageVerifyMacVersion2(t *testing.T) {
 		macKey[i] = byte(i + 10)
 	}
 
-	// Create a v3 message but verify with version 2 (to exercise version < 3 path in getMac)
 	msg, err := NewSignalMessage(
 		CurrentVersion, 5, 2, macKey,
-		ratchetKey.PublicKey(), []byte("cipher-v2-test"),
+		ratchetKey.PublicKey(), []byte("cipher-identity-test"),
 		senderIdentity, receiverIdentity, serializer,
-		nil, // pqRatchetMsg
+		nil,      // pqRatchetMsg
+		nil, nil, // localAddress, remoteAddress (no binding)
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Verify with a different version - should fail since MAC was computed with v3
-	err = msg.VerifyMac(2, senderIdentity, receiverIdentity, macKey)
-	if err == nil {
-		t.Fatal("expected error: MAC mismatch when version changes")
+	// Correct identity keys → MAC verifies.
+	if err := msg.VerifyMac(CurrentVersion, senderIdentity, receiverIdentity, macKey); err != nil {
+		t.Fatalf("expected MAC to verify with correct identity keys, got: %v", err)
 	}
+
+	// Wrong receiver identity key → MAC mismatch.
+	wrongIdentity := newTestIdentityKey(t)
+	if err := msg.VerifyMac(CurrentVersion, senderIdentity, wrongIdentity, macKey); err == nil {
+		t.Fatal("expected MAC mismatch with wrong receiver identity key")
+	}
+}
+
+// TestNewSignalMessage_AddressBinding_ValidAddresses verifies that supplying two
+// valid ServiceId-format addresses (UUID names, device IDs 1-127) embeds the
+// address-binding field (proto field 6) in the resulting message.
+//
+// Codex finding P2 — valid addresses → binding present.
+func TestNewSignalMessage_AddressBinding_ValidAddresses(t *testing.T) {
+	serializer := &jsonSignalMessageSerializer{}
+	ratchetKey := newTestKeyPair(t)
+	senderID := newTestIdentityKey(t)
+	receiverID := newTestIdentityKey(t)
+	macKey := make([]byte, 32)
+
+	sender := NewSignalAddress("11111111-1111-1111-1111-111111111111", 1)
+	recipient := NewSignalAddress("22222222-2222-2222-2222-222222222222", 2)
+
+	msg, err := NewSignalMessage(
+		CurrentVersion, 1, 0, macKey,
+		ratchetKey.PublicKey(), []byte("payload"),
+		senderID, receiverID, serializer,
+		nil, sender, recipient,
+	)
+	if err != nil {
+		t.Fatalf("NewSignalMessage with valid addresses: unexpected error: %v", err)
+	}
+	if len(msg.Addresses()) != 36 {
+		t.Fatalf("expected 36-byte address-binding field, got %d bytes", len(msg.Addresses()))
+	}
+}
+
+// TestNewSignalMessage_AddressBinding_DeviceIDZero verifies that supplying
+// a sender address with device ID 0 returns ErrInvalidAddressForBinding rather
+// than silently downgrading to an unbound message.
+//
+// Codex finding P2 — device_id == 0 → typed error.
+func TestNewSignalMessage_AddressBinding_DeviceIDZero(t *testing.T) {
+	serializer := &jsonSignalMessageSerializer{}
+	ratchetKey := newTestKeyPair(t)
+	senderID := newTestIdentityKey(t)
+	receiverID := newTestIdentityKey(t)
+	macKey := make([]byte, 32)
+
+	// device ID 0 is invalid for SerializeAddresses.
+	sender := NewSignalAddress("11111111-1111-1111-1111-111111111111", 0)
+	recipient := NewSignalAddress("22222222-2222-2222-2222-222222222222", 1)
+
+	_, err := NewSignalMessage(
+		CurrentVersion, 1, 0, macKey,
+		ratchetKey.PublicKey(), []byte("payload"),
+		senderID, receiverID, serializer,
+		nil, sender, recipient,
+	)
+	if err == nil {
+		t.Fatal("expected error for device ID 0, got nil")
+	}
+	if !isError(err, errInvalidAddressForBinding) {
+		t.Fatalf("expected errInvalidAddressForBinding, got %T: %v", err, err)
+	}
+}
+
+// TestNewSignalMessage_AddressBinding_DeviceIDTooLarge verifies that supplying
+// a recipient address with device ID > 127 returns ErrInvalidAddressForBinding.
+//
+// Codex finding P2 — device_id > 127 → typed error.
+func TestNewSignalMessage_AddressBinding_DeviceIDTooLarge(t *testing.T) {
+	serializer := &jsonSignalMessageSerializer{}
+	ratchetKey := newTestKeyPair(t)
+	senderID := newTestIdentityKey(t)
+	receiverID := newTestIdentityKey(t)
+	macKey := make([]byte, 32)
+
+	sender := NewSignalAddress("11111111-1111-1111-1111-111111111111", 1)
+	// device ID 128 exceeds the valid range [1, 127].
+	recipient := NewSignalAddress("22222222-2222-2222-2222-222222222222", 128)
+
+	_, err := NewSignalMessage(
+		CurrentVersion, 1, 0, macKey,
+		ratchetKey.PublicKey(), []byte("payload"),
+		senderID, receiverID, serializer,
+		nil, sender, recipient,
+	)
+	if err == nil {
+		t.Fatal("expected error for device ID 128, got nil")
+	}
+	if !isError(err, errInvalidAddressForBinding) {
+		t.Fatalf("expected errInvalidAddressForBinding, got %T: %v", err, err)
+	}
+}
+
+// TestNewSignalMessage_AddressBinding_BothNil verifies that the legacy
+// unbound path (both addresses nil) produces a message without the
+// addresses field and returns no error.
+//
+// Codex finding P2 — both addresses nil → binding absent, no error (legacy path).
+func TestNewSignalMessage_AddressBinding_BothNil(t *testing.T) {
+	serializer := &jsonSignalMessageSerializer{}
+	ratchetKey := newTestKeyPair(t)
+	senderID := newTestIdentityKey(t)
+	receiverID := newTestIdentityKey(t)
+	macKey := make([]byte, 32)
+
+	msg, err := NewSignalMessage(
+		CurrentVersion, 1, 0, macKey,
+		ratchetKey.PublicKey(), []byte("payload"),
+		senderID, receiverID, serializer,
+		nil, nil, nil,
+	)
+	if err != nil {
+		t.Fatalf("NewSignalMessage with nil addresses: unexpected error: %v", err)
+	}
+	if len(msg.Addresses()) != 0 {
+		t.Fatalf("expected empty addresses field for unbound legacy path, got %d bytes", len(msg.Addresses()))
+	}
+}
+
+// isError is a package-internal helper that checks whether err is an *Error
+// with the given kind. Used to assert specific error kinds in tests without
+// exporting the errorKind type.
+func isError(err error, kind errorKind) bool {
+	e, ok := err.(*Error)
+	return ok && e.kind == kind
 }

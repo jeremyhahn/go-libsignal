@@ -270,6 +270,102 @@ func TestDeriveSecrets_ShortReadCannotOccur(t *testing.T) {
 	}
 }
 
+// TestExtract_RFC5869_TC1 verifies Extract against RFC 5869 Test Case 1.
+// Extract(ikm, salt) == HMAC-SHA256(salt, ikm) per RFC 5869 §2.2.
+// Finding #7 fix: mirrors Rust Hkdf::<Sha256>::extract(salt, ikm).
+// Rust source: rust/crypto/src/hpke/provider.rs:55
+func TestExtract_RFC5869_TC1(t *testing.T) {
+	ikm := mustDecodeHex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b")
+	salt := mustDecodeHex("000102030405060708090a0b0c")
+	// Expected PRK from RFC 5869 Appendix A.1.
+	expectedPRK := mustDecodeHex("077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5")
+
+	prk := Extract(ikm, salt)
+	if len(prk) != 32 {
+		t.Fatalf("Extract returned %d bytes, want 32", len(prk))
+	}
+	if !bytes.Equal(prk, expectedPRK) {
+		t.Errorf("PRK mismatch\n  got  %x\n  want %x", prk, expectedPRK)
+	}
+}
+
+// TestExtract_NilSalt verifies that Extract with a nil salt uses the RFC 5869
+// default (zero-byte key of HashLen bytes), not panicking.
+func TestExtract_NilSalt(t *testing.T) {
+	ikm := []byte("some input key material")
+	prk := Extract(ikm, nil)
+	if len(prk) != 32 {
+		t.Fatalf("Extract with nil salt returned %d bytes, want 32", len(prk))
+	}
+}
+
+// TestExpand_RFC5869_TC1 verifies Expand against RFC 5869 Test Case 1.
+// Finding #7 fix: mirrors Rust Hkdf::<Sha256>::from_prk(prk).expand(info, out).
+// Rust source: rust/crypto/src/hpke/provider.rs:69-72
+func TestExpand_RFC5869_TC1(t *testing.T) {
+	// PRK from RFC 5869 Appendix A.1.
+	prk := mustDecodeHex("077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5")
+	info := mustDecodeHex("f0f1f2f3f4f5f6f7f8f9")
+	// Expected OKM from RFC 5869 Appendix A.1 (42 bytes).
+	expectedOKM := mustDecodeHex(
+		"3cb25f25faacd57a90434f64d0362f2a" +
+			"2d2d0a90cf1a5a4c5db02d56ecc4c5bf" +
+			"34007208d5b887185865")
+
+	okm, err := Expand(prk, info, 42)
+	if err != nil {
+		t.Fatalf("Expand: %v", err)
+	}
+	if !bytes.Equal(okm, expectedOKM) {
+		t.Errorf("OKM mismatch\n  got  %x\n  want %x", okm, expectedOKM)
+	}
+}
+
+// TestExpand_InvalidPRK verifies that Expand returns ErrHKDFInvalidPRK when
+// the PRK is shorter than SHA-256 output (32 bytes).
+func TestExpand_InvalidPRK(t *testing.T) {
+	_, err := Expand(make([]byte, 16), nil, 32)
+	var prkErr *ErrHKDFInvalidPRK
+	if !errors.As(err, &prkErr) {
+		t.Errorf("expected ErrHKDFInvalidPRK, got %T: %v", err, err)
+	}
+}
+
+// TestExtractThenExpand_MatchesDeriveSecrets verifies that Extract followed by
+// Expand produces the same output as DeriveSecrets for the same inputs.
+// This confirms the two-step API is consistent with the combined function.
+func TestExtractThenExpand_MatchesDeriveSecrets(t *testing.T) {
+	ikm := []byte("some input key material for test")
+	salt := []byte("salt value")
+	info := []byte("info value")
+	outputLen := 64
+
+	combined, err := DeriveSecrets(ikm, salt, info, outputLen)
+	if err != nil {
+		t.Fatalf("DeriveSecrets: %v", err)
+	}
+
+	prk := Extract(ikm, salt)
+	twoStep, err := Expand(prk, info, outputLen)
+	if err != nil {
+		t.Fatalf("Expand: %v", err)
+	}
+
+	if !bytes.Equal(combined, twoStep) {
+		t.Error("Extract+Expand output does not match DeriveSecrets for same inputs")
+	}
+}
+
+// TestExpand_TooLargeOutput verifies Expand returns an error when the
+// requested output exceeds the HKDF-SHA256 limit of 255 * 32 = 8160 bytes.
+func TestExpand_TooLargeOutput(t *testing.T) {
+	prk := make([]byte, 32)
+	_, err := Expand(prk, nil, 8161)
+	if err == nil {
+		t.Fatal("expected error for output length exceeding HKDF max")
+	}
+}
+
 // TestHKDF_SignalVector3 documents that Signal's HKDF v2 (used in older protocol
 // versions) is NOT supported by DeriveSecrets, which implements RFC 5869 (v3).
 //

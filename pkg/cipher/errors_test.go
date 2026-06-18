@@ -255,3 +255,70 @@ func TestAESGCMSIVZeroize(t *testing.T) {
 	// Calling Zeroize again must be idempotent (no panic).
 	z.Zeroize()
 }
+
+func TestErrCipherInvalidKeySize_Error(t *testing.T) {
+	err := &ErrCipherInvalidKeySize{Got: 16}
+	msg := err.Error()
+	if !strings.Contains(msg, "16") {
+		t.Errorf("ErrCipherInvalidKeySize.Error() = %q, want '16'", msg)
+	}
+	if !strings.Contains(msg, "32") {
+		t.Errorf("ErrCipherInvalidKeySize.Error() = %q, want '32'", msg)
+	}
+}
+
+func TestErrCipherCiphertextTooShort_Error(t *testing.T) {
+	err := &ErrCipherCiphertextTooShort{}
+	if err.Error() == "" {
+		t.Fatal("ErrCipherCiphertextTooShort.Error() returned empty string")
+	}
+}
+
+func TestErrCipherInvalidBlockSize_Error(t *testing.T) {
+	err := &ErrCipherInvalidBlockSize{Got: -1}
+	msg := err.Error()
+	if !strings.Contains(msg, "-1") {
+		t.Errorf("ErrCipherInvalidBlockSize.Error() = %q, want '-1'", msg)
+	}
+}
+
+func TestErrCipherInvalidPKCS7Data_Error(t *testing.T) {
+	err := &ErrCipherInvalidPKCS7Data{}
+	if err.Error() == "" {
+		t.Fatal("ErrCipherInvalidPKCS7Data.Error() returned empty string")
+	}
+}
+
+func TestErrCipherInvalidPKCS7Padding_Error(t *testing.T) {
+	err := &ErrCipherInvalidPKCS7Padding{}
+	if err.Error() == "" {
+		t.Fatal("ErrCipherInvalidPKCS7Padding.Error() returned empty string")
+	}
+}
+
+func TestErrInvalidKeyLength_Error(t *testing.T) {
+	err := &ErrInvalidKeyLength{Got: 16, Expected: 32}
+	msg := err.Error()
+	if !strings.Contains(msg, "16") || !strings.Contains(msg, "32") {
+		t.Errorf("ErrInvalidKeyLength.Error() = %q, want got and expected sizes", msg)
+	}
+}
+
+func TestErrInvalidNonceLength_Error(t *testing.T) {
+	err := &ErrInvalidNonceLength{Got: 8, Expected: 12}
+	msg := err.Error()
+	if !strings.Contains(msg, "8") || !strings.Contains(msg, "12") {
+		t.Errorf("ErrInvalidNonceLength.Error() = %q, want got and expected sizes", msg)
+	}
+}
+
+func TestErrAESGCMAuthFailed_Error(t *testing.T) {
+	err := &ErrAESGCMAuthFailed{}
+	msg := err.Error()
+	if msg == "" {
+		t.Fatal("ErrAESGCMAuthFailed.Error() returned empty string")
+	}
+	if !strings.Contains(msg, "auth") {
+		t.Errorf("ErrAESGCMAuthFailed.Error() = %q, want 'auth'", msg)
+	}
+}

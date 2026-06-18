@@ -154,8 +154,9 @@ func TestKyber1024KEMEncapsulateMultipleTimes(t *testing.T) {
 func TestKyber1024KEMEncapsulateWrongKeyType(t *testing.T) {
 	k := NewKyber1024KEM()
 
-	// Create a public key with wrong type
-	pk := NewPublicKey(KeyTypeKyber768, make([]byte, 32))
+	// Provide a public key tagged as MLKEM768 (a different supported type) to
+	// trigger the KeyTypeMismatchError path in Kyber1024KEM.Encapsulate.
+	pk := NewPublicKey(KeyTypeMLKEM768, make([]byte, 32))
 
 	_, _, err := k.Encapsulate(pk)
 	if err == nil {
@@ -192,10 +193,10 @@ func TestKyber1024KEMDecapsulateWrongSecretKeyType(t *testing.T) {
 		t.Fatalf("Encapsulate() error: %v", err)
 	}
 
-	// Use wrong key type for secret key — create with correct size for Kyber768 (2400)
-	wrongSKData := make([]byte, 2400)
-	copy(wrongSKData, kp.Secret.Data())
-	wrongSK, skErr := NewSecretKey(KeyTypeKyber768, wrongSKData)
+	// Use wrong key type for secret key — tag 3168 bytes as MLKEM768 to use a
+	// different supported type and exercise the KeyTypeMismatchError path.
+	wrongSKData := make([]byte, 64)
+	wrongSK, skErr := NewSecretKey(KeyTypeMLKEM768, wrongSKData)
 	if skErr != nil {
 		t.Fatalf("NewSecretKey() error: %v", skErr)
 	}
@@ -222,8 +223,8 @@ func TestKyber1024KEMDecapsulateWrongCiphertextType(t *testing.T) {
 		t.Fatalf("Encapsulate() error: %v", err)
 	}
 
-	// Use wrong key type for ciphertext
-	wrongCT := NewCiphertext(KeyTypeKyber768, ct.Data())
+	// Use MLKEM768 as wrong ciphertext type to trigger KeyTypeMismatchError.
+	wrongCT := NewCiphertext(KeyTypeMLKEM768, ct.Data())
 	_, err = k.Decapsulate(kp.Secret, wrongCT)
 	if err == nil {
 		t.Fatal("Decapsulate with wrong ciphertext type should return error")

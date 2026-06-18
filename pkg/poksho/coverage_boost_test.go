@@ -368,3 +368,47 @@ func TestProofError_WithoutContext(t *testing.T) {
 		t.Errorf("unexpected error message: %s", err.Error())
 	}
 }
+
+// TestSignAndVerify exercises the package-level Sign and Verify functions using
+// the KAT from rust/poksho/src/sign.rs::tests::test_signature.
+// block32 = 0..31, block64 = 0..63, block100 = 0..99.
+func TestSignAndVerify(t *testing.T) {
+	var block64 [64]byte
+	for i := range block64 {
+		block64[i] = byte(i)
+	}
+	var block32 [32]byte
+	for i := range block32 {
+		block32[i] = byte(i)
+	}
+	block100 := make([]byte, 100)
+	for i := range block100 {
+		block100[i] = byte(i)
+	}
+
+	privateKey, err := ristretto255.NewScalar().SetUniformBytes(block64[:])
+	if err != nil {
+		t.Fatalf("SetUniformBytes: %v", err)
+	}
+	publicKey := ristretto255.NewIdentityElement().ScalarBaseMult(privateKey)
+
+	sig, err := Sign(privateKey, publicKey, block100, block32[:])
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	if len(sig) == 0 {
+		t.Fatal("Sign returned empty signature")
+	}
+
+	// Verify must succeed with the same message.
+	if err := Verify(sig, publicKey, block100); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	// Tampered message must fail.
+	tampered := append([]byte(nil), block100...)
+	tampered[0] ^= 0xFF
+	if err := Verify(sig, publicKey, tampered); err == nil {
+		t.Fatal("Verify of tampered message should have failed")
+	}
+}
