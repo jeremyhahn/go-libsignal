@@ -1,3 +1,8 @@
+# ci-template: v1 (customized)
+# Reconciled against software/templates/github-actions/ci.yml in the
+# automatethethings repo (devops.md §1/§8/§9). Divergence outside the
+# repo-specific blocks below is a defect.
+
 name: CI
 
 on:
@@ -41,8 +46,12 @@ jobs:
       - name: Test
         run: make test 2>&1 | tee test.log
 
+      # upload-artifact v4+ refuses to run against any server that is not
+      # github.com -- it detects one and reports "not currently supported on
+      # GHES", and Gitea presents as such (devops.md §1). Every such step in
+      # this file is guarded; the work it captures has already run.
       - name: Upload test log
-        if: failure()
+        if: failure() && github.server_url == 'https://github.com'
         uses: actions/upload-artifact@v4
         with:
           name: test-log
@@ -143,7 +152,7 @@ jobs:
         run: make staticcheck 2>&1 | tee staticcheck.log
 
       - name: Upload security logs
-        if: always()
+        if: always() && github.server_url == 'https://github.com'
         uses: actions/upload-artifact@v4
         with:
           name: security-logs
@@ -229,8 +238,9 @@ jobs:
           go-version: '1.26.6'
           cache: true
 
+      # Latest action major and latest linter: devops.md §9.
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
           version: latest
 
@@ -250,7 +260,7 @@ jobs:
         run: make integration-test 2>&1 | tee integration-test.log
 
       - name: Upload integration test log
-        if: failure()
+        if: failure() && github.server_url == 'https://github.com'
         uses: actions/upload-artifact@v4
         with:
           name: integration-test-log
@@ -289,7 +299,7 @@ jobs:
         run: make coverage 2>&1 | tee coverage.log
 
       - name: Upload coverage
-        if: always()
+        if: always() && github.server_url == 'https://github.com'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
@@ -297,3 +307,28 @@ jobs:
             coverage/coverage.out
             coverage/coverage.html
             coverage.log
+
+  # The single required check (devops.md §1). Every job above appears in BOTH
+  # the needs list and the results check -- a gate that can pass vacuously is
+  # worse than no gate. join(needs.*.result) is deliberately not used: it
+  # evaluates empty on Gitea and reports success while jobs fail.
+  ci-gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [test, conformance-fixtures, interop-live, security, trivy, lint, integration-test, examples-build, coverage]
+    steps:
+      - name: Fail closed on any non-success
+        run: |
+          check() { case "$2" in success) echo "OK   $1";; *) echo "FAIL $1 ($2)"; BAD=1;; esac; }
+          BAD=0
+          check test                  "${{ needs.test.result }}"
+          check conformance-fixtures  "${{ needs.conformance-fixtures.result }}"
+          check interop-live          "${{ needs.interop-live.result }}"
+          check security              "${{ needs.security.result }}"
+          check trivy                 "${{ needs.trivy.result }}"
+          check lint                  "${{ needs.lint.result }}"
+          check integration-test      "${{ needs.integration-test.result }}"
+          check examples-build        "${{ needs.examples-build.result }}"
+          check coverage              "${{ needs.coverage.result }}"
+          exit $BAD
