@@ -104,9 +104,15 @@ limit reached? [Err: cannot allocate memory]
 
 Container runtimes are the usual culprit: Docker defaults `memlock` to
 8 MiB, hard limit included, and `RLIMIT_MEMLOCK` cannot be raised past
-its hard limit without `CAP_SYS_RESOURCE`. Run containers with
-`--ulimit memlock=-1:-1`; CI runners need the same setting on the job
-container, not just the host.
+its hard limit without `CAP_SYS_RESOURCE`. Run containers with an
+explicit budget, e.g. `--ulimit memlock=4294967296:4294967296`. CI
+runners need it on the **job container**, not just the host.
+
+Prefer a bounded figure to `-1:-1`. Locked pages are unswappable, so an
+unlimited job can pin all of a shared runner's RAM. The company's Gitea
+runners grant 4 GiB (ratified 2026-08-14, `infra/gitea/docs/lessons.md`):
+2x the measured requirement, raised deliberately if a suite ever
+outgrows it.
 
 ## Commit Conventions
 

@@ -52,10 +52,11 @@ jobs:
       # forward). That needs RLIMIT_MEMLOCK >= 2 GiB; see the locked-memory
       # section of CONTRIBUTING.md for the measurements. Docker defaults it to
       # 8 MiB soft AND hard, and the hard limit cannot be raised from inside the
-      # container without CAP_SYS_RESOURCE — so the runner has to grant it
-      # (act_runner `container.options: --ulimit memlock=-1:-1`). Report the
-      # limit before running, so exhaustion reads as a provisioning problem
-      # rather than a mysterious allocation failure deep in a test.
+      # container without CAP_SYS_RESOURCE — so the runner has to grant it. The
+      # company's Gitea runners pass --ulimit memlock=4294967296 (4 GiB, granted
+      # 2026-08-14). Report the limit before running, so exhaustion reads as a
+      # provisioning problem rather than a mysterious allocation failure deep in
+      # a test — that is exactly how it was diagnosed.
       - name: Report locked-memory limit
         run: |
           echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
