@@ -124,6 +124,9 @@ jobs:
           go-version: '1.26.6'
           cache: true
 
+      - name: Verify module integrity
+        run: go mod verify
+
       - name: Install security tools
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
@@ -148,6 +151,72 @@ jobs:
             gosec.log
             govulncheck.log
             staticcheck.log
+
+  trivy:
+    name: Trivy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Two paths for one gate (devops.md §8). trivy-action's setup step cannot
+      # authenticate to github.com from a Gitea runner and upload-sarif has no
+      # GHES-compatible endpoint there, so the action path is guarded on the
+      # server URL and Gitea gates with the trivy CLI below. Both run the same
+      # fs scan at the same severity; only the SARIF upload is GitHub-only.
+      #
+      # tests/, examples/ and bench/ are skipped: none of them ship to a
+      # consumer of the library, and tests/interop/rust carries the upstream
+      # Rust reference crate purely to diff wire bytes against.
+      - name: Trivy scan (SARIF for code scanning)
+        if: github.server_url == 'https://github.com'
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: 0
+          skip-dirs: tests,examples,bench
+          trivyignores: .trivyignore
+
+      - name: Upload Trivy SARIF
+        if: github.server_url == 'https://github.com'
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-fs
+
+      - name: Trivy gate (fail on CRITICAL/HIGH)
+        if: github.server_url == 'https://github.com'
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH
+          exit-code: 1
+          format: table
+          skip-dirs: tests,examples,bench
+          trivyignores: .trivyignore
+
+      - name: Install Trivy CLI (Gitea)
+        if: github.server_url != 'https://github.com'
+        run: curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Trivy gate (Gitea)
+        if: github.server_url != 'https://github.com'
+        run: trivy fs --scanners vuln,secret --severity CRITICAL,HIGH --exit-code 1 --skip-dirs tests,examples,bench .
+
+  # There is deliberately no trivy-image job yet. The only container this repo
+  # builds is the Rust<->Go interop harness, and tests/interop/Dockerfile does
+  # not build today: the crate's Cargo.toml has path dependencies on a sibling
+  # upstream libsignal checkout the Dockerfile never provides. `make
+  # trivy-image` carries the ready-to-use scan and the full explanation; add
+  # the CI job when the Dockerfile is repaired.
 
   lint:
     name: Lint

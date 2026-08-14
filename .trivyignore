@@ -1,0 +1,20 @@
+# Trivy ignore list for go-libsignal.
+#
+# The gate is a SOURCE filesystem scan (trivy fs) of the shipped Go module,
+# failing on CRITICAL/HIGH (conventions/devops.md §8). tests/, examples/ and
+# bench/ are skipped: none of them ship to a consumer, and tests/interop/rust
+# carries the upstream Rust reference crate purely to diff wire bytes against.
+#
+# There is no image gate yet. The only container this repo builds is the
+# Rust<->Go interop harness, and tests/interop/Dockerfile does not build
+# today — the crate's Cargo.toml has path dependencies on a sibling upstream
+# libsignal checkout the Dockerfile never provides. `make trivy-image` carries
+# the ready-to-use scan; wire it into `make security` and add the CI job once
+# the Dockerfile is repaired.
+#
+# Add specific advisory IDs below ONLY when a finding is confirmed
+# not-applicable or unfixable, with a one-line justification AND the date it
+# was accepted. An entry without both is a defect.
+#
+# Example:
+# CVE-XXXX-XXXXX  # 2026-01-01 <reason this advisory does not apply here>

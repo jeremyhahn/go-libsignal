@@ -69,6 +69,7 @@ TESTABLE_PACKAGES := pkg/accountkeys pkg/attest pkg/backup pkg/cipher pkg/device
 	interop-live-group interop-live-backup interop-docker \
 	vet lint clean coverage help \
 	ci security gosec govulncheck staticcheck errcheck nilcheck \
+	modverify trivy trivy-image \
 	test-slow-session examples-build
 
 # ==============================================================================
@@ -299,7 +300,57 @@ nilcheck:
 		go install go.uber.org/nilaway/cmd/nilaway@latest)
 	nilaway ./... || true
 
-security: gosec govulncheck staticcheck
+modverify:
+	go mod verify
+
+# Filesystem CVE/secret scan, gated on CRITICAL/HIGH. tests/, examples/ and
+# bench/ are skipped: none of them ship to a consumer of the library, and
+# tests/interop/rust carries the upstream Rust reference crate purely to diff
+# wire bytes against.
+trivy:
+	@command -v trivy >/dev/null 2>&1 || { \
+		echo "trivy not installed - skipping filesystem scan (see https://trivy.dev/latest/getting-started/installation/)"; \
+		exit 0; \
+	}; \
+	trivy fs --scanners vuln,secret --severity CRITICAL,HIGH --exit-code 1 --skip-dirs tests,examples,bench .
+
+# Image scan of the only container this repo builds: the Rust<->Go interop
+# test harness (`make interop-docker`), which is never pushed to a registry.
+#
+# NOT a prerequisite of `security`, and deliberately so. tests/interop/rust/
+# Cargo.toml carries path dependencies on ../../../../libsignal/rust/{protocol,
+# zkgroup,core} — a sibling checkout of upstream Rust libsignal that the
+# Dockerfile never provides, so the rust-builder stage fails at `cargo build`
+# with "failed to read /libsignal/rust/core/Cargo.toml". That is a pre-existing
+# defect in the harness Dockerfile, not a security finding, and chaining it
+# into `security` would give this repo a gate that fails for an unrelated
+# reason. Wire it into `security` (and add the matching CI job) once the
+# Dockerfile clones upstream at /RUST_REV the way the conformance-fixtures CI
+# job already does.
+#
+# Two scoping decisions, both deliberate:
+#
+#   --ignore-unfixed  The final stage is golang:<stable>-bookworm, so its
+#                     Debian package set is upstream's. A CVE with no released
+#                     fix cannot be actioned by rebuilding and would pin this
+#                     gate permanently red; a CVE that HAS a fix means the
+#                     base is stale, which is a real finding.
+#   --skip-dirs       usr/local/go and go/pkg/mod are the toolchain and module
+#                     cache the image carries so it can run `go test` inside.
+#                     Their contents are upstream release artifacts, not
+#                     go-libsignal code.
+#
+# The Go module tree is gated unconditionally by `make trivy` and govulncheck.
+trivy-image:
+	@command -v docker >/dev/null 2>&1 || { echo "docker not installed - skipping image scan"; exit 0; }; \
+	command -v trivy >/dev/null 2>&1 || { echo "trivy not installed - skipping image scan"; exit 0; }; \
+	docker build -f tests/interop/Dockerfile -t libsignal-interop:security . && \
+	trivy image --scanners vuln,secret --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \
+		--skip-dirs usr/local/go --skip-dirs go/pkg/mod libsignal-interop:security
+
+# The full devops.md §8 suite. See trivy-image above for why the image scan is
+# not chained in yet.
+security: gosec govulncheck staticcheck modverify trivy
 
 # ==============================================================================
 # CI
@@ -356,10 +407,13 @@ help:
 	@echo "    make lint               - Run golangci-lint"
 	@echo ""
 	@echo "  Security:"
-	@echo "    make security           - Run all security scanners (gosec, govulncheck, staticcheck)"
+	@echo "    make security           - Full devops.md §8 suite (gosec, govulncheck, staticcheck, go mod verify, trivy fs)"
 	@echo "    make gosec              - Run gosec (common Go security issues)"
 	@echo "    make govulncheck        - Run govulncheck (known dependency vulnerabilities)"
 	@echo "    make staticcheck        - Run staticcheck (advanced static analysis)"
+	@echo "    make modverify          - Verify module integrity against go.sum"
+	@echo "    make trivy              - Filesystem CVE/secret scan (CRITICAL/HIGH gate)"
+	@echo "    make trivy-image        - Scan the interop harness image (see Makefile note)"
 	@echo "    make errcheck           - Run errcheck (unchecked error returns)"
 	@echo "    make nilcheck           - Run nilaway (nil dereference analysis, non-blocking)"
 	@echo ""

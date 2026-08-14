@@ -10,7 +10,7 @@ require (
 	github.com/flynn/noise v1.1.0
 	github.com/gtank/ristretto255 v0.2.0
 	golang.org/x/crypto v0.52.0
-	golang.org/x/text v0.37.0
+	golang.org/x/text v0.39.0
 	google.golang.org/protobuf v1.36.11
 	pgregory.net/rapid v1.3.0
 )
