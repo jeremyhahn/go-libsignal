@@ -358,7 +358,7 @@ func getMac(senderIdentityKey, receiverIdentityKey *identity.Key,
 		return nil, newInvalidMacKeyLengthError(len(macKey))
 	}
 
-	mac := hmac.New(sha256.New, macKey[:])
+	mac := hmac.New(sha256.New, macKey)
 	mac.Write(senderIdentityKey.PublicKey().Serialize())
 	mac.Write(receiverIdentityKey.PublicKey().Serialize())
 	mac.Write(serialized)

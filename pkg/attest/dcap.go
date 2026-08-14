@@ -14,6 +14,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"math/big"
+	"slices"
 	"strings"
 	"time"
 )
@@ -1172,7 +1173,7 @@ func ecdsaRawToDER(raw []byte) ([]byte, error) {
 	sDER := append([]byte{0x02, byte(len(sBytes))}, sBytes...)
 
 	// SEQUENCE tag (0x30) + length + contents
-	contents := append(rDER, sDER...)
+	contents := slices.Concat(rDER, sDER)
 	return append([]byte{0x30, byte(len(contents))}, contents...), nil
 }
 

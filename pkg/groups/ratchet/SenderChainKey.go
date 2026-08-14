@@ -121,7 +121,7 @@ func (k *SenderChainKey) Zeroize() {
 }
 
 func (k *SenderChainKey) getDerivative(seed []byte, key []byte) []byte {
-	mac := hmac.New(sha256.New, key[:])
+	mac := hmac.New(sha256.New, key)
 	mac.Write(seed)
 
 	return mac.Sum(nil)

@@ -69,7 +69,7 @@ func (k *Key) CreateChain(theirRatchetKey ecc.ECPublicKeyable, ourRatchetKey *ec
 	}
 	defer crypto.ZeroizeArray32(&sharedSecret)
 	defer crypto.ZeroizeArray32(&ourPrivateKey)
-	copy(keyMaterial[:], sharedSecret[:])
+	copy(keyMaterial, sharedSecret[:])
 	derivedSecretBytes, err := kdf.DeriveSecrets(keyMaterial, k.key.Bytes(), []byte(KdfInfo), ChainDerivedSecretsSize)
 	crypto.Zeroize(keyMaterial)
 	if err != nil {

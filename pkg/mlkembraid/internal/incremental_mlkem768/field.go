@@ -307,8 +307,9 @@ func samplePolyCBD(s []byte, b byte) ringElement {
 // byteEncode12 encodes a polynomial f using ByteEncode12 (FIPS 203 Algorithm 5).
 // Output is 384 bytes appended to dst.
 func byteEncode12(dst []byte, f nttElement) []byte {
-	out := append(dst, make([]byte, encodingSize12)...)
-	b := out[len(dst):]
+	start := len(dst)
+	dst = append(dst, make([]byte, encodingSize12)...)
+	b := dst[start:]
 	for i := 0; i < n; i += 2 {
 		x := uint32(f[i]) | uint32(f[i+1])<<12
 		b[0] = uint8(x)
@@ -316,7 +317,7 @@ func byteEncode12(dst []byte, f nttElement) []byte {
 		b[2] = uint8(x >> 16)
 		b = b[3:]
 	}
-	return out
+	return dst
 }
 
 // byteDecode12 decodes 384 bytes into an nttElement using ByteDecode12 (FIPS 203 Algorithm 6).
@@ -341,8 +342,9 @@ func byteDecode12(b []byte) (nttElement, error) {
 
 // ringCompressEncode10 appends Compress10(u) to dst (320 bytes per polynomial).
 func ringCompressEncode10(dst []byte, f ringElement) []byte {
-	out := append(dst, make([]byte, encodingSize10)...)
-	b := out[len(dst):]
+	start := len(dst)
+	dst = append(dst, make([]byte, encodingSize10)...)
+	b := dst[start:]
 	for i := 0; i < n; i += 4 {
 		var x uint64
 		x |= uint64(compress(f[i], 10))
@@ -356,27 +358,29 @@ func ringCompressEncode10(dst []byte, f ringElement) []byte {
 		b[4] = uint8(x >> 32)
 		b = b[5:]
 	}
-	return out
+	return dst
 }
 
 // ringCompressEncode4 appends Compress4(v) to dst (128 bytes).
 func ringCompressEncode4(dst []byte, f ringElement) []byte {
-	out := append(dst, make([]byte, encodingSize4)...)
-	b := out[len(dst):]
+	start := len(dst)
+	dst = append(dst, make([]byte, encodingSize4)...)
+	b := dst[start:]
 	for i := 0; i < n; i += 2 {
 		b[i/2] = uint8(compress(f[i], 4) | compress(f[i+1], 4)<<4)
 	}
-	return out
+	return dst
 }
 
 // ringCompressEncode1 appends Compress1(msg) to dst (32 bytes).
 func ringCompressEncode1(dst []byte, f ringElement) []byte {
-	out := append(dst, make([]byte, encodingSize1)...)
-	b := out[len(dst):]
+	start := len(dst)
+	dst = append(dst, make([]byte, encodingSize1)...)
+	b := dst[start:]
 	for i := range f {
 		b[i/8] |= uint8(compress(f[i], 1)) << (i % 8)
 	}
-	return out
+	return dst
 }
 
 // ringDecodeDecompress1 maps 32 bytes to a ring element (message decoding).

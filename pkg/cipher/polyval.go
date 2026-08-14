@@ -153,7 +153,7 @@ func ghashMul(s *[4]uint32, h *[4]uint32) {
 			v[3] = (v[3] >> 1) | (v[2] << 31)
 			v[2] = (v[2] >> 1) | (v[1] << 31)
 			v[1] = (v[1] >> 1) | (v[0] << 31)
-			v[0] = v[0] >> 1
+			v[0] >>= 1
 			// Constant-time: XOR with reduction constant when lsb=1.
 			reduceMask := uint32(-int32(lsb)) // 0xFFFFFFFF when lsb=1, 0x00000000 when lsb=0
 			v[0] ^= 0xe1000000 & reduceMask   // 0xe1 << 24, big-endian uint32

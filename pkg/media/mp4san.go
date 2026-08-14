@@ -952,18 +952,3 @@ func countMdatBoxes(children []mp4.Box) int {
 	}
 	return n
 }
-
-// encodeFtypMoov encodes ftyp and moov into a single contiguous byte slice.
-// This is the "sanitized metadata" block that can be prepended to the mdat
-// span to form a valid MP4 file.  Used by the faststart (already-ordered) path
-// in sanitizeMP4 where no offset adjustment is needed.
-func encodeFtypMoov(ftyp *mp4.FtypBox, moov *mp4.MoovBox) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := ftyp.Encode(&buf); err != nil {
-		return nil, err
-	}
-	if err := moov.Encode(&buf); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}

@@ -719,11 +719,3 @@ func TestNewSignalMessage_AddressBinding_BothNil(t *testing.T) {
 		t.Fatalf("expected empty addresses field for unbound legacy path, got %d bytes", len(msg.Addresses()))
 	}
 }
-
-// isError is a package-internal helper that checks whether err is an *Error
-// with the given kind. Used to assert specific error kinds in tests without
-// exporting the errorKind type.
-func isError(err error, kind errorKind) bool {
-	e, ok := err.(*Error)
-	return ok && e.kind == kind
-}

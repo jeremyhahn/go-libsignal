@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/subtle"
+	"slices"
 
 	signalcipher "github.com/jeremyhahn/go-libsignal/pkg/cipher"
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
@@ -189,7 +190,7 @@ func SealedSenderEncryptFromUSMC(
 		return nil, err
 	}
 	staticMAC := truncatedHMAC(macKey1, encryptedStatic)
-	encryptedStaticWithMAC := append(encryptedStatic, staticMAC...)
+	encryptedStaticWithMAC := slices.Concat(encryptedStatic, staticMAC)
 
 	// Step 4: Second ECDH - our identity key to their identity key.
 	// salt = chain_key || encrypted_static_with_mac
@@ -197,7 +198,7 @@ func SealedSenderEncryptFromUSMC(
 	chainKey1Copy := make([]byte, 32)
 	defer crypto.Zeroize(chainKey1Copy)
 	copy(chainKey1Copy, chainKey1)
-	salt2 := append(chainKey1Copy, encryptedStaticWithMAC...)
+	salt2 := slices.Concat(chainKey1Copy, encryptedStaticWithMAC)
 
 	ourPrivArr := ourIdentity.PrivateKey().Serialize()
 	ourPrivSecret, err := secret.New(ourPrivArr[:])
@@ -240,7 +241,7 @@ func SealedSenderEncryptFromUSMC(
 		return nil, err
 	}
 	messageMAC := truncatedHMAC(macKey2, encryptedMessage)
-	encryptedMessageWithMAC := append(encryptedMessage, messageMAC...)
+	encryptedMessageWithMAC := slices.Concat(encryptedMessage, messageMAC)
 
 	// Step 6: Build the protobuf envelope.
 	envelope := &sealedpb.UnidentifiedSenderMessage{
@@ -386,7 +387,7 @@ func SealedSenderDecryptToUSMC(
 	chainKey1Copy := make([]byte, 32)
 	defer crypto.Zeroize(chainKey1Copy)
 	copy(chainKey1Copy, chainKey1)
-	salt2 := append(chainKey1Copy, encryptedStaticWithMAC...)
+	salt2 := slices.Concat(chainKey1Copy, encryptedStaticWithMAC)
 
 	theirPubRaw := theirPubKey.PublicKey()
 	copy(ourPriv[:], ourPrivSecret.Bytes())
@@ -573,8 +574,16 @@ func SealedSenderDecryptWithKyber(
 			return nil, err
 		}
 
+		// Build local address so the inner SignalMessage verify uses
+		// VerifyMacWithAddresses (address binding), matching the PREKEY
+		// branch above. Messages that carry no address-binding field still
+		// verify — VerifyMacWithAddresses accepts an empty binding for
+		// backward compatibility — so this only closes the
+		// address-substitution downgrade for senders that do bind.
+		localAddress := protocol.NewSignalAddress(localUUID, localDeviceID)
+
 		sessionBuilder := buildSessionBuilder()
-		sessionCipher := session.NewCipherWithIdentity(sessionBuilder, senderAddress, identityStore)
+		sessionCipher := session.NewCipherWithIdentityAndLocalAddress(sessionBuilder, localAddress, senderAddress, identityStore)
 		plaintext, err = sessionCipher.Decrypt(whisperMsg)
 		if err != nil {
 			return nil, err

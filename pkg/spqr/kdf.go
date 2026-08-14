@@ -2,6 +2,7 @@ package spqr
 
 import (
 	"encoding/binary"
+	"slices"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/kdf"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
@@ -168,7 +169,7 @@ func KdfSckaCK(ck *secret.Secret, ctr uint32) (mk, nextCK *secret.Secret, err er
 	// Build info: counter_be32 || ChainNextInfo
 	ctrBytes := make([]byte, 4)
 	binary.BigEndian.PutUint32(ctrBytes, ctr)
-	info := append(ctrBytes, []byte(ChainNextInfo)...)
+	info := slices.Concat(ctrBytes, []byte(ChainNextInfo))
 
 	output, err := kdf.DeriveSecrets(ck.Bytes(), zeroSalt(), info, sckaCKOutputLen)
 	if err != nil {

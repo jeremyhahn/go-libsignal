@@ -734,32 +734,6 @@ func generateTestCert(t *testing.T) *x509.Certificate {
 	return cert
 }
 
-func generateSelfSignedCertForEndorsements(t *testing.T) *x509.Certificate {
-	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatalf("generate key: %v", err)
-	}
-	template := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "test"},
-		NotBefore:             time.Now().Add(-time.Hour),
-		NotAfter:              time.Now().Add(time.Hour),
-		IsCA:                  true,
-		BasicConstraintsValid: true,
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-	}
-	certBytes, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
-	if err != nil {
-		t.Fatalf("create cert: %v", err)
-	}
-	cert, err := x509.ParseCertificate(certBytes)
-	if err != nil {
-		t.Fatalf("parse cert: %v", err)
-	}
-	return cert
-}
-
 func TestParseEndorsements_ValidStructure(t *testing.T) {
 	versionField := make([]byte, 4)
 	binary.LittleEndian.PutUint32(versionField, oeEndorsementsV1)

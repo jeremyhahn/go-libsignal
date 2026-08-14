@@ -571,7 +571,7 @@ func (s *State) aliceCompleteCt2(_ *Message, kemImpl IncrementalKEM) (uint64, *O
 	if s.epoch == math.MaxUint64 {
 		return 0, nil, &ErrEpochOverflow{}
 	}
-	s.epoch = s.epoch + 1
+	s.epoch++
 	s.kind = StateNoHeaderReceived
 	headerDec, headerErr := NewDecoder(HeaderSize+MacSize, s.chunkSize)
 	if headerErr != nil {
@@ -1229,7 +1229,7 @@ func (s *State) receiveCt2Sampled(msg *Message, _ IncrementalKEM, _ int) (uint64
 		if s.epoch == math.MaxUint64 {
 			return 0, nil, &ErrEpochOverflow{}
 		}
-		s.epoch = s.epoch + 1
+		s.epoch++
 		s.kind = StateKeysUnsampled
 
 		// Reset state for new epoch.

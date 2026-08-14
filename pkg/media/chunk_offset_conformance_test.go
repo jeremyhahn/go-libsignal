@@ -466,7 +466,7 @@ func TestCompoundedMdat_MoovAfterMdat_StcoOffsetRewriting(t *testing.T) {
 	mdatHdr := make([]byte, 8)
 	copy(mdatHdr[4:], "mdat")
 
-	const originalMdatOffset = int64(20)  // ftyp is 20 bytes
+	const originalMdatOffset = int64(20)   // ftyp is 20 bytes
 	const originalChunkOffset = uint32(28) // mdat payload byte 0 = ftyp(20)+hdr(8)
 
 	moovRaw := buildMoovWithStco([]uint32{originalChunkOffset})

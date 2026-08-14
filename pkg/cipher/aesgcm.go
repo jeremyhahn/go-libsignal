@@ -13,6 +13,7 @@ package cipher
 import (
 	"crypto/aes"
 	goCipher "crypto/cipher"
+	"slices"
 )
 
 // AESGCMNonceSize is the nonce size for AES-256-GCM.
@@ -252,7 +253,7 @@ func (d *AES256GCMDecryption) VerifyTag(tag []byte) ([]byte, error) {
 	}
 
 	// Reconstruct the GCM wire format (ciphertext || tag) for Open.
-	combined := append(d.buf, tag...)
+	combined := slices.Concat(d.buf, tag)
 	plaintext, err := gcm.Open(nil, d.nonce, combined, d.aad)
 	if err != nil {
 		// Zero out the internal buffer on authentication failure.
