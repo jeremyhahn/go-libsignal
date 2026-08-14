@@ -1,0 +1,50 @@
+# Keep the build context small and reproducible.
+#
+# tests/interop/Dockerfile uses `COPY . .` with the repository root as its
+# context, so anything not excluded here is baked into the image. The Rust
+# interop target/ directory in particular is large and is rebuilt inside the
+# container anyway.
+
+# VCS and CI config — never needed inside the image
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# Rust interop build output — rebuilt in the container
+tests/interop/rust/target/
+**/target/
+
+# Host-built binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test, coverage and benchmark artifacts
+coverage/
+*.test
+*.out
+*.prof
+*.log
+
+# A stray go.work silently changes module resolution inside the build
+go.work
+go.work.sum
+vendor/
+
+# Editor, agent and OS noise
+.idea/
+.vscode/
+.claude/
+.serena/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Docker files themselves
+.dockerignore
+**/Dockerfile
