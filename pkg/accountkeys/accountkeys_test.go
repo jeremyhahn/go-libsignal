@@ -352,6 +352,46 @@ func TestHashPin(t *testing.T) {
 			t.Fatal("trimmed PINs should produce same keys")
 		}
 	})
+
+	// Regression: all-digit PINs with non-ASCII digits still transliterate.
+	// "١٢٣" (U+0661 U+0662 U+0663) is an all-digit string → transliterate → "123".
+	// HashPin("١٢٣", salt) must equal HashPin("123", salt): no regression to the
+	// byte-exact derivation path for existing all-numeric-PIN users.
+	t.Run("all_digit_non_ascii_equals_ascii_hash", func(t *testing.T) {
+		h1, err := HashPin("١٢٣", salt) // Arabic-Indic "١٢٣"
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer h1.Zeroize()
+		h2, err := HashPin("123", salt)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer h2.Zeroize()
+		if !bytes.Equal(h1.AccessKey.Bytes(), h2.AccessKey.Bytes()) {
+			t.Fatal("all-digit non-ASCII PIN must hash identically to its ASCII equivalent")
+		}
+	})
+
+	// Regression: a mixed text+non-ASCII-digit PIN must NOT hash the same as
+	// the ASCII-digit version.  Before the fix, normalizePin("abc١def") wrongly
+	// returned "abc1def", making both PINs derive the same SVR/backup key and
+	// potentially locking users out.
+	t.Run("mixed_text_non_ascii_digit_not_transliterated", func(t *testing.T) {
+		h1, err := HashPin("abc١def", salt) // "abc١def", mixed text
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer h1.Zeroize()
+		h2, err := HashPin("abc1def", salt) // the wrongly-transliterated form
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer h2.Zeroize()
+		if bytes.Equal(h1.AccessKey.Bytes(), h2.AccessKey.Bytes()) {
+			t.Fatal("mixed text PIN with non-ASCII digit must not hash the same as the ASCII-digit version")
+		}
+	})
 }
 
 func TestVerifyPin(t *testing.T) {
@@ -628,8 +668,15 @@ func TestNormalizePin(t *testing.T) {
 		{"devanagari digits", "\u0966\u0967\u0968\u0969", "0123"},
 		// Bengali digits ০১২৩
 		{"bengali digits", "\u09E6\u09E7\u09E8\u09E9", "0123"},
-		// Mixed: ASCII + non-ASCII digits
+		// "mixed digits": every rune is a Unicode digit (1, \u0662, \u0968, 3) so
+		// isAllDigits=true and transliteration still applies \u2192 "1223".
+		// This behavior is UNCHANGED by the all-digits gate.
 		{"mixed digits", "1\u0662\u09683", "1223"},
+		// Regression: mixed text + non-ASCII digit must NOT transliterate.
+		// "abc\u0661def" has non-digit runes, so isAllDigits=false; '\u0661' (U+0661)
+		// is preserved as-is under NFKD (it does not decompose).
+		// Before the fix normalizePin("abc\u0661def") wrongly returned "abc1def".
+		{"mixed text non-ascii digit", "abc\u0661def", "abc\u0661def"},
 		// Non-digit unicode text stays as-is (but gets NFKD normalized)
 		{"unicode text", "caf\u00E9", "cafe\u0301"},
 		// Full-width digits (NFKD normalizes these to ASCII)

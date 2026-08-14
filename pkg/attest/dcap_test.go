@@ -1567,12 +1567,22 @@ func TestVerifyEnclaveSource_QETCBStatusUpToDate(t *testing.T) {
 
 // --- AT-C1: CRL verification in verifyCertificates ---
 
+// TestVerifyCRLs_RevokedCert verifies that a cert present in pckCertCRL is rejected.
+// pckProcCACRL is supplied to pass the mandatory-CRL check added by Finding-1 fix;
+// the revocation error fires in step 1 (pckCertCRL check) before reaching the
+// Intel-key verification of pckProcCACRL, so the test still catches CRLVerificationError.
 func TestVerifyCRLs_RevokedCert(t *testing.T) {
 	key, cert := generateTestCertAndKeyForDcap(t)
 
-	// Create a CRL that revokes the cert
+	// Create a CRL that revokes the cert.
 	crlBytes := generateTestCRLWithRevokedForDcap(t, cert, key, cert.SerialNumber)
 	crl, _ := x509.ParseRevocationList(crlBytes)
+
+	// A non-nil pckProcCACRL is required (Finding-1 fix).  The function returns
+	// CRLVerificationError at the pckCertCRL revocation check before reaching the
+	// Intel-key check on pckProcCACRL, so any non-nil CRL value satisfies the test.
+	emptyCRLBytes := generateTestEmptyCRLForDcap(t, cert, key)
+	emptyCRL, _ := x509.ParseRevocationList(emptyCRLBytes)
 
 	evidence := &dcapEvidence{
 		quote: &sgxQuote{
@@ -1584,6 +1594,7 @@ func TestVerifyCRLs_RevokedCert(t *testing.T) {
 	endorsements := &sgxEndorsements{
 		pckCertCRL:        crl,
 		pckIssuerCRLChain: []*x509.Certificate{cert},
+		pckProcCACRL:      emptyCRL,
 	}
 
 	err := verifyCRLs(evidence, endorsements)
@@ -1596,6 +1607,14 @@ func TestVerifyCRLs_RevokedCert(t *testing.T) {
 	}
 }
 
+// TestVerifyCRLs_NoRevocation verifies that when no cert is in pckCertCRL, the
+// function proceeds past the leaf-CRL revocation check and then enforces the
+// Intel-root-key check on pckProcCACRL.  With test keys (non-Intel), we expect
+// a RootCRLVerificationError rather than success.
+//
+// Before Finding-1 fix: verifyCRLs with nil pckProcCACRL silently returned nil.
+// After fix: nil pckProcCACRL → CRLMissingError; test-signed pckProcCACRL →
+// RootCRLVerificationError.  The function can no longer be short-circuited.
 func TestVerifyCRLs_NoRevocation(t *testing.T) {
 	key, cert := generateTestCertAndKeyForDcap(t)
 
@@ -1612,13 +1631,26 @@ func TestVerifyCRLs_NoRevocation(t *testing.T) {
 	endorsements := &sgxEndorsements{
 		pckCertCRL:        crl,
 		pckIssuerCRLChain: []*x509.Certificate{cert},
+		// Finding-1 fix requires pckProcCACRL to be non-nil.
+		// A test-signed CRL cannot pass verifyRootCRLAgainstIntelKey, so we
+		// expect a RootCRLVerificationError once the leaf-CRL check passes.
+		pckProcCACRL: crl,
 	}
 
-	if err := verifyCRLs(evidence, endorsements); err != nil {
-		t.Fatalf("verifyCRLs failed: %v", err)
+	err := verifyCRLs(evidence, endorsements)
+	if err == nil {
+		t.Fatal("expected error: pckProcCACRL must be Intel-signed (test key cannot pass Intel root key check)")
+	}
+	var rootErr *RootCRLVerificationError
+	if !errors.As(err, &rootErr) {
+		t.Errorf("expected RootCRLVerificationError, got %T: %v", err, err)
 	}
 }
 
+// TestVerifyCRLs_NilCRLs is a regression test for Finding 1 (DCAP revocation
+// bypass via CRL stripping).  Before the fix, verifyCRLs with nil CRLs returned
+// nil (success), allowing a revoked PCK cert to pass attestation.  After the fix
+// it must return a CRLMissingError immediately.
 func TestVerifyCRLs_NilCRLs(t *testing.T) {
 	evidence := &dcapEvidence{
 		quote: &sgxQuote{
@@ -1627,10 +1659,15 @@ func TestVerifyCRLs_NilCRLs(t *testing.T) {
 			},
 		},
 	}
-	endorsements := &sgxEndorsements{}
+	endorsements := &sgxEndorsements{} // both CRLs are nil
 
-	if err := verifyCRLs(evidence, endorsements); err != nil {
-		t.Fatalf("verifyCRLs failed with nil CRLs: %v", err)
+	err := verifyCRLs(evidence, endorsements)
+	if err == nil {
+		t.Fatal("verifyCRLs must reject nil CRLs (regression for Finding 1: CRL stripping attack)")
+	}
+	var missingErr *CRLMissingError
+	if !errors.As(err, &missingErr) {
+		t.Errorf("expected CRLMissingError, got %T: %v", err, err)
 	}
 }
 
@@ -1662,10 +1699,16 @@ func generateTestCertAndKeyForDcap(t *testing.T) (*ecdsa.PrivateKey, *x509.Certi
 
 func generateTestEmptyCRLForDcap(t *testing.T, issuer *x509.Certificate, key *ecdsa.PrivateKey) []byte {
 	t.Helper()
+	// parseCRL now requires AKI and CRL Number (matches Rust reference).
+	aki := issuer.SubjectKeyId
+	if len(aki) == 0 {
+		aki = []byte{0x01, 0x02, 0x03, 0x04}
+	}
 	template := &x509.RevocationList{
-		Number:     big.NewInt(1),
-		ThisUpdate: time.Now().Add(-time.Hour),
-		NextUpdate: time.Now().Add(time.Hour),
+		Number:         big.NewInt(1),
+		AuthorityKeyId: aki,
+		ThisUpdate:     time.Now().Add(-time.Hour),
+		NextUpdate:     time.Now().Add(time.Hour),
 	}
 	crlBytes, err := x509.CreateRevocationList(rand.Reader, template, issuer, key)
 	if err != nil {
@@ -1676,10 +1719,16 @@ func generateTestEmptyCRLForDcap(t *testing.T, issuer *x509.Certificate, key *ec
 
 func generateTestCRLWithRevokedForDcap(t *testing.T, issuer *x509.Certificate, key *ecdsa.PrivateKey, serial *big.Int) []byte {
 	t.Helper()
+	// parseCRL now requires AKI and CRL Number (matches Rust reference).
+	aki := issuer.SubjectKeyId
+	if len(aki) == 0 {
+		aki = []byte{0x01, 0x02, 0x03, 0x04}
+	}
 	template := &x509.RevocationList{
-		Number:     big.NewInt(1),
-		ThisUpdate: time.Now().Add(-time.Hour),
-		NextUpdate: time.Now().Add(time.Hour),
+		Number:         big.NewInt(1),
+		AuthorityKeyId: aki,
+		ThisUpdate:     time.Now().Add(-time.Hour),
+		NextUpdate:     time.Now().Add(time.Hour),
 		RevokedCertificateEntries: []x509.RevocationListEntry{
 			{
 				SerialNumber:   serial,
@@ -1816,5 +1865,51 @@ func TestPCKExtensionParseError_Message(t *testing.T) {
 	errNoInner := &PCKExtensionParseError{Field: "pceId"}
 	if errNoInner.Error() == "" {
 		t.Error("error message without inner error should not be empty")
+	}
+}
+
+// TestFinding2_PCKChainCheckedAgainstRootCRL is a regression test for Finding 2:
+// PCK evidence chain was never checked against the root CRL (pckProcCACRL).
+// Before the fix, verifyCRLs only checked pckCertChain against pckCertCRL
+// (intermediate CRL), so a cert revoked by the root CA passed unchallenged.
+// The fix adds a loop that calls checkCertAgainstCRL(cert, pckProcCACRL) for
+// every cert in pckCertChain, mirroring Rust dcap.rs ~311 (CRL_CHECK_ALL on
+// the trust store containing root_crl).
+//
+// The full integration path through verifyCRLs cannot be exercised in unit tests
+// because verifyRootCRLAgainstIntelKey requires Intel-signed CRLs.  This test
+// directly validates the security property: a cert revoked in the root CRL is
+// detected by checkCertAgainstCRL — the call the fix adds for pckCertChain.
+func TestFinding2_PCKChainCheckedAgainstRootCRL(t *testing.T) {
+	key, cert := generateTestCertAndKeyForDcap(t)
+
+	// Root CRL that revokes cert (simulates a cert whose CA revoked it at root level).
+	rootCRLBytes := generateTestCRLWithRevokedForDcap(t, cert, key, cert.SerialNumber)
+	rootCRL, err := x509.ParseRevocationList(rootCRLBytes)
+	if err != nil {
+		t.Fatalf("parse root CRL: %v", err)
+	}
+
+	// Before Fix 2: only pckCertCRL was checked against pckCertChain.
+	// Simulate pckCertCRL being an empty CRL (cert not in leaf CRL).
+	emptyCRLBytes := generateTestEmptyCRLForDcap(t, cert, key)
+	emptyCRL, err := x509.ParseRevocationList(emptyCRLBytes)
+	if err != nil {
+		t.Fatalf("parse empty CRL: %v", err)
+	}
+
+	// Leaf CRL passes (cert not revoked there).
+	if leafErr := checkCertAgainstCRL(cert, emptyCRL); leafErr != nil {
+		t.Fatalf("cert should not be in empty leaf CRL: %v", leafErr)
+	}
+
+	// Root CRL must catch the cert (this is the check Fix 2 adds to verifyCRLs).
+	rootErr := checkCertAgainstCRL(cert, rootCRL)
+	if rootErr == nil {
+		t.Fatal("Fix 2 regression: cert revoked in root CRL must be rejected by checkCertAgainstCRL(cert, pckProcCACRL)")
+	}
+	var revErr *CRLVerificationError
+	if !errors.As(rootErr, &revErr) {
+		t.Errorf("expected CRLVerificationError, got %T: %v", rootErr, rootErr)
 	}
 }

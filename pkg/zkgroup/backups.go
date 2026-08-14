@@ -28,6 +28,43 @@ const (
 
 var backupCredentialLabel = []byte("20231003_Signal_BackupAuthCredential")
 
+// parseBackupLevel validates a u64 wire value as a BackupLevel enum variant.
+// Mirrors Rust's TryFrom<u64> for BackupLevel at
+// rust/zkgroup/src/api/backups/auth_credential.rs:68-78:
+//   - value must fit in a u8 (>255 rejected), then
+//   - the u8 must equal a valid variant (200=Free, 201=Paid).
+//
+// Previously Go silently truncated the u64 to a byte with no range or enum
+// check; this validator matches the Rust rejection semantics exactly.
+func parseBackupLevel(v uint64) (BackupLevel, error) {
+	if v > 255 {
+		return 0, &ZkGroupDeserializationFailure{TypeName: "BackupLevel"}
+	}
+	level := BackupLevel(v)
+	switch level {
+	case BackupLevelFree, BackupLevelPaid:
+		return level, nil
+	}
+	return 0, &ZkGroupDeserializationFailure{TypeName: "BackupLevel"}
+}
+
+// parseBackupCredentialType validates a u64 wire value as a BackupCredentialType variant.
+// Mirrors Rust's TryFrom<u64> for BackupCredentialType at
+// rust/zkgroup/src/api/backups/auth_credential.rs:98-108:
+//   - value must fit in a u8, then
+//   - the u8 must equal a valid variant (1=Messages, 2=Media).
+func parseBackupCredentialType(v uint64) (BackupCredentialType, error) {
+	if v > 255 {
+		return 0, &ZkGroupDeserializationFailure{TypeName: "BackupCredentialType"}
+	}
+	t := BackupCredentialType(v)
+	switch t {
+	case BackupCredentialTypeMessages, BackupCredentialTypeMedia:
+		return t, nil
+	}
+	return 0, &ZkGroupDeserializationFailure{TypeName: "BackupCredentialType"}
+}
+
 // BackupID is a 16-byte backup identifier derived from the client's account
 // entropy pool.
 type BackupID [16]byte

@@ -36,6 +36,14 @@ func (c *failingSendKeyECCipher) ReceiveKey(ecHeader []byte) ([]byte, error) {
 	return c.delegate.ReceiveKey(ecHeader)
 }
 
+func (c *failingSendKeyECCipher) TakeECSnapshot() ([]byte, error) {
+	return c.delegate.TakeECSnapshot()
+}
+
+func (c *failingSendKeyECCipher) RestoreECSnapshot(data []byte) error {
+	return c.delegate.RestoreECSnapshot(data)
+}
+
 // failingReceiveKeyECCipher delegates SendKey to a real cipher but always
 // returns an error from ReceiveKey.
 type failingReceiveKeyECCipher struct {
@@ -48,6 +56,14 @@ func (c *failingReceiveKeyECCipher) SendKey() ([]byte, []byte, error) {
 
 func (c *failingReceiveKeyECCipher) ReceiveKey(ecHeader []byte) ([]byte, error) {
 	return nil, &ErrInvalidInput{Field: "test", Reason: "ReceiveKey injected failure"}
+}
+
+func (c *failingReceiveKeyECCipher) TakeECSnapshot() ([]byte, error) {
+	return c.delegate.TakeECSnapshot()
+}
+
+func (c *failingReceiveKeyECCipher) RestoreECSnapshot(data []byte) error {
+	return c.delegate.RestoreECSnapshot(data)
 }
 
 // failingSnapshotECCipher is an ECCipher+ECCipherSnapshotable whose

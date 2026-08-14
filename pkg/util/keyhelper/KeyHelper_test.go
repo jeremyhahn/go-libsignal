@@ -10,6 +10,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/serialize"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/medium"
 )
 
 // failingReader is an io.Reader that always returns an error.
@@ -99,9 +100,21 @@ func TestGenerateIdentityKeyPair_Unique(t *testing.T) {
 
 func TestGenerateRegistrationID(t *testing.T) {
 	id := GenerateRegistrationID()
-	// Registration IDs must fit in 14 bits (0–16383)
-	if id > 0x3FFF {
-		t.Fatalf("GenerateRegistrationID returned %d, exceeds 14-bit max 16383", id)
+	// Registration IDs are in [1, 16380] per the Java reference implementation.
+	if id < 1 || id > 16380 {
+		t.Fatalf("GenerateRegistrationID returned %d, not in [1, 16380]", id)
+	}
+}
+
+// TestGenerateRegistrationID_ValidRange verifies that 1000 consecutive calls
+// always produce values in [1, 16380], confirming no 0 sentinel or out-of-range
+// values can be emitted.
+func TestGenerateRegistrationID_ValidRange(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		id := GenerateRegistrationID()
+		if id < 1 || id > 16380 {
+			t.Fatalf("iteration %d: GenerateRegistrationID returned %d, not in [1, 16380]", i, id)
+		}
 	}
 }
 
@@ -140,6 +153,66 @@ func TestGeneratePreKeys_CountZero(t *testing.T) {
 	}
 	if len(preKeys) != 0 {
 		t.Fatalf("expected 0 pre keys, got %d", len(preKeys))
+	}
+}
+
+// TestGeneratePreKeys_IDsStartAtOffset verifies that the generated prekey IDs
+// begin at the requested start offset and are sequential.
+func TestGeneratePreKeys_IDsStartAtOffset(t *testing.T) {
+	serializer := serialize.NewJSONSerializer()
+	start := 100
+	count := 10
+	preKeys, err := GeneratePreKeys(start, count, serializer.PreKeyRecord)
+	if err != nil {
+		t.Fatalf("GeneratePreKeys failed: %v", err)
+	}
+	if len(preKeys) != count {
+		t.Fatalf("expected %d prekeys, got %d", count, len(preKeys))
+	}
+	for i, pk := range preKeys {
+		wantID := uint32(start + i)
+		gotID := pk.ID().Value
+		if gotID != wantID {
+			t.Errorf("preKeys[%d].ID() = %d, want %d", i, gotID, wantID)
+		}
+	}
+}
+
+// TestGeneratePreKeys_IDsWrapNearMaxValue verifies that prekey IDs wrap
+// correctly near medium.MaxValue (0xFFFFFF), never emitting 0 or MaxValue.
+// When start == MaxValue, the first ID should be 1 (wrapped).
+func TestGeneratePreKeys_IDsWrapNearMaxValue(t *testing.T) {
+	serializer := serialize.NewJSONSerializer()
+	start := int(medium.MaxValue) // 0xFFFFFF
+	preKeys, err := GeneratePreKeys(start, 3, serializer.PreKeyRecord)
+	if err != nil {
+		t.Fatalf("GeneratePreKeys failed: %v", err)
+	}
+	wantIDs := []uint32{1, 2, 3}
+	for i, pk := range preKeys {
+		gotID := pk.ID().Value
+		if gotID != wantIDs[i] {
+			t.Errorf("preKeys[%d].ID() = %d, want %d (wrapped)", i, gotID, wantIDs[i])
+		}
+	}
+}
+
+// TestGeneratePreKeys_StartZeroIsZeroBased verifies that start=0 reproduces the
+// historical zero-based ID sequence [0, 1, ..., count-1] (Java reference
+// behavior), so existing callers that pass start=0 are unaffected.
+func TestGeneratePreKeys_StartZeroIsZeroBased(t *testing.T) {
+	serializer := serialize.NewJSONSerializer()
+	preKeys, err := GeneratePreKeys(0, 5, serializer.PreKeyRecord)
+	if err != nil {
+		t.Fatalf("GeneratePreKeys(0, 5): unexpected error: %v", err)
+	}
+	if len(preKeys) != 5 {
+		t.Fatalf("expected 5 prekeys, got %d", len(preKeys))
+	}
+	for i, pk := range preKeys {
+		if got, want := pk.ID().Value, uint32(i); got != want {
+			t.Errorf("preKeys[%d].ID() = %d, want %d", i, got, want)
+		}
 	}
 }
 

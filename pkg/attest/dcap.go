@@ -213,14 +213,26 @@ func verifyCertificates(evidence *dcapEvidence, endorsements *sgxEndorsements, c
 }
 
 // verifyCRLs verifies CRL signatures and checks certificates against revocation lists.
+// Both pckCertCRL and pckProcCACRL are mandatory: a missing CRL is a hard error
+// (fail-closed), not a pass-through. This matches the Rust libsignal reference which
+// requires CRL_CHECK | CRL_CHECK_ALL and treats absent CRLs as invalid endorsements.
 func verifyCRLs(evidence *dcapEvidence, endorsements *sgxEndorsements) error {
-	// Verify PCK cert CRL signature against the PCK CRL issuer chain
-	if endorsements.pckCertCRL != nil && len(endorsements.pckIssuerCRLChain) > 0 {
+	// Fail closed on missing CRLs.  An attacker who strips CRL fields from
+	// the endorsement blob ends up here with nil pointers; we must reject, not skip.
+	if endorsements.pckCertCRL == nil {
+		return &CRLMissingError{Detail: "PCK cert CRL"}
+	}
+	if endorsements.pckProcCACRL == nil {
+		return &CRLMissingError{Detail: "PCK processor CA CRL"}
+	}
+
+	// Verify PCK cert CRL signature against the PCK CRL issuer chain.
+	if len(endorsements.pckIssuerCRLChain) > 0 {
 		if err := verifyCRLAgainstIssuers(endorsements.pckCertCRL, endorsements.pckIssuerCRLChain); err != nil {
 			return err
 		}
 
-		// Check PCK certificates against the CRL
+		// Check PCK certificates against the leaf CRL.
 		for _, cert := range evidence.quote.support.pckCertChain {
 			if err := checkCertAgainstCRL(cert, endorsements.pckCertCRL); err != nil {
 				return err
@@ -228,21 +240,30 @@ func verifyCRLs(evidence *dcapEvidence, endorsements *sgxEndorsements) error {
 		}
 	}
 
-	// Verify PCK processor CA CRL (root CRL) signature against Intel root key first.
+	// Verify PCK processor CA CRL (root CRL) against Intel root key first.
 	// The Rust reference calls root_crl.verify(root_key) before trusting any CRL.
-	if endorsements.pckProcCACRL != nil {
-		if err := verifyRootCRLAgainstIntelKey(endorsements.pckProcCACRL); err != nil {
+	if err := verifyRootCRLAgainstIntelKey(endorsements.pckProcCACRL); err != nil {
+		return err
+	}
+
+	// Check PCK cert chain against the root CRL (Finding 2 fix).
+	// Rust (dcap.rs ~311) validates pck_cert_chain against a trust store that
+	// contains root_crl with CRL_CHECK_ALL.  The Go code previously only checked
+	// pckCertChain against pckCertCRL (the intermediate CRL); now we also check
+	// against pckProcCACRL so a cert revoked at the root level is caught.
+	for _, cert := range evidence.quote.support.pckCertChain {
+		if err := checkCertAgainstCRL(cert, endorsements.pckProcCACRL); err != nil {
 			return err
 		}
 	}
 
-	// Verify PCK processor CA CRL (root CRL) signature against issuer chain
-	if endorsements.pckProcCACRL != nil && len(endorsements.pckIssuerCRLChain) > 0 {
+	// Verify PCK processor CA CRL signature against issuer chain.
+	if len(endorsements.pckIssuerCRLChain) > 0 {
 		if err := verifyCRLAgainstIssuers(endorsements.pckProcCACRL, endorsements.pckIssuerCRLChain); err != nil {
 			return err
 		}
 
-		// Check PCK CRL issuer chain certs against the root CRL
+		// Check PCK CRL issuer chain certs against the root CRL.
 		for _, cert := range endorsements.pckIssuerCRLChain {
 			if err := checkCertAgainstCRL(cert, endorsements.pckProcCACRL); err != nil {
 				return err
@@ -250,25 +271,21 @@ func verifyCRLs(evidence *dcapEvidence, endorsements *sgxEndorsements) error {
 		}
 	}
 
-	// Check TCB issuer chain certificates against the root CRL (AT-A1)
+	// Check TCB issuer chain certificates against the root CRL (AT-A1).
 	// The Rust reference validates tcb_issuer_chain against the trust store
 	// which includes root_crl with CRL_CHECK_ALL, rejecting revoked signers.
-	if endorsements.pckProcCACRL != nil {
-		for _, cert := range endorsements.tcbIssuerChain {
-			if err := checkCertAgainstCRL(cert, endorsements.pckProcCACRL); err != nil {
-				return err
-			}
+	for _, cert := range endorsements.tcbIssuerChain {
+		if err := checkCertAgainstCRL(cert, endorsements.pckProcCACRL); err != nil {
+			return err
 		}
 	}
 
-	// Check QE ID issuer chain certificates against the root CRL (AT-A1)
+	// Check QE ID issuer chain certificates against the root CRL (AT-A1).
 	// The Rust reference validates qe_id_issuer_chain against the trust store
 	// which includes root_crl with CRL_CHECK_ALL, rejecting revoked signers.
-	if endorsements.pckProcCACRL != nil {
-		for _, cert := range endorsements.qeIDIssuerChain {
-			if err := checkCertAgainstCRL(cert, endorsements.pckProcCACRL); err != nil {
-				return err
-			}
+	for _, cert := range endorsements.qeIDIssuerChain {
+		if err := checkCertAgainstCRL(cert, endorsements.pckProcCACRL); err != nil {
+			return err
 		}
 	}
 

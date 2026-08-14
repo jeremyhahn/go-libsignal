@@ -107,6 +107,13 @@ func (s *ProtobufSignalMessageSerializer) Deserialize(serialized []byte) (*proto
 		return nil, err
 	}
 
+	// Rust: rust/protocol/src/protocol.rs:299-301 returns InvalidProtobufEncoding
+	// when counter is absent. Enforce the same check so deserialization of a
+	// SignalMessage missing its counter field fails fast.
+	if pb.Counter == nil {
+		return nil, &ErrInvalidProtobufEncoding{MessageType: "signal message", Field: "counter"}
+	}
+
 	return &protocol.SignalMessageStructure{
 		Version:         version,
 		RatchetKey:      pb.GetRatchetKey(),
@@ -202,6 +209,13 @@ func (s *ProtobufPreKeySignalMessageSerializer) Deserialize(serialized []byte) (
 	var kyberCiphertext []byte
 	if len(pb.GetKyberCiphertext()) > 0 {
 		kyberCiphertext = pb.GetKyberCiphertext()
+	}
+
+	// Rust: rust/protocol/src/protocol.rs:481-483 returns InvalidProtobufEncoding
+	// when signed_pre_key_id is absent. Enforce the same check so deserialization
+	// of a PreKeySignalMessage missing its signed_pre_key_id fails fast.
+	if pb.SignedPreKeyId == nil {
+		return nil, &ErrInvalidProtobufEncoding{MessageType: "prekey signal message", Field: "signed_pre_key_id"}
 	}
 
 	return &protocol.PreKeySignalMessageStructure{

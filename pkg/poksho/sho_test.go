@@ -492,3 +492,66 @@ func TestShoConsecutiveSqueezes_DifferentOutput(t *testing.T) {
 		t.Error("consecutive squeezes should produce different output")
 	}
 }
+
+// TestSqueezeAndRatchet_AutoRatchetsFromAbsorbing is a regression test for the
+// fix that adds an absorbing-mode guard to SqueezeAndRatchet. Before the fix,
+// calling SqueezeAndRatchet while still in ABSORBING mode would silently squeeze
+// pre-ratchet state, producing a different result than an explicit
+// Absorb → Ratchet → SqueezeAndRatchet sequence. After the fix both paths must
+// produce identical output.
+func TestSqueezeAndRatchet_AutoRatchetsFromAbsorbing(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		newSho func(string) *SHO
+	}{
+		{"HMAC-SHA-256", NewShoHmacSha256},
+		{"SHA-256", NewShoSha256},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Path A: Absorb then SqueezeAndRatchet with no explicit Ratchet call.
+			a := tc.newSho("regression-label")
+			a.Absorb([]byte("hello world"))
+			outA := a.SqueezeAndRatchet(32)
+
+			// Path B: Absorb, explicit Ratchet, then SqueezeAndRatchet.
+			b := tc.newSho("regression-label")
+			b.Absorb([]byte("hello world"))
+			b.Ratchet()
+			outB := b.SqueezeAndRatchet(32)
+
+			if !bytes.Equal(outA, outB) {
+				t.Errorf("SqueezeAndRatchet after Absorb (no explicit Ratchet) "+
+					"differs from Ratchet+SqueezeAndRatchet\n"+
+					"direct:   %x\nexplicit: %x", outA, outB)
+			}
+		})
+	}
+}
+
+// TestSqueezeAndRatchet_AbsorbingModeMatchesSqueeze verifies that calling
+// SqueezeAndRatchet directly in absorbing mode produces the same output as
+// calling Squeeze (which already had an absorbing guard before this fix).
+func TestSqueezeAndRatchet_AbsorbingModeMatchesSqueeze(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		newSho func(string) *SHO
+	}{
+		{"HMAC-SHA-256", NewShoHmacSha256},
+		{"SHA-256", NewShoSha256},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := tc.newSho("squeeze-label")
+			a.Absorb([]byte("data"))
+			outSAR := a.SqueezeAndRatchet(32)
+
+			b := tc.newSho("squeeze-label")
+			b.Absorb([]byte("data"))
+			outSqueeze := b.Squeeze(32)
+
+			if !bytes.Equal(outSAR, outSqueeze) {
+				t.Errorf("SqueezeAndRatchet and Squeeze diverge from absorbing mode\n"+
+					"SqueezeAndRatchet: %x\nSqueeze:           %x", outSAR, outSqueeze)
+			}
+		})
+	}
+}

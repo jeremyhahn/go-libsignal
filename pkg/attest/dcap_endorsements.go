@@ -97,17 +97,15 @@ func (e *sgxEndorsements) validAt(t time.Time) bool {
 	}
 
 	// Check PCK issuer CRL validity.
-	if e.pckCertCRL != nil {
-		if t.Before(e.pckCertCRL.ThisUpdate) || t.After(e.pckCertCRL.NextUpdate) {
-			return false
-		}
+	// A nil CRL means endorsements were stripped; fail closed rather than skip.
+	if e.pckCertCRL == nil || t.Before(e.pckCertCRL.ThisUpdate) || t.After(e.pckCertCRL.NextUpdate) {
+		return false
 	}
 
 	// Check root CRL validity.
-	if e.pckProcCACRL != nil {
-		if t.Before(e.pckProcCACRL.ThisUpdate) || t.After(e.pckProcCACRL.NextUpdate) {
-			return false
-		}
+	// A nil CRL means endorsements were stripped; fail closed rather than skip.
+	if e.pckProcCACRL == nil || t.Before(e.pckProcCACRL.ThisUpdate) || t.After(e.pckProcCACRL.NextUpdate) {
+		return false
 	}
 
 	// Check TCB info nextUpdate if set.
@@ -528,14 +526,26 @@ func toCamelCase(s string) string {
 	return s
 }
 
-// parseCRL parses a DER-encoded CRL. Returns nil if the data is empty.
+// parseCRL parses a DER-encoded CRL.
+// Empty data is a typed error: the Rust libsignal reference (dcap/revocation_list.rs)
+// treats absent CRL fields as a hard failure, not a pass-through. Callers must
+// supply both CRLs from the endorsements; an attacker stripping them is rejected here.
+// The Authority Key Identifier and CRL Number extensions are mandatory per the
+// Rust reference (revocation_list.rs requires AKI + CRL-number before trusting any CRL).
 func parseCRL(data []byte) (*x509.RevocationList, error) {
 	if len(data) == 0 {
-		return nil, nil
+		return nil, &CRLMissingError{Detail: "CRL data is empty"}
 	}
 	crl, err := x509.ParseRevocationList(data)
 	if err != nil {
 		return nil, &CRLParseError{Err: err}
+	}
+	// Enforce mandatory extensions required by Rust libsignal reference.
+	if len(crl.AuthorityKeyId) == 0 {
+		return nil, &CRLMissingError{Detail: "Authority Key Identifier extension"}
+	}
+	if crl.Number == nil {
+		return nil, &CRLMissingError{Detail: "CRL Number extension"}
 	}
 	return crl, nil
 }

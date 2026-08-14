@@ -5,6 +5,7 @@ package attest
 
 import (
 	"encoding/binary"
+	"errors"
 	"testing"
 
 	"github.com/flynn/noise"
@@ -550,5 +551,49 @@ func TestPreQuantumHandshakeStillWorks(t *testing.T) {
 	}
 	if unvalidated == nil {
 		t.Fatal("unvalidated should not be nil for PreQuantum")
+	}
+}
+
+// TestDecodeRaftGroupConfig_GiantVarintLength is a regression test for Finding 3
+// (pre-auth DoS via crafted varint in the length-delimited protobuf branch).
+// Before the fix, a varint encoding 2^63 caused int(length) to be negative,
+// bypassing the "offset += int(length)" bounds, triggering a panic or data
+// corruption.  The fix validates length in uint64 arithmetic before the int()
+// cast and returns ProtobufDecodeError.
+//
+// The crafted input: tag 0x52 (field 10, wire type 2) followed by the 10-byte
+// varint for 2^63 = {0x80 × 9, 0x01}.
+func TestDecodeRaftGroupConfig_GiantVarintLength(t *testing.T) {
+	// varint encoding of 2^63: nine 0x80 continuation bytes then 0x01.
+	tag := byte(0x52) // field 10, wire type 2 (length-delimited)
+	giantVarint := []byte{0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01}
+	data := append([]byte{tag}, giantVarint...)
+
+	_, err := decodeRaftGroupConfig(data)
+	if err == nil {
+		t.Fatal("must return error for giant varint length, not panic (regression for Finding 3)")
+	}
+	var pbErr *ProtobufDecodeError
+	if !errors.As(err, &pbErr) {
+		t.Errorf("expected ProtobufDecodeError, got %T: %v", err, err)
+	}
+}
+
+// TestDecodeRaftGroupConfig_GiantVarintLengthFieldOne verifies the same panic-safe
+// behaviour on a different wire-type-2 field number.
+func TestDecodeRaftGroupConfig_GiantVarintLengthFieldOne(t *testing.T) {
+	// tag = (100<<3)|2 = 0x322 — multi-byte tag, but encode as two bytes.
+	// Actually use a single-byte tag for simplicity: field 1 wire type 2 = 0x0A.
+	tag := byte(0x0A)
+	giantVarint := []byte{0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01}
+	data := append([]byte{tag}, giantVarint...)
+
+	_, err := decodeRaftGroupConfig(data)
+	if err == nil {
+		t.Fatal("must return error for giant varint length on field 1 wire type 2")
+	}
+	var pbErr *ProtobufDecodeError
+	if !errors.As(err, &pbErr) {
+		t.Errorf("expected ProtobufDecodeError, got %T: %v", err, err)
 	}
 }

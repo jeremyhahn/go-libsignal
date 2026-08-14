@@ -4,15 +4,21 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 )
 
 const (
 	varintMaxLength = 10
 
-	// maxFrameSize is the maximum allowed frame size in bytes (10 MiB).
-	// This prevents a malicious varint from triggering a multi-GiB allocation
-	// that could exhaust memory. Normal backup frames are well below this limit.
-	maxFrameSize = 10 * 1024 * 1024
+	// maxFrameSize is the maximum allowed declared frame size in bytes.
+	// Rust's VarintDelimitedReader accepts frames up to u32::MAX
+	// (rust/message-backup/src/parse.rs: read_raw_varint32 returns u32).
+	// We match that range here. The whole-stream io.LimitReader applied
+	// in DecryptFrames (maxBackupSize = 100 GiB) bounds actual memory
+	// use: a declared length larger than the remaining stream bytes causes
+	// io.ReadFull to return an UnexpectedEOF error rather than allocating
+	// the full declared amount.
+	maxFrameSize = 1<<32 - 1 // u32::MAX = 4 294 967 295
 )
 
 // FrameTooLargeError is returned when a varint-delimited frame exceeds the
@@ -59,20 +65,31 @@ func (v *VarintDelimitedReader) ReadNext() ([]byte, error) {
 		return nil, &FrameTooLargeError{Size: uint64(length), Max: maxFrameSize}
 	}
 
-	// Read `length` bytes, first from the buffer, then from the reader.
-	msg := make([]byte, length)
+	// Read `length` bytes: first whatever is already buffered, then the
+	// remainder from the reader. The remainder is read incrementally rather
+	// than pre-allocating the attacker-declared `length`. maxFrameSize is
+	// u32::MAX (to match Rust's acceptance range), so a single make([]byte,
+	// length) would let one bogus frame header force a multi-GiB allocation
+	// before the (short) stream is even read. io.ReadAll over a bounded
+	// LimitReader instead grows in proportion to bytes actually delivered.
 	bufferedCount := length
 	if bufferedCount > v.bufLen {
 		bufferedCount = v.bufLen
 	}
+	msg := make([]byte, bufferedCount)
 	copy(msg, v.buf[:bufferedCount])
 	v.consumeBuffer(bufferedCount)
 
 	if bufferedCount < length {
-		_, err := io.ReadFull(v.reader, msg[bufferedCount:])
-		if err != nil {
-			return nil, &ErrReadingDelimitedMessage{Err: err}
+		remaining := int64(length - bufferedCount)
+		rest, readErr := io.ReadAll(io.LimitReader(v.reader, remaining))
+		if readErr != nil {
+			return nil, &ErrReadingDelimitedMessage{Err: readErr}
 		}
+		if int64(len(rest)) != remaining {
+			return nil, &ErrReadingDelimitedMessage{Err: io.ErrUnexpectedEOF}
+		}
+		msg = append(msg, rest...)
 	}
 
 	return msg, nil
@@ -92,8 +109,19 @@ func (v *VarintDelimitedReader) readNextVarint() (int, error) {
 	if consumed <= 0 {
 		return 0, &ErrInvalidVarint{}
 	}
+
+	// Check the cap while val is still uint64, before any int() conversion.
+	// On 32-bit platforms int is 32 bits and values in [2^31, u32::MAX] would
+	// silently wrap to negative after int(val), triggering a false EOF. The
+	// math.MaxInt constant is platform-specific: 2^63-1 on 64-bit (so this
+	// check never fires there) and 2^31-1 on 32-bit (catches the overflow).
 	if val > uint64(maxVarintValue) {
 		return 0, &ErrVarintOverflow{Value: val, Max: uint64(maxVarintValue)}
+	}
+	if val > uint64(math.MaxInt) {
+		// val is in (math.MaxInt, u32::MAX] on this platform; int(val) would
+		// overflow. Return the same typed error so callers handle it uniformly.
+		return 0, &ErrVarintOverflow{Value: val, Max: uint64(math.MaxInt)}
 	}
 
 	v.consumeBuffer(consumed)

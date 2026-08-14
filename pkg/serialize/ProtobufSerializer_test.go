@@ -1099,3 +1099,143 @@ func TestProtobufStateSerializer_WithEmptyPendingPreKey(t *testing.T) {
 		t.Fatal("pending prekey should not be nil")
 	}
 }
+
+// =============================================================================
+// Finding 7 regression tests: required-field presence checks
+//
+// Rust libsignal (rust/protocol/src/protocol.rs:299-301 for SignalMessage and
+// :481-483 for PreKeySignalMessage) rejects messages where the protobuf encoding
+// omits certain required fields by returning InvalidProtobufEncoding. The Go
+// implementation must enforce the same check.
+//
+// Strategy: craft a raw SignalMessage or PreKeySignalMessage proto body with the
+// target required field absent, wrap it with the appropriate wire-format framing
+// (version byte, MAC suffix), and verify that Deserialize returns
+// *ErrInvalidProtobufEncoding for the right field.
+// =============================================================================
+
+// buildSignalMessageBytes constructs a binary SignalMessage wire payload:
+//
+//	version_byte || proto_body || mac[8]
+//
+// The proto body is encoded from a wirepb.SignalMessage where only the fields
+// supplied via the non-nil pointer arguments are set. Pass nil to omit a field.
+func buildSignalMessageBytes(t *testing.T, counter *uint32, ratchetKey []byte) []byte {
+	t.Helper()
+	pb := &wirepb.SignalMessage{
+		RatchetKey: ratchetKey,
+		Counter:    counter,
+		Ciphertext: []byte("ct"),
+	}
+	body, err := proto.Marshal(pb)
+	if err != nil {
+		t.Fatalf("buildSignalMessageBytes: marshal: %v", err)
+	}
+	// Wire format: version_byte || proto_body || mac[8]
+	result := make([]byte, 0, 1+len(body)+8)
+	result = append(result, 0x33) // version (3<<4|3)
+	result = append(result, body...)
+	result = append(result, make([]byte, 8)...) // placeholder MAC
+	return result
+}
+
+// buildPreKeySignalMessageBytes constructs a binary PreKeySignalMessage wire
+// payload: version_byte || proto_body. The signedPreKeyID argument is set only
+// when the non-nil pointer is provided; pass nil to omit the field.
+func buildPreKeySignalMessageBytes(t *testing.T, signedPreKeyID *uint32) []byte {
+	t.Helper()
+	registrationID := uint32(1)
+	pb := &wirepb.PreKeySignalMessage{
+		RegistrationId: &registrationID,
+		SignedPreKeyId: signedPreKeyID,
+		BaseKey:        []byte{0x05, 0x01},
+		IdentityKey:    []byte{0x05, 0x02},
+		Message:        []byte("inner"),
+	}
+	body, err := proto.Marshal(pb)
+	if err != nil {
+		t.Fatalf("buildPreKeySignalMessageBytes: marshal: %v", err)
+	}
+	result := make([]byte, 1+len(body))
+	result[0] = 0x33 // version byte
+	copy(result[1:], body)
+	return result
+}
+
+// TestSignalMessageDeserialize_MissingCounter verifies Finding 7 for the
+// SignalMessage serializer: a wire payload that omits the required `counter`
+// proto field must be rejected with *ErrInvalidProtobufEncoding naming the
+// "counter" field, matching Rust protocol.rs:299-301.
+// Before the fix this returned nil error and silently used counter=0.
+func TestSignalMessageDeserialize_MissingCounter(t *testing.T) {
+	s := &ProtobufSignalMessageSerializer{}
+	data := buildSignalMessageBytes(t, nil, []byte{0x05, 0x01, 0x02})
+
+	_, err := s.Deserialize(data)
+	if err == nil {
+		t.Fatal("expected error for SignalMessage missing counter, got nil")
+	}
+	encErr, ok := err.(*ErrInvalidProtobufEncoding)
+	if !ok {
+		t.Fatalf("expected *ErrInvalidProtobufEncoding, got %T: %v", err, err)
+	}
+	if encErr.Field != "counter" {
+		t.Errorf("expected field=counter, got field=%q", encErr.Field)
+	}
+}
+
+// TestSignalMessageDeserialize_CounterPresent verifies the positive case: a
+// properly-encoded SignalMessage with a counter field present deserializes
+// successfully, confirming that the counter nil-check does not over-reject.
+func TestSignalMessageDeserialize_CounterPresent(t *testing.T) {
+	s := &ProtobufSignalMessageSerializer{}
+	counter := uint32(7)
+	data := buildSignalMessageBytes(t, &counter, []byte{0x05, 0x01, 0x02})
+
+	result, err := s.Deserialize(data)
+	if err != nil {
+		t.Fatalf("unexpected error for SignalMessage with counter: %v", err)
+	}
+	if result.Counter != 7 {
+		t.Errorf("expected counter=7, got %d", result.Counter)
+	}
+}
+
+// TestPreKeySignalMessageDeserialize_MissingSignedPreKeyID verifies Finding 7
+// for the PreKeySignalMessage serializer: a wire payload that omits the required
+// `signed_pre_key_id` proto field must be rejected with *ErrInvalidProtobufEncoding
+// naming the "signed_pre_key_id" field, matching Rust protocol.rs:481-483.
+// Before the fix this returned nil error and silently used signedPreKeyId=0.
+func TestPreKeySignalMessageDeserialize_MissingSignedPreKeyID(t *testing.T) {
+	s := &ProtobufPreKeySignalMessageSerializer{}
+	data := buildPreKeySignalMessageBytes(t, nil)
+
+	_, err := s.Deserialize(data)
+	if err == nil {
+		t.Fatal("expected error for PreKeySignalMessage missing signed_pre_key_id, got nil")
+	}
+	encErr, ok := err.(*ErrInvalidProtobufEncoding)
+	if !ok {
+		t.Fatalf("expected *ErrInvalidProtobufEncoding, got %T: %v", err, err)
+	}
+	if encErr.Field != "signed_pre_key_id" {
+		t.Errorf("expected field=signed_pre_key_id, got field=%q", encErr.Field)
+	}
+}
+
+// TestPreKeySignalMessageDeserialize_SignedPreKeyIDPresent verifies the positive
+// case: a properly-encoded PreKeySignalMessage with signed_pre_key_id present
+// deserializes successfully.
+func TestPreKeySignalMessageDeserialize_SignedPreKeyIDPresent(t *testing.T) {
+	s := &ProtobufPreKeySignalMessageSerializer{}
+	spkID := uint32(5)
+	data := buildPreKeySignalMessageBytes(t, &spkID)
+
+	result, err := s.Deserialize(data)
+	if err != nil {
+		t.Fatalf("unexpected error for PreKeySignalMessage with signed_pre_key_id: %v", err)
+	}
+	if result.SignedPreKeyID != 5 {
+		t.Errorf("expected SignedPreKeyID=5, got %d", result.SignedPreKeyID)
+	}
+}

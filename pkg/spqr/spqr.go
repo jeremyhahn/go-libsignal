@@ -261,7 +261,7 @@ func (s *SPQR) Decrypt(epoch uint64, counter uint32) (messageKey *secret.Secret,
 		// Match Rust KeyHistory::get(): if the counter is old enough that
 		// it would have been garbage-collected, report it as trimmed.
 		// Otherwise it was in the skipped map and already consumed.
-		if counter+maxSkippedKeys < chain.recvCounter {
+		if uint64(counter)+uint64(maxSkippedKeys) < uint64(chain.recvCounter) {
 			return nil, &ErrKeyTrimmed{Counter: counter}
 		}
 		return nil, &ErrKeyAlreadyRequested{Counter: counter}

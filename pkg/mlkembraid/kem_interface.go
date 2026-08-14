@@ -342,6 +342,23 @@ func (k *MLKEM768IncrementalKEM) HeaderSize() int {
 	return HeaderSize
 }
 
+// headerAwareKEM is an internal interface for KEMs that encode and parse the
+// wire header differently from the legacy ek_seed(32) || SHA3-256(ek_seed||ek_vector)(32)
+// layout. Implemented by IncrementalMLKEM768KEM, NOT by MLKEM768IncrementalKEM.
+//
+// State machine functions detect this interface to build and parse headers correctly
+// so that both KEM types work end-to-end without changing the MLKEM768IncrementalKEM
+// wire format.
+type headerAwareKEM interface {
+	// BuildHeader returns the complete wire header bytes from the given key material.
+	// For IncrementalMLKEM768KEM this is simply pk1 (the header IS pk1).
+	BuildHeader(ekSeed, ekVector []byte) []byte
+
+	// EKSeedFromHeader extracts the full ek_seed from a received wire header.
+	// For IncrementalMLKEM768KEM this is the full 64-byte pk1 (the header IS pk1).
+	EKSeedFromHeader(header []byte) []byte
+}
+
 // kemCompleter is an internal interface for performing the deferred Bob-side
 // full encapsulation. Both MLKEM768IncrementalKEM and IncrementalMLKEM768KEM
 // implement it so that state.go's bobCompleteEncapsulationDeferred can
@@ -566,6 +583,23 @@ func (k *IncrementalMLKEM768KEM) CT2Size() int {
 // HeaderSize returns the header size = pk1 size = 64 bytes.
 func (k *IncrementalMLKEM768KEM) HeaderSize() int {
 	return imlkem.PublicKey1Size // 64
+}
+
+// BuildHeader returns the wire header for IncrementalMLKEM768KEM.
+// The header is simply pk1 (seed_for_A(32) || H(ek)(32)); ekVector is not used
+// in the header itself (it is transmitted separately as the ek_vector).
+// Implements headerAwareKEM.
+func (k *IncrementalMLKEM768KEM) BuildHeader(ekSeed, _ []byte) []byte {
+	return IncrementalHeader(ekSeed)
+}
+
+// EKSeedFromHeader extracts pk1 from a received wire header.
+// For IncrementalMLKEM768KEM the header IS pk1 so the entire header is returned.
+// Implements headerAwareKEM.
+func (k *IncrementalMLKEM768KEM) EKSeedFromHeader(header []byte) []byte {
+	out := make([]byte, len(header))
+	copy(out, header)
+	return out
 }
 
 // IncrementalHeader builds a header from pk1 directly (it IS the header).

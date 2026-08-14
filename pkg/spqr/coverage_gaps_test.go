@@ -2,7 +2,6 @@ package spqr
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"math"
 	"testing"
@@ -67,22 +66,6 @@ func TestErrEpochAdvanceErrorAndUnwrap(t *testing.T) {
 	}
 	if !errors.Is(err, inner) {
 		t.Error("ErrEpochAdvance.Unwrap() should return the inner error")
-	}
-}
-
-func TestErrWireDecodeError(t *testing.T) {
-	err := &ErrWireDecode{Reason: "truncated"}
-	want := "spqr: wire decode failed: truncated"
-	if err.Error() != want {
-		t.Errorf("ErrWireDecode.Error() = %q, want %q", err.Error(), want)
-	}
-}
-
-func TestErrWireEncodeError(t *testing.T) {
-	err := &ErrWireEncode{Reason: "overflow"}
-	want := "spqr: wire encode failed: overflow"
-	if err.Error() != want {
-		t.Errorf("ErrWireEncode.Error() = %q, want %q", err.Error(), want)
 	}
 }
 
@@ -820,111 +803,6 @@ func TestAdvanceEpochNilOutputKey(t *testing.T) {
 	var e *ErrInvalidInput
 	if !errors.As(err, &e) || e.Field != "outputKey" {
 		t.Errorf("expected ErrInvalidInput{outputKey}, got %T: %v", err, err)
-	}
-}
-
-// ---- wire.go error paths ----
-
-func TestDecodeWireMessageUnsupportedVersion(t *testing.T) {
-	// A 2-byte message that is NOT 12 bytes (not legacy) with version byte != wireVersion.
-	data := []byte{0x99, 0x01}
-	_, err := decodeWireMessage(data)
-	if err == nil {
-		t.Fatal("expected error for unsupported wire version")
-	}
-	var e *ErrWireDecode
-	if !errors.As(err, &e) {
-		t.Errorf("expected *ErrWireDecode, got %T: %v", err, err)
-	}
-}
-
-func TestDecodeWireMessageEmpty(t *testing.T) {
-	_, err := decodeWireMessage([]byte{})
-	if err == nil {
-		t.Fatal("expected error for empty wire message")
-	}
-}
-
-func TestDecodeWireMessageInvalidEpochVarint(t *testing.T) {
-	// wireVersion byte followed by an invalid varint (all-0x80 bytes, no terminator).
-	// All continuation bits set with no terminating byte — must fail varint decode.
-	data := make([]byte, 13)
-	data[0] = wireVersion
-	for i := 1; i < 13; i++ {
-		data[i] = 0x80 // continuation bits set, no terminator
-	}
-	_, err := decodeWireMessage(data)
-	if err == nil {
-		t.Fatal("expected error for invalid varint")
-	}
-}
-
-func TestDecodeWireMessageCounterExceedsU32(t *testing.T) {
-	// Build a message: wireVersion + varint(epoch=1) + varint(counter > MaxUint32) + msgType
-	buf := []byte{wireVersion}
-	var tmp [binary.MaxVarintLen64]byte
-	n := binary.PutUvarint(tmp[:], 1) // epoch=1
-	buf = append(buf, tmp[:n]...)
-	n = binary.PutUvarint(tmp[:], uint64(math.MaxUint32)+1) // counter too big
-	buf = append(buf, tmp[:n]...)
-	buf = append(buf, byte(mlkembraid.MessageTypeNone))
-
-	_, err := decodeWireMessage(buf)
-	if err == nil {
-		t.Fatal("expected error for counter exceeding u32 range")
-	}
-}
-
-func TestDecodeWireMessageMissingMsgType(t *testing.T) {
-	// wireVersion + varint(epoch=1) + varint(counter=1) but no msg type byte.
-	buf := []byte{wireVersion}
-	var tmp [binary.MaxVarintLen64]byte
-	n := binary.PutUvarint(tmp[:], 1) // epoch=1
-	buf = append(buf, tmp[:n]...)
-	n = binary.PutUvarint(tmp[:], 1) // counter=1
-	buf = append(buf, tmp[:n]...)
-	// no msg type byte appended
-
-	_, err := decodeWireMessage(buf)
-	if err == nil {
-		t.Fatal("expected error for missing message type byte")
-	}
-}
-
-func TestDecodeWireMessageUnknownMsgType(t *testing.T) {
-	buf := []byte{wireVersion}
-	var tmp [binary.MaxVarintLen64]byte
-	n := binary.PutUvarint(tmp[:], 1)
-	buf = append(buf, tmp[:n]...)
-	n = binary.PutUvarint(tmp[:], 1)
-	buf = append(buf, tmp[:n]...)
-	buf = append(buf, 0xFF) // unknown message type > MessageTypeCt2
-
-	_, err := decodeWireMessage(buf)
-	if err == nil {
-		t.Fatal("expected error for unknown message type")
-	}
-}
-
-// TestEncodeDecodeWireMessageRoundTrip verifies variable-length encoding/decoding.
-func TestEncodeDecodeWireMessageRoundTrip(t *testing.T) {
-	epoch := uint64(5)
-	counter := uint32(13)
-	msgType := mlkembraid.MessageTypeNone
-
-	encoded := encodeWireMessage(epoch, counter, msgType, nil)
-	decoded, err := decodeWireMessage(encoded)
-	if err != nil {
-		t.Fatalf("decodeWireMessage: %v", err)
-	}
-	if decoded.Epoch != epoch {
-		t.Errorf("epoch = %d, want %d", decoded.Epoch, epoch)
-	}
-	if decoded.Counter != counter {
-		t.Errorf("counter = %d, want %d", decoded.Counter, counter)
-	}
-	if decoded.MsgType != msgType {
-		t.Errorf("msgType = %v, want %v", decoded.MsgType, msgType)
 	}
 }
 

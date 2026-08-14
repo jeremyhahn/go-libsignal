@@ -167,12 +167,10 @@ func TestVerifyMacWithAddresses_NilLocalAddresses(t *testing.T) {
 	// is skipped entirely. Use a stub structure to drive only the panic path
 	// via the public constructor + a doctored Addresses slice.
 	//
-	// Construction via the public API requires valid addresses (which is the
-	// point of the new ErrInvalidAddressForBinding guard). To exercise the
-	// nil-input verify path we build the SignalMessage normally with valid
-	// addresses, then call VerifyMacWithAddresses with nil local addresses.
-	// The MAC verification will fail first with random key — but the test
-	// only needs to confirm NO PANIC and an error return (any error is fine).
+	// Address binding is opportunistic: SerializeAddresses returns nil for
+	// non-ServiceId or out-of-range inputs (matching Rust serialize_addresses),
+	// and the verify path must tolerate nil inputs without panicking rather
+	// than dereferencing them. The test confirms NO PANIC on nil/nil input.
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("VerifyMacWithAddresses with nil addresses panicked: %v", r)

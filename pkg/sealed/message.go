@@ -84,6 +84,14 @@ func DeserializeUnidentifiedSenderMessageContent(data []byte) (*UnidentifiedSend
 		return nil, ErrUnknownUSMCType
 	}
 
+	// Rust: rust/protocol/src/sealed_sender.rs:526-528 returns
+	// InvalidProtobufEncoding when the content field is absent. Enforce the
+	// same check here so malformed USMCs without a payload are rejected
+	// rather than silently accepted with nil contents.
+	if pbMsg.Content == nil {
+		return nil, &CertificateError{Detail: "USMC missing required content field"}
+	}
+
 	var hint ContentHint
 	if pbMsg.ContentHint != nil {
 		hint = ContentHint(pbMsg.GetContentHint())

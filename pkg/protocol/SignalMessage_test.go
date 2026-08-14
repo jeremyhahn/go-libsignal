@@ -340,9 +340,14 @@ func TestNewSignalMessageSerializeError(t *testing.T) {
 	}
 }
 
-func TestSignalMessageVerifyMacSerializeError(t *testing.T) {
-	// Create a valid message first with a working serializer, then replace
-	// the serializer with a failing one before calling VerifyMac.
+// TestSignalMessageVerifyMac_NoLongerCallsSerializer verifies that VerifyMac
+// uses the retained wire bytes (serializedBytes) rather than re-serializing
+// the struct. Replacing the serializer with a failing one after construction
+// must NOT cause VerifyMac to return an error — the serializer is simply not
+// consulted. This is the regression test for the byte-malleability fix:
+// previously VerifyMac called Serialize() and would error when the serializer
+// failed; now it uses the pre-stored bytes unconditionally.
+func TestSignalMessageVerifyMac_NoLongerCallsSerializer(t *testing.T) {
 	goodSerializer := &jsonSignalMessageSerializer{}
 	ratchetKey := newTestKeyPair(t)
 	senderIdentity := newTestIdentityKey(t)
@@ -360,12 +365,45 @@ func TestSignalMessageVerifyMacSerializeError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Replace serializer with a failing one
+	// Replace serializer with a failing one. With the old re-serialization code
+	// VerifyMac would have called Serialize() here and returned a serializer
+	// error. With the fix, VerifyMac uses the retained pre-MAC bytes and does
+	// not touch the serializer at all, so verification must succeed.
 	msg.serializer = &failingSignalMessageSerializer{}
+
+	if err := msg.VerifyMac(CurrentVersion, senderIdentity, receiverIdentity, macKey); err != nil {
+		t.Fatalf("VerifyMac must not call Serialize; got unexpected error: %v", err)
+	}
+}
+
+// TestSignalMessageVerifyMac_NilSerializedBytes verifies that VerifyMac returns
+// a bad-mac error when the message has no stored serializedBytes (e.g., a
+// message created directly via NewSignalMessageFromStruct without going through
+// NewSignalMessage or NewSignalMessageFromBytes). This is a safety net: callers
+// that bypass the standard constructors cannot silently skip MAC verification.
+func TestSignalMessageVerifyMac_NilSerializedBytes(t *testing.T) {
+	serializer := &jsonSignalMessageSerializer{}
+	ratchetKey := newTestKeyPair(t)
+	senderIdentity := newTestIdentityKey(t)
+	receiverIdentity := newTestIdentityKey(t)
+	macKey := make([]byte, 32)
+
+	structure := &SignalMessageStructure{
+		Version:    CurrentVersion,
+		Counter:    1,
+		RatchetKey: ratchetKey.PublicKey().Serialize(),
+		CipherText: []byte("test"),
+		Mac:        make([]byte, 8),
+	}
+	// NewSignalMessageFromStruct does NOT set serializedBytes.
+	msg, err := NewSignalMessageFromStruct(structure, serializer)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	err = msg.VerifyMac(CurrentVersion, senderIdentity, receiverIdentity, macKey)
 	if err == nil {
-		t.Fatal("expected error when serializer fails during VerifyMac")
+		t.Fatal("expected bad-mac error when serializedBytes is nil")
 	}
 }
 
@@ -599,10 +637,10 @@ func TestNewSignalMessage_AddressBinding_ValidAddresses(t *testing.T) {
 }
 
 // TestNewSignalMessage_AddressBinding_DeviceIDZero verifies that supplying
-// a sender address with device ID 0 returns ErrInvalidAddressForBinding rather
-// than silently downgrading to an unbound message.
-//
-// Codex finding P2 — device_id == 0 → typed error.
+// a sender address with device ID 0 (not serializable as a binding address)
+// omits the binding field and produces a valid unbound message, matching
+// Rust's opportunistic serialize_addresses (protocol.rs:91-92, 250-256) which
+// returns None rather than erroring.
 func TestNewSignalMessage_AddressBinding_DeviceIDZero(t *testing.T) {
 	serializer := &jsonSignalMessageSerializer{}
 	ratchetKey := newTestKeyPair(t)
@@ -610,28 +648,27 @@ func TestNewSignalMessage_AddressBinding_DeviceIDZero(t *testing.T) {
 	receiverID := newTestIdentityKey(t)
 	macKey := make([]byte, 32)
 
-	// device ID 0 is invalid for SerializeAddresses.
+	// device ID 0 is invalid for SerializeAddresses → binding omitted.
 	sender := NewSignalAddress("11111111-1111-1111-1111-111111111111", 0)
 	recipient := NewSignalAddress("22222222-2222-2222-2222-222222222222", 1)
 
-	_, err := NewSignalMessage(
+	msg, err := NewSignalMessage(
 		CurrentVersion, 1, 0, macKey,
 		ratchetKey.PublicKey(), []byte("payload"),
 		senderID, receiverID, serializer,
 		nil, sender, recipient,
 	)
-	if err == nil {
-		t.Fatal("expected error for device ID 0, got nil")
+	if err != nil {
+		t.Fatalf("expected unbound message for device ID 0, got error: %v", err)
 	}
-	if !isError(err, errInvalidAddressForBinding) {
-		t.Fatalf("expected errInvalidAddressForBinding, got %T: %v", err, err)
+	if got := msg.Addresses(); got != nil {
+		t.Fatalf("expected omitted (nil) binding field, got %d bytes", len(got))
 	}
 }
 
 // TestNewSignalMessage_AddressBinding_DeviceIDTooLarge verifies that supplying
-// a recipient address with device ID > 127 returns ErrInvalidAddressForBinding.
-//
-// Codex finding P2 — device_id > 127 → typed error.
+// a recipient address with device ID > 127 omits the binding field rather than
+// erroring (Rust opportunistic binding, protocol.rs:91-92, 250-256).
 func TestNewSignalMessage_AddressBinding_DeviceIDTooLarge(t *testing.T) {
 	serializer := &jsonSignalMessageSerializer{}
 	ratchetKey := newTestKeyPair(t)
@@ -643,17 +680,17 @@ func TestNewSignalMessage_AddressBinding_DeviceIDTooLarge(t *testing.T) {
 	// device ID 128 exceeds the valid range [1, 127].
 	recipient := NewSignalAddress("22222222-2222-2222-2222-222222222222", 128)
 
-	_, err := NewSignalMessage(
+	msg, err := NewSignalMessage(
 		CurrentVersion, 1, 0, macKey,
 		ratchetKey.PublicKey(), []byte("payload"),
 		senderID, receiverID, serializer,
 		nil, sender, recipient,
 	)
-	if err == nil {
-		t.Fatal("expected error for device ID 128, got nil")
+	if err != nil {
+		t.Fatalf("expected unbound message for device ID 128, got error: %v", err)
 	}
-	if !isError(err, errInvalidAddressForBinding) {
-		t.Fatalf("expected errInvalidAddressForBinding, got %T: %v", err, err)
+	if got := msg.Addresses(); got != nil {
+		t.Fatalf("expected omitted (nil) binding field, got %d bytes", len(got))
 	}
 }
 

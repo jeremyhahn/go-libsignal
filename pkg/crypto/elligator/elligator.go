@@ -106,11 +106,16 @@ func (jp *jacobiPoint) dual() *jacobiPoint {
 }
 
 // elligatorInv computes a field element that maps to this Jacobi quartic point
-// under Elligator2, if one exists. Returns (wasFound, fieldElement).
+// under Elligator2, if one exists. Returns (found, fieldElement) where found
+// is 1 if a preimage exists and 0 otherwise. The int return allows the caller
+// to fold the result into a bitmask without a conditional branch.
 //
-// This implementation uses constant-time conditional selection to avoid
-// branching on secret-dependent values, preventing timing side channels.
-func (jp *jacobiPoint) elligatorInv() (bool, *field.Element) {
+// All validity decisions (including the found flag) are computed branchlessly
+// using integer bit-ops on the 0/1 flags produced by field.Element.Equal and
+// field.Element.SqrtRatio, preserving the constant-time guarantee documented at
+// the package level. This matches curve25519-dalek-signal which uses
+// subtle::Choice for the same purpose.
+func (jp *jacobiPoint) elligatorInv() (int, *field.Element) {
 	// Special case: s = 0. If s is zero, either t = 1 or t = -1.
 	// If t=1, then sqrt(i*d) is the preimage. Otherwise it's 0.
 	sIsZero := jp.S.Equal(feZero)
@@ -148,10 +153,17 @@ func (jp *jacobiPoint) elligatorInv() (bool, *field.Element) {
 	// If s==0, use s0Result; otherwise use x (the general case).
 	out := new(field.Element).Select(s0Result, x, int(sIsZero))
 
-	// found = sIsZero || (wasSquare && !sIsZero)
-	// If sIsZero, always found (it's a valid degenerate case).
-	// If not sIsZero, found only if wasSquare.
-	found := sIsZero == 1 || (wasSquare == 1 && sIsZero != 1)
+	// Compute validity branchlessly: found = sIsZero || (wasSquare && !sIsZero).
+	// Using int bit-ops on the 0/1 flags from field.Element.Equal / SqrtRatio:
+	//   found = sIsZero | (wasSquare &^ sIsZero)
+	// Truth table (exhaustive over {0,1}²):
+	//   sIsZero=0 wasSquare=0 → 0|0 = 0  (no preimage)
+	//   sIsZero=0 wasSquare=1 → 0|1 = 1  (square, preimage exists)
+	//   sIsZero=1 wasSquare=0 → 1|0 = 1  (degenerate s=0 case)
+	//   sIsZero=1 wasSquare=1 → 1|0 = 1  (degenerate s=0 case)
+	// This eliminates the boolean short-circuit branch on secret-derived flags,
+	// matching curve25519-dalek-signal which uses subtle::Choice here.
+	found := sIsZero | (wasSquare &^ sIsZero)
 
 	return found, out
 }
@@ -326,17 +338,15 @@ func ElligatorRistrettoFlavorInverse(encoded []byte) (mask uint8, candidates [8]
 	jcs := toJacobiQuarticRistretto(X, Y, Z, T)
 
 	for i := 0; i < 4; i++ {
+		// elligatorInv returns an int (0 or 1); fold directly into the mask
+		// without a conditional branch, matching the constant-time contract.
 		found, fe := jcs[i].elligatorInv()
-		if found {
-			mask |= 1 << (2 * i)
-		}
+		mask |= uint8(found) << (2 * i)
 		copy(candidates[2*i][:], fe.Bytes())
 
 		dualJC := jcs[i].dual()
 		found2, fe2 := dualJC.elligatorInv()
-		if found2 {
-			mask |= 1 << (2*i + 1)
-		}
+		mask |= uint8(found2) << (2*i + 1)
 		copy(candidates[2*i+1][:], fe2.Bytes())
 	}
 

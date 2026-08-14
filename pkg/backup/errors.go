@@ -526,3 +526,16 @@ type ErrInvalidKeyLength struct {
 func (e *ErrInvalidKeyLength) Error() string {
 	return fmt.Sprintf("backup: %s must be %d bytes, got %d", e.Field, e.Want, e.Got)
 }
+
+// ErrDecompressedSizeExceeded is returned when the cumulative number of
+// decompressed bytes across all frames exceeds the per-stream budget.
+// An authenticated backup could legitimately trigger this only if the
+// compression ratio is extreme; it guards against decompression bombs
+// even after HMAC verification.
+type ErrDecompressedSizeExceeded struct {
+	MaxBytes int64
+}
+
+func (e *ErrDecompressedSizeExceeded) Error() string {
+	return fmt.Sprintf("backup: decompressed data exceeds maximum allowed size of %d bytes", e.MaxBytes)
+}

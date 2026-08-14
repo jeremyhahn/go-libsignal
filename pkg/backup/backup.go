@@ -488,10 +488,20 @@ func encodeVarintDelimited(data []byte) []byte {
 // PaddedLength rounds contentLength up to obscure the exact size of a backup.
 // This matches the Rust reference: log_base(content_length, 1.05).ceil() -> 1.05^exp -> floor.
 // Uses Go's IEEE 754 compliant math.Log and math.Pow, matching Rust's f64::log and f64::powf.
+//
+// Rust libsignal ref: rust/message-backup/src/lib.rs padded_length
 func PaddedLength(contentLength uint32) uint32 {
 	const base = 1.05
 	exp := math.Ceil(math.Log(float64(contentLength)) / math.Log(base))
-	result := uint32(math.Floor(math.Pow(base, exp)))
+	v := math.Floor(math.Pow(base, exp))
+	// Clamp to [0, math.MaxUint32] before converting to uint32. Near 4 GiB the
+	// float64 result can exceed math.MaxUint32, and Go's float64→uint32 cast is
+	// implementation-defined in that range (Rust uses saturating_cast which
+	// returns u32::MAX). Explicit clamping matches Rust's saturating behavior.
+	if v >= math.MaxUint32 {
+		return math.MaxUint32
+	}
+	result := uint32(v)
 	if result < 541 {
 		return 541
 	}

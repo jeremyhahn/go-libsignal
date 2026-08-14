@@ -271,8 +271,15 @@ func (s *State) sendKeysUnsampled(kemImpl IncrementalKEM) (*Message, uint64, *Ou
 		return nil, 0, nil, &ErrKEMOperation{Op: "sendKeysUnsampled ekVector", Err: err}
 	}
 
-	// Build header = ek_seed(32) || SHA3-256(ek_seed || ek_vector)(32).
-	header := Header(s.ekSeed.Bytes(), s.ekVector.Bytes())
+	// Build header: legacy KEM uses ek_seed(32) || SHA3-256(ek_seed||ek_vector)(32);
+	// IncrementalMLKEM768KEM uses pk1 directly as the header (it IS pk1).
+	// Detect via headerAwareKEM so the legacy wire format is unchanged.
+	var header []byte
+	if ha, ok := kemImpl.(headerAwareKEM); ok {
+		header = ha.BuildHeader(s.ekSeed.Bytes(), s.ekVector.Bytes())
+	} else {
+		header = Header(s.ekSeed.Bytes(), s.ekVector.Bytes())
+	}
 
 	// MAC the header at auth's current epoch.
 	mac, err := s.auth.MacHdr(s.auth.Epoch(), header)
@@ -518,16 +525,24 @@ func (s *State) aliceCompleteCt2(_ *Message, kemImpl IncrementalKEM) (uint64, *O
 	}
 	defer crypto.Zeroize(outputKey)
 
-	// SECURITY NOTE: auth.Update is called before VfyCt per the spec (Section 2.5).
-	// If VfyCt fails on a forged ct2, the authenticator is irreversibly advanced,
-	// requiring a session reset. This matches the Rust reference implementation
-	// and is an inherent property of the protocol design.
-	// Per spec: auth.Update(state.epoch, ss) -- uses KDF_OK-derived key.
+	// Clone the authenticator before Update so we can roll back if VfyCt fails.
+	// Without this, a forged ct2 that passes Decaps but fails VfyCt permanently
+	// advances the auth mac_key, desynchronizing Alice's and Bob's authenticators
+	// for all future epochs (Finding 2).
+	//
+	// Per protocol: auth.Update advances the mac_key to the same state Bob used when
+	// computing the MAC, so VfyCt MUST use the post-Update mac_key. The clone is only
+	// used for rollback; VfyCt always runs on the updated auth.
+	preUpdateAuth, err := s.auth.Clone()
+	if err != nil {
+		return 0, nil, &ErrKEMOperation{Op: "aliceCompleteCt2/auth.Clone", Err: err}
+	}
 	if err := s.auth.Update(currentEpoch, outputKey); err != nil {
+		preUpdateAuth.Zeroize()
 		return 0, nil, err
 	}
 
-	// VfyCt(epoch, ct1||ct2, mac).
+	// VfyCt(epoch, ct1||ct2, mac) using the post-Update mac_key.
 	receivedCt1Bytes := s.receivedCt1.Bytes()
 	fullCT := make([]byte, 0, len(receivedCt1Bytes)+len(ct2))
 	fullCT = append(fullCT, receivedCt1Bytes...)
@@ -535,11 +550,18 @@ func (s *State) aliceCompleteCt2(_ *Message, kemImpl IncrementalKEM) (uint64, *O
 
 	valid, err := s.auth.VfyCt(currentEpoch, fullCT, mac)
 	if err != nil {
+		// Roll back auth to pre-Update state on any error.
+		s.auth.Zeroize()
+		s.auth = preUpdateAuth
 		return 0, nil, err
 	}
 	if !valid {
+		// Roll back auth so the session is intact for a legitimate retry.
+		s.auth.Zeroize()
+		s.auth = preUpdateAuth
 		return 0, nil, &ErrMACVerification{Epoch: currentEpoch, Kind: "ct"}
 	}
+	preUpdateAuth.Zeroize()
 
 	// Destroy intermediate secret state.
 	destroySecret(&s.dk)
@@ -684,7 +706,7 @@ func (s *State) receiveKeysUnsampled(_ *Message, _ IncrementalKEM, _ int) (uint6
 // receiveNoHeaderReceived: Bob receives header chunks.
 // Per spec: receiving_epoch = state.epoch - 1. Requires msg.epoch == state.epoch.
 // Transition (6) to HeaderReceived.
-func (s *State) receiveNoHeaderReceived(msg *Message, _ IncrementalKEM, _ int) (uint64, *OutputKey, error) {
+func (s *State) receiveNoHeaderReceived(msg *Message, kemImpl IncrementalKEM, _ int) (uint64, *OutputKey, error) {
 	receivingEpoch := s.epoch - 1
 
 	if msg.Type == MessageTypeNone {
@@ -734,14 +756,25 @@ func (s *State) receiveNoHeaderReceived(msg *Message, _ IncrementalKEM, _ int) (
 		}
 
 		// Extract ek_seed and hek into guarded memory.
-		ekSeedData := make([]byte, EKSeedSize)
-		copy(ekSeedData, header[:EKSeedSize])
+		// IncrementalMLKEM768KEM: ek_seed = full header = pk1 (64 bytes).
+		// Legacy MLKEM768IncrementalKEM: ek_seed = header[:32], hek = header[32:64].
+		var ekSeedData []byte
+		if ha, ok := kemImpl.(headerAwareKEM); ok {
+			full := ha.EKSeedFromHeader(header)
+			ekSeedData = make([]byte, len(full))
+			copy(ekSeedData, full)
+		} else {
+			ekSeedData = make([]byte, EKSeedSize)
+			copy(ekSeedData, header[:EKSeedSize])
+		}
 		destroySecret(&s.bobEkSeed)
 		s.bobEkSeed, err = secret.New(ekSeedData)
 		if err != nil {
 			return 0, nil, &ErrKEMOperation{Op: "receiveNoHeaderReceived bobEkSeed", Err: err}
 		}
 
+		// hekData: for legacy KEM = header[32:64]; for IncrementalMLKEM768KEM = header[32:64] = H(ek).
+		// IncrementalMLKEM768KEM.Encaps1 ignores hek, but verifyEkVector uses it for the legacy path.
 		hekData := make([]byte, 32)
 		copy(hekData, header[EKSeedSize:])
 		destroySecret(&s.bobHek)
@@ -1073,6 +1106,13 @@ func (s *State) bobCompleteEncapsulationDeferred(kemImpl IncrementalKEM, chunkSi
 		}}
 	}
 
+	// Always verify ekVector authenticity before encapsulating (Finding 3).
+	// The two-phase path (bobEncapSecret != nil) previously skipped this check,
+	// allowing a tampered ek_vector to silently produce a mismatched shared secret.
+	if err := s.verifyEkVector(ekVector); err != nil {
+		return 0, nil, err
+	}
+
 	var ct1, ct2, ss []byte
 	var err error
 
@@ -1084,10 +1124,7 @@ func (s *State) bobCompleteEncapsulationDeferred(kemImpl IncrementalKEM, chunkSi
 		}
 		destroySecret(&s.bobEncapSecret)
 	} else {
-		// Verify hek and encapsulate directly.
-		if err := s.verifyEkVector(ekVector); err != nil {
-			return 0, nil, err
-		}
+		// Single-phase path: encapsulate directly (ekVector verified above).
 		ct1, ct2, ss, err = completer.FullEncaps(s.bobEkSeed.Bytes(), ekVector)
 		if err != nil {
 			return 0, nil, err
@@ -1172,9 +1209,16 @@ func (s *State) receiveCt2Sampled(msg *Message, _ IncrementalKEM, _ int) (uint64
 	receivingEpoch := s.epoch - 1
 
 	// Check for Transition (13): next epoch has begun.
-	// Per Rust spqr states.rs Ct2Sampled arm: ANY message with epoch == state.epoch+1
-	// triggers recv_next_epoch regardless of message type. The type-gate was a
-	// divergence from Rust; removed to match the Rust state machine exactly.
+	// Per Rust sparsepostquantumratchet states.rs Ct2Sampled arm: ANY message with
+	// epoch == state.epoch+1 triggers recv_next_epoch regardless of message type.
+	//
+	// Defense-in-depth note: tearing down the epoch on the FIRST message carrying
+	// epoch+1 (before Alice confirms key receipt) is intentional — it matches the
+	// Rust reference and prevents the receiver from accumulating stale epoch state.
+	// An attacker injecting a spoofed epoch+1 message can only cause Bob to advance
+	// his own epoch counter early; he cannot forge Alice's epoch advance (which
+	// requires a valid VfyCt MAC from Alice). This is an inherent property of the
+	// protocol design (see also Rust's ct2_sampled_receive in states.rs).
 	if msg.Epoch == s.epoch+1 {
 		// Destroy secrets from the completed epoch before transitioning.
 		destroySecret(&s.bobCt1)
@@ -1202,10 +1246,10 @@ func (s *State) receiveCt2Sampled(msg *Message, _ IncrementalKEM, _ int) (uint64
 }
 
 // bobCompleteEncapsulation performs the second phase of two-phase incremental
-// encapsulation when ek_vector is available. If Encaps1 was already called
-// (bobEncapSecret is set), it uses CompleteEncaps2 to finalize with hek
-// verification built in. Otherwise, it falls back to FullEncaps with
-// explicit hek verification for backward compatibility.
+// encapsulation when ek_vector is available. Routes through the kemCompleter
+// interface so that both MLKEM768IncrementalKEM and IncrementalMLKEM768KEM
+// complete correctly (Finding 1). Always verifies ekVector before encapsulating
+// regardless of which path (two-phase vs single-phase) is taken (Finding 3).
 func (s *State) bobCompleteEncapsulation(kemImpl IncrementalKEM, chunkSize int) (*OutputKey, error) {
 	ekVectorData, err := s.ekDecoder.Message()
 	if err != nil {
@@ -1220,31 +1264,33 @@ func (s *State) bobCompleteEncapsulation(kemImpl IncrementalKEM, chunkSize int) 
 		return nil, &ErrKEMOperation{Op: "bobCompleteEncapsulation bobEkVector", Err: err}
 	}
 
-	kyberKEM, ok := kemImpl.(*MLKEM768IncrementalKEM)
+	completer, ok := kemImpl.(kemCompleter)
 	if !ok {
-		return nil, &ErrKEMOperation{Op: "CompleteEncaps2", Err: &ErrInvalidInput{
-			Field: "kemImpl", Reason: "must be *MLKEM768IncrementalKEM",
+		return nil, &ErrKEMOperation{Op: "bobCompleteEncapsulation", Err: &ErrInvalidInput{
+			Field: "kemImpl", Reason: "must implement kemCompleter (MLKEM768IncrementalKEM or IncrementalMLKEM768KEM)",
 		}}
+	}
+
+	// Always verify ekVector authenticity before encapsulating (Finding 3).
+	// This applies to both the two-phase path (bobEncapSecret != nil) and the
+	// single-phase path, preventing a tampered ek_vector from producing a
+	// shared secret that Alice can never replicate.
+	if err := s.verifyEkVector(s.bobEkVector.Bytes()); err != nil {
+		return nil, err
 	}
 
 	var ct1, ct2, ss []byte
 
 	if s.bobEncapSecret != nil {
 		// Two-phase path: Encaps1 was called in sendHeaderReceived.
-		// CompleteEncaps2 verifies hek internally against the stored value.
-		ct1, ct2, ss, err = kyberKEM.CompleteEncaps2(s.bobEncapSecret.Bytes(), s.bobEkSeed.Bytes(), s.bobEkVector.Bytes())
+		ct1, ct2, ss, err = completer.CompleteEncaps2(s.bobEncapSecret.Bytes(), s.bobEkSeed.Bytes(), s.bobEkVector.Bytes())
 		if err != nil {
 			return nil, err
 		}
 		destroySecret(&s.bobEncapSecret)
 	} else {
-		// Legacy single-phase path: verify hek and encapsulate directly.
-		computedHEK := computeHEK(s.bobEkSeed.Bytes(), s.bobEkVector.Bytes())
-		if subtle.ConstantTimeCompare(computedHEK, s.bobHek.Bytes()) != 1 {
-			return nil, &ErrHeaderFormat{Reason: "hek does not match received ek_vector"}
-		}
-
-		ct1, ct2, ss, err = kyberKEM.FullEncaps(s.bobEkSeed.Bytes(), s.bobEkVector.Bytes())
+		// Single-phase path: ekVector was available from the start.
+		ct1, ct2, ss, err = completer.FullEncaps(s.bobEkSeed.Bytes(), s.bobEkVector.Bytes())
 		if err != nil {
 			return nil, err
 		}

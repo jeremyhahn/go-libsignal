@@ -216,10 +216,16 @@ func DeserializeBackupAuthCredentialPresentation(data []byte) (*BackupAuthCreden
 	}
 	off++
 
-	level := BackupLevel(binary.LittleEndian.Uint64(data[off : off+8]))
+	level, err := parseBackupLevel(binary.LittleEndian.Uint64(data[off : off+8]))
+	if err != nil {
+		return nil, &ZkGroupDeserializationFailure{TypeName: "BackupAuthCredentialPresentation"}
+	}
 	off += 8
 
-	credType := BackupCredentialType(binary.LittleEndian.Uint64(data[off : off+8]))
+	credType, err := parseBackupCredentialType(binary.LittleEndian.Uint64(data[off : off+8]))
+	if err != nil {
+		return nil, &ZkGroupDeserializationFailure{TypeName: "BackupAuthCredentialPresentation"}
+	}
 	off += 8
 
 	redemptionTime := NewTimestamp(binary.LittleEndian.Uint64(data[off : off+8]))

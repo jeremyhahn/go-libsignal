@@ -848,10 +848,13 @@ func TestReportBody_HasFlag_Debug(t *testing.T) {
 
 // --- validAt: cert-based and time-based checks ---
 
+// TestSgxEndorsements_ValidAt_EmptyIsValid was updated by Finding-1 fix:
+// empty endorsements (nil CRLs) must fail validAt rather than pass silently.
+// Before the fix this test asserted true; after the fix the correct assertion is false.
 func TestSgxEndorsements_ValidAt_EmptyIsValid(t *testing.T) {
 	e := &sgxEndorsements{}
-	if !e.validAt(time.Now()) {
-		t.Error("validAt should return true for empty endorsements")
+	if e.validAt(time.Now()) {
+		t.Error("validAt must return false for endorsements without CRLs (regression for Finding 1)")
 	}
 }
 

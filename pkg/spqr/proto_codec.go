@@ -1018,6 +1018,14 @@ func protoChainToSPQR(pb *pqratchetpb.Chain, s *SPQR) error {
 	if pb.CurrentEpoch < n-1 {
 		return &ErrProtoChainUnderflow{CurrentEpoch: pb.CurrentEpoch, NumLinks: n}
 	}
+	// Bound the number of epoch links processed to prevent CPU-DoS from a
+	// malformed proto carrying an unbounded pb.Links slice. The cap matches
+	// maxSkippedKeys: storing more epochs than can fit in the skipped-key map
+	// has no legitimate use, and each link iteration allocates key material.
+	const maxEpochLinks = maxSkippedKeys
+	if n > maxEpochLinks {
+		return &ErrProtoChainUnderflow{CurrentEpoch: pb.CurrentEpoch, NumLinks: n}
+	}
 	startEpoch := pb.CurrentEpoch - (n - 1)
 
 	for i, link := range pb.Links {
@@ -1032,6 +1040,13 @@ func protoChainToSPQR(pb *pqratchetpb.Chain, s *SPQR) error {
 	// Rebuild the skippedKeysFIFO from the populated skippedKeys map so that
 	// subsequent evictions have a valid FIFO order without a live-receive pass.
 	s.rebuildSkippedKeysFIFO()
+
+	// Enforce the live-session cap on skipped keys after deserialization.
+	// A malformed proto with unbounded recv.prev fields could cause memory
+	// exhaustion; evict oldest entries until the map is within maxSkippedKeys.
+	for len(s.skippedKeys) > maxSkippedKeys {
+		s.evictOldestSkippedKey()
+	}
 
 	return nil
 }

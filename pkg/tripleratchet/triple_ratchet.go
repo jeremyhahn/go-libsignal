@@ -168,6 +168,12 @@ func newTripleRatchet(ecCipher ECCipher, sharedSecret []byte, kemImpl mlkembraid
 	if ecCipher == nil {
 		return nil, &ErrInvalidInput{Field: "ecCipher", Reason: "must not be nil"}
 	}
+	// ECCipherSnapshotable is required so that Decrypt can atomically roll back
+	// EC state when MAC verification fails. Without it the EC ratchet permanently
+	// advances on any failure, silently voiding all rollback guarantees.
+	if _, ok := ecCipher.(ECCipherSnapshotable); !ok {
+		return nil, &ErrInvalidInput{Field: "ecCipher", Reason: "must implement ECCipherSnapshotable for atomic rollback"}
+	}
 	if len(sharedSecret) == 0 {
 		return nil, &ErrInvalidInput{Field: "sharedSecret", Reason: "must not be empty"}
 	}

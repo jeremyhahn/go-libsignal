@@ -11,6 +11,8 @@ import (
 	"crypto/subtle"
 	"encoding/binary"
 	"io"
+
+	crypto "github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 )
 
 const (
@@ -26,6 +28,14 @@ const (
 	// backup reader. 100 GiB is a generous upper bound that prevents a
 	// malicious or corrupted stream from exhausting memory.
 	maxBackupSize = 100 * 1024 * 1024 * 1024 // 100 GiB
+
+	// maxDecompressedSize is the cumulative budget for decompressed frame
+	// bytes across a single backup stream. A gzip decompression bomb can
+	// expand far beyond the encrypted payload size; this cap limits the
+	// total cleartext accumulated in memory after HMAC verification.
+	// The check fires only for authenticated data (i.e., the caller holds
+	// the key) but guards against corrupt or adversarial backup generators.
+	maxDecompressedSize = maxBackupSize // 100 GiB
 )
 
 // HMACMismatchError indicates that the expected HMAC did not match the
@@ -80,8 +90,12 @@ func (fe *FrameEncryptor) EncryptFrames(w io.Writer, frames [][]byte) error {
 		return &ErrGeneratingIV{Err: err}
 	}
 
-	// PKCS#7 pad the plaintext to AES block size.
-	padded := pkcs7Pad(plaintext.Bytes(), AESBlockSize)
+	// Pad gzip output to bucketed size before PKCS#7 (Rust: export.rs
+	// pad_gzipped_bucketed). Zeros appended here are tolerated by the
+	// decompressor because gzr.Multistream(false) stops at the gzip EOF.
+	gzipBytes := PadGzippedBucketed(plaintext.Bytes())
+	// PKCS#7 pad the bucketed output to AES block size.
+	padded := pkcs7Pad(gzipBytes, AESBlockSize)
 
 	// Encrypt with AES-256-CBC.
 	block, err := aes.NewCipher(fe.key.AESKey.Bytes())
@@ -196,6 +210,13 @@ func (fd *FrameDecryptor) DecryptFrames(r io.Reader) (_ [][]byte, err error) {
 // returns the varint-delimited frames. This is shared between legacy and
 // modern format after HMAC verification.
 func (fd *FrameDecryptor) decryptPayload(content []byte) (_ [][]byte, err error) {
+	return fd.decryptPayloadWithBudget(content, maxDecompressedSize)
+}
+
+// decryptPayloadWithBudget is the parameterised implementation of decryptPayload.
+// budget limits cumulative decompressed bytes; callers pass maxDecompressedSize
+// for production use and a small value for unit tests.
+func (fd *FrameDecryptor) decryptPayloadWithBudget(content []byte, budget int64) (_ [][]byte, err error) {
 	// Extract IV and ciphertext.
 	iv := content[:AESIVSize]
 	ciphertext := content[AESIVSize:]
@@ -210,6 +231,10 @@ func (fd *FrameDecryptor) decryptPayload(content []byte) (_ [][]byte, err error)
 		return nil, &ErrCreatingAESCipher{Err: err}
 	}
 	plaintext := make([]byte, len(ciphertext))
+	// Best-effort wipe of the bulk cleartext buffer when decryptPayload returns.
+	// Keys are already held in guarded memory; this covers the decompressed
+	// working copy on the heap.
+	defer crypto.Zeroize(plaintext)
 	mode := cipher.NewCBCDecrypter(block, iv)
 	mode.CryptBlocks(plaintext, ciphertext)
 
@@ -237,9 +262,11 @@ func (fd *FrameDecryptor) decryptPayload(content []byte) (_ [][]byte, err error)
 		}
 	}()
 
-	// Read varint-delimited frames.
+	// Read varint-delimited frames. Track cumulative decompressed bytes to
+	// guard against decompression bombs even when the caller holds a valid key.
 	vr := NewVarintDelimitedReader(gzr)
 	var frames [][]byte
+	var totalDecompressed int64
 	for {
 		frame, ferr := vr.ReadNext()
 		if ferr != nil {
@@ -247,6 +274,10 @@ func (fd *FrameDecryptor) decryptPayload(content []byte) (_ [][]byte, err error)
 		}
 		if frame == nil {
 			break
+		}
+		totalDecompressed += int64(len(frame))
+		if totalDecompressed > budget {
+			return nil, &ErrDecompressedSizeExceeded{MaxBytes: budget}
 		}
 		frames = append(frames, frame)
 	}
@@ -494,8 +525,12 @@ func (fe *FrameEncryptor) EncryptFramesModern(w io.Writer, frames [][]byte, meta
 		return &ErrGeneratingIV{Err: err}
 	}
 
+	// Pad gzip output to bucketed size before PKCS#7 (Rust: export.rs
+	// pad_gzipped_bucketed). The trailing zeros are tolerated on decrypt
+	// because gzr.Multistream(false) stops at the gzip EOF.
+	gzipBytes := PadGzippedBucketed(plaintext.Bytes())
 	// PKCS#7 pad and encrypt with AES-256-CBC.
-	padded := pkcs7Pad(plaintext.Bytes(), AESBlockSize)
+	padded := pkcs7Pad(gzipBytes, AESBlockSize)
 	block, err := aes.NewCipher(fe.key.AESKey.Bytes())
 	if err != nil {
 		return &ErrCreatingAESCipher{Err: err}
@@ -557,10 +592,16 @@ func writeProtoLenField(buf *bytes.Buffer, fieldNum uint64, val []byte) {
 
 // VerifyHMAC checks the HMAC of encrypted backup data without decrypting it.
 // The input r should contain the full encrypted backup (IV + ciphertext + HMAC).
+// Reads are bounded to maxBackupSize to prevent an unauthenticated reader from
+// triggering unbounded memory allocation (OOM DoS).
 func VerifyHMAC(key *MessageBackupKey, r io.Reader) error {
-	data, err := io.ReadAll(r)
+	limited := io.LimitReader(r, maxBackupSize+1)
+	data, err := io.ReadAll(limited)
 	if err != nil {
 		return &ErrReadingHMACData{Err: err}
+	}
+	if int64(len(data)) > maxBackupSize {
+		return &ErrBackupTooLarge{MaxBytes: maxBackupSize}
 	}
 
 	if len(data) < AESIVSize+HMACLen {

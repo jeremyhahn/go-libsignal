@@ -41,7 +41,49 @@ func NewSignalMessageFromBytes(serialized []byte, serializer SignalMessageSerial
 		return nil, newUnrecognizedVersionError("SignalMessage", signalMessageStructure.Version)
 	}
 
-	return NewSignalMessageFromStruct(signalMessageStructure, serializer)
+	msg, err := NewSignalMessageFromStruct(signalMessageStructure, serializer)
+	if err != nil {
+		return nil, err
+	}
+
+	// Retain the bytes over which the MAC was computed so that VerifyMac can
+	// use them directly rather than re-serializing. This prevents byte-malleability
+	// where re-encoding a message with non-minimal varints or unknown proto fields
+	// produces different bytes, causing the MAC to be verified against a different
+	// input than what the sender signed. Mirrors Rust protocol.rs:160-184.
+	//
+	// Format detection: the Protobuf wire format appends the 8-byte MAC as a binary
+	// suffix (version_byte || proto_body || mac[8]), so the last macLength bytes of
+	// the received buffer equal signalMessageStructure.Mac. JSON and other formats
+	// embed the MAC as a field, not as a binary suffix.
+	//
+	// For binary (protobuf) format: retain serialized[:len-macLength] directly —
+	// these are the exact bytes the sender's getMac was called over, ensuring
+	// that any malleability in the proto body (non-minimal varints, unknown fields)
+	// is correctly detected at verification time.
+	//
+	// For non-binary formats (JSON, test serializers): re-serialize with Mac=nil
+	// to reproduce the canonical pre-MAC bytes. This is the same as the original
+	// VerifyMac implementation and carries no additional malleability risk for
+	// these test-only formats.
+	if len(serialized) > macLength &&
+		hmac.Equal(serialized[len(serialized)-macLength:], signalMessageStructure.Mac) {
+		// Binary wire format: MAC is a binary suffix; retain original pre-MAC bytes.
+		preMac := make([]byte, len(serialized)-macLength)
+		copy(preMac, serialized[:len(serialized)-macLength])
+		msg.serializedBytes = preMac
+	} else {
+		// Non-binary format: re-derive the pre-MAC bytes by re-serializing with Mac=nil.
+		zeroedStruct := *signalMessageStructure
+		zeroedStruct.Mac = nil
+		preMac, serErr := serializer.Serialize(&zeroedStruct)
+		if serErr != nil {
+			return nil, serErr
+		}
+		msg.serializedBytes = preMac
+	}
+
+	return msg, nil
 }
 
 // NewSignalMessageFromStruct returns a Signal Ciphertext message from the
@@ -81,23 +123,22 @@ func NewSignalMessage(messageVersion int, counter, previousCounter uint32, macKe
 
 	// Serialize addresses into the binding field (proto field 6).
 	//
-	// Both nil → legacy unbound format (backward compat, no error).
-	// Asymmetric (exactly one nil) → legacy unbound; the nil side is not
-	//   known, so address binding cannot be established (backward compat, no
-	//   error). Callers that want to enforce binding must supply both.
-	// Both non-nil → binding is attempted. If SerializeAddresses returns nil
-	//   (invalid device ID or non-ServiceId name), return
-	//   ErrInvalidAddressForBinding rather than silently downgrading to an
-	//   unbound message. This closes the silent-omission bug reported in
-	//   Codex finding P2.
+	// Address binding is opportunistic, matching Rust SignalMessage::new
+	// (rust/protocol/src/protocol.rs:91-92), which builds the field via
+	// `addresses.and_then(serialize_addresses)`. serialize_addresses
+	// (protocol.rs:250-256) parses each name as a ServiceId with the `?`
+	// operator on an Option, so a non-ServiceId name (or out-of-range device
+	// ID) yields None and the binding field is simply omitted — the message
+	// falls back to the legacy unbound format rather than erroring. Production
+	// addresses are always ServiceIds and still bind; legacy/non-ServiceId
+	// callers degrade gracefully, and the receiver independently accepts
+	// unbound messages (verify_mac_with_addresses, protocol.rs:198-200).
 	//
-	// Mirrors Rust SignalMessage::new at rust/protocol/src/protocol.rs:79.
+	// Both nil, or exactly one nil, also leaves the field unset (no address
+	// pair to bind).
 	var addresses []byte
 	if localAddress != nil && remoteAddress != nil {
 		addresses = SerializeAddresses(localAddress, remoteAddress)
-		if addresses == nil {
-			return nil, newInvalidAddressForBindingError()
-		}
 	}
 
 	// Build the signal message structure with the given data.
@@ -111,8 +152,10 @@ func NewSignalMessage(messageVersion int, counter, previousCounter uint32, macKe
 		Addresses:       addresses,
 	}
 
-	// Serialize the structure to get bytes for MAC calculation.
-	serializedBytes, err := serializer.Serialize(structure)
+	// Serialize the structure (without MAC) to get bytes for MAC calculation.
+	// These bytes become the canonical MAC input, stored on the message so
+	// VerifyMac can use them directly rather than re-serializing.
+	preMacBytes, err := serializer.Serialize(structure)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +163,7 @@ func NewSignalMessage(messageVersion int, counter, previousCounter uint32, macKe
 	// Get the message authentication code from the serialized structure.
 	mac, err := getMac(
 		senderIdentityKey, receiverIdentityKey,
-		macKey, serializedBytes,
+		macKey, preMacBytes,
 	)
 	if err != nil {
 		return nil, err
@@ -132,6 +175,10 @@ func NewSignalMessage(messageVersion int, counter, previousCounter uint32, macKe
 	if err != nil {
 		return nil, err
 	}
+
+	// Store the pre-MAC bytes so VerifyMac uses the exact same bytes that
+	// were MACed, matching the Rust self.serialized[..len-MAC_LENGTH] pattern.
+	whisperMessage.serializedBytes = preMacBytes
 
 	return whisperMessage, nil
 }
@@ -155,6 +202,16 @@ type SignalMessage struct {
 	structure        SignalMessageStructure
 	senderRatchetKey ecc.ECPublicKeyable
 	serializer       SignalMessageSerializer
+	// serializedBytes holds the wire bytes used as MAC input (everything
+	// before the trailing macLength-byte MAC tag). Set at construction time
+	// from the pre-MAC serialized bytes (encrypt path) or from the received
+	// wire bytes stripped of the MAC suffix (deserialize path). VerifyMac
+	// MACs these bytes directly instead of re-serializing the struct, which
+	// prevents byte-malleability attacks where re-encoding a message with
+	// non-minimal varints or unknown proto fields would change the MAC input.
+	// Mirrors Rust: rust/protocol/src/protocol.rs:160-184 MACs
+	// self.serialized[..self.serialized.len()-MAC_LENGTH].
+	serializedBytes []byte
 }
 
 // SenderRatchetKey returns the SignalMessage's sender ratchet key. This
@@ -187,42 +244,34 @@ func (s *SignalMessage) Body() []byte {
 // VerifyMac will return an error if the message's message authentication code
 // is invalid. This should be used on SignalMessages that have been constructed
 // from a sent message.
+//
+// The MAC is verified over the retained wire bytes set at construction or
+// deserialization time (serializedBytes), not over a re-serialization of
+// the struct. This prevents byte-malleability attacks where re-encoding with
+// non-minimal varints or extra unknown proto fields changes the MAC input.
+// Mirrors Rust: rust/protocol/src/protocol.rs:160-184 which MACs
+// self.serialized[..self.serialized.len()-MAC_LENGTH].
 func (s *SignalMessage) VerifyMac(messageVersion int, senderIdentityKey,
 	receiverIdentityKey *identity.Key, macKey []byte) error {
 
-	// Create a copy of the message without the mac. We'll use this to calculate
-	// the message authentication code.
-	structure := s.structure
-	signalMessage, err := NewSignalMessageFromStruct(&structure, s.serializer)
-	if err != nil {
-		return err
-	}
-	signalMessage.structure.Mac = nil
-
-	// Serialize the message for MAC calculation.
-	serializedBytes, err := signalMessage.Serialize()
-	if err != nil {
-		logger.Error(err)
-		return err
+	if len(s.serializedBytes) == 0 {
+		return newBadMacError()
 	}
 
-	// Calculate the message authentication code from the serialized structure.
+	// Compute the expected MAC over the original pre-MAC wire bytes.
 	ourMac, err := getMac(
 		senderIdentityKey,
 		receiverIdentityKey,
 		macKey,
-		serializedBytes,
+		s.serializedBytes,
 	)
 	if err != nil {
 		logger.Error(err)
 		return err
 	}
 
-	// Get the message authentication code that was sent to us as part of
-	// the signal message structure.
+	// Constant-time comparison with the received MAC.
 	theirMac := s.structure.Mac
-
-	// Return an error if our calculated mac doesn't match the mac sent to us.
 	if !hmac.Equal(ourMac, theirMac) {
 		return newBadMacError()
 	}

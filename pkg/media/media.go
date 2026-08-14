@@ -498,7 +498,13 @@ func sanitizeMP4(data []byte) (*ValidateResult, error) {
 		if f.Ftyp == nil || f.Moov == nil {
 			return nil, &MediaValidationError{Detail: "MP4 missing ftyp or moov after validation"}
 		}
-		metadataBytes, err = encodeFtypMoov(f.Ftyp, f.Moov)
+		// Finding (MEDIUM): stripping free/skip boxes changes the byte distance
+		// between moov and mdat, so stco/co64 entries must be shifted by the
+		// same delta as in the moov-after-mdat path.  Route through
+		// rewriteMetadataWithOffsets so the shift (and stco→co64 promotion) is
+		// applied correctly.  When no padding was present, delta==0 and the
+		// function is a no-op on the offsets.
+		metadataBytes, err = rewriteMetadataWithOffsets(f.Ftyp, f.Moov, sm.DataOffset)
 		if err != nil {
 			return nil, &MediaValidationError{Detail: "MP4 metadata encode error: " + err.Error()}
 		}

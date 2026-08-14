@@ -22,10 +22,12 @@ type Decoder struct {
 	originalLen int
 
 	// totalChunksNeeded is the number of distinct chunk indices required for
-	// reconstruction (ceil(originalLen/ChunkDataSize)). Chunk indices at or
-	// beyond this value are rejected as out-of-range, matching the protocol
-	// expectation that senders do not emit redundancy beyond the first pass
-	// unless explicitly retransmitting.
+	// reconstruction (ceil(originalLen/ChunkDataSize)). The decoder accepts
+	// polynomial redundancy chunks (indices ≥ totalChunksNeeded) because the
+	// Lagrange interpolation works with any N distinct x-values. At most
+	// 2*totalChunksNeeded unique indices are accepted per lifetime to bound
+	// memory use; any peer legitimately needs at most one first pass plus one
+	// redundancy pass worth of chunks.
 	totalChunksNeeded int
 
 	// seenIndices tracks which chunk indices have been accepted, for duplicate
@@ -84,7 +86,10 @@ func NewDecoder(originalLen, _ int) (*Decoder, error) {
 //
 // The varint-encoded index is decoded first, then exactly 32 bytes of payload
 // data follow. Duplicate chunks for the same index are silently ignored.
-// Chunk indices at or beyond TotalChunks are rejected as out of range.
+// Polynomial redundancy chunks (index ≥ TotalChunks) are accepted because the
+// Lagrange interpolation works with any N distinct x-values. A hard cap of
+// 2*TotalChunks unique indices per decoder lifetime bounds memory use against
+// DoS via index flooding.
 func (d *Decoder) AddChunk(chunk []byte) error {
 	if len(chunk) == 0 {
 		return &ErrChunkFormat{Reason: "chunk is empty"}
@@ -112,6 +117,16 @@ func (d *Decoder) AddChunk(chunk []byte) error {
 	if d.seenIndices[index] {
 		return nil
 	}
+
+	// Cap unique accepted indices at 2*totalChunksNeeded to bound memory use.
+	// An attacker can otherwise force up to 65536 distinct indices, bloating
+	// seenIndices and chunkLog to ~2 MB. Any legitimate peer needs at most one
+	// first pass (indices 0..N-1) plus one redundancy pass (indices N..2N-1);
+	// any index beyond 2N is spurious.
+	if len(d.seenIndices) >= 2*d.totalChunksNeeded {
+		return &ErrChunkIndex{Index: index, Total: uint16(d.totalChunksNeeded)}
+	}
+
 	d.seenIndices[index] = true
 
 	var data [ChunkDataSize]byte

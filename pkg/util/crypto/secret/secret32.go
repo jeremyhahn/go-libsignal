@@ -13,8 +13,10 @@ type Secret32 struct {
 	inner *Secret
 }
 
-// NewSecret32 creates a Secret32 from a 32-byte array. The source array is
-// zeroized after the data is moved into guarded memory.
+// NewSecret32 creates a Secret32 from a 32-byte array. The data parameter is
+// received by value (Go copies it on function entry), so the caller's source
+// array is not zeroized by this function. Callers must zeroize their own array
+// after calling NewSecret32 if it contains sensitive key material.
 func NewSecret32(data [32]byte) (*Secret32, error) {
 	s, err := New(data[:])
 	if err != nil {

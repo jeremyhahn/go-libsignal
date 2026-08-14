@@ -26,7 +26,6 @@ const (
 	errDecryptionErrorMessageDeserialize
 	errAddressMismatch
 	errInvalidArgumentPlaintext
-	errInvalidAddressForBinding
 )
 
 // ErrLegacyVersion indicates a message with an unsupported legacy version was received.
@@ -77,19 +76,6 @@ var ErrAddressMismatch = &Error{kind: errAddressMismatch}
 // rust/protocol/src/protocol.rs:898-900.
 var ErrInvalidArgumentPlaintext = &Error{kind: errInvalidArgumentPlaintext}
 
-// ErrInvalidAddressForBinding is returned by NewSignalMessage when non-nil
-// addresses are provided but cannot be serialized into the addresses binding
-// field (proto field 6) because a device ID is outside the valid range [1, 127]
-// or an address name is not a valid ServiceId string.
-//
-// Passing nil for both addresses is the legacy unbound format and does not
-// return this error. Only asymmetric (one nil, one non-nil) or structurally
-// invalid addresses trigger this error.
-//
-// Mirrors Rust SignalProtocolError::InvalidArgument raised in
-// rust/protocol/src/protocol.rs when address serialization fails.
-var ErrInvalidAddressForBinding = &Error{kind: errInvalidAddressForBinding}
-
 func (e *Error) Error() string {
 	switch e.kind {
 	case errLegacyVersion:
@@ -124,8 +110,6 @@ func (e *Error) Error() string {
 		return "protocol: address mismatch: SignalMessage addresses field does not match expected sender/recipient"
 	case errInvalidArgumentPlaintext:
 		return "protocol: cannot create a DecryptionErrorMessage for plaintext content; it is not encrypted"
-	case errInvalidAddressForBinding:
-		return "protocol: non-nil addresses cannot be serialized into the address-binding field; device ID must be 1-127 and names must be valid ServiceId strings"
 	default:
 		return "protocol: unknown error"
 	}
@@ -205,12 +189,6 @@ func newAddressMismatchError() *Error {
 // DecryptionErrorMessageForOriginal when the original message type is PLAINTEXT_TYPE.
 func newInvalidArgumentPlaintextError() *Error {
 	return &Error{kind: errInvalidArgumentPlaintext}
-}
-
-// newInvalidAddressForBindingError creates the error returned by NewSignalMessage
-// when non-nil addresses fail SerializeAddresses validation.
-func newInvalidAddressForBindingError() *Error {
-	return &Error{kind: errInvalidAddressForBinding}
 }
 
 // ServiceIdParseError indicates a failure parsing a ServiceId.

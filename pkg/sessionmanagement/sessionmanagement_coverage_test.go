@@ -220,7 +220,8 @@ func newTestParty(t *testing.T, name string, deviceID uint32, ser *serialize.Ser
 	}
 	p.regID = keyhelper.GenerateRegistrationID()
 
-	p.preKeys, err = keyhelper.GeneratePreKeys(0, 10, ser.PreKeyRecord)
+	// start=1: GeneratePreKeys requires start >= 1 (pre-key ID 0 is invalid).
+	p.preKeys, err = keyhelper.GeneratePreKeys(1, 10, ser.PreKeyRecord)
 	if err != nil {
 		t.Fatalf("GeneratePreKeys: %v", err)
 	}
@@ -1120,6 +1121,95 @@ func TestBackCompat_PNIBothEndpoints(t *testing.T) {
 	}
 	if string(decrypted) != "pni-pni" {
 		t.Errorf("decrypted = %q, want %q", decrypted, "pni-pni")
+	}
+}
+
+// =============================================================================
+// Finding 1 regression: double-commit of deferred.Complete()
+//
+// Before the fix, sessionmanagement.MessageDecryptPreKey called
+// deferred.Complete() AFTER SessionCipher.DecryptPreKeyMessage had ALREADY
+// called it internally. For a non-idempotent store (one that errors on the
+// second call to MarkKyberPreKeyUsed/RemovePreKey), this caused a spurious
+// error on what was otherwise a successful first message decrypt.
+//
+// The fix discards the returned *DeferredActions with `_`, so Complete() is
+// only called once — inside DecryptPreKeyMessage.
+// =============================================================================
+
+// oneShotKyberStore wraps memKyberPreKeyStore and makes MarkKyberPreKeyUsed
+// succeed exactly once. A second call returns an error, simulating a
+// non-idempotent remote pre-key store (e.g., one that errors when trying to
+// delete an already-deleted key).
+type oneShotKyberStore struct {
+	*memKyberPreKeyStore
+	calls int
+}
+
+func (s *oneShotKyberStore) MarkKyberPreKeyUsed(id uint32, regID uint32, ik ecc.ECPublicKeyable) error {
+	s.calls++
+	if s.calls > 1 {
+		return fmt.Errorf("oneShotKyberStore: MarkKyberPreKeyUsed called %d times (non-idempotent store fails on second call)", s.calls)
+	}
+	return s.memKyberPreKeyStore.MarkKyberPreKeyUsed(id, regID, ik)
+}
+
+var _ store.KyberPreKey = (*oneShotKyberStore)(nil)
+
+// TestMessageDecryptPreKey_NoDoubleCommit verifies Finding 1: that
+// MessageDecryptPreKey does NOT call deferred.Complete() a second time after
+// SessionCipher.DecryptPreKeyMessage has already called it internally.
+//
+// Before the fix: MessageDecryptPreKey called deferred.Complete() again after
+// DecryptPreKeyMessage returned, which triggered a second call to
+// MarkKyberPreKeyUsed. With a non-idempotent store (one that errors on the
+// second call, e.g., because the key was already removed), this produced a
+// spurious error even though decryption succeeded.
+//
+// After the fix: deferred is discarded with `_`, so MarkKyberPreKeyUsed is
+// only called once (from within DecryptPreKeyMessage) and the one-shot store
+// does not see a second call. MessageDecryptPreKey succeeds.
+func TestMessageDecryptPreKey_NoDoubleCommit(t *testing.T) {
+	ser := serialize.NewJSONSerializer()
+	alice := newTestParty(t, "alice_nodc", 1, ser)
+	bob := newTestParty(t, "bob_nodc", 2, ser)
+
+	setupSession(t, alice, bob, ser)
+
+	ct, err := sessionmanagement.MessageEncrypt(
+		[]byte("no-double-commit"),
+		bob.addr, alice.addr,
+		alice.sessionStore, alice.identityStore, ser,
+	)
+	if err != nil {
+		t.Fatalf("MessageEncrypt: %v", err)
+	}
+	preKeyMsg, ok := ct.(*protocol.PreKeySignalMessage)
+	if !ok {
+		t.Fatalf("expected PreKeySignalMessage, got %T", ct)
+	}
+
+	// Replace Bob's Kyber store with a one-shot version: succeeds on call 1,
+	// errors on call 2. If MessageDecryptPreKey double-commits, this test fails.
+	oneShot := &oneShotKyberStore{memKyberPreKeyStore: bob.kyberStore}
+
+	plaintext, err := sessionmanagement.MessageDecryptPreKey(
+		preKeyMsg, alice.addr, bob.addr,
+		bob.sessionStore, bob.identityStore,
+		bob.preKeyStore, bob.signedKeyStore, oneShot,
+		ser,
+	)
+	if err != nil {
+		t.Fatalf("MessageDecryptPreKey with one-shot Kyber store should succeed (single Complete): %v\n"+
+			"(pre-fix: second deferred.Complete() call failed on non-idempotent store)", err)
+	}
+	if string(plaintext) != "no-double-commit" {
+		t.Errorf("plaintext = %q, want %q", plaintext, "no-double-commit")
+	}
+
+	// Verify the one-shot store was called exactly once (not twice).
+	if oneShot.calls != 1 {
+		t.Errorf("MarkKyberPreKeyUsed called %d times, expected exactly 1 (pre-fix called 2)", oneShot.calls)
 	}
 }
 

@@ -1,6 +1,8 @@
 package protocol
 
 import (
+	"bytes"
+
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/bytehelper"
 )
@@ -24,7 +26,44 @@ func NewSenderKeyMessageFromBytes(serialized []byte,
 		return nil, err
 	}
 
-	return NewSenderKeyMessageFromStruct(senderKeyMessageStructure, serializer)
+	msg, err := NewSenderKeyMessageFromStruct(senderKeyMessageStructure, serializer)
+	if err != nil {
+		return nil, err
+	}
+
+	// Retain the bytes over which the signature was computed so that Serialize()
+	// can return them directly, preventing byte-malleability attacks where
+	// re-encoding a message with non-minimal varints or unknown proto fields
+	// produces different bytes than what the sender signed.
+	//
+	// Format detection: the Protobuf wire format appends the 64-byte signature as
+	// a binary suffix (version_byte || proto_body || sig[64]), so the last
+	// SenderKeySignatureLength bytes of the received buffer equal structure.Signature.
+	// JSON embeds the signature as a field, not as a binary suffix.
+	//
+	// Binary (protobuf) format: retain serialized[:len-SenderKeySignatureLength].
+	// Non-binary (JSON): re-serialize without the signature field to reproduce
+	//   the canonical pre-signature bytes. This matches the original behavior and
+	//   carries no additional malleability risk for test-only formats.
+	if len(serialized) > SenderKeySignatureLength &&
+		bytes.Equal(serialized[len(serialized)-SenderKeySignatureLength:], senderKeyMessageStructure.Signature) {
+		// Binary wire format: signature is a binary suffix.
+		preSig := make([]byte, len(serialized)-SenderKeySignatureLength)
+		copy(preSig, serialized[:len(serialized)-SenderKeySignatureLength])
+		msg.serializedBytes = preSig
+	} else {
+		// Non-binary format: re-serialize without signature to reproduce the
+		// canonical pre-signature bytes.
+		zeroedStruct := *senderKeyMessageStructure
+		zeroedStruct.Signature = nil
+		preSig, serErr := serializer.Serialize(&zeroedStruct)
+		if serErr != nil {
+			return nil, serErr
+		}
+		msg.serializedBytes = preSig
+	}
+
+	return msg, nil
 }
 
 // NewSenderKeyMessageFromStruct returns a Signal Ciphertext message from the
@@ -130,6 +169,14 @@ type SenderKeyMessage struct {
 	ciphertext     []byte
 	signature      []byte
 	serializer     SenderKeyMessageSerializer
+	// serializedBytes holds the pre-signature wire bytes retained from the
+	// received message at deserialize time. When non-nil, Serialize() returns
+	// these bytes directly so that GroupCipher signature verification uses
+	// the original encoding rather than a re-serialized form. This prevents
+	// byte-malleability where non-minimal varints or unknown proto fields
+	// survive unmarshal but are dropped by re-encoding, causing signature
+	// verification to succeed on a byte-modified message.
+	serializedBytes []byte
 }
 
 // DistributionID returns the SenderKeyMessage distribution UUID.
@@ -160,7 +207,21 @@ func (p *SenderKeyMessage) Version() uint32 {
 // Serialize will use the given serializer to return the message as bytes
 // excluding the signature. This should be used for signing and verifying
 // message signatures.
+//
+// When the message was deserialized from wire bytes (NewSenderKeyMessageFromBytes),
+// Serialize returns the retained original pre-signature bytes directly.
+// This prevents byte-malleability in signature verification: if the received
+// encoding uses non-minimal varints or carries unknown proto fields, re-serializing
+// from the struct would produce different bytes than what was signed.
+//
+// On the construction path (NewSenderKeyMessageWithVersion), serializedBytes is
+// nil and this method re-serializes from the struct as before.
 func (p *SenderKeyMessage) Serialize() ([]byte, error) {
+	if p.serializedBytes != nil {
+		out := make([]byte, len(p.serializedBytes))
+		copy(out, p.serializedBytes)
+		return out, nil
+	}
 	structure := &SenderKeyMessageStructure{
 		DistributionID: p.distributionID,
 		ID:             p.keyID,

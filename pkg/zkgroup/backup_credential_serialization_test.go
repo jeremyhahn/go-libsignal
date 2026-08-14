@@ -2,6 +2,7 @@ package zkgroup
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"testing"
 )
@@ -177,5 +178,111 @@ func TestDeserializeBackupAuthCredentialResponse_TooShort(t *testing.T) {
 	_, err := DeserializeBackupAuthCredentialResponse([]byte{0x00})
 	if err == nil {
 		t.Fatal("expected error for too-short input")
+	}
+}
+
+// buildValidResponseBlob returns a complete, byte-valid wire blob for a
+// BackupAuthCredentialResponse so regression tests can mutate a single field.
+func buildValidResponseBlob(t *testing.T) []byte {
+	t.Helper()
+	var backupKey [32]byte
+	for i := range backupKey {
+		backupKey[i] = 0x46
+	}
+	aciBytes := [16]byte{
+		0xc0, 0xfc, 0x16, 0xe4, 0xba, 0xe5, 0x43, 0x43,
+		0x9f, 0x0d, 0xe7, 0xec, 0xf4, 0x25, 0x13, 0x43,
+	}
+	aci := NewACI(aciBytes)
+	ctx, err := NewBackupAuthCredentialRequestContext(backupKey, aci)
+	if err != nil {
+		t.Fatalf("buildValidResponseBlob: NewBackupAuthCredentialRequestContext: %v", err)
+	}
+	var r1, r2 RandomnessBytes
+	for i := range r1 {
+		r1[i] = 0x43
+		r2[i] = 0x44
+	}
+	serverParams := GenerateGenericServerSecretParams(r1)
+	redemptionTime := NewTimestamp(1681344000)
+	resp, err := ctx.GetRequest().Issue(redemptionTime, BackupLevelFree, BackupCredentialTypeMessages, serverParams, r2)
+	if err != nil {
+		t.Fatalf("buildValidResponseBlob: Issue: %v", err)
+	}
+	return SerializeBackupAuthCredentialResponse(resp)
+}
+
+// TestDeserializeBackupAuthCredentialResponse_InvalidLevel_Regression is a
+// regression test for the bug where BackupLevel was read as u64 but cast to
+// byte without range or enum validation.
+//
+// Wire layout for response: reserved(1) + redemption_time(8) + backup_level(8) + …
+// Level occupies bytes [9:17].
+//
+// Before the fix: 256 was truncated to BackupLevel(0), no error.
+// After the fix: rejected with a deserialization error.
+//
+// Rust reference: TryFrom<u64> for BackupLevel at
+// rust/zkgroup/src/api/backups/auth_credential.rs:68-78.
+func TestDeserializeBackupAuthCredentialResponse_InvalidLevel_Regression(t *testing.T) {
+	validBlob := buildValidResponseBlob(t)
+
+	tests := []struct {
+		name     string
+		levelU64 uint64
+	}{
+		{"gt_255_truncates_to_0", 256},
+		{"gt_255_large", 0xFFFF},
+		{"max_uint64", ^uint64(0)},
+		{"byte_range_invalid_0", 0},
+		{"byte_range_invalid_42", 42},
+		{"byte_range_invalid_199", 199},
+		{"byte_range_invalid_202", 202},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			blob := make([]byte, len(validBlob))
+			copy(blob, validBlob)
+			// reserved(1) + redemption_time(8) = 9 bytes before level.
+			binary.LittleEndian.PutUint64(blob[9:17], tt.levelU64)
+			_, err := DeserializeBackupAuthCredentialResponse(blob)
+			if err == nil {
+				t.Fatalf("level=%d: expected deserialization error, got nil", tt.levelU64)
+			}
+		})
+	}
+}
+
+// TestDeserializeBackupAuthCredentialResponse_InvalidCredentialType_Regression
+// mirrors the level regression for BackupCredentialType (bytes [17:25]).
+//
+// Rust reference: TryFrom<u64> for BackupCredentialType at
+// rust/zkgroup/src/api/backups/auth_credential.rs:98-108.
+func TestDeserializeBackupAuthCredentialResponse_InvalidCredentialType_Regression(t *testing.T) {
+	validBlob := buildValidResponseBlob(t)
+
+	tests := []struct {
+		name        string
+		credTypeU64 uint64
+	}{
+		{"gt_255", 256},
+		{"max_uint64", ^uint64(0)},
+		{"byte_range_invalid_0", 0},
+		{"byte_range_invalid_3", 3},
+		{"byte_range_invalid_99", 99},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			blob := make([]byte, len(validBlob))
+			copy(blob, validBlob)
+			// Set a valid level (200 = BackupLevelFree) so only the credType check fires.
+			binary.LittleEndian.PutUint64(blob[9:17], 200)
+			// reserved(1) + redemption_time(8) + level(8) = 17 bytes before credType.
+			binary.LittleEndian.PutUint64(blob[17:25], tt.credTypeU64)
+			_, err := DeserializeBackupAuthCredentialResponse(blob)
+			if err == nil {
+				t.Fatalf("credType=%d: expected deserialization error, got nil", tt.credTypeU64)
+			}
+		})
 	}
 }

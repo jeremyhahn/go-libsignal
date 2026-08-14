@@ -251,12 +251,17 @@ func (s *SHO) AbsorbAndRatchet(data []byte) {
 }
 
 // SqueezeAndRatchet produces output bytes from the SHO state and updates
-// the chaining value. The SHO must be in RATCHETED mode.
+// the chaining value. If the SHO is still in ABSORBING mode it is ratcheted
+// first, mirroring the Rust assert!(self.mode == ShoMode::Ratcheted) guard
+// that the Rust implementation enforces at this entry point.
 //
 // This matches the Rust squeeze_and_ratchet() method exactly:
 //   - For each 32-byte block i: output_i = hash(cv, i_as_be64 || 0x01)
 //   - New cv = hash(cv, outlen_as_be64 || 0x02)
 func (s *SHO) SqueezeAndRatchet(length int) []byte {
+	if s.mode == modeAbsorbing {
+		s.Ratchet()
+	}
 	if length <= 0 {
 		// Even with zero length, update the state per Rust behavior.
 		s.cv = s.variant.squeezeStateUpdate(s.cv, 0)

@@ -135,6 +135,12 @@ func decodeRaftGroupConfig(data []byte) (*RaftConfig, error) {
 				return nil, &ProtobufDecodeError{Detail: "failed to decode length"}
 			}
 			offset += n
+			// Validate length before int() cast.  A crafted varint (e.g. 2^63)
+			// makes int(length) negative so the naive offset+int(length) bounds
+			// check passes, then the subsequent read panics.
+			if offset > len(data) || length > uint64(len(data)-offset) {
+				return nil, &ProtobufDecodeError{Detail: "data underflow in length-delimited field"}
+			}
 			offset += int(length)
 		case 5: // 32-bit
 			offset += 4

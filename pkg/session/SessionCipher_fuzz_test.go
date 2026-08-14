@@ -65,7 +65,8 @@ func buildFuzzSession() (aliceCipher *session.Cipher, bobBuilder *session.Builde
 	bobKyberStore := newInMemoryKyberPreKey()
 
 	// Generate Bob's pre-key material and populate his stores.
-	bobPreKeyList, _ := keyhelper.GeneratePreKeys(0, 10, ser.PreKeyRecord)
+	// start=1: GeneratePreKeys requires start >= 1 (pre-key ID 0 is invalid).
+	bobPreKeyList, _ := keyhelper.GeneratePreKeys(1, 10, ser.PreKeyRecord)
 	for _, pk := range bobPreKeyList {
 		if err := bobPreKeyStore.StorePreKey(pk.ID().Value,
 			record.NewPreKey(pk.ID().Value, pk.KeyPair(), ser.PreKeyRecord)); err != nil {

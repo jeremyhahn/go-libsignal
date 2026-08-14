@@ -110,6 +110,21 @@ func (c *fifoTestECCipher) ReceiveKey(ecHeader []byte) ([]byte, error) {
 	return key, nil
 }
 
+// TakeECSnapshot serializes the send counter for atomic rollback.
+func (c *fifoTestECCipher) TakeECSnapshot() ([]byte, error) {
+	ctr := c.sendCtr
+	return []byte{byte(ctr >> 24), byte(ctr >> 16), byte(ctr >> 8), byte(ctr)}, nil
+}
+
+// RestoreECSnapshot restores the send counter from a snapshot.
+func (c *fifoTestECCipher) RestoreECSnapshot(data []byte) error {
+	if len(data) != 4 {
+		return &ErrInvalidInput{Field: "data", Reason: "EC snapshot must be 4 bytes"}
+	}
+	c.sendCtr = uint32(data[0])<<24 | uint32(data[1])<<16 | uint32(data[2])<<8 | uint32(data[3])
+	return nil
+}
+
 // newFIFOTestPair creates a matched Alice/Bob TripleRatchet pair for FIFO tests.
 func newFIFOTestPair(t *testing.T, ss []byte) (*TripleRatchet, *TripleRatchet) {
 	t.Helper()

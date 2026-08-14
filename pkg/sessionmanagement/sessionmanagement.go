@@ -214,17 +214,19 @@ func MessageDecryptPreKey(
 	)
 	cipher.SetIdentityStore(identityStore)
 
-	plaintext, deferred, err := cipher.DecryptPreKeyMessage(builder, ciphertext)
+	// DecryptPreKeyMessage calls deferred.Complete() internally and returns
+	// a non-nil deferred only on success. Calling Complete() a second time
+	// here was a double-commit bug: on a non-idempotent store (e.g., one
+	// that errors on the second RemovePreKey or MarkKyberPreKeyUsed call)
+	// a valid first-message decrypt would return a spurious error.
+	// Mirrors sealed/sealed_sender.go which discards the returned deferred
+	// for the same reason.
+	//
+	// Rust reference: session_cipher.rs message_decrypt_prekey only calls
+	// the side-effect functions once.
+	plaintext, _, err := cipher.DecryptPreKeyMessage(builder, ciphertext)
 	if err != nil {
 		return nil, err
-	}
-
-	// Commit deferred side effects only after a successful decrypt, matching
-	// the Rust ordering in session_management.rs:239-273.
-	if deferred != nil {
-		if err := deferred.Complete(); err != nil {
-			return nil, err
-		}
 	}
 
 	return plaintext, nil

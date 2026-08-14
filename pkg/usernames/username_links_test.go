@@ -210,6 +210,32 @@ func TestDecodeUsernameData_TruncatedFixed32(t *testing.T) {
 	}
 }
 
+// TestDecodeUsernameData_VarintLengthOverflow verifies that a crafted protobuf
+// field whose varint-encoded length is 2^63 (0x80 × 9 + 0x01) returns a
+// ProtobufError instead of panicking. Before the fix, int(2^63) is the minimum
+// int64 value (-9223372036854775808), which made the bounds check
+// "i+int(length) > len(data)" evaluate to false (bypassed) and then caused
+// data[i : i+int(length)] to panic with a high<low slice index.
+func TestDecodeUsernameData_VarintLengthOverflow(t *testing.T) {
+	// Build a minimal protobuf message:
+	//   field 1 (string, wire type 2, tag 0x0a): length = 2^63, no payload
+	// The 10-byte encoding of 2^63: nine 0x80 continuation bytes followed by
+	// 0x01 (terminator with value bit set in the 64th position).
+	data := []byte{
+		0x0a,                                                       // tag: field 1, wire type 2
+		0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01, // varint = 2^63
+	}
+
+	// Must not panic; must return a ProtobufError.
+	_, err := decodeUsernameData(data)
+	if err == nil {
+		t.Fatal("expected error for varint length 2^63, got nil")
+	}
+	if _, ok := err.(*ProtobufError); !ok {
+		t.Errorf("expected *ProtobufError, got %T: %v", err, err)
+	}
+}
+
 func TestPkcs7Padding(t *testing.T) {
 	tests := []struct {
 		name      string

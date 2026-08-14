@@ -55,13 +55,26 @@ func SealedSenderEncrypt(
 	sessionStore store.Session,
 	identityStore store.IdentityKey,
 ) ([]byte, error) {
+	// Guard the certificate before dereferencing it for the sender address
+	// below: a nil cert must surface as a typed CertificateError rather than a
+	// nil-pointer panic (the inner USMC build would reject it anyway).
+	if senderCert == nil {
+		return nil, &CertificateError{Detail: "sealed sender encrypt: nil sender certificate"}
+	}
+
 	serializer := serialize.NewProtobufSerializer()
+
+	// Build the sender's own address so the inner SignalMessage's addresses
+	// field (proto field 6) is populated, enabling address binding.
+	// Mirrors Rust sealed_sender_encrypt which forwards the sender address as
+	// local to message_encrypt: rust/protocol/src/sealed_sender.rs:2056-2069.
+	senderAddr := protocol.NewSignalAddress(senderCert.SenderUUID(), senderCert.SenderDevice())
 
 	sessionBuilder := session.NewBuilder(
 		sessionStore, nil, nil, identityStore,
 		destination, serializer,
 	)
-	sessionCipher := session.NewCipherWithIdentity(sessionBuilder, destination, identityStore)
+	sessionCipher := session.NewCipherWithIdentityAndLocalAddress(sessionBuilder, senderAddr, destination, identityStore)
 
 	ciphertextMessage, err := sessionCipher.Encrypt(plaintext)
 	if err != nil {
@@ -537,8 +550,14 @@ func SealedSenderDecryptWithKyber(
 			return nil, err
 		}
 
+		// Build local address so the inner SignalMessage verify uses
+		// VerifyMacWithAddresses (address binding). Mirrors Rust
+		// rust/protocol/src/sealed_sender.rs:2056-2069 which forwards
+		// Some(local_address) to message_decrypt_prekey.
+		localAddress := protocol.NewSignalAddress(localUUID, localDeviceID)
+
 		sessionBuilder := buildSessionBuilder()
-		sessionCipher := session.NewCipherWithIdentity(sessionBuilder, senderAddress, identityStore)
+		sessionCipher := session.NewCipherWithIdentityAndLocalAddress(sessionBuilder, localAddress, senderAddress, identityStore)
 		plaintext, _, err = sessionCipher.DecryptPreKeyMessage(sessionBuilder, preKeyMsg)
 		if err != nil {
 			return nil, err

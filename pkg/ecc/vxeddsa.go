@@ -400,10 +400,22 @@ func vxeddsaSign(privateKey *[32]byte, message []byte, random [64]byte) (*[96]by
 //	if h == h_check: v = hash_5(cV); return v
 //	return false
 func vxeddsaVerify(publicKey [32]byte, message []byte, signature *[96]byte) (bool, []byte) {
-	// Clear the sign bit from the Montgomery public key
+	// VXEdDSA intentionally masks bit 255 of the Montgomery x-coordinate before
+	// the canonicity check. This matches the behavior of curve25519-dalek-signal's
+	// FieldElement::from_bytes, which silently masks that bit when decoding, so any
+	// key with bit 255 set is reduced to its canonical form rather than rejected.
+	//
+	// This differs deliberately from XEdDSA verify (verify() in SignCurve25519.go),
+	// which skips the pre-mask and rejects non-canonical keys outright. That
+	// stricter check is documented there as an intentional hardening.
+	//
+	// VXEdDSA retains the dalek-compatible mask because there is no Rust oracle to
+	// confirm the strict-rejection behavior for VXEdDSA specifically; changing the
+	// semantics here without a cross-implementation reference risks breaking
+	// interoperability with peers whose public keys carry the high bit.
 	publicKey[31] &= 0x7F
 
-	// Reject non-canonical Montgomery x-coordinates
+	// Reject keys whose value (after masking bit 255) is still >= p.
 	if isNonCanonicalFieldElement(publicKey) {
 		return false, nil
 	}

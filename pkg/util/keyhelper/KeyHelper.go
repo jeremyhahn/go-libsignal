@@ -12,6 +12,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/identity"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/bytehelper"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/medium"
 )
 
 // GenerateIdentityKeyPair generates an identity keypair used for
@@ -26,24 +27,29 @@ func GenerateIdentityKeyPair() (*identity.KeyPair, error) {
 	return identity.NewKeyPair(publicKey, keyPair.PrivateKey()), nil
 }
 
-// GeneratePreKeys generates a list of PreKeys. Client shsould do this at
+// GeneratePreKeys generates a list of PreKeys. Clients should do this at
 // install time, and subsequently any time the list of PreKeys stored on
 // the server runs low.
 //
-// PreKeys IDs are shorts, so they will eventually be repeated. Clients
-// should store PreKeys in a circular buffer, so that they are repeated
-// as infrequently as possible.
+// PreKey IDs follow the Java reference formula
+// id = ((start-1+i) % (medium.MaxValue-1)) + 1 (signed arithmetic), which
+// honors the start offset so successive batches do not collide and wraps at
+// medium.MaxValue. start=0 reproduces the historical zero-based sequence
+// [0, 1, ..., count-1]; start=K (K>=1) yields [K, K+1, ...].
+//
+// Java ref: libsignal-protocol-java KeyHelper.generatePreKeys.
 func GeneratePreKeys(start int, count int, serializer record.PreKeySerializer) ([]*record.PreKey, error) {
 	var preKeys []*record.PreKey
-
-	_ = start // start is reserved for future circular buffer offset use
-
 	for i := 0; i < count; i++ {
+		// Signed modulo matches the Java reference: for start=0, i=0 the
+		// dividend is -1, Go's truncated modulo yields -1, and +1 gives ID 0
+		// (the long-standing zero-based behavior). All other inputs are >= 1.
+		id := uint32(((start - 1 + i) % (int(medium.MaxValue) - 1)) + 1)
 		key, err := ecc.GenerateKeyPair()
 		if err != nil {
 			return nil, err
 		}
-		preKeys = append(preKeys, record.NewPreKey(uint32(i), key, serializer))
+		preKeys = append(preKeys, record.NewPreKey(id, key, serializer))
 	}
 
 	return preKeys, nil
@@ -76,15 +82,19 @@ func GenerateSignedPreKey(identityKeyPair *identity.KeyPair, signedPreKeyID uint
 }
 
 // GenerateRegistrationID generates a registration ID. Clients should only do
-// this once, at install time. Registration IDs are 14-bit values (0–16383)
-// per the Signal protocol specification.
+// this once, at install time. Registration IDs are in the range [1, 16380],
+// matching the Java reference implementation (% 16380 + 1). Values 0 and
+// 16381–16383 are never emitted; 0 is the "unset" sentinel and the upper
+// three values are excluded for compatibility with the Java implementation.
+//
+// Java ref: libsignal-protocol-java KeyHelper.generateRegistrationId.
 func GenerateRegistrationID() uint32 {
 	var n uint32
 	if err := binary.Read(rand.Reader, binary.LittleEndian, &n); err != nil {
 		panic("keyhelper: failed to read random bytes for registration ID: " + err.Error())
 	}
 
-	return n & 0x3FFF
+	return (n % 16380) + 1
 }
 
 //---------- Group Stuff ----------------

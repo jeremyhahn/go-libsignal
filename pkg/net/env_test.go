@@ -1,6 +1,7 @@
 package net
 
 import (
+	"net"
 	"testing"
 	"time"
 )
@@ -266,6 +267,61 @@ func TestStaging_KeyTransAuditorIsolation(t *testing.T) {
 	if env2.KeyTrans.AuditorKeyMaterials[0][0] != original {
 		t.Errorf("Staging() after mutation returned AuditorKeyMaterials[0][0] = 0x%02x, want 0x%02x",
 			env2.KeyTrans.AuditorKeyMaterials[0][0], original)
+	}
+}
+
+// TestProduction_DomainConfigMutationIsolation verifies that cloneDomainConfig
+// deep-copies the Proxy pointer and the IPv4/IPv6 slices, so mutating one
+// Production() Env does not affect another Production() Env.
+func TestProduction_DomainConfigMutationIsolation(t *testing.T) {
+	env1 := Production()
+	env2 := Production()
+
+	// --- Proxy isolation ---
+	if env1.ChatDomainConfig.Connect.Proxy == nil {
+		t.Fatal("env1 ChatDomainConfig.Connect.Proxy is nil")
+	}
+	if env2.ChatDomainConfig.Connect.Proxy == nil {
+		t.Fatal("env2 ChatDomainConfig.Connect.Proxy is nil")
+	}
+	if env1.ChatDomainConfig.Connect.Proxy == env2.ChatDomainConfig.Connect.Proxy {
+		t.Error("env1 and env2 share the same Proxy pointer; mutations would be shared")
+	}
+
+	savedPath := env2.ChatDomainConfig.Connect.Proxy.PathPrefix
+	env1.ChatDomainConfig.Connect.Proxy.PathPrefix = "/mutated"
+	if env2.ChatDomainConfig.Connect.Proxy.PathPrefix != savedPath {
+		t.Errorf("env2 Proxy.PathPrefix = %q after mutating env1; want %q",
+			env2.ChatDomainConfig.Connect.Proxy.PathPrefix, savedPath)
+	}
+
+	// --- IPv4 slice isolation ---
+	if len(env1.ChatDomainConfig.IPv4) == 0 {
+		t.Fatal("env1 has no IPv4 addresses")
+	}
+	if len(env2.ChatDomainConfig.IPv4) == 0 {
+		t.Fatal("env2 has no IPv4 addresses")
+	}
+
+	// Save env2's first IPv4 address.
+	savedIPv4 := make(net.IP, len(env2.ChatDomainConfig.IPv4[0]))
+	copy(savedIPv4, env2.ChatDomainConfig.IPv4[0])
+
+	// Replace env1's first entry; env2 must be unaffected.
+	env1.ChatDomainConfig.IPv4[0] = net.IP{0, 0, 0, 0}
+	if !env2.ChatDomainConfig.IPv4[0].Equal(savedIPv4) {
+		t.Error("env2 IPv4[0] changed after replacing env1's slice element")
+	}
+
+	// --- IPv6 slice isolation ---
+	if len(env1.ChatDomainConfig.IPv6) > 0 && len(env2.ChatDomainConfig.IPv6) > 0 {
+		savedIPv6 := make(net.IP, len(env2.ChatDomainConfig.IPv6[0]))
+		copy(savedIPv6, env2.ChatDomainConfig.IPv6[0])
+
+		env1.ChatDomainConfig.IPv6[0] = net.IP{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+		if !env2.ChatDomainConfig.IPv6[0].Equal(savedIPv6) {
+			t.Error("env2 IPv6[0] changed after replacing env1's slice element")
+		}
 	}
 }
 

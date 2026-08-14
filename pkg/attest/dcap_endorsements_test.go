@@ -354,27 +354,39 @@ func TestValidateOffsets_NotStrictlyIncreasing(t *testing.T) {
 
 func TestSgxEndorsements_ValidAt(t *testing.T) {
 	now := time.Now()
-	validCert := generateSelfSignedCertForEndorsements(t)
+	certKey, validCert := generateTestCertAndKey(t)
+	validCRLBytes := generateTestCRL(t, validCert, certKey)
+	validCRL, err := x509.ParseRevocationList(validCRLBytes)
+	if err != nil {
+		t.Fatalf("parse CRL: %v", err)
+	}
 
-	t.Run("empty endorsements valid", func(t *testing.T) {
+	// Finding-1 fix: nil CRLs must cause validAt to return false (fail-closed),
+	// not silently pass.  An attacker who strips CRL fields gets endorsements with
+	// nil pckCertCRL / pckProcCACRL; validAt must reject them.
+	t.Run("nil CRLs fail closed", func(t *testing.T) {
 		e := &sgxEndorsements{}
-		if !e.validAt(now) {
-			t.Error("validAt should return true for empty endorsements")
+		if e.validAt(now) {
+			t.Error("validAt must return false when CRLs are missing (regression for Finding 1)")
 		}
 	})
 
-	t.Run("valid certs and no expiry", func(t *testing.T) {
+	t.Run("valid certs and CRLs within window", func(t *testing.T) {
 		e := &sgxEndorsements{
 			tcbIssuerChain: []*x509.Certificate{validCert},
+			pckCertCRL:     validCRL,
+			pckProcCACRL:   validCRL,
 		}
 		if !e.validAt(now) {
-			t.Error("validAt should return true with valid cert")
+			t.Error("validAt should return true with valid cert and valid CRLs")
 		}
 	})
 
 	t.Run("expired cert", func(t *testing.T) {
 		e := &sgxEndorsements{
 			tcbIssuerChain: []*x509.Certificate{validCert},
+			pckCertCRL:     validCRL,
+			pckProcCACRL:   validCRL,
 		}
 		futureTime := now.Add(24 * time.Hour)
 		if e.validAt(futureTime) {
@@ -383,11 +395,13 @@ func TestSgxEndorsements_ValidAt(t *testing.T) {
 	})
 
 	t.Run("tcb info expired", func(t *testing.T) {
+		// No CRLs — validAt returns false due to nil CRL before reaching the
+		// tcbInfoNextUpdate check.  The expected result (false) is unchanged.
 		e := &sgxEndorsements{
 			tcbInfoNextUpdate: now.Add(-time.Hour),
 		}
 		if e.validAt(now) {
-			t.Error("validAt should return false when tcb info is past nextUpdate")
+			t.Error("validAt should return false when tcb info is past nextUpdate (or CRLs missing)")
 		}
 	})
 
@@ -396,17 +410,19 @@ func TestSgxEndorsements_ValidAt(t *testing.T) {
 			qeIDNextUpdate: now.Add(-time.Hour),
 		}
 		if e.validAt(now) {
-			t.Error("validAt should return false when qe identity is past nextUpdate")
+			t.Error("validAt should return false when qe identity is past nextUpdate (or CRLs missing)")
 		}
 	})
 
-	t.Run("tcb info not expired", func(t *testing.T) {
+	t.Run("tcb info not expired with valid CRLs", func(t *testing.T) {
 		e := &sgxEndorsements{
 			tcbInfoNextUpdate: now.Add(time.Hour),
 			qeIDNextUpdate:    now.Add(time.Hour),
+			pckCertCRL:        validCRL,
+			pckProcCACRL:      validCRL,
 		}
 		if !e.validAt(now) {
-			t.Error("validAt should return true when within validity period")
+			t.Error("validAt should return true when within validity period and CRLs present")
 		}
 	})
 }
@@ -594,10 +610,17 @@ func generateTestCertAndKey(t *testing.T) (*ecdsa.PrivateKey, *x509.Certificate)
 
 func generateTestCRL(t *testing.T, issuer *x509.Certificate, key *ecdsa.PrivateKey) []byte {
 	t.Helper()
+	// parseCRL now requires AKI and CRL Number extensions (matches Rust reference).
+	// Use the issuer's SubjectKeyId for AKI; fall back to a minimal test value.
+	aki := issuer.SubjectKeyId
+	if len(aki) == 0 {
+		aki = []byte{0x01, 0x02, 0x03, 0x04}
+	}
 	template := &x509.RevocationList{
-		Number:     big.NewInt(1),
-		ThisUpdate: time.Now().Add(-time.Hour),
-		NextUpdate: time.Now().Add(time.Hour),
+		Number:         big.NewInt(1),
+		AuthorityKeyId: aki,
+		ThisUpdate:     time.Now().Add(-time.Hour),
+		NextUpdate:     time.Now().Add(time.Hour),
 	}
 	crlBytes, err := x509.CreateRevocationList(rand.Reader, template, issuer, key)
 	if err != nil {
@@ -608,10 +631,16 @@ func generateTestCRL(t *testing.T, issuer *x509.Certificate, key *ecdsa.PrivateK
 
 func generateTestCRLWithRevoked(t *testing.T, issuer *x509.Certificate, key *ecdsa.PrivateKey, revokedSerial *big.Int) []byte {
 	t.Helper()
+	// parseCRL now requires AKI and CRL Number extensions (matches Rust reference).
+	aki := issuer.SubjectKeyId
+	if len(aki) == 0 {
+		aki = []byte{0x01, 0x02, 0x03, 0x04}
+	}
 	template := &x509.RevocationList{
-		Number:     big.NewInt(1),
-		ThisUpdate: time.Now().Add(-time.Hour),
-		NextUpdate: time.Now().Add(time.Hour),
+		Number:         big.NewInt(1),
+		AuthorityKeyId: aki,
+		ThisUpdate:     time.Now().Add(-time.Hour),
+		NextUpdate:     time.Now().Add(time.Hour),
 		RevokedCertificateEntries: []x509.RevocationListEntry{
 			{
 				SerialNumber:   revokedSerial,
@@ -925,13 +954,31 @@ func TestVerifySignedJSON_DERSignature_BadSig(t *testing.T) {
 
 // --- AT-C1: CRL verification tests ---
 
+// TestParseCRL_EmptyData verifies the Finding-1 fix: empty CRL data must be
+// rejected with a typed error rather than silently returning (nil, nil).
+// Before the fix parseCRL returned nil, nil for empty input, which let an
+// attacker strip CRL fields and bypass all revocation checks.
 func TestParseCRL_EmptyData(t *testing.T) {
-	crl, err := parseCRL(nil)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	_, err := parseCRL(nil)
+	if err == nil {
+		t.Fatal("parseCRL must reject nil/empty data (regression for Finding 1: CRL stripping attack)")
 	}
-	if crl != nil {
-		t.Error("expected nil CRL for empty data")
+	var missingErr *CRLMissingError
+	if !errors.As(err, &missingErr) {
+		t.Errorf("expected CRLMissingError, got %T: %v", err, err)
+	}
+}
+
+// TestParseCRL_EmptySliceRejected verifies that an explicitly empty byte slice
+// is also rejected (same path as nil, regression for Finding 1).
+func TestParseCRL_EmptySliceRejected(t *testing.T) {
+	_, err := parseCRL([]byte{})
+	if err == nil {
+		t.Fatal("parseCRL must reject empty byte slice")
+	}
+	var missingErr *CRLMissingError
+	if !errors.As(err, &missingErr) {
+		t.Errorf("expected CRLMissingError, got %T: %v", err, err)
 	}
 }
 

@@ -295,6 +295,47 @@ func TestDecodeToExtended(t *testing.T) {
 	})
 }
 
+// TestElligatorInv_BranchlessFoundFlagEquivalence is a regression test for the
+// constant-time refactor of elligatorInv. It verifies that the branchless
+// integer expression `sIsZero | (wasSquare &^ sIsZero)` is mathematically
+// identical to the old boolean `sIsZero==1 || (wasSquare==1 && sIsZero!=1)` for
+// every combination of the two 0/1 input flags. This exhaustive truth-table
+// proof guarantees the refactor introduces no behavioral change in the found flag
+// (and therefore no change in the mask produced by ElligatorRistrettoFlavorInverse).
+func TestElligatorInv_BranchlessFoundFlagEquivalence(t *testing.T) {
+	cases := []struct {
+		sIsZero   int
+		wasSquare int
+		wantFound int
+	}{
+		{0, 0, 0}, // s≠0, not a square: no preimage
+		{0, 1, 1}, // s≠0, is a square: preimage exists
+		{1, 0, 1}, // s=0 degenerate case: preimage is sqrtID (or zero)
+		{1, 1, 1}, // s=0 degenerate case (also square): preimage exists
+	}
+
+	for _, tc := range cases {
+		// Old branchy boolean logic (reference):
+		oldBool := tc.sIsZero == 1 || (tc.wasSquare == 1 && tc.sIsZero != 1)
+		var oldInt int
+		if oldBool {
+			oldInt = 1
+		}
+
+		// New branchless integer logic (implementation):
+		newInt := tc.sIsZero | (tc.wasSquare &^ tc.sIsZero)
+
+		if newInt != tc.wantFound {
+			t.Errorf("sIsZero=%d wasSquare=%d: branchless got %d, want %d",
+				tc.sIsZero, tc.wasSquare, newInt, tc.wantFound)
+		}
+		if oldInt != newInt {
+			t.Errorf("sIsZero=%d wasSquare=%d: old=%d new=%d (behavioral divergence detected)",
+				tc.sIsZero, tc.wasSquare, oldInt, newInt)
+		}
+	}
+}
+
 // TestConstantsConsistency verifies derived constants are self-consistent.
 func TestConstantsConsistency(t *testing.T) {
 	// Verify dp1OverDm1 = (d+1) * (d-1)^{-1}

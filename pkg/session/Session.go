@@ -172,7 +172,20 @@ func (d *DeferredActions) Complete() error {
 func (b *Builder) Process(message *protocol.PreKeySignalMessage) (*DeferredActions, error) {
 
 	// Load or create session record for this session.
-	sessionRecord, err := b.sessionStore.LoadSession(b.remoteAddress)
+	loadedRecord, err := b.sessionStore.LoadSession(b.remoteAddress)
+	if err != nil {
+		return nil, err
+	}
+
+	// Operate on a deep copy. Session stores return their record by reference,
+	// so processV3 (which adds the new session state) and the subsequent
+	// DecryptWithRecordPreKey (which advances the ratchet) would otherwise
+	// mutate the persisted session in place — corrupting it even when the inner
+	// SignalMessage fails to decrypt and Complete() is never called. By cloning
+	// here, a failed decryption leaves the stored session untouched and the
+	// one-time pre-key unburned; Complete() persists this copy only on success.
+	// Mirrors Rust's atomic process_prekey_signal_message (session.rs).
+	sessionRecord, err := loadedRecord.Copy()
 	if err != nil {
 		return nil, err
 	}

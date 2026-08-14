@@ -9,7 +9,6 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/root"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/session"
 	"github.com/jeremyhahn/go-libsignal/pkg/logger"
-	"github.com/jeremyhahn/go-libsignal/pkg/util/bytehelper"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/errorhelper"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/optional"
@@ -173,10 +172,25 @@ func (s *State) SenderBaseKey() []byte {
 	return s.senderBaseKey.Serialize()
 }
 
-// SetSenderBaseKey sets the sender's base key with the given bytes.
+// SetSenderBaseKey sets the sender's base key with the given serialized bytes.
+// The input must be the 33-byte type-prefixed EC public key form ([0x05 || 32 key bytes])
+// as returned by ECPublicKeyable.Serialize(). Using ecc.DecodePoint rather than
+// bytehelper.SliceToArray + NewDjbECPublicKey prevents a truncation bug where
+// SliceToArray kept the 0x05 type byte and dropped the last key byte, producing a
+// 34-byte Serialize() output that never matched the expected 33-byte comparison
+// in HasSessionState. If decoding fails the field is set to nil and the error logged.
 func (s *State) SetSenderBaseKey(senderBaseKey []byte) {
-	senderBaseKeyArray := bytehelper.SliceToArray(senderBaseKey)
-	s.senderBaseKey = ecc.NewDjbECPublicKey(senderBaseKeyArray)
+	if len(senderBaseKey) == 0 {
+		s.senderBaseKey = nil
+		return
+	}
+	pub, err := ecc.DecodePoint(senderBaseKey, 0)
+	if err != nil {
+		logger.Error("SetSenderBaseKey: failed to decode public key: ", err)
+		s.senderBaseKey = nil
+		return
+	}
+	s.senderBaseKey = pub
 }
 
 // Version returns the session's version. A stored version of 0 indicates a
@@ -681,6 +695,13 @@ func (s *State) Serialize() ([]byte, error) {
 // deserializing through the state's serializer. This is used to preserve
 // state before speculative operations that may need to be rolled back.
 func (s *State) Clone() (*State, error) {
+	// An uninitialized state (sessionVersion 0) — the placeholder current state
+	// of a fresh or freshly-archived session — carries no ratchet material and
+	// cannot survive a Serialize/Deserialize round-trip. It has nothing to deep
+	// copy, so return a new empty state bound to the same serializer.
+	if s.sessionVersion == 0 {
+		return NewState(s.serializer), nil
+	}
 	serialized, err := s.Serialize()
 	if err != nil {
 		return nil, err

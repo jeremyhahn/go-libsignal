@@ -222,6 +222,24 @@ func TestCandidatesFrom(t *testing.T) {
 	}
 }
 
+// TestCandidatesFrom_Distinct verifies that CandidatesFrom never returns
+// duplicate candidates. Before the fix, independent per-iteration sampling
+// could produce collisions within a discriminator range.
+func TestCandidatesFrom_Distinct(t *testing.T) {
+	limits := DefaultNicknameLimits()
+	candidates, err := CandidatesFrom("alice", limits)
+	if err != nil {
+		t.Fatalf("CandidatesFrom error: %v", err)
+	}
+	seen := make(map[string]struct{}, len(candidates))
+	for _, c := range candidates {
+		if _, dup := seen[c]; dup {
+			t.Errorf("duplicate candidate: %q", c)
+		}
+		seen[c] = struct{}{}
+	}
+}
+
 func TestValidCharactersMapping(t *testing.T) {
 	valid := "_abcdefghijklmnopqrstuvwxyz0123456789"
 	var mapped []byte

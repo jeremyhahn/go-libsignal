@@ -583,11 +583,14 @@ var (
 	}
 )
 
-// cloneDomainConfig returns a DomainConfig that is a shallow copy of src
-// except that MinTLSVersion and HTTPVersion inside the Connect field are
-// replaced with freshly-allocated pointers holding the same values. This
-// ensures each returned Env owns independent pointer instances so that a
-// caller mutating one Env's TLS or HTTP version does not affect any other Env.
+// cloneDomainConfig returns a DomainConfig that is a deep copy of src with
+// independent allocations for every pointer and slice field:
+//   - MinTLSVersion and HTTPVersion are freshly-allocated pointers.
+//   - Connect.Proxy is a freshly-allocated *ConnectionProxyConfig (value copy).
+//   - IPv4 and IPv6 are independent slice copies (new backing arrays).
+//
+// This ensures each returned Env is fully isolated: mutating any field of one
+// Env cannot affect another Env or the package-level configuration constants.
 func cloneDomainConfig(src DomainConfig) DomainConfig {
 	dst := src
 	if src.Connect.MinTLSVersion != nil {
@@ -596,6 +599,12 @@ func cloneDomainConfig(src DomainConfig) DomainConfig {
 	if src.Connect.HTTPVersion != nil {
 		dst.Connect.HTTPVersion = newHTTPVersion(*src.Connect.HTTPVersion)
 	}
+	if src.Connect.Proxy != nil {
+		proxy := *src.Connect.Proxy
+		dst.Connect.Proxy = &proxy
+	}
+	dst.IPv4 = append([]net.IP(nil), src.IPv4...)
+	dst.IPv6 = append([]net.IP(nil), src.IPv6...)
 	return dst
 }
 

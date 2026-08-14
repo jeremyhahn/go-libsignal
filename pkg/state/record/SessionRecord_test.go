@@ -685,8 +685,8 @@ func TestSessionHasSessionState(t *testing.T) {
 
 	// HasSessionState returns true when BOTH version AND base key match
 	// (using constant-time comparison). This matches Rust promote_matching_session.
-	// Use the stored base key for comparison since SetSenderBaseKey round-trips
-	// through SliceToArray/Serialize.
+	// SetSenderBaseKey now correctly parses the 33-byte type-prefixed form via
+	// ecc.DecodePoint, so state.SenderBaseKey() equals kp.PublicKey().Serialize().
 	baseKey := state.SenderBaseKey()
 	result := sess.HasSessionState(3, baseKey)
 	if !result {
@@ -722,7 +722,8 @@ func TestSessionHasSessionStatePreviousStates(t *testing.T) {
 	sess.SessionState().SetVersion(3)
 	sess.SessionState().SetSenderBaseKey(kp1.PublicKey().Serialize())
 
-	// Capture the base key as stored (SetSenderBaseKey truncates then re-serializes)
+	// SetSenderBaseKey now correctly decodes the 33-byte type-prefixed EC key via
+	// ecc.DecodePoint, so SenderBaseKey() returns the original Serialize() bytes.
 	oldBaseKey := sess.SessionState().SenderBaseKey()
 
 	// Archive and set up new current state

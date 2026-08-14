@@ -179,11 +179,14 @@ func TestSGXEndorsements_ValidAt_ExpiredQEIDNextUpdate(t *testing.T) {
 	}
 }
 
+// TestSGXEndorsements_ValidAt_AllValid was updated by Finding-1 fix:
+// endorsements without CRLs must fail validAt (fail-closed), not pass silently.
+// An empty sgxEndorsements has nil pckCertCRL and pckProcCACRL; before the fix
+// validAt returned true, allowing a stripped-CRL endorsement to pass attestation.
 func TestSGXEndorsements_ValidAt_AllValid(t *testing.T) {
-	// No certs, no CRLs, zero nextUpdate times - should be valid
 	endorsements := &sgxEndorsements{}
-	if !endorsements.validAt(time.Now()) {
-		t.Fatal("empty endorsements should be considered valid")
+	if endorsements.validAt(time.Now()) {
+		t.Fatal("empty endorsements must NOT be valid (regression for Finding 1: nil CRLs bypass revocation)")
 	}
 }
 

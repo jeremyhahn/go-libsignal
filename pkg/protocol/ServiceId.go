@@ -169,12 +169,21 @@ func ServiceIdFromFixedWidthBinary(data [17]byte) (ServiceId, error) {
 // and any other unrecognised format. Returns ErrInvalidServiceIdString for all
 // unrecognised inputs.
 //
+// Intentional divergence from Rust: Rust libsignal_core rejects "ACI:<uuid>"
+// (rust/core/src/address.rs:263-279 only accepts bare UUID or "PNI:<uuid>").
+// Go accepts "ACI:<uuid>" as a documented back-compat extension for
+// effectiveLocalAddress in pkg/sessionmanagement and any persistent stores that
+// serialized addresses under the older "ACI:" prefix form. This cannot cause
+// cross-identity confusion because both "ACI:<uuid>" and the bare "<uuid>" form
+// parse to the same ACI ServiceId value; String() always re-emits the canonical
+// bare-UUID form, so no "ACI:"-prefixed ServiceId ever appears on the wire.
+//
 // Mirrors Rust libsignal_core ServiceId::parse_from_service_id_string at
 // rust/core/src/address.rs:263-279.
 func ServiceIdFromServiceIdString(s string) (ServiceId, error) {
-	// Legacy Go form: "ACI:<uuid>" was emitted by older releases of this
-	// package. Accept it leniently and parse the remainder as a bare UUID for
-	// ACI. The prefix match is case-sensitive; "aci:" is not accepted.
+	// Intentional Go-only back-compat: "ACI:<uuid>" was emitted by older
+	// releases. Accept leniently; "aci:" (lowercase) is still rejected.
+	// Both forms map to the same ACI UUID — no cross-identity confusion.
 	if rest, ok := strings.CutPrefix(s, "ACI:"); ok {
 		return parseHyphenatedUUID(ServiceIdKindACI, rest)
 	}

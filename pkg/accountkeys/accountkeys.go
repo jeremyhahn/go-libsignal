@@ -392,14 +392,44 @@ func parsePHCString(phc string) (salt, hash []byte, err error) {
 	return salt, hash, nil
 }
 
+// isAllDigits reports whether s is non-empty and every rune satisfies
+// unicode.IsDigit. Used by normalizePin to decide whether to apply digit
+// transliteration: the Rust reference only transliterates when the WHOLE
+// trimmed string consists of digits (step 2 of the normalization algorithm).
+//
+// Rust reference: rust/account-keys/src/hash.rs doc comment, step 2:
+// "If the whole string consists of digits, then non-arabic digits must be
+// replaced with their arabic 0-9 equivalents."
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
 // normalizePin normalizes a PIN string following the Rust reference implementation:
-// 1. Trim leading and trailing whitespace
-// 2. Transliterate non-ASCII decimal digits to ASCII (e.g., Arabic-Indic, Devanagari)
-// 3. Apply Unicode NFKD normalization
+//  1. Trim leading and trailing whitespace.
+//  2. If and only if the whole trimmed string consists of digits (every rune
+//     satisfies unicode.IsDigit), transliterate non-ASCII decimal digits to
+//     their ASCII equivalents (e.g., Arabic-Indic '١' → '1').
+//  3. Apply Unicode NFKD normalization.
+//
+// Gating transliteration on all-digits (step 2) matches the Rust reference at
+// rust/account-keys/src/hash.rs. The previous implementation transliterated
+// unconditionally, producing divergent SVR/backup keys for mixed PINs such as
+// "abc١def" (incorrectly became "abc1def" instead of staying "abc١def").
 func normalizePin(pin string) string {
 	trimmed := strings.TrimSpace(pin)
-	transliterated := transliterateDigits(trimmed)
-	return norm.NFKD.String(transliterated)
+	s := trimmed
+	if isAllDigits(trimmed) {
+		s = transliterateDigits(trimmed)
+	}
+	return norm.NFKD.String(s)
 }
 
 // transliterateDigits converts non-ASCII Unicode decimal digits to their ASCII

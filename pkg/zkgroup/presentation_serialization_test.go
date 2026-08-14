@@ -1,6 +1,7 @@
 package zkgroup
 
 import (
+	"encoding/binary"
 	"errors"
 	"testing"
 )
@@ -440,5 +441,122 @@ func TestDeserializeCreateCallLinkCredentialPresentation_TooShort(t *testing.T) 
 	_, err := DeserializeCreateCallLinkCredentialPresentation([]byte{0x00})
 	if err == nil {
 		t.Fatal("expected error for too-short input")
+	}
+}
+
+// buildValidPresentationBlob returns a complete, byte-valid wire blob for a
+// BackupAuthCredentialPresentation that passes all checks when unmodified.
+// Tests mutate specific fields after copying to exercise validation.
+func buildValidPresentationBlob(t *testing.T) []byte {
+	t.Helper()
+	var r1, r2, r3 RandomnessBytes
+	for i := range r1 {
+		r1[i] = 0x43
+		r2[i] = 0x44
+		r3[i] = 0x45
+	}
+	var backupKey [32]byte
+	for i := range backupKey {
+		backupKey[i] = 0x46
+	}
+	aciBytes := [16]byte{
+		0xc0, 0xfc, 0x16, 0xe4, 0xba, 0xe5, 0x43, 0x43,
+		0x9f, 0x0d, 0xe7, 0xec, 0xf4, 0x25, 0x13, 0x43,
+	}
+	aci := NewACI(aciBytes)
+
+	ctx, err := NewBackupAuthCredentialRequestContext(backupKey, aci)
+	if err != nil {
+		t.Fatalf("buildValidPresentationBlob: NewBackupAuthCredentialRequestContext: %v", err)
+	}
+	serverParams := GenerateGenericServerSecretParams(r1)
+	redemptionTime := NewTimestamp(1681344000)
+	resp, err := ctx.GetRequest().Issue(redemptionTime, BackupLevelFree, BackupCredentialTypeMessages, serverParams, r2)
+	if err != nil {
+		t.Fatalf("buildValidPresentationBlob: Issue: %v", err)
+	}
+	cred, err := ctx.Receive(resp, serverParams.GetPublicParams(), redemptionTime)
+	if err != nil {
+		t.Fatalf("buildValidPresentationBlob: Receive: %v", err)
+	}
+	presentation, err := cred.Present(serverParams.GetPublicParams(), r3)
+	if err != nil {
+		t.Fatalf("buildValidPresentationBlob: Present: %v", err)
+	}
+	return SerializeBackupAuthCredentialPresentation(presentation)
+}
+
+// TestDeserializeBackupAuthCredentialPresentation_InvalidLevel_Regression is a
+// regression test for the bug where BackupLevel was read as a u64 and cast
+// directly to byte, silently truncating (e.g. 256→0) with no enum validation.
+//
+// Wire layout: reserved(1) + backup_level(8) + credential_type(8) + …
+// Level occupies bytes [1:9].
+//
+// Before the fix: value 256 truncated to BackupLevel(0), no error returned for
+// the full blob.  After the fix: rejected immediately with a deserialization error.
+//
+// Rust reference: TryFrom<u64> for BackupLevel at
+// rust/zkgroup/src/api/backups/auth_credential.rs:68-78.
+func TestDeserializeBackupAuthCredentialPresentation_InvalidLevel_Regression(t *testing.T) {
+	validBlob := buildValidPresentationBlob(t)
+
+	tests := []struct {
+		name     string
+		levelU64 uint64
+	}{
+		// value > 255 was previously truncated (256 → 0) and passed through
+		{"gt_255_truncates_to_0", 256},
+		{"gt_255_large", 0xFFFF},
+		{"max_uint64", ^uint64(0)},
+		// in-byte-range but not a valid BackupLevel variant
+		{"byte_range_invalid_0", 0},
+		{"byte_range_invalid_42", 42},
+		{"byte_range_invalid_199", 199},
+		{"byte_range_invalid_202", 202},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			blob := make([]byte, len(validBlob))
+			copy(blob, validBlob)
+			binary.LittleEndian.PutUint64(blob[1:9], tt.levelU64)
+			_, err := DeserializeBackupAuthCredentialPresentation(blob)
+			if err == nil {
+				t.Fatalf("level=%d: expected deserialization error, got nil", tt.levelU64)
+			}
+		})
+	}
+}
+
+// TestDeserializeBackupAuthCredentialPresentation_InvalidCredentialType_Regression
+// mirrors the level regression for BackupCredentialType (bytes [9:17]).
+//
+// Rust reference: TryFrom<u64> for BackupCredentialType at
+// rust/zkgroup/src/api/backups/auth_credential.rs:98-108.
+func TestDeserializeBackupAuthCredentialPresentation_InvalidCredentialType_Regression(t *testing.T) {
+	validBlob := buildValidPresentationBlob(t)
+
+	tests := []struct {
+		name        string
+		credTypeU64 uint64
+	}{
+		{"gt_255", 256},
+		{"max_uint64", ^uint64(0)},
+		{"byte_range_invalid_0", 0},
+		{"byte_range_invalid_3", 3},
+		{"byte_range_invalid_99", 99},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			blob := make([]byte, len(validBlob))
+			copy(blob, validBlob)
+			// Set a valid level so only the credType check fires.
+			binary.LittleEndian.PutUint64(blob[1:9], 200) // BackupLevelFree
+			binary.LittleEndian.PutUint64(blob[9:17], tt.credTypeU64)
+			_, err := DeserializeBackupAuthCredentialPresentation(blob)
+			if err == nil {
+				t.Fatalf("credType=%d: expected deserialization error, got nil", tt.credTypeU64)
+			}
+		})
 	}
 }

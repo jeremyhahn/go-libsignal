@@ -36,13 +36,14 @@ func NewKeyFromBytes(publicKey [32]byte, offset int) Key {
 	return identityKey
 }
 
-// Decode parses and validates a DjbType-prefixed (0x05) Curve25519 public key
-// from a byte slice, returning a Key or an error on malformed input.
-//
-// This is the Go equivalent of Rust's IdentityKey::decode at
-// rust/protocol/src/identity_key.rs:50, which calls PublicKey::try_from and
-// validates the curve point immediately. Unlike NewKeyFromBytes, this function
-// is fallible and performs immediate point validation via ecc.DecodePoint.
+// Decode parses a DjbType-prefixed (0x05) Curve25519 public key from a byte
+// slice. It checks the type byte and key length, returning an error for
+// malformed input. Full curve-point validation is deferred to first
+// cryptographic use (key agreement or signature verify), matching Rust's
+// PublicKey::deserialize at curve.rs:84-105 (called transitively by
+// IdentityKey::decode at rust/protocol/src/identity_key.rs:50). Unlike
+// NewKeyFromBytes, this function is fallible and rejects wrong type bytes
+// or insufficient-length inputs.
 func Decode(value []byte) (*Key, error) {
 	pub, err := ecc.DecodePoint(value, 0)
 	if err != nil {

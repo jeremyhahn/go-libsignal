@@ -4,6 +4,7 @@
 package attest
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -191,5 +192,45 @@ func TestSvr2NewHandshakeWithConstants_MalformedProtobuf(t *testing.T) {
 	_, err := svr2NewHandshakeWithConstants(mrenclave, []byte{0x80}, time.Now(), nil, config, PreQuantum)
 	if err == nil {
 		t.Fatal("expected error for malformed protobuf")
+	}
+}
+
+// TestDecodeSVRClientHandshakeStart_GiantVarintLength is a regression test for
+// Finding 3 (pre-auth DoS via crafted varint length).  Before the fix, a varint
+// encoding 2^63 caused int(length) to be negative, bypassing the bounds check,
+// and make([]byte, length) panicked.  The fix validates length in uint64 arithmetic
+// before the int() cast so the function returns a ProtobufDecodeError instead.
+//
+// The crafted input is: tag 0x12 (field 2, wire type 2 = length-delimited) followed
+// by the 10-byte varint for 2^63 = {0x80 × 9, 0x01}.
+func TestDecodeSVRClientHandshakeStart_GiantVarintLength(t *testing.T) {
+	// varint encoding of 2^63: nine 0x80 continuation bytes then 0x01.
+	tag := byte(0x12) // field 2 (evidence), wire type 2 (length-delimited)
+	giantVarint := []byte{0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x01}
+	data := append([]byte{tag}, giantVarint...)
+
+	_, _, err := decodeSVRClientHandshakeStart(data)
+	if err == nil {
+		t.Fatal("must return error for giant varint length, not panic (regression for Finding 3)")
+	}
+	var pbErr *ProtobufDecodeError
+	if !errors.As(err, &pbErr) {
+		t.Errorf("expected ProtobufDecodeError, got %T: %v", err, err)
+	}
+}
+
+// TestDecodeSVRClientHandshakeStart_MaxVarint verifies the boundary: a length
+// equal to exactly the remaining bytes is accepted, but one byte more is rejected.
+func TestDecodeSVRClientHandshakeStart_MaxVarint(t *testing.T) {
+	// Build a valid field 2 carrying exactly 4 bytes of payload.
+	payload := []byte{0x01, 0x02, 0x03, 0x04}
+	msg := buildProtobufBytesField(2, payload)
+
+	ev, _, err := decodeSVRClientHandshakeStart(msg)
+	if err != nil {
+		t.Fatalf("valid message must not error: %v", err)
+	}
+	if string(ev) != string(payload) {
+		t.Errorf("evidence = %v, want %v", ev, payload)
 	}
 }

@@ -57,6 +57,21 @@ func (c *braidECCipher) ReceiveKey(ecHeader []byte) ([]byte, error) {
 	return key, nil
 }
 
+// TakeECSnapshot serializes the send counter as 4-byte big-endian for atomic rollback.
+func (c *braidECCipher) TakeECSnapshot() ([]byte, error) {
+	ctr := c.sendCtr
+	return []byte{byte(ctr >> 24), byte(ctr >> 16), byte(ctr >> 8), byte(ctr)}, nil
+}
+
+// RestoreECSnapshot restores the send counter from a snapshot taken by TakeECSnapshot.
+func (c *braidECCipher) RestoreECSnapshot(data []byte) error {
+	if len(data) != 4 {
+		return &ErrInvalidInput{Field: "data", Reason: "EC snapshot must be 4 bytes"}
+	}
+	c.sendCtr = uint32(data[0])<<24 | uint32(data[1])<<16 | uint32(data[2])<<8 | uint32(data[3])
+	return nil
+}
+
 // braidRandomSharedSecret generates a random 32-byte shared secret.
 func braidRandomSharedSecret(t *testing.T) []byte {
 	t.Helper()

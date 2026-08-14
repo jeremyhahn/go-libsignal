@@ -1,5 +1,7 @@
 package bytehelper
 
+import "math"
+
 // SliceToArray will convert byte slice to a 32 byte array
 func SliceToArray(bytes []byte) [32]byte {
 	var byteArray [32]byte
@@ -34,6 +36,10 @@ func Split(input []byte, firstLength, secondLength int) ([][]byte, error) {
 	if firstLength < 0 || secondLength < 0 {
 		return nil, &ErrNegativeLength{Lengths: []int{firstLength, secondLength}}
 	}
+	// Guard against int overflow before summing the lengths.
+	if secondLength > math.MaxInt-firstLength {
+		return nil, &ErrInputTooSmall{Required: math.MaxInt, Got: len(input)}
+	}
 	required := firstLength + secondLength
 	if len(input) < required {
 		return nil, &ErrInputTooSmall{Required: required, Got: len(input)}
@@ -61,7 +67,15 @@ func SplitThree(input []byte, firstLength, secondLength, thirdLength int) ([][]b
 	if firstLength < 0 || secondLength < 0 || thirdLength < 0 {
 		return nil, &ErrNegativeLength{Lengths: []int{firstLength, secondLength, thirdLength}}
 	}
-	required := firstLength + secondLength + thirdLength
+	// Guard against int overflow before summing the lengths step by step.
+	if secondLength > math.MaxInt-firstLength {
+		return nil, &ErrInputTooSmall{Required: math.MaxInt, Got: len(input)}
+	}
+	partial := firstLength + secondLength
+	if thirdLength > math.MaxInt-partial {
+		return nil, &ErrInputTooSmall{Required: math.MaxInt, Got: len(input)}
+	}
+	required := partial + thirdLength
 	if len(input) < required {
 		return nil, &ErrInputTooSmall{Required: required, Got: len(input)}
 	}
@@ -80,16 +94,28 @@ func SplitThree(input []byte, firstLength, secondLength, thirdLength int) ([][]b
 	return parts, nil
 }
 
-// Trim will trim the given byte array to the given length.
+// Trim returns a copy of input truncated to length bytes. If length is
+// negative it is clamped to 0; if length exceeds len(input) it is clamped
+// to len(input). Trim never panics on out-of-range arguments.
 func Trim(input []byte, length int) []byte {
+	if length < 0 {
+		length = 0
+	}
+	if length > len(input) {
+		length = len(input)
+	}
 	result := make([]byte, length)
 	copy(result, input[:length])
 
 	return result
 }
 
-// Bytes5ToInt64 will convert the given byte array and offset to an int64.
+// Bytes5ToInt64 converts five consecutive bytes starting at offset to an int64.
+// Returns 0 if offset is negative or offset+5 exceeds len(bytes).
 func Bytes5ToInt64(bytes []byte, offset int) int64 {
+	if offset < 0 || offset+5 > len(bytes) {
+		return 0
+	}
 
 	value := (int64(bytes[offset]&0xff) << 32) |
 		(int64(bytes[offset+1]&0xff) << 24) |

@@ -172,3 +172,66 @@ func TestDeserializeUnidentifiedSenderMessageContentInvalid(t *testing.T) {
 		})
 	}
 }
+
+// TestDeserializeUnidentifiedSenderMessageContent_MissingContent verifies
+// Finding 4: a USMC protobuf message that omits the `content` field is rejected
+// with a *CertificateError rather than silently accepted with nil content.
+//
+// The Rust reference (libsignal-protocol/src/sealed_sender.rs UnidentifiedSenderMessageContent
+// decode) validates that the content field is non-empty; the Go implementation
+// must enforce the same constraint.
+//
+// Before the fix, a USMC with no content field was accepted and usmc.Contents()
+// returned nil, which callers passed to the session cipher without validation.
+func TestDeserializeUnidentifiedSenderMessageContent_MissingContent(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	cert, _ := newTestSenderCertificate(t, trustRoot)
+
+	// Build a well-formed USMC protobuf that omits the content field.
+	pbMsg := &sealedpb.UnidentifiedSenderMessage_Message{
+		Type:              sealedpb.UnidentifiedSenderMessage_Message_MESSAGE.Enum(),
+		SenderCertificate: cert.Serialize(),
+		// Content intentionally absent.
+	}
+	data, err := proto.Marshal(pbMsg)
+	if err != nil {
+		t.Fatalf("proto.Marshal: %v", err)
+	}
+
+	_, err = DeserializeUnidentifiedSenderMessageContent(data)
+	if err == nil {
+		t.Fatal("expected error for USMC with missing content field, got nil")
+	}
+	certErr, ok := err.(*CertificateError)
+	if !ok {
+		t.Fatalf("expected *CertificateError, got %T: %v", err, err)
+	}
+	if certErr.Detail == "" {
+		t.Error("expected non-empty Detail in CertificateError")
+	}
+}
+
+// TestDeserializeUnidentifiedSenderMessageContent_ContentPresent verifies the
+// positive case for Finding 4: a USMC with the content field present is accepted.
+func TestDeserializeUnidentifiedSenderMessageContent_ContentPresent(t *testing.T) {
+	trustRoot := newTestTrustRoot(t)
+	cert, _ := newTestSenderCertificate(t, trustRoot)
+
+	pbMsg := &sealedpb.UnidentifiedSenderMessage_Message{
+		Type:              sealedpb.UnidentifiedSenderMessage_Message_MESSAGE.Enum(),
+		SenderCertificate: cert.Serialize(),
+		Content:           []byte("payload"),
+	}
+	data, err := proto.Marshal(pbMsg)
+	if err != nil {
+		t.Fatalf("proto.Marshal: %v", err)
+	}
+
+	usmc, err := DeserializeUnidentifiedSenderMessageContent(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(usmc.Contents()) != "payload" {
+		t.Errorf("Contents() = %q, want %q", usmc.Contents(), "payload")
+	}
+}

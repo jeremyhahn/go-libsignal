@@ -15,6 +15,113 @@ import (
 	mp4 "github.com/Eyevinn/mp4ff/mp4"
 )
 
+// maxBoxDepth is the maximum ISO BMFF container box nesting depth accepted
+// before calling mp4.DecodeFile. Real MP4 files are rarely nested deeper than
+// ~10 levels. mp4ff's DecodeContainerChildren / DecodeUdta are recursive with
+// no depth counter; a fatal Go stack overflow cannot be caught by recover().
+//
+// Rust mp4san: no explicit depth cap (Rust stack is bounded differently).
+const maxBoxDepth = 32
+
+// containerBoxTypes is the set of ISO BMFF box types whose payload contains
+// child boxes. checkMP4BoxDepth descends into these during its iterative scan.
+var containerBoxTypes = map[string]bool{
+	"moov": true, "trak": true, "mdia": true, "minf": true,
+	"stbl": true, "edts": true, "dinf": true, "udta": true,
+	"mvex": true, "moof": true, "traf": true, "mfra": true,
+	"skip": true, "meta": true, "ilst": true, "meco": true,
+	"sinf": true, "schi": true, "rinf": true,
+}
+
+// depthFrame is one entry in the iterative DFS worklist used by checkMP4BoxDepth.
+type depthFrame struct {
+	offset int64
+	end    int64
+	depth  int
+}
+
+// checkMP4BoxDepth iteratively walks the ISO BMFF box tree in input and returns
+// a MediaValidationError if any container box is nested deeper than maxBoxDepth.
+// This guard MUST be applied before calling mp4.DecodeFile because mp4ff's
+// decoder is recursive and a Go fatal stack overflow cannot be caught by recover().
+//
+// The walk is purely iterative (slice-based worklist); it never calls mp4ff.
+func checkMP4BoxDepth(input []byte) error {
+	total := int64(len(input))
+	worklist := []depthFrame{{offset: 0, end: total, depth: 1}}
+	for len(worklist) > 0 {
+		frame := worklist[len(worklist)-1]
+		worklist = worklist[:len(worklist)-1]
+
+		offset := frame.offset
+		end := frame.end
+
+		for offset < end {
+			if end-offset < 8 {
+				break // truncated box header; mp4ff will handle it
+			}
+			rawSize := int64(binary.BigEndian.Uint32(input[offset : offset+4]))
+			boxType := string(input[offset+4 : offset+8])
+
+			var (
+				size      int64
+				headerLen int64 = 8
+				eofBox    bool
+				invalid   bool
+			)
+			switch rawSize {
+			case 0:
+				size = end - offset
+				eofBox = true
+			case 1:
+				if offset+16 > end {
+					invalid = true
+				} else {
+					size = int64(binary.BigEndian.Uint64(input[offset+8 : offset+16]))
+					headerLen = 16
+					if size < 16 {
+						invalid = true
+					}
+				}
+			default:
+				size = rawSize
+				if size < 8 {
+					invalid = true
+				}
+			}
+
+			if invalid {
+				break // malformed box; mp4ff will reject
+			}
+			if !eofBox && size > end-offset {
+				break // box extends beyond boundary; mp4ff will reject
+			}
+
+			if containerBoxTypes[boxType] {
+				childDepth := frame.depth + 1
+				if childDepth > maxBoxDepth {
+					return &MediaValidationError{Detail: "MP4 box nesting depth exceeds maximum allowed depth"}
+				}
+				childStart := offset + headerLen
+				childEnd := offset + size
+				if childStart < childEnd {
+					worklist = append(worklist, depthFrame{
+						offset: childStart,
+						end:    childEnd,
+						depth:  childDepth,
+					})
+				}
+			}
+
+			if eofBox {
+				break
+			}
+			offset += size
+		}
+	}
+	return nil
+}
+
 // SanitizedMetadata is the result of MP4 sanitization, mirroring the Java
 // SanitizedMetadata class (libsignal/java/.../media/SanitizedMetadata.java).
 //
@@ -153,6 +260,13 @@ func sanitizeMP4Internal(input []byte, cumulativeMdatBoxSize int64) (*SanitizedM
 	// parse; in the compounded path we do a manual scan.
 	if cumulativeMdatBoxSize >= 0 {
 		return sanitizeMP4Compounded(input, cumulativeMdatBoxSize)
+	}
+
+	// Finding (HIGH): guard against unbounded recursion in mp4ff's
+	// DecodeContainerChildren / DecodeUdta before handing bytes to the decoder.
+	// A fatal Go stack overflow cannot be caught by recover().
+	if err := checkMP4BoxDepth(input); err != nil {
+		return nil, err
 	}
 
 	// Normal path: full mp4ff parse.
@@ -318,7 +432,12 @@ func rewriteMetadataWithOffsets(ftyp *mp4.FtypBox, moov *mp4.MoovBox, originalMd
 			}
 			for _, off := range stbl.Stco.ChunkOffset {
 				newOff := int64(off) + delta
-				if newOff > math.MaxUint32 || newOff < 0 {
+				// Finding (LOW): reject negative post-shift values instead of
+				// promoting to co64; uint64(negative_int64) wraps to a huge bogus offset.
+				if newOff < 0 {
+					return nil, &MediaValidationError{Detail: "MP4 stco chunk offset underflows after relocation"}
+				}
+				if newOff > math.MaxUint32 {
 					toPromote = append(toPromote, promotionCandidate{stbl: stbl, stco: stbl.Stco})
 					break
 				}
@@ -341,6 +460,25 @@ func rewriteMetadataWithOffsets(ftyp *mp4.FtypBox, moov *mp4.MoovBox, originalMd
 		// Recompute delta with the now-larger moov.
 		newMdatStart = ftypLen + int64(moov.Size())
 		delta = newMdatStart - originalMdatOffset
+	}
+
+	// Finding (LOW): pre-validate all co64 offsets before any mutation so that a
+	// negative post-shift value is rejected as a hard error rather than silently
+	// wrapping to a huge bogus uint64.  After the promotion loop, remaining stco
+	// entries are already verified non-negative; co64 entries (both original and
+	// freshly promoted) must be checked here.
+	for _, trak := range moov.Traks {
+		if trak.Mdia == nil || trak.Mdia.Minf == nil || trak.Mdia.Minf.Stbl == nil {
+			continue
+		}
+		stbl := trak.Mdia.Minf.Stbl
+		if stbl.Co64 != nil {
+			for _, off := range stbl.Co64.ChunkOffset {
+				if int64(off)+delta < 0 {
+					return nil, &MediaValidationError{Detail: "MP4 co64 chunk offset underflows after relocation"}
+				}
+			}
+		}
 	}
 
 	// Apply delta to all stco and co64 boxes.
@@ -491,11 +629,17 @@ func sanitizeMP4Compounded(input []byte, cumulativeMdatBoxSize int64) (*Sanitize
 		return nil, &ErrMP4MetadataTooLarge{Size: uint64(len(moovBytes))}
 	}
 
-	// Finding #3: parse ftyp+moov together so mp4ff can validate dref etc.
-	// Fail-closed: reject if DecodeFile fails or Moov is nil.
+	// Finding (HIGH): depth-guard the initBytes before handing them to mp4ff's
+	// recursive decoder. The moov from a compounded-mdat file can carry the same
+	// deeply-nested udta/container attack as the normal path.
 	initBytes := make([]byte, 0, len(ftypBytes)+len(moovBytes))
 	initBytes = append(initBytes, ftypBytes...)
 	initBytes = append(initBytes, moovBytes...)
+	if err := checkMP4BoxDepth(initBytes); err != nil {
+		return nil, &MediaValidationError{Detail: "MP4 compounded-mdat box depth error: " + err.Error()}
+	}
+	// Finding #3: parse ftyp+moov together so mp4ff can validate dref etc.
+	// Fail-closed: reject if DecodeFile fails or Moov is nil.
 	initFile, parseErr := mp4.DecodeFile(bytes.NewReader(initBytes))
 	if parseErr != nil || initFile.Moov == nil {
 		return nil, &MediaValidationError{Detail: "MP4 compounded-mdat moov parse error"}
@@ -648,15 +792,23 @@ func extractBoxBytes(input []byte, startPos int64) ([]byte, error) {
 	case 0:
 		size = int64(len(input)) - startPos
 	case 1:
+		// Finding (LOW): the extended largesize field is a uint64; casting to
+		// int64 can produce a negative value (high bit set), and size < 16 is
+		// invalid for a largesize box.  Either case must be rejected before the
+		// make/slice calls below to prevent a panic.
 		if startPos+16 > int64(len(input)) {
 			return nil, io.ErrUnexpectedEOF
 		}
 		size = int64(binary.BigEndian.Uint64(input[startPos+8 : startPos+16]))
+		if size < 16 {
+			return nil, &MediaValidationError{Detail: "MP4 box extended-size too small"}
+		}
 	default:
 		size = rawSize
 	}
-	if startPos+size > int64(len(input)) {
-		return nil, io.ErrUnexpectedEOF
+	// Use subtraction to avoid int64 overflow when size is near MaxInt64.
+	if size > int64(len(input))-startPos {
+		return nil, &MediaValidationError{Detail: "MP4 box extends beyond input"}
 	}
 	result := make([]byte, size)
 	copy(result, input[startPos:startPos+size])

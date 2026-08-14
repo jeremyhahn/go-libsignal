@@ -682,3 +682,18 @@ type EndorsementValidationError struct {
 func (e *EndorsementValidationError) Error() string {
 	return fmt.Sprintf("attest: endorsement: %s", e.Detail)
 }
+
+// CRLMissingError indicates that a required CRL field was absent or empty.
+// This covers both empty CRL wire data (endorsement-parse path) and a nil
+// CRL pointer reaching verification (defense-in-depth path).
+type CRLMissingError struct {
+	// Detail identifies which CRL or required extension is absent.
+	Detail string
+}
+
+func (e *CRLMissingError) Error() string {
+	if e.Detail != "" {
+		return fmt.Sprintf("attest: required CRL missing: %s", e.Detail)
+	}
+	return "attest: required CRL is missing"
+}

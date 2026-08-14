@@ -159,15 +159,18 @@ func TestUnmarshalCompositeMessage_TooShort(t *testing.T) {
 // receive chain through many counter positions, exercising receivePQKey's
 // chain-stepping path and the snapshot/restore path across many messages.
 //
-// Note: The Braid SCKA is an asymmetric handshake state machine. Alice must
-// send several messages carrying braid chunks before Bob's braid produces an
-// OutputKey. This test exercises the Alice→Bob direction, which is sufficient
-// to validate SPQR chain key stepping and snapshot rollback.
+// Round budget: the ML-KEM Braid SCKA completes when Bob receives all EK chunks
+// from Alice. With ChunkDataSize=32, the header envelope (96 bytes) takes 3
+// chunks (rounds 0-2) and the EK (1152 bytes) takes 36 chunks (rounds 3-38).
+// Bob calls bobCompleteEncapsulation at round 38, advances his PQ epoch, and
+// diverges from Alice who hasn't received CT2 yet. The test is bounded to 30
+// rounds — well below the 38-round boundary — to keep the braid pre-handshake.
+// A bidirectional braid integration test covers the full epoch-advance path.
 func TestEncryptDecrypt_ManyMessages(t *testing.T) {
 	ss := randomSharedSecret(t)
 	alice, bob := newTestPair(t, ss)
 
-	const rounds = 50
+	const rounds = 30
 	for i := 0; i < rounds; i++ {
 		msg := []byte("round message")
 		ct, encErr := alice.Encrypt(msg)

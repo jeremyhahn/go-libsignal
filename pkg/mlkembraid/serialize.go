@@ -447,6 +447,15 @@ func readOptionalEncoder(data []byte) (*Encoder, int, error) {
 	innerIdx := readU32BE(data[at:])
 	at += 4
 
+	// Bound innerIdx by total to prevent attacker-controlled CPU-DoS.
+	// A serialized blob with innerIdx >> total would cause the fast-forward
+	// loop below to iterate up to 2^32 times before the legitimate chunks
+	// are emitted. Since innerIdx is the number of chunks already emitted
+	// from a (sent, total) encoder, any innerIdx > total is malformed.
+	if innerIdx > uint32(total) {
+		return nil, 0, &ErrDeserialize{Reason: fmt.Sprintf("encoder innerIdx %d exceeds total %d", innerIdx, total)}
+	}
+
 	// Re-create the polynomial encoder from the original message.
 	inner, err := polynomial.NewPolyEncoder(msg)
 	if err != nil {

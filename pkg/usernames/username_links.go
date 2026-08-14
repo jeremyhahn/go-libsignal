@@ -262,7 +262,11 @@ func decodeUsernameData(data []byte) (string, error) {
 				return "", err
 			}
 			i += n
-			if i+int(length) > len(data) {
+			// Guard against varint values >= 2^63: int(length) would be
+			// negative, bypassing the bounds check and causing a slice panic.
+			// Compare in uint64 so the check is always correct regardless of
+			// the sign of the cast.
+			if length > uint64(len(data)-i) {
 				return "", &ProtobufError{Detail: "field extends past end of data"}
 			}
 			if fieldNum == 1 {

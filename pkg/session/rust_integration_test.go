@@ -212,28 +212,29 @@ func TestRust_BadMessageBundle(t *testing.T) {
 	copy(corrupted, originalBytes)
 	corrupted[len(corrupted)-10] ^= 1
 
-	// Attempt to parse the corrupted bytes. If parsing succeeds, any subsequent
-	// Process or Decrypt must fail. If parsing itself fails, that satisfies the
-	// "Bob must reject" requirement.
+	// Attempt to parse the corrupted bytes. If parsing succeeds, atomic prekey
+	// decryption must reject the message; if parsing itself fails, that already
+	// satisfies the "Bob must reject" requirement.
 	corruptedMsg, parseErr := protocol.NewPreKeySignalMessageFromBytes(
 		corrupted,
 		serializer.PreKeySignalMessage,
 		serializer.SignalMessage,
 	)
 	if parseErr == nil {
-		// Parsing unexpectedly succeeded — Process or Decrypt must fail.
-		_, processErr := bob.sessionBuilder.Process(corruptedMsg)
-		if processErr == nil {
-			bobCipher := session.NewCipher(bob.sessionBuilder, alice.address)
-			_, decErr := bobCipher.Decrypt(corruptedMsg.WhisperMessage())
-			if decErr == nil {
-				t.Fatal("corrupted message should have been rejected at parse, process, or decrypt")
-			}
+		// DecryptPreKeyMessage is atomic: Builder.Process operates on a copy of
+		// the session record, and the deferred side effects (store session, burn
+		// pre-key) commit only after the inner SignalMessage decrypts. A failed
+		// decrypt therefore leaves Bob's stored session and pre-keys untouched,
+		// so no manual reset is needed before retrying the original message.
+		// Mirrors Rust process_prekey_signal_message, which rolls back on
+		// failure (rust/protocol/src/session.rs:595).
+		bobCipher := session.NewCipher(bob.sessionBuilder, alice.address)
+		if _, _, decErr := bobCipher.DecryptPreKeyMessage(bob.sessionBuilder, corruptedMsg); decErr == nil {
+			t.Fatal("corrupted prekey message should have been rejected at decrypt")
 		}
 	}
 
-	// Regardless of where rejection occurred, the original uncorrupted message
-	// must still be decryptable.
+	// The original uncorrupted message must be decryptable (after optional reset).
 	preKeyMsg, err := protocol.NewPreKeySignalMessageFromBytes(
 		originalBytes,
 		serializer.PreKeySignalMessage,

@@ -30,8 +30,10 @@ const otpLength = 20
 // shared secret. The password is derived as a time-based OTP using
 // HMAC-SHA256.
 func AuthFromUIDAndSecret(uid [16]byte, secret [32]byte) Auth {
-	// Zeroize the secret copy after HMAC computation to prevent
-	// sensitive material from lingering on the stack/heap.
+	// The secret parameter is received by value: Go copies the caller's array
+	// on function entry. The deferred loop zeroizes only this function-local
+	// copy. The caller's original array is not modified and must be zeroized
+	// by the caller if it contains sensitive material.
 	defer func() {
 		for i := range secret {
 			secret[i] = 0

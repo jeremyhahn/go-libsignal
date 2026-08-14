@@ -267,7 +267,8 @@ func newTestUser(t *testing.T, name string, deviceID uint32, serializer *seriali
 		t.Fatal(err)
 	}
 	u.registrationID = keyhelper.GenerateRegistrationID()
-	u.preKeys, err = keyhelper.GeneratePreKeys(0, 100, serializer.PreKeyRecord)
+	// start=1: GeneratePreKeys requires start >= 1 (pre-key ID 0 is invalid).
+	u.preKeys, err = keyhelper.GeneratePreKeys(1, 100, serializer.PreKeyRecord)
 	if err != nil {
 		t.Fatal(err)
 	}

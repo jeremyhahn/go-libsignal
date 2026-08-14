@@ -3,6 +3,7 @@ package tripleratchet_test
 import (
 	"bytes"
 	"crypto/rand"
+	"errors"
 	"io"
 	"testing"
 
@@ -64,6 +65,21 @@ func (c *testECCipher) ReceiveKey(ecHeader []byte) (messageKey []byte, err error
 	ctr := uint32(ecHeader[0]) | uint32(ecHeader[1])<<8 | uint32(ecHeader[2])<<16 | uint32(ecHeader[3])<<24
 	key := deriveTestKey(c.recvState.seed, ctr)
 	return key, nil
+}
+
+// TakeECSnapshot serializes the send counter as 4-byte big-endian for atomic rollback.
+func (c *testECCipher) TakeECSnapshot() ([]byte, error) {
+	ctr := c.sendState.counter
+	return []byte{byte(ctr >> 24), byte(ctr >> 16), byte(ctr >> 8), byte(ctr)}, nil
+}
+
+// RestoreECSnapshot restores the send counter from a snapshot taken by TakeECSnapshot.
+func (c *testECCipher) RestoreECSnapshot(data []byte) error {
+	if len(data) != 4 {
+		return &tripleratchet.ErrInvalidInput{Field: "data", Reason: "EC snapshot must be 4 bytes"}
+	}
+	c.sendState.counter = uint32(data[0])<<24 | uint32(data[1])<<16 | uint32(data[2])<<8 | uint32(data[3])
+	return nil
 }
 
 // newTestPair creates a matched Alice/Bob cipher pair from a shared seed.
@@ -128,6 +144,52 @@ func TestNewAlice_NilECCipher(t *testing.T) {
 	_, err := tripleratchet.NewAlice(nil, ss, kem, 10)
 	if err == nil {
 		t.Fatal("expected error for nil ECCipher")
+	}
+}
+
+// nonSnapshotCipher implements ECCipher but NOT ECCipherSnapshotable.
+// Used as a regression test for Finding 5: newTripleRatchet must reject
+// ciphers that cannot atomically roll back EC state.
+type nonSnapshotCipher struct{}
+
+func (c *nonSnapshotCipher) SendKey() ([]byte, []byte, error) {
+	return make([]byte, 4), make([]byte, 32), nil
+}
+func (c *nonSnapshotCipher) ReceiveKey([]byte) ([]byte, error) {
+	return make([]byte, 32), nil
+}
+
+// TestNewAlice_RejectsNonSnapshotableCipher is the Finding 5 regression test.
+// Before the fix, NewAlice accepted any ECCipher, silently omitting rollback.
+// After the fix, construction fails if the cipher does not implement ECCipherSnapshotable.
+func TestNewAlice_RejectsNonSnapshotableCipher(t *testing.T) {
+	ss := randomSharedSecret(t)
+	kem := mlkembraid.NewIncrementalMLKEM768KEM()
+	ec := &nonSnapshotCipher{}
+
+	_, err := tripleratchet.NewAlice(ec, ss, kem, 10)
+	if err == nil {
+		t.Fatal("NewAlice must reject a cipher that does not implement ECCipherSnapshotable")
+	}
+	var e *tripleratchet.ErrInvalidInput
+	if !errors.As(err, &e) || e.Field != "ecCipher" {
+		t.Errorf("expected ErrInvalidInput{ecCipher}, got %T: %v", err, err)
+	}
+}
+
+// TestNewBob_RejectsNonSnapshotableCipher mirrors the Finding 5 test for Bob.
+func TestNewBob_RejectsNonSnapshotableCipher(t *testing.T) {
+	ss := randomSharedSecret(t)
+	kem := mlkembraid.NewIncrementalMLKEM768KEM()
+	ec := &nonSnapshotCipher{}
+
+	_, err := tripleratchet.NewBob(ec, ss, kem, 10)
+	if err == nil {
+		t.Fatal("NewBob must reject a cipher that does not implement ECCipherSnapshotable")
+	}
+	var e *tripleratchet.ErrInvalidInput
+	if !errors.As(err, &e) || e.Field != "ecCipher" {
+		t.Errorf("expected ErrInvalidInput{ecCipher}, got %T: %v", err, err)
 	}
 }
 

@@ -129,7 +129,8 @@ func VerifyProof(proof []byte, hash [32]byte) error {
 }
 
 // CandidatesFrom generates username candidates for a given nickname by picking
-// random discriminators from predefined ranges.
+// distinct random discriminators from predefined ranges (sample without
+// replacement per range, matching the Rust libsignal implementation).
 func CandidatesFrom(nickname string, limits NicknameLimits) ([]string, error) {
 	if err := validateNickname(nickname, limits); err != nil {
 		return nil, err
@@ -138,15 +139,34 @@ func CandidatesFrom(nickname string, limits NicknameLimits) ([]string, error) {
 	var candidates []string
 	for i, count := range candidatesPerRange {
 		r := discriminatorRanges[i]
-		for j := 0; j < count; j++ {
-			d, err := randInRange(r.Start, r.End)
-			if err != nil {
-				return nil, &CryptoError{Operation: "random generation failed", Err: err}
-			}
+		discriminators, err := sampleDistinct(r.Start, r.End, count)
+		if err != nil {
+			return nil, &CryptoError{Operation: "random generation failed", Err: err}
+		}
+		for _, d := range discriminators {
 			candidates = append(candidates, formatParts(nickname, uint64(d)))
 		}
 	}
 	return candidates, nil
+}
+
+// sampleDistinct draws count distinct integers from [lo, hi) without
+// replacement using rejection sampling. It terminates quickly in practice
+// because count is always much smaller than the range size.
+func sampleDistinct(lo, hi, count int) ([]int, error) {
+	seen := make(map[int]struct{}, count)
+	results := make([]int, 0, count)
+	for len(results) < count {
+		d, err := randInRange(lo, hi)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seen[d]; !exists {
+			seen[d] = struct{}{}
+			results = append(results, d)
+		}
+	}
+	return results, nil
 }
 
 func formatParts(nickname string, discriminator uint64) string {

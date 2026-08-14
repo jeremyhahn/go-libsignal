@@ -2,6 +2,7 @@ package bytehelper
 
 import (
 	"bytes"
+	"math"
 	"testing"
 )
 
@@ -219,6 +220,26 @@ func TestTrim_FullLength(t *testing.T) {
 	}
 }
 
+// TestTrim_NegativeLength verifies that Trim clamps negative lengths to 0
+// rather than panicking.
+func TestTrim_NegativeLength(t *testing.T) {
+	input := []byte{1, 2, 3}
+	result := Trim(input, -1)
+	if len(result) != 0 {
+		t.Fatalf("expected empty result for negative length, got len %d", len(result))
+	}
+}
+
+// TestTrim_ExceedsInput verifies that Trim clamps an oversized length to
+// len(input) rather than panicking with an out-of-range slice index.
+func TestTrim_ExceedsInput(t *testing.T) {
+	input := []byte{1, 2, 3}
+	result := Trim(input, 10)
+	if !bytes.Equal(result, input) {
+		t.Fatalf("expected full input when length > len(input), got %v", result)
+	}
+}
+
 func TestBytes5ToInt64(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -259,6 +280,48 @@ func TestBytes5ToInt64(t *testing.T) {
 				t.Fatalf("Bytes5ToInt64(%v, %d) = %d, want %d", tc.bytes, tc.offset, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestBytes5ToInt64_OOBOffset verifies that Bytes5ToInt64 returns 0 instead
+// of panicking when the slice is too short or the offset is negative.
+func TestBytes5ToInt64_OOBOffset(t *testing.T) {
+	data := []byte{0x01, 0x02, 0x03} // only 3 bytes; need 5
+
+	result := Bytes5ToInt64(data, 0)
+	if result != 0 {
+		t.Fatalf("Bytes5ToInt64 with too-short slice: got %d, want 0", result)
+	}
+
+	result = Bytes5ToInt64(data, -1)
+	if result != 0 {
+		t.Fatalf("Bytes5ToInt64 with negative offset: got %d, want 0", result)
+	}
+}
+
+// TestSplit_LengthOverflow verifies that Split returns ErrInputTooSmall when
+// firstLength+secondLength overflows int, preventing a panic.
+func TestSplit_LengthOverflow(t *testing.T) {
+	input := []byte{1, 2, 3}
+	_, err := Split(input, math.MaxInt/2+1, math.MaxInt/2+1)
+	if err == nil {
+		t.Fatal("expected error for overflowing lengths, got nil")
+	}
+	if _, ok := err.(*ErrInputTooSmall); !ok {
+		t.Fatalf("expected *ErrInputTooSmall, got %T", err)
+	}
+}
+
+// TestSplitThree_LengthOverflow verifies that SplitThree returns ErrInputTooSmall
+// when the sum of lengths overflows int, preventing a panic.
+func TestSplitThree_LengthOverflow(t *testing.T) {
+	input := []byte{1, 2, 3}
+	_, err := SplitThree(input, math.MaxInt/2+1, math.MaxInt/2+1, 1)
+	if err == nil {
+		t.Fatal("expected error for overflowing lengths, got nil")
+	}
+	if _, ok := err.(*ErrInputTooSmall); !ok {
+		t.Fatalf("expected *ErrInputTooSmall, got %T", err)
 	}
 }
 

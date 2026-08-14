@@ -120,7 +120,10 @@ func decodeSVRClientHandshakeStart(data []byte) ([]byte, []byte, error) {
 		}
 		offset += n
 
-		if offset+int(length) > len(data) {
+		// Validate length before int() cast.  A crafted varint can encode values
+		// ≥ 2^63; casting to int wraps negative, defeating the bounds check, then
+		// make([]byte, length) panics.  Check in uint64 arithmetic instead.
+		if offset > len(data) || length > uint64(len(data)-offset) {
 			return nil, nil, &ProtobufDecodeError{Detail: "data underflow"}
 		}
 

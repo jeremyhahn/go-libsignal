@@ -60,12 +60,14 @@ func unmarshalCompositeHeader(data []byte) (*CompositeHeader, error) {
 		return nil, &ErrInvalidCompositeMessage{Reason: "too short for composite header"}
 	}
 
-	ecHeaderLen := int(binary.BigEndian.Uint32(data[0:4]))
+	ecHeaderLenU32 := binary.BigEndian.Uint32(data[0:4])
 	offset := 4
-
-	if len(data) < offset+ecHeaderLen {
+	// Compare as uint64 before narrowing to int: on 32-bit builds, int(ecHeaderLenU32)
+	// wraps negative for values > MaxInt32, causing the subsequent slice to panic.
+	if uint64(len(data)) < uint64(offset)+uint64(ecHeaderLenU32) {
 		return nil, &ErrInvalidCompositeMessage{Reason: "EC header length exceeds data"}
 	}
+	ecHeaderLen := int(ecHeaderLenU32)
 
 	ecHeader := make([]byte, ecHeaderLen)
 	copy(ecHeader, data[offset:offset+ecHeaderLen])
@@ -111,12 +113,13 @@ func unmarshalCompositeMessage(data []byte) (headerBytes, ciphertext []byte, err
 		return nil, nil, &ErrInvalidCompositeMessage{Reason: "too short for composite message"}
 	}
 
-	headerLen := int(binary.BigEndian.Uint32(data[0:4]))
+	// Use uint64 arithmetic before narrowing to int to avoid sign-wrap on 32-bit builds.
+	headerLenU32 := binary.BigEndian.Uint32(data[0:4])
 	offset := 4
-
-	if len(data) < offset+headerLen {
+	if uint64(len(data)) < uint64(offset)+uint64(headerLenU32) {
 		return nil, nil, &ErrInvalidCompositeMessage{Reason: "header length exceeds data"}
 	}
+	headerLen := int(headerLenU32)
 
 	headerBytes = data[offset : offset+headerLen]
 	offset += headerLen
@@ -125,12 +128,12 @@ func unmarshalCompositeMessage(data []byte) (headerBytes, ciphertext []byte, err
 		return nil, nil, &ErrInvalidCompositeMessage{Reason: "too short for ciphertext length"}
 	}
 
-	ciphertextLen := int(binary.BigEndian.Uint32(data[offset : offset+4]))
+	ciphertextLenU32 := binary.BigEndian.Uint32(data[offset : offset+4])
 	offset += 4
-
-	if len(data) < offset+ciphertextLen {
+	if uint64(len(data)) < uint64(offset)+uint64(ciphertextLenU32) {
 		return nil, nil, &ErrInvalidCompositeMessage{Reason: "ciphertext length exceeds data"}
 	}
+	ciphertextLen := int(ciphertextLenU32)
 
 	ciphertext = data[offset : offset+ciphertextLen]
 	return headerBytes, ciphertext, nil

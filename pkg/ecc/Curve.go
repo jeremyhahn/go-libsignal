@@ -10,7 +10,7 @@ import (
 )
 
 // VXEdDSASign signs a message using VXEdDSA, producing a 96-byte signature
-// and a 64-byte VRF output. The VRF output is deterministic for a given
+// and a 32-byte VRF output. The VRF output is deterministic for a given
 // (key, message) pair, providing verifiable randomness.
 func VXEdDSASign(key ECPrivateKeyable, message []byte) ([]byte, []byte, error) {
 	if key == nil {
@@ -56,9 +56,11 @@ func VXEdDSAVerify(key ECPublicKeyable, message, signature []byte) (bool, []byte
 // DjbType is the Diffie-Hellman curve type (curve25519) created by D. J. Bernstein.
 const DjbType = 0x05
 
-// DecodePoint will take the given bytes and offset and return an ECPublicKeyable object.
-// This is used to check the byte at the given offset in the byte array for a special
-// "type" byte that will determine the key type. Currently only DJB EC keys are supported.
+// DecodePoint decodes a type-prefixed public key from bytes starting at offset.
+// It validates only the type byte (0x05 = DjbType / Curve25519) and key length;
+// full curve-point validation is deferred to first cryptographic use (key
+// agreement, signature verify, etc.), matching Rust's behavior in curve.rs:84-105.
+// Currently only DJB (Curve25519) keys are supported.
 func DecodePoint(bytes []byte, offset int) (ECPublicKeyable, error) {
 	if offset < 0 || offset >= len(bytes) {
 		return nil, ErrInputTooShort
