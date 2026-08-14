@@ -92,8 +92,12 @@ test:
 test-verbose:
 	$(GOTEST) -race -v ./...
 
+# No `| tee` here. A make recipe runs under /bin/sh without pipefail, so a
+# pipeline exits with tee's status (always 0) and the target could never fail —
+# `make integration-test` reported success on a failing suite. Callers that want
+# a log file tee at the call site with pipefail set; ci.yml does.
 integration-test:
-	$(GOTEST) -race -v ./tests/... 2>&1 | tee integration-test.log
+	$(GOTEST) -race -v ./tests/...
 
 # Slow tests: marked //go:build slow; excluded from make test.
 # test_chain_jump_over_limit (rust/protocol/tests/session.rs:245):
@@ -270,11 +274,28 @@ lint:
 # Security Scanning
 # ==============================================================================
 
+# devops.md §8: every -exclude rule carries a written justification beside it.
+#
+#   G115  integer overflow conversion (int -> uint8/uint16/uint32).
+#         206 findings, and they are the rule's known false-positive mode
+#         rather than defects. A wire-format library length-prefixes almost
+#         every field, so `byte(len(b))` and `uint32(len(b))` appear on nearly
+#         every serializer; in each case the length is already bounded by a
+#         checked limit upstream (frame caps, MAX_* consts mirrored from Rust
+#         libsignal) that gosec's per-expression analysis cannot see. The
+#         conversions that are genuinely unbounded are guarded explicitly —
+#         see PaddedLength's saturating clamp in pkg/backup/backup.go and its
+#         regression tests. Narrowing this exclusion means annotating each of
+#         the 206 sites with #nosec plus the bound it relies on; that is worth
+#         doing and is tracked for the v1.0 audit pass, not achievable as a
+#         side effect of a CI fix.
+GOSEC_EXCLUDE := G115
+
 gosec:
 	@which gosec > /dev/null 2>&1 || \
 		(echo "Installing gosec..." && \
 		go install github.com/securego/gosec/v2/cmd/gosec@latest)
-	gosec -fmt=text -severity=medium -exclude=G115 ./...
+	gosec -fmt=text -severity=medium -exclude=$(GOSEC_EXCLUDE) ./...
 
 govulncheck:
 	@which govulncheck > /dev/null 2>&1 || \

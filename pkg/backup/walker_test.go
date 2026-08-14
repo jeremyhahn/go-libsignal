@@ -5,21 +5,32 @@ import (
 	"encoding/binary"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 )
+
+// canonicalBackupSubpath locates canonical-backup.binproto inside an upstream
+// Rust libsignal checkout. The fixture is upstream's, not this repository's, so
+// it is resolved from LIBSIGNAL_UPSTREAM — the same environment variable
+// tests/interop/scripts/check_fixtures.sh uses to find the tree pinned by
+// /RUST_REV. Hardcoding a developer's checkout path here made this test pass on
+// exactly one machine and fail everywhere else, CI included.
+const canonicalBackupSubpath = "rust/message-backup/tests/res/canonical-backup.binproto"
 
 // loadCanonicalBackupFrames reads the canonical-backup.binproto from the
 // Rust upstream test fixtures and parses it into raw varint-delimited frames.
 //
-// The fixture is at /mnt/vm-host-1/libsignal/rust/message-backup/tests/res/canonical-backup.binproto.
-// If that path is unavailable the test is skipped.
-const canonicalBackupPath = "/mnt/vm-host-1/libsignal/rust/message-backup/tests/res/canonical-backup.binproto"
-
+// The test is skipped when no upstream checkout is available.
 func loadCanonicalBackupFrames(t *testing.T) [][]byte {
 	t.Helper()
-	data, err := os.ReadFile(canonicalBackupPath)
+	upstream := os.Getenv("LIBSIGNAL_UPSTREAM")
+	if upstream == "" {
+		t.Skip("LIBSIGNAL_UPSTREAM is not set; point it at an upstream Rust libsignal checkout at the commit in /RUST_REV to run this test")
+	}
+	path := filepath.Join(upstream, canonicalBackupSubpath)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("canonical-backup.binproto not available at %s: %v", canonicalBackupPath, err)
+		t.Skipf("canonical-backup.binproto not available at %s: %v", path, err)
 	}
 	r := NewVarintDelimitedReader(bytes.NewReader(data))
 	var frames [][]byte

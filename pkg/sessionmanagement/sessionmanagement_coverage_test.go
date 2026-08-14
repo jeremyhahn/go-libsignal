@@ -428,7 +428,7 @@ func TestMessageDecryptSignal(t *testing.T) {
 		bob.identityStore, bob.kyberStore,
 		alice.addr, ser,
 	)
-	bobCipher := session.NewCipher(bobBuilder, alice.addr)
+	bobCipher := session.NewCipherWithLocalAddress(bobBuilder, nil, alice.addr)
 	bobMsg, err := bobCipher.Encrypt([]byte("reply"))
 	if err != nil {
 		t.Fatalf("Bob encrypt reply: %v", err)
@@ -439,7 +439,7 @@ func TestMessageDecryptSignal(t *testing.T) {
 		alice.identityStore, alice.kyberStore,
 		bob.addr, ser,
 	)
-	aliceCipher := session.NewCipher(aliceBuilder, bob.addr)
+	aliceCipher := session.NewCipherWithLocalAddress(aliceBuilder, nil, bob.addr)
 	switch m := bobMsg.(type) {
 	case *protocol.SignalMessage:
 		if _, err := aliceCipher.Decrypt(m); err != nil {
@@ -519,7 +519,7 @@ func TestMessageDecrypt_DispatchesSignal(t *testing.T) {
 		bob.identityStore, bob.kyberStore,
 		alice.addr, ser,
 	)
-	bobCipher := session.NewCipher(bobBuilder, alice.addr)
+	bobCipher := session.NewCipherWithLocalAddress(bobBuilder, nil, alice.addr)
 	bobReply, err := bobCipher.Encrypt([]byte("bob reply ds"))
 	if err != nil {
 		t.Fatalf("Bob encrypt: %v", err)
@@ -530,7 +530,7 @@ func TestMessageDecrypt_DispatchesSignal(t *testing.T) {
 		alice.identityStore, alice.kyberStore,
 		bob.addr, ser,
 	)
-	aliceCipher := session.NewCipher(aliceBuilder, bob.addr)
+	aliceCipher := session.NewCipherWithLocalAddress(aliceBuilder, nil, bob.addr)
 	switch m := bobReply.(type) {
 	case *protocol.SignalMessage:
 		if _, err := aliceCipher.Decrypt(m); err != nil {
@@ -734,7 +734,7 @@ func establishSignalMessageSession(t *testing.T, alice, bob *testParty, ser *ser
 		bob.identityStore, bob.kyberStore,
 		alice.addr, ser,
 	)
-	bobCipher := session.NewCipher(bobBuilder, alice.addr)
+	bobCipher := session.NewCipherWithLocalAddress(bobBuilder, nil, alice.addr)
 	bobReply, err := bobCipher.Encrypt([]byte("reply"))
 	if err != nil {
 		t.Fatalf("Bob encrypt reply: %v", err)
@@ -744,7 +744,7 @@ func establishSignalMessageSession(t *testing.T, alice, bob *testParty, ser *ser
 		alice.identityStore, alice.kyberStore,
 		bob.addr, ser,
 	)
-	aliceCipher := session.NewCipher(aliceBuilder, bob.addr)
+	aliceCipher := session.NewCipherWithLocalAddress(aliceBuilder, nil, bob.addr)
 	switch m := bobReply.(type) {
 	case *protocol.SignalMessage:
 		if _, err := aliceCipher.Decrypt(m); err != nil {
@@ -873,7 +873,7 @@ func TestMessageDecryptSignal_NilLocalAddress(t *testing.T) {
 		bob.identityStore, bob.kyberStore,
 		alice.addr, ser,
 	)
-	bobCipher := session.NewCipher(bobBuilder, alice.addr)
+	bobCipher := session.NewCipherWithLocalAddress(bobBuilder, nil, alice.addr)
 	bobReply, err := bobCipher.Encrypt([]byte("reply-nil"))
 	if err != nil {
 		t.Fatalf("Bob encrypt: %v", err)
@@ -883,7 +883,7 @@ func TestMessageDecryptSignal_NilLocalAddress(t *testing.T) {
 		alice.identityStore, alice.kyberStore,
 		bob.addr, ser,
 	)
-	aliceCipher := session.NewCipher(aliceBuilder, bob.addr)
+	aliceCipher := session.NewCipherWithLocalAddress(aliceBuilder, nil, bob.addr)
 	switch m := bobReply.(type) {
 	case *protocol.SignalMessage:
 		if _, err := aliceCipher.Decrypt(m); err != nil {

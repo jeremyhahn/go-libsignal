@@ -1,0 +1,146 @@
+# Upstream-tree interop checks (devops.md §5).
+#
+# Both jobs here need a full checkout of upstream Rust libsignal at the commit
+# pinned in /RUST_REV, and the live suite additionally compiles it. That is tens
+# of minutes on a serial Gitea runner, and the pin is immutable — a push that
+# touches neither /RUST_REV nor the harness cannot change the outcome. So this
+# runs weekly, on demand, and on pushes that touch the pin or the harness,
+# rather than on every push. The fast half of the fixture gate (sha256 against
+# MANIFEST.toml, no network) stays in ci.yml's `test` job.
+
+name: Interop
+
+on:
+  push:
+    branches: [master, main, develop]
+    paths:
+      - 'RUST_REV'
+      - 'tests/interop/**'
+      - '.github/workflows/interop.yml'
+  pull_request:
+    branches: [master, main, develop]
+    paths:
+      - 'RUST_REV'
+      - 'tests/interop/**'
+      - '.github/workflows/interop.yml'
+  schedule:
+    # Weekly on Monday at 03:00 UTC.
+    - cron: '0 3 * * 1'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+env:
+  GOWORK: off
+
+jobs:
+  conformance-fixtures:
+    name: Conformance Fixtures (upstream diff)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # Checked out under a subdirectory so the upstream tree can sit beside it
+      # — see the layout note in interop-live below, which depends on it.
+      - uses: actions/checkout@v4
+        with:
+          path: go-libsignal
+
+      - name: Read pinned RUST_REV
+        id: rust_rev
+        run: |
+          rev=$(grep -vE '^\s*(#|$)' go-libsignal/RUST_REV | head -n1)
+          echo "rev=${rev}" >>"$GITHUB_OUTPUT"
+
+      - name: Fetch upstream Rust libsignal at pinned commit
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/signalapp/libsignal.git libsignal
+          git -C libsignal checkout ${{ steps.rust_rev.outputs.rev }}
+
+      - name: Diff fixtures against upstream tree
+        run: |
+          LIBSIGNAL_UPSTREAM="$GITHUB_WORKSPACE/libsignal" \
+            go-libsignal/tests/interop/scripts/check_fixtures.sh
+
+  interop-live:
+    name: Live Interop (Rust↔Go)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      # The directory layout here is load-bearing, not incidental.
+      # tests/interop/rust/Cargo.toml carries path dependencies on
+      # ../../../../libsignal/rust/{protocol,zkgroup,core} — four levels up from
+      # the crate, i.e. a `libsignal` directory beside the repository checkout.
+      # Nothing provisioned it before, so `make interop-live-build` resolved it
+      # only on a developer machine that happened to have upstream cloned as a
+      # sibling, and failed everywhere else. Checking out under go-libsignal/
+      # and cloning upstream to libsignal/ reproduces that layout from the
+      # pinned commit, deterministically.
+      - uses: actions/checkout@v4
+        with:
+          path: go-libsignal
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.6'
+          cache: true
+          cache-dependency-path: go-libsignal/go.sum
+
+      - name: Read pinned RUST_REV
+        id: rust_rev
+        run: |
+          rev=$(grep -vE '^\s*(#|$)' go-libsignal/RUST_REV | head -n1)
+          echo "rev=${rev}" >>"$GITHUB_OUTPUT"
+
+      - name: Fetch upstream Rust libsignal at pinned commit
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/signalapp/libsignal.git libsignal
+          git -C libsignal checkout ${{ steps.rust_rev.outputs.rev }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            go-libsignal/tests/interop/rust/target
+          key: ${{ runner.os }}-cargo-${{ steps.rust_rev.outputs.rev }}-${{ hashFiles('go-libsignal/tests/interop/rust/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ steps.rust_rev.outputs.rev }}-
+            ${{ runner.os }}-cargo-
+
+      - name: Install protoc
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Install protoc-gen-go
+        working-directory: go-libsignal
+        run: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+
+      - name: Build Rust interop binaries
+        working-directory: go-libsignal
+        run: make interop-live-build
+
+      - name: Run live interop test suite
+        working-directory: go-libsignal
+        run: make interop-live
+
+  # devops.md §1: one required check per workflow, listing every job explicitly
+  # and failing closed. join(needs.*.result) evaluates empty on Gitea.
+  interop-gate:
+    name: Interop Gate
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [conformance-fixtures, interop-live]
+    steps:
+      - name: Fail closed on any non-success
+        run: |
+          check() { case "$2" in success) echo "OK   $1";; *) echo "FAIL $1 ($2)"; BAD=1;; esac; }
+          BAD=0
+          check conformance-fixtures  "${{ needs.conformance-fixtures.result }}"
+          check interop-live          "${{ needs.interop-live.result }}"
+          exit $BAD

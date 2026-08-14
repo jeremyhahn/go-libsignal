@@ -507,13 +507,16 @@ func TestPaddedLength_ClampAtMaxUint32(t *testing.T) {
 }
 
 // TestPaddedLength_NearMaxDoesNotExceedUint32 verifies inputs just below
-// MaxUint32 produce results that do not overflow uint32.
+// MaxUint32 saturate rather than wrap.
 func TestPaddedLength_NearMaxDoesNotExceedUint32(t *testing.T) {
 	const nearMax = math.MaxUint32 - 1000
 	result := PaddedLength(nearMax)
-	// Result must be clamped — any bucket above MaxUint32 saturates to MaxUint32.
-	if result > math.MaxUint32 {
-		t.Errorf("PaddedLength(%d) = %d exceeds MaxUint32", nearMax, result)
+	// The next 1.05 bucket above nearMax lands past MaxUint32, so the clamp
+	// must saturate. An unclamped float64→uint32 cast is implementation-defined
+	// out of range and would yield a value below the input instead.
+	if result != math.MaxUint32 {
+		t.Errorf("PaddedLength(%d) = %d, want saturation to %d",
+			uint32(nearMax), result, uint32(math.MaxUint32))
 	}
 }
 

@@ -1639,14 +1639,14 @@ func TestSealedSenderDecryptWithKyber_WhisperDecryptFailure(t *testing.T) {
 		bobSessionStore, bobPreKeyStore, bobSignedPreKeyStore,
 		bobIdentityStore, bobKyberPreKeyStore, aliceAddress, serializer,
 	)
-	bobCipher := session.NewCipher(bobBuilder, aliceAddress)
+	bobCipher := session.NewCipherWithLocalAddress(bobBuilder, nil, aliceAddress)
 	replyMsg, _ := bobCipher.Encrypt([]byte("reply"))
 	replyBytes, _ := replyMsg.Serialize()
 	aliceBuilder2 := session.NewBuilderWithKyber(
 		aliceSessionStore, alicePreKeyStore, aliceSignedPreKeyStore,
 		aliceIdentityStore, newInMemoryKyberPreKeyStoreForV1(), bobAddress, serializer,
 	)
-	aliceCipher := session.NewCipher(aliceBuilder2, bobAddress)
+	aliceCipher := session.NewCipherWithLocalAddress(aliceBuilder2, nil, bobAddress)
 	replyWhisper, err := protocol.NewSignalMessageFromBytes(replyBytes, serializer.SignalMessage)
 	if err != nil {
 		t.Fatalf("NewSignalMessageFromBytes error: %v", err)
@@ -1793,7 +1793,7 @@ func TestSealedSenderDecryptWithKyber_NilKyberStoreWhisperMessage(t *testing.T) 
 		bobSessionStore, bobPreKeyStore, bobSignedPreKeyStore,
 		bobIdentityStore, bobKyberPreKeyStore, aliceAddress, serializer,
 	)
-	bobCipher := session.NewCipher(bobBuilder2, aliceAddress)
+	bobCipher := session.NewCipherWithLocalAddress(bobBuilder2, nil, aliceAddress)
 	replyMsg, err := bobCipher.Encrypt([]byte("bob reply"))
 	if err != nil {
 		t.Fatalf("Bob encrypt reply error: %v", err)
@@ -1804,7 +1804,7 @@ func TestSealedSenderDecryptWithKyber_NilKyberStoreWhisperMessage(t *testing.T) 
 		aliceSessionStore, alicePreKeyStore, aliceSignedPreKeyStore,
 		aliceIdentityStore, newInMemoryKyberPreKeyStoreForV1(), bobAddress, serializer,
 	)
-	aliceCipher := session.NewCipher(aliceBuilder2, bobAddress)
+	aliceCipher := session.NewCipherWithLocalAddress(aliceBuilder2, nil, bobAddress)
 	replyWhisper, err := protocol.NewSignalMessageFromBytes(replyBytes, serializer.SignalMessage)
 	if err != nil {
 		t.Fatalf("NewSignalMessageFromBytes error: %v", err)

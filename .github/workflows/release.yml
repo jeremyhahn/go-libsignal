@@ -1,5 +1,11 @@
 name: Release
 
+# go-libsignal is a LIBRARY: no cmd/ directory, no package main outside
+# examples/, so a release ships no binaries. What a Go module release consists
+# of is the tag itself. This workflow validates that the tag is releasable,
+# generates an SBOM, and publishes the release to whichever host the tag was
+# pushed to (devops.md §3).
+
 on:
   push:
     tags:
@@ -13,124 +19,156 @@ on:
 
 permissions:
   contents: write
-  id-token: write
 
 env:
   GOWORK: off
 
 jobs:
-  build-and-test:
-    name: Build and Test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-        with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-
-      - name: Set up Go
-        uses: actions/setup-go@d60b41a563a30eb0b7f6a852f3d5e67ebb8f8df8  # v5.5.0
-        with:
-          go-version: '1.26.6'
-          cache: true
-
-      - name: Run CI
-        run: make ci
-
-  sbom:
-    name: Generate SBOM
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-        with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-
-      - name: Set up Go
-        uses: actions/setup-go@d60b41a563a30eb0b7f6a852f3d5e67ebb8f8df8  # v5.5.0
-        with:
-          go-version: '1.26.6'
-          cache: true
-
-      - name: Install cyclonedx-gomod
-        run: go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@latest
-
-      - name: Generate SBOM (JSON)
-        run: cyclonedx-gomod mod -json -licenses -output sbom.cdx.json
-
-      - name: Generate SBOM (XML)
-        run: cyclonedx-gomod mod -output sbom.cdx.xml
-
-      - name: Upload SBOM artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
-        with:
-          name: sbom
-          path: |
-            sbom.cdx.json
-            sbom.cdx.xml
-          retention-days: 90
-
+  # SBOM generation and publication were two jobs handing artifacts over with
+  # actions/upload-artifact + download-artifact. That pair refuses to run
+  # against anything but github.com ("not currently supported on GHES", which is
+  # how Gitea presents), so the handoff could never work on the dev remote. One
+  # job keeps the files in a single workspace and needs no artifact store.
   release:
-    name: Create Release
+    name: Release
     runs-on: ubuntu-latest
-    needs: sbom
+    timeout-minutes: 60
     steps:
+      # Actions are referenced by tag, not by commit SHA. act_runner resolves a
+      # `uses:` ref by fetching that ref from github.com; a bare commit SHA that
+      # is not the tip of a branch or tag is not fetchable, so every SHA-pinned
+      # step failed the job before any of its own steps ran:
+      #     Unable to resolve d60b41a...: reference not found
+      # That is what killed run #114. Tags are also what devops.md §9 requires.
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - name: Download SBOM artifacts
-        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e  # v4.2.1
+      - name: Set up Go
+        uses: actions/setup-go@v5
         with:
-          name: sbom
-          path: dist/
-
-      - name: Compute checksums
-        run: sha256sum dist/sbom.cdx.json dist/sbom.cdx.xml > dist/checksums.txt
+          go-version: '1.26.6'
+          cache: true
 
       - name: Resolve release tag
         id: tag
         run: |
+          set -euo pipefail
           if [ -n "${{ github.event.inputs.tag }}" ]; then
-            echo "name=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+            TAG="${{ github.event.inputs.tag }}"
           else
-            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "name=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          if echo "$TAG" | grep -qEi -- '-(rc|alpha|beta)'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Determine if prerelease
-        id: prerelease
+      # A malformed tag is published forever: the module proxy caches it and it
+      # cannot be retracted by deleting the tag. Validate before anything else.
+      - name: Validate tag
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          tag="${{ steps.tag.outputs.name }}"
-          if echo "$tag" | grep -qE -- '-(rc|alpha|beta)\.' ; then
-            echo "flag=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "flag=false" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "FAIL: tag v$VERSION is not a semantic version"
+            exit 1
           fi
+          FILE_VERSION="$(tr -d '[:space:]' < VERSION)"
+          if [ "$FILE_VERSION" != "$VERSION" ]; then
+            echo "FAIL: VERSION file says '$FILE_VERSION' but the tag says '$VERSION'"
+            exit 1
+          fi
+          # A v2+ module must carry the major suffix in its module path, or
+          # every `go get` of it silently resolves to the v1 line.
+          MAJOR="${VERSION%%.*}"
+          MODULE="$(go list -m)"
+          if [ "$MAJOR" -ge 2 ] && [ "${MODULE##*/}" != "v$MAJOR" ]; then
+            echo "FAIL: module path '$MODULE' lacks the required /v$MAJOR suffix"
+            exit 1
+          fi
+
+      # Smoke check only. The full gate (lint, gosec, govulncheck, trivy, -race
+      # tests, coverage threshold) runs in ci.yml on the commit this tag points
+      # at; repeating it here would double an already long pipeline. What this
+      # catches is a tag placed on a commit that does not build.
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Install cyclonedx-gomod
+        run: go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@latest
+
+      - name: Generate SBOM
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cyclonedx-gomod mod -json -licenses -output dist/sbom.cdx.json
+          cyclonedx-gomod mod -output dist/sbom.cdx.xml
+          ( cd dist && sha256sum sbom.cdx.json sbom.cdx.xml > checksums.txt )
 
       - name: Locate release notes
         id: notes
+        env:
+          TAG: ${{ steps.tag.outputs.name }}
         run: |
-          tag="${{ steps.tag.outputs.name }}"
-          notes_file="RELEASE_NOTES_${tag}.md"
+          set -euo pipefail
+          notes_file="RELEASE_NOTES_${TAG}.md"
           if [ ! -f "$notes_file" ]; then
             notes_file="RELEASE_NOTES_v0.1.0.md"
           fi
           if [ ! -f "$notes_file" ]; then
-            echo "## Release ${tag}" > release_notes.md
+            echo "## Release ${TAG}" > release_notes.md
             notes_file="release_notes.md"
           fi
           echo "file=${notes_file}" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631  # v2.2.2
+        if: github.server_url == 'https://github.com'
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.name }}
           name: ${{ steps.tag.outputs.name }}
           body_path: ${{ steps.notes.outputs.file }}
-          prerelease: ${{ steps.prerelease.outputs.flag }}
+          prerelease: ${{ steps.tag.outputs.prerelease }}
           files: |
             dist/sbom.cdx.json
             dist/sbom.cdx.xml
             dist/checksums.txt
+
+      # softprops/action-gh-release talks to the GitHub Releases API, which
+      # Gitea does not serve. Gitea has its own equivalent under /api/v1, and
+      # the job's own token authenticates against it.
+      - name: Create Gitea Release
+        if: github.server_url != 'https://github.com'
+        env:
+          GITEA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.name }}
+          PRERELEASE: ${{ steps.tag.outputs.prerelease }}
+          NOTES_FILE: ${{ steps.notes.outputs.file }}
+        run: |
+          set -euo pipefail
+          API="${GITHUB_SERVER_URL}/api/v1/repos/${GITHUB_REPOSITORY}/releases"
+          BODY="$(python3 -c 'import json,sys; print(json.dumps(open(sys.argv[1]).read()))' "$NOTES_FILE")"
+          PAYLOAD=$(cat <<EOF
+          {"tag_name":"${TAG}","name":"${TAG}","body":${BODY},"prerelease":${PRERELEASE},"draft":false}
+          EOF
+          )
+          RELEASE_ID=$(curl -sSf -X POST "$API" \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+          echo "Created release ${TAG} (id ${RELEASE_ID})"
+          for f in dist/sbom.cdx.json dist/sbom.cdx.xml dist/checksums.txt; do
+            curl -sSf -X POST "${API}/${RELEASE_ID}/assets?name=$(basename "$f")" \
+              -H "Authorization: token ${GITEA_TOKEN}" \
+              -F "attachment=@${f}" >/dev/null
+            echo "Attached $(basename "$f")"
+          done

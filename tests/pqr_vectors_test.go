@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"golang.org/x/crypto/hkdf"
@@ -174,10 +175,16 @@ func TestPQRHKDFVectors(t *testing.T) {
 	}
 	t.Logf("PQR Test Vectors:\n%s", string(vectorJSON))
 
-	// Write vectors to file for cross-language verification
-	vectorPath := "/home/jhahn/sources/go-libsignal/tests/pqr_vectors.json"
-	if err := os.WriteFile(vectorPath, vectorJSON, 0644); err != nil {
+	// Write vectors to file for cross-language verification. This goes to the
+	// test's temporary directory, never into the source tree: a test that
+	// writes outside the run's own scratch space mutates the developer's
+	// checkout as a side effect of `make test` (devops.md §4). The full JSON is
+	// also in the t.Logf above, so nothing is lost when the temp dir is reaped.
+	vectorPath := filepath.Join(t.TempDir(), "pqr_vectors.json")
+	if err := os.WriteFile(vectorPath, vectorJSON, 0o644); err != nil {
 		t.Logf("Warning: could not write vectors to file: %v", err)
+	} else {
+		t.Logf("PQR vectors written to %s", vectorPath)
 	}
 }
 

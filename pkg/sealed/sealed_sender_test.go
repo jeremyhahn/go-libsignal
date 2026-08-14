@@ -852,7 +852,7 @@ func TestSealedSenderFullEncryptDecryptWhisperMessage(t *testing.T) {
 		bobSessionStore, bobPreKeyStore, bobSignedPreKeyStore,
 		bobIdentityStore, bobKyberPreKeyStore, aliceAddress, serializer,
 	)
-	bobCipher := session.NewCipher(bobBuilder, aliceAddress)
+	bobCipher := session.NewCipherWithLocalAddress(bobBuilder, nil, aliceAddress)
 
 	// Bob's reply (this establishes Bob's session with Alice for return messages).
 	replyMsg, err := bobCipher.Encrypt([]byte("bob reply"))
@@ -866,7 +866,7 @@ func TestSealedSenderFullEncryptDecryptWhisperMessage(t *testing.T) {
 		aliceSessionStore, alicePreKeyStore, aliceSignedPreKeyStore,
 		aliceIdentityStore, newInMemoryKyberPreKeyStoreForV1(), bobAddress, serializer,
 	)
-	aliceCipher := session.NewCipher(aliceBuilder2, bobAddress)
+	aliceCipher := session.NewCipherWithLocalAddress(aliceBuilder2, nil, bobAddress)
 	replyWhisper, err := protocol.NewSignalMessageFromBytes(replyBytes, serializer.SignalMessage)
 	if err != nil {
 		t.Fatalf("NewSignalMessageFromBytes error: %v", err)
