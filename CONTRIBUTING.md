@@ -75,12 +75,38 @@ fixtures (`make interop-wire-emit`):
 - `protoc` (Protocol Buffers compiler)
 - `protoc-gen-go` and `protoc-gen-go-grpc`
 
-### Kernel capability note
+### Locked-memory requirement (`RLIMIT_MEMLOCK`)
 
-`pkg/util/crypto/secret` uses `memguard`, which calls `mlockall(2)`.
-This requires a kernel with the capability enabled (standard on Linux
-with default `ulimit -l`). Tests for this package may fail in
-heavily-restricted container environments.
+`pkg/util/crypto/secret` uses `memguard`, which `mlock(2)`s every secret
+it holds. memguard surrounds each buffer with canary and guard pages, so
+a 32-byte message key costs roughly 16 KiB of locked pages, and the test
+suite holds thousands of them at once: `TestGroupCipherDecryptTooFarInFuture`
+alone drives a sender chain 25,002 messages forward to exercise the
+`maxForwardJumps` limit.
+
+**Run the suite with `ulimit -l` of at least 2 GiB**, or `unlimited`.
+Measured on go1.26.6 with `-race`, 2026-08-14:
+
+| `ulimit -l` | Result |
+|---|---|
+| 8 MiB (Docker's default) | fails at chain iteration ~511 |
+| 64 MiB | fails at ~4074 |
+| 256 MiB / 512 MiB | still fails in `pkg/groups` and `pkg/session` |
+| 2 GiB | passes |
+
+The failure is not a flake and not a leak — `GOGC=1` fails at the exact
+same iteration, so the buffers are genuinely live. It surfaces as:
+
+```
+secret: allocation failed: <memcall> could not acquire lock on 0x...,
+limit reached? [Err: cannot allocate memory]
+```
+
+Container runtimes are the usual culprit: Docker defaults `memlock` to
+8 MiB, hard limit included, and `RLIMIT_MEMLOCK` cannot be raised past
+its hard limit without `CAP_SYS_RESOURCE`. Run containers with
+`--ulimit memlock=-1:-1`; CI runners need the same setting on the job
+container, not just the host.
 
 ## Commit Conventions
 
