@@ -41,12 +41,12 @@ jobs:
       #     Unable to resolve d60b41a...: reference not found
       # That is what killed run #114. Tags are also what devops.md §9 requires.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: '1.26.6'
           cache: true
