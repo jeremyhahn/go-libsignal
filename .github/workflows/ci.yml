@@ -27,6 +27,27 @@ env:
   GOWORK: off
 
 jobs:
+  fips:
+    name: FIPS
+    runs-on: ubuntu-latest
+    needs: [build]
+    timeout-minutes: 30
+    env:
+      GOFIPS140: latest
+      GODEBUG: fips140=on
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Build all packages (FIPS mode)
+        run: go build ./...
+
+      - name: Unit tests (FIPS mode)
+        run: go test -count=1 -timeout=900s ./...
+
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -308,7 +329,7 @@ jobs:
     name: CI Gate
     runs-on: ubuntu-latest
     if: always()
-    needs: [test, build, security, trivy, lint, integration-test, examples-build, coverage]
+    needs: [test, build, security, trivy, lint, integration-test, examples-build, coverage, fips]
     steps:
       - name: Fail closed on any non-success
         run: |
@@ -316,6 +337,7 @@ jobs:
           BAD=0
           check test                  "${{ needs.test.result }}"
           check build                 "${{ needs.build.result }}"
+          check fips        "${{ needs.fips.result }}"
           check security              "${{ needs.security.result }}"
           check trivy                 "${{ needs.trivy.result }}"
           check lint                  "${{ needs.lint.result }}"
