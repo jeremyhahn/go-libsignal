@@ -97,7 +97,7 @@ func buildFuzzSession() (aliceCipher *session.Cipher, bobBuilder *session.Builde
 		bobSPK.Signature(),
 		identity.NewKey(bobKP.PublicKey().PublicKey()),
 		&optional.Uint32{Value: 42},
-		bobKyberPreKey.KeyPair().Public,
+		bobKyberPreKey.PublicKey(),
 		bobKyberPreKey.Signature(),
 	)
 	_ = aliceBuilder.ProcessBundle(bundle)

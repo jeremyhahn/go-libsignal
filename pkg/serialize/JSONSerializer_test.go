@@ -137,7 +137,7 @@ func TestJSONSignedPreKeyRecordSerializer_RoundTrip(t *testing.T) {
 	original := &record.SignedPreKeyStructure{
 		ID:         1,
 		PublicKey:  []byte{0x01},
-		PrivateKey: []byte{0x02},
+		PrivateKey: mustGuard(t, []byte{0x02}),
 		Signature:  []byte{0x03},
 		Timestamp:  1000,
 	}
@@ -175,7 +175,7 @@ func TestJSONPreKeyRecordSerializer_RoundTrip(t *testing.T) {
 	original := &record.PreKeyStructure{
 		ID:         5,
 		PublicKey:  []byte{0x01},
-		PrivateKey: []byte{0x02},
+		PrivateKey: mustGuard(t, []byte{0x02}),
 	}
 
 	serialized, err := s.Serialize(original)
@@ -210,7 +210,7 @@ func TestJSONStateSerializer_RoundTrip(t *testing.T) {
 		LocalRegistrationID:  1111,
 		RemoteRegistrationID: 2222,
 		PreviousCounter:      10,
-		RootKey:              []byte{0x01, 0x02},
+		RootKey:              mustGuard(t, []byte{0x01, 0x02}),
 	}
 
 	serialized, err := s.Serialize(original)

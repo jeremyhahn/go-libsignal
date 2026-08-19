@@ -274,7 +274,7 @@ func (p *testParty) kyberBundle(ser *serialize.Serializer) *prekey.Bundle {
 		p.signedPreKey.Signature(),
 		p.identityKP.PublicKey(),
 		&optional.Uint32{Value: 42},
-		p.kyberPreKey.KeyPair().Public,
+		p.kyberPreKey.PublicKey(),
 		p.kyberPreKey.Signature(),
 	)
 }

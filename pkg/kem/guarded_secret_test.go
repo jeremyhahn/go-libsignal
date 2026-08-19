@@ -42,7 +42,7 @@ func TestNewGuardedSecretKeyNilInput(t *testing.T) {
 }
 
 func TestNewGuardedSecretKeyFromSecret(t *testing.T) {
-	data := make([]byte, 32)
+	data := make([]byte, expectedSecretKeySize(KeyTypeKyber1024))
 	for i := range data {
 		data[i] = byte(i + 1)
 	}
@@ -52,7 +52,10 @@ func TestNewGuardedSecretKeyFromSecret(t *testing.T) {
 		t.Fatalf("secret.New() error: %v", err)
 	}
 
-	gsk := NewGuardedSecretKeyFromSecret(KeyTypeKyber1024, s)
+	gsk, err := NewGuardedSecretKeyFromSecret(KeyTypeKyber1024, s)
+	if err != nil {
+		t.Fatalf("NewGuardedSecretKeyFromSecret() error: %v", err)
+	}
 	defer gsk.Destroy()
 
 	if gsk.Type() != KeyTypeKyber1024 {
@@ -320,4 +323,103 @@ func TestGuardedKeyPairDestroyNilSecret(t *testing.T) {
 
 	// Should not panic.
 	gkp.Destroy()
+}
+
+func TestNewGuardedSecretKeyFromSecretRejectsWrongLength(t *testing.T) {
+	s, err := secret.New(make([]byte, 32))
+	if err != nil {
+		t.Fatalf("secret.New() error: %v", err)
+	}
+
+	gsk, err := NewGuardedSecretKeyFromSecret(KeyTypeKyber1024, s)
+	if err == nil {
+		t.Fatal("expected a length mismatch to be rejected")
+	}
+	if gsk != nil {
+		t.Error("no key should be returned when the material is rejected")
+	}
+	if !s.IsDestroyed() {
+		t.Error("the rejected material should be destroyed, not abandoned")
+	}
+}
+
+func TestGuardedSecretKeyCloneSecret(t *testing.T) {
+	data := make([]byte, expectedSecretKeySize(KeyTypeKyber1024))
+	for i := range data {
+		data[i] = byte(i)
+	}
+	want := append([]byte(nil), data...)
+
+	gsk, err := NewGuardedSecretKey(KeyTypeKyber1024, data)
+	if err != nil {
+		t.Fatalf("NewGuardedSecretKey() error: %v", err)
+	}
+	defer gsk.Destroy()
+
+	cloned, err := gsk.CloneSecret()
+	if err != nil {
+		t.Fatalf("CloneSecret() error: %v", err)
+	}
+	if !cloned.EqualTo(want) {
+		t.Error("CloneSecret() did not copy the key material")
+	}
+
+	// The clone is independent: destroying it leaves the key intact.
+	cloned.Destroy()
+	if gsk.IsDestroyed() {
+		t.Error("destroying the clone destroyed the source key")
+	}
+}
+
+func TestGuardedSecretKeyCloneSecretDestroyed(t *testing.T) {
+	gsk, err := NewGuardedSecretKey(KeyTypeKyber1024, make([]byte, expectedSecretKeySize(KeyTypeKyber1024)))
+	if err != nil {
+		t.Fatalf("NewGuardedSecretKey() error: %v", err)
+	}
+	gsk.Destroy()
+
+	cloned, err := gsk.CloneSecret()
+	if err == nil {
+		t.Fatal("expected an error cloning a destroyed key")
+	}
+	if cloned != nil {
+		t.Error("no secret should be returned for a destroyed key")
+	}
+}
+
+func TestGuardedFromPublicAndPrivate(t *testing.T) {
+	generated, err := NewGuardedKyber1024().Generate()
+	if err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+	defer generated.Destroy()
+	want := append([]byte(nil), generated.Secret.Data()...)
+
+	loaded, err := GuardedFromPublicAndPrivate(generated.Public.Serialize(), append([]byte(nil), want...))
+	if err != nil {
+		t.Fatalf("GuardedFromPublicAndPrivate() error: %v", err)
+	}
+	defer loaded.Destroy()
+
+	if loaded.Public.Type() != KeyTypeKyber1024 {
+		t.Errorf("Public.Type() = 0x%02x, want 0x%02x", loaded.Public.Type(), KeyTypeKyber1024)
+	}
+	if !bytes.Equal(loaded.Secret.Data(), want) {
+		t.Error("secret key material was not loaded into guarded memory intact")
+	}
+}
+
+func TestGuardedFromPublicAndPrivateRejectsBadInput(t *testing.T) {
+	generated, err := NewGuardedKyber1024().Generate()
+	if err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+	defer generated.Destroy()
+
+	if _, err := GuardedFromPublicAndPrivate(nil, make([]byte, expectedSecretKeySize(KeyTypeKyber1024))); err == nil {
+		t.Error("expected an unparseable public key to be rejected")
+	}
+	if _, err := GuardedFromPublicAndPrivate(generated.Public.Serialize(), make([]byte, 32)); err == nil {
+		t.Error("expected a secret key of the wrong length to be rejected")
+	}
 }

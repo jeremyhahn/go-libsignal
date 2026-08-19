@@ -9,6 +9,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/kdf"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/chain"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/message"
+	"github.com/jeremyhahn/go-libsignal/pkg/keys/root"
 	"github.com/jeremyhahn/go-libsignal/pkg/logger"
 	"github.com/jeremyhahn/go-libsignal/pkg/protocol"
 	"github.com/jeremyhahn/go-libsignal/pkg/spqr"
@@ -173,7 +174,11 @@ func (d *Cipher) Encrypt(plaintext []byte) (protocol.CiphertextMessage, error) {
 		return nil, err
 	}
 	sessionState := sessionRecord.SessionState()
+	// SenderChainKey hands back a copy in its own guarded buffer. The ratchet
+	// forward below consumes it; this releases it on the paths that return
+	// before that happens.
 	chainKey := sessionState.SenderChainKey()
+	defer chainKey.(*chain.Key).Zeroize()
 
 	// Derive message keys, incorporating SPQR ratchet if active.
 	var (
@@ -185,7 +190,9 @@ func (d *Cipher) Encrypt(plaintext []byte) (protocol.CiphertextMessage, error) {
 		if pqrErr != nil {
 			return nil, pqrErr
 		}
-		sessionState.SetPqRatchetState(newState)
+		if setErr := sessionState.SetPqRatchetState(newState); setErr != nil {
+			return nil, setErr
+		}
 		pqrMsg = msg
 		messageKeys, err = chainKey.MessageKeysWithSalt(pqrKey)
 	} else {
@@ -506,13 +513,30 @@ func (d *Cipher) DecryptWithState(sessionState *record.State, ciphertextMessage 
 		return nil, nil, cloneErr
 	}
 
+	// The clone holds its own guarded buffers, and a failed decrypt throws it
+	// away. Release them rather than abandoning them: memguard reclaims
+	// nothing on its own, so otherwise every message that fails MAC
+	// verification would cost the process locked memory it never gets back.
+	// The commit below moves those buffers into sessionState, which is why the
+	// discard is disarmed on the success path.
+	committed := false
+	defer func() {
+		if !committed {
+			workingState.DiscardClone()
+		}
+	}()
+
 	plaintext, messageKeys, err := d.decryptWithClonedState(workingState, ciphertextMessage)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	// Decryption succeeded -- commit the working state back to the original.
-	sessionState.CopyFrom(workingState)
+	// Committing rather than copying releases the guarded material the commit
+	// supersedes, so a long-lived session does not accumulate a locked buffer
+	// per message it accepts.
+	sessionState.CommitClone(workingState)
+	committed = true
 
 	return plaintext, messageKeys, nil
 }
@@ -551,6 +575,17 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 	if sessionState.HasReceiverChain(theirEphemeral) && sessionState.HasMessageKeys(theirEphemeral, counter) {
 		skippedKeys := sessionState.RemoveMessageKeys(theirEphemeral, counter)
 
+		// The keys are no longer part of the clone, so discarding the clone no
+		// longer covers them. Release them on every exit that does not hand
+		// them to the caller — a message that matches a stored skipped key but
+		// fails authentication is attacker-supplied.
+		keysHandedOver := false
+		defer func() {
+			if !keysHandedOver && skippedKeys != nil {
+				skippedKeys.Zeroize()
+			}
+		}()
+
 		// Note: PQR state is advanced before MAC verification, which differs from
 		// Rust's ordering. This is safe because decryptWithClonedState operates on
 		// a cloned session state; if MAC verification fails, the clone is discarded
@@ -565,7 +600,9 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 					if pqrErr != nil {
 						return nil, nil, pqrErr
 					}
-					sessionState.SetPqRatchetState(newState)
+					if setErr := sessionState.SetPqRatchetState(newState); setErr != nil {
+						return nil, nil, setErr
+					}
 					seedCopy := make([]byte, len(seed))
 					copy(seedCopy, seed)
 					reDerived, reErr := chain.DeriveMessageKeysFromSeed(
@@ -574,6 +611,9 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 					if reErr != nil {
 						return nil, nil, reErr
 					}
+					// The stored keys have been superseded by the re-derived
+					// ones; the seed was copied out above.
+					skippedKeys.Zeroize()
 					skippedKeys = reDerived
 				}
 			}
@@ -605,6 +645,7 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 		}
 
 		sessionState.ClearUnackPreKeyMessage()
+		keysHandedOver = true
 		return plaintext, skippedKeys, nil
 	}
 
@@ -613,6 +654,10 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 		logger.Error("Unable to get or create chain key: ", chainCreateErr)
 		return nil, nil, chainCreateErr
 	}
+	// The chain key is this call's own copy. Ratcheting it forward destroys its
+	// buffer, so this is a no-op on the paths that get that far and a release
+	// on the ones that return first — a duplicate message, for instance.
+	defer chainKey.Zeroize()
 
 	// SPQR: Derive the PQR salt for message key derivation if both the message
 	// carries PQR data and the session has active SPQR state.
@@ -632,7 +677,9 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 				}
 				return nil, nil, pqrErr
 			}
-			sessionState.SetPqRatchetState(newState)
+			if setErr := sessionState.SetPqRatchetState(newState); setErr != nil {
+				return nil, nil, setErr
+			}
 			pqrSalt = pqrKey
 		}
 	}
@@ -642,6 +689,16 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 		logger.Error("Unable to get or create message keys: ", keysCreateErr)
 		return nil, nil, keysCreateErr
 	}
+	// These keys are derived here and belong to nothing else. Release them on
+	// every exit that does not hand them to the caller — authentication has
+	// not happened yet, so the exits below are exactly the ones an attacker
+	// can drive.
+	messageKeysHandedOver := false
+	defer func() {
+		if !messageKeysHandedOver && messageKeys != nil {
+			messageKeys.Zeroize()
+		}
+	}()
 
 	// F15: Use VerifyMacWithAddresses when both local and remote addresses are
 	// known, enforcing address binding. Mirrors Rust
@@ -669,6 +726,7 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 
 	sessionState.ClearUnackPreKeyMessage()
 
+	messageKeysHandedOver = true
 	return plaintext, messageKeys, nil
 }
 
@@ -682,6 +740,9 @@ func getOrCreateMessageKeys(sessionState *record.State, theirEphemeral ecc.ECPub
 			if seed := storedKeys.SeedMaterial(); len(seed) > 0 && len(pqrSalt) > 0 {
 				seedCopy := make([]byte, len(seed))
 				copy(seedCopy, seed)
+				// The stored keys leave the clone here and are superseded by
+				// the re-derived ones, so nothing else will release them.
+				defer storedKeys.Zeroize()
 				return chain.DeriveMessageKeysFromSeed(kdf.DeriveSecrets, seedCopy, pqrSalt, storedKeys.Index())
 			}
 			return storedKeys, nil
@@ -709,6 +770,18 @@ func getOrCreateMessageKeys(sessionState *record.State, theirEphemeral ecc.ECPub
 	// Rust's per-chain eviction. The state layer enforces the bound.
 
 	hasSPQR := len(pqrSalt) > 0
+
+	// Walking the chain forward replaces chainKey with each derived key, and
+	// only the one that reaches SetReceiverChainKey below finds an owner.
+	// Release whatever the walk ends on if it does not get there; the caller's
+	// own release covers the key it passed in, and both are idempotent.
+	walked := chainKey
+	defer func() {
+		if walked != nil {
+			walked.Zeroize()
+		}
+	}()
+
 	for chainKey.Index() < counter {
 		var msgKeys *message.Keys
 		var err error
@@ -726,6 +799,7 @@ func getOrCreateMessageKeys(sessionState *record.State, theirEphemeral ecc.ECPub
 		}
 		// NextKey zeroizes the old chain key internally.
 		chainKey = chainKey.NextKey()
+		walked = chainKey
 	}
 
 	// Get message keys before advancing, since NextKey destroys the current key's
@@ -735,14 +809,20 @@ func getOrCreateMessageKeys(sessionState *record.State, theirEphemeral ecc.ECPub
 		return nil, err
 	}
 	nextKey := chainKey.NextKey()
+	walked = nextKey
 	if err := sessionState.SetReceiverChainKey(theirEphemeral, nextKey); err != nil {
 		return nil, err
 	}
+	walked = nil
 	return msgKeys, nil
 }
 
 // getOrCreateChainKey will either return the existing chain key or
 // create a new one with the given session state and ephemeral key.
+//
+// The returned key is the caller's own guarded copy in both cases, never the
+// one the state holds. Ratcheting it forward with NextKey consumes it; a
+// caller that returns without doing so must release it.
 func getOrCreateChainKey(sessionState *record.State, theirEphemeral ecc.ECPublicKeyable) (*chain.Key, error) {
 
 	// If our session state already has a receiver chain, use their
@@ -765,8 +845,12 @@ func getOrCreateChainKey(sessionState *record.State, theirEphemeral ecc.ECPublic
 		return nil, gErr
 	}
 
-	// Create a new chain using our new ephemeral key.
+	// Create a new chain using our new ephemeral key. The intermediate root key
+	// is consumed here and never stored, so release its guarded buffer.
 	senderChain, cErr := receiverChain.RootKey.CreateChain(theirEphemeral, ourNewEphemeral)
+	if intermediateRootKey, ok := receiverChain.RootKey.(*root.Key); ok {
+		intermediateRootKey.Zeroize()
+	}
 	if cErr != nil {
 		return nil, cErr
 	}
@@ -778,14 +862,20 @@ func getOrCreateChainKey(sessionState *record.State, theirEphemeral ecc.ECPublic
 	sessionState.AddReceiverChain(theirEphemeral, receiverChain.ChainKey)
 
 	// H1: Previous counter uses max(current_index - 1, 0) to match Rust.
-	previousCounter := sessionState.SenderChainKey().Index()
+	// SenderChainKey hands back a copy in its own guarded buffer, so release it
+	// once its index has been read.
+	senderChainKey := sessionState.SenderChainKey()
+	previousCounter := senderChainKey.Index()
+	senderChainKey.(*chain.Key).Zeroize()
 	if previousCounter > 0 {
 		previousCounter--
 	}
 	sessionState.SetPreviousCounter(previousCounter)
 	sessionState.SetSenderChain(ourNewEphemeral, senderChain.ChainKey)
 
-	return receiverChain.ChainKey.(*chain.Key), nil
+	// Hand back a copy rather than the chain's own key, so the caller owns what
+	// it is given here exactly as it does on the existing-chain path above.
+	return sessionState.ReceiverChainKey(theirEphemeral), nil
 }
 
 // decrypt will use the given message keys and ciphertext and return

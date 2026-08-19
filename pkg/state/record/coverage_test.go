@@ -316,7 +316,7 @@ func TestStateFromStructureInvalidKeys(t *testing.T) {
 		LocalIdentityPublic:  []byte{0xFF}, // Invalid
 		RemoteIdentityPublic: []byte{0xFF}, // Invalid
 		SenderBaseKey:        []byte{0xFF}, // Invalid
-		RootKey:              make([]byte, 32),
+		RootKey:              mustGuard(t, make([]byte, 32)),
 	}
 
 	_, err := record.NewStateFromStructure(structure, s.State)

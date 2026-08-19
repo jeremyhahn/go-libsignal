@@ -88,11 +88,7 @@ func TestGenericSignedPreKeySignedPreKeyImplements(t *testing.T) {
 // accessor on the concrete type.
 func TestGenericSignedPreKeyKyberPreKeyImplements(t *testing.T) {
 	pubKey := kem.NewPublicKey(kem.KeyTypeKyber1024, make([]byte, 1568))
-	secKey, err := kem.NewSecretKey(kem.KeyTypeKyber1024, make([]byte, 3168))
-	if err != nil {
-		t.Fatalf("NewSecretKey() error: %v", err)
-	}
-	kp := &kem.KeyPair{Public: pubKey, Secret: secKey}
+	kp := mustGuardedKyberKeyPair(t, pubKey, make([]byte, 3168))
 	sigBytes := []byte("kyber-identity-sig")
 
 	kpk := record.NewKyberPreKey(99, 67890, kp, sigBytes, &kyberPreKeySerializer{})
@@ -166,11 +162,7 @@ func TestGenericSignedPreKeyPolymorphicSlice(t *testing.T) {
 	spk := record.NewSignedPreKey(1, 100, kp, sig, s.SignedPreKeyRecord)
 
 	pubKey := kem.NewPublicKey(kem.KeyTypeKyber1024, make([]byte, 1568))
-	secKey, err := kem.NewSecretKey(kem.KeyTypeKyber1024, make([]byte, 3168))
-	if err != nil {
-		t.Fatal(err)
-	}
-	kpk := record.NewKyberPreKey(2, 200, &kem.KeyPair{Public: pubKey, Secret: secKey}, []byte("s"), &kyberPreKeySerializer{})
+	kpk := record.NewKyberPreKey(2, 200, mustGuardedKyberKeyPair(t, pubKey, make([]byte, 3168)), []byte("s"), &kyberPreKeySerializer{})
 
 	preKeys := []record.GenericSignedPreKey{spk, kpk}
 
@@ -264,7 +256,7 @@ func TestGenericSignedPreKeySignedPreKeyConstructorTypedError(t *testing.T) {
 	structure := &record.SignedPreKeyStructure{
 		ID:         20,
 		PublicKey:  make([]byte, 32),
-		PrivateKey: make([]byte, 32), // all-zero key is rejected by GuardedECPrivateKey
+		PrivateKey: mustGuard(t, make([]byte, 32)), // all-zero key is rejected by GuardedECPrivateKey
 		Signature:  make([]byte, 64),
 		Timestamp:  111,
 	}

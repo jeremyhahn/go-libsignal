@@ -82,7 +82,7 @@ func (s *State) HasUsableSenderChain(now time.Time, req SessionUsabilityRequirem
 		}
 	}
 	if req.Contains(SessionRequireSpqr) {
-		if len(s.pqRatchetState) == 0 {
+		if len(s.pqRatchetState.BytesOrNil()) == 0 {
 			return false, nil
 		}
 	}

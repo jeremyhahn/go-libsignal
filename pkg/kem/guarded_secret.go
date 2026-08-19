@@ -45,9 +45,35 @@ func NewGuardedSecretKey(keyType KeyType, data []byte) (k *GuardedSecretKey, err
 }
 
 // NewGuardedSecretKeyFromSecret creates a GuardedSecretKey by taking ownership
-// of an existing Secret. The caller must not use the Secret after this call.
-func NewGuardedSecretKeyFromSecret(keyType KeyType, s *secret.Secret) *GuardedSecretKey {
-	return &GuardedSecretKey{keyType: keyType, key: s}
+// of an existing Secret, so that key material already in guarded memory never
+// has to transit the Go heap to become a KEM key. The caller must not use the
+// Secret after this call: it is owned by the returned key on success, and
+// destroyed before returning on failure.
+//
+// The key type and material length are validated exactly as NewSecretKey
+// validates them, so a guarded key cannot bypass the checks a heap-backed one
+// is subject to.
+func NewGuardedSecretKeyFromSecret(keyType KeyType, s *secret.Secret) (*GuardedSecretKey, error) {
+	if err := validateSecretKeyMaterial(keyType, len(s.BytesOrNil())); err != nil {
+		s.Destroy()
+		return nil, err
+	}
+	return &GuardedSecretKey{keyType: keyType, key: s}, nil
+}
+
+// validateSecretKeyMaterial reports whether the given key type is supported by
+// this library and whether size matches the secret key size for it.
+func validateSecretKeyMaterial(keyType KeyType, size int) error {
+	if keyType == KeyTypeKyber768 {
+		return ErrKeyTypeKyber768Unsupported
+	}
+	if !validKeyType(keyType) {
+		return &BadKEMKeyTypeError{Value: byte(keyType)}
+	}
+	if expected := expectedSecretKeySize(keyType); size != expected {
+		return &BadKeyLengthError{KeyType: keyType, Expected: expected, Actual: size}
+	}
+	return nil
 }
 
 // Type returns the KEM algorithm identifier for this secret key.
@@ -96,6 +122,24 @@ func (g *GuardedSecretKey) Clone() (k *GuardedSecretKey, err error) {
 		return nil, &GuardedKeyAllocationError{Operation: "guarded secret key clone failed", Err: cloneErr}
 	}
 	return &GuardedSecretKey{keyType: g.keyType, key: cloned}, nil
+}
+
+// CloneSecret returns an independent guarded copy of the key material as a
+// secret.Secret, the inverse of NewGuardedSecretKeyFromSecret. Ownership of
+// the returned Secret transfers to the caller, which must destroy it; the
+// key material never transits the Go heap unguarded.
+//
+// It exists for the persisted-state structures, which hold their key material
+// as a secret.Secret so that it stays guarded across the storage boundary.
+func (g *GuardedSecretKey) CloneSecret() (*secret.Secret, error) {
+	if g.IsDestroyed() {
+		return nil, &GuardedKeyDestroyedError{}
+	}
+	cloned, err := g.key.Clone()
+	if err != nil {
+		return nil, &GuardedKeyAllocationError{Operation: "guarded secret key clone failed", Err: err}
+	}
+	return cloned, nil
 }
 
 // GuardedSharedSecret holds a 32-byte KEM shared secret in memguard-protected
@@ -188,6 +232,30 @@ func (g *GuardedSharedSecret) Secret32() *secret.Secret32 {
 type GuardedKeyPair struct {
 	Public *PublicKey
 	Secret *GuardedSecretKey
+}
+
+// GuardedFromPublicAndPrivate deserializes a public key and a raw secret key
+// and assembles them into a GuardedKeyPair, verifying that both carry the same
+// algorithm tag. It is the guarded counterpart of FromPublicAndPrivate, for
+// callers that load a stored key pair and must keep the secret half out of the
+// Go heap; secretData is zeroized as part of the move into guarded memory.
+func GuardedFromPublicAndPrivate(publicSerialized []byte, secretData []byte) (*GuardedKeyPair, error) {
+	pk, err := DeserializePublicKey(publicSerialized)
+	if err != nil {
+		// The contract is that secretData does not survive this call, whether
+		// or not the move into guarded memory is reached.
+		zeroizeSlice(secretData)
+		return nil, err
+	}
+	sk, err := NewGuardedSecretKey(pk.Type(), secretData)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateSecretKeyMaterial(pk.Type(), len(sk.Data())); err != nil {
+		sk.Destroy()
+		return nil, err
+	}
+	return &GuardedKeyPair{Public: pk, Secret: sk}, nil
 }
 
 // Destroy zeroizes the guarded secret key. The public key is not sensitive

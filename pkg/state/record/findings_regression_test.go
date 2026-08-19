@@ -87,7 +87,7 @@ func TestPreKeyRecord_NewPreKeyFromBytes_InvalidKey(t *testing.T) {
 	badStructure := &record.PreKeyStructure{
 		ID:         99,
 		PublicKey:  badKey,
-		PrivateKey: bytehelper.ArrayToSlice(kp.PrivateKey().Serialize()),
+		PrivateKey: mustGuard(t, bytehelper.ArrayToSlice(kp.PrivateKey().Serialize())),
 	}
 	_, err = record.NewPreKeyFromStruct(badStructure, ser.PreKeyRecord)
 	if err == nil {
@@ -155,7 +155,7 @@ func TestSignedPreKeyRecord_NewSignedPreKeyFromBytes_InvalidKey(t *testing.T) {
 	badStructure := &record.SignedPreKeyStructure{
 		ID:         7,
 		PublicKey:  []byte{0xFF, 0x00}, // invalid
-		PrivateKey: bytehelper.ArrayToSlice(kp.PrivateKey().Serialize()),
+		PrivateKey: mustGuard(t, bytehelper.ArrayToSlice(kp.PrivateKey().Serialize())),
 		Signature:  make([]byte, 64),
 	}
 	_, err := record.NewSignedPreKeyFromStruct(badStructure, ser.SignedPreKeyRecord)

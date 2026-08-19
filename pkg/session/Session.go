@@ -22,6 +22,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/spqr"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/store"
+	crypto "github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/optional"
 )
 
@@ -299,9 +300,10 @@ func (b *Builder) processV3(sessionRecord *record.Session,
 		if guardErr != nil {
 			return nil, nil, guardErr
 		}
-		// Note: guardedKP.Destroy() is called explicitly after
-		// CalculateReceiverSession below, not deferred, to make the
-		// lifetime dependency on the ratchet calculation explicit.
+		// The clone stays alive until this function returns, which covers
+		// CalculateReceiverSession below, and is released on every exit
+		// path — including a malformed ciphertext, which a peer controls.
+		defer guardedKP.Destroy()
 		parameters.SetOurKyberPreKeyPair(guardedKP)
 
 		ct, ctErr := kem.DeserializeCiphertext(message.KyberCiphertext())
@@ -321,14 +323,6 @@ func (b *Builder) processV3(sessionRecord *record.Session,
 	sessionState := sessionRecord.SessionState()
 	derivedKeys, sessionErr := ratchet.CalculateReceiverSession(parameters)
 
-	// Destroy the guarded Kyber key pair now that CalculateReceiverSession
-	// has consumed it via decapsulation. This is done explicitly rather than
-	// via defer to make the lifetime dependency clear and avoid fragility
-	// if code is reordered.
-	if kp := parameters.OurKyberPreKeyPair(); kp != nil {
-		kp.Destroy()
-	}
-
 	if sessionErr != nil {
 		return nil, nil, sessionErr
 	}
@@ -337,7 +331,15 @@ func (b *Builder) processV3(sessionRecord *record.Session,
 	sessionState.SetVersion(message.MessageVersion())
 	sessionState.SetRemoteIdentityKey(parameters.TheirIdentityKey())
 	sessionState.SetLocalIdentityKey(parameters.OurIdentityKeyPair().PublicKey())
-	sessionState.SetSenderChain(parameters.OurRatchetKey(), derivedKeys.ChainKey)
+	// The state takes ownership of the chain it is given, and destroys the chain
+	// it supersedes. Our ratchet key here is the signed pre-key, which belongs
+	// to the pre-key store and outlives this session, so hand the state its own
+	// copy rather than the store's.
+	ourRatchetKey, ratchetErr := cloneKeyPairForState(parameters.OurRatchetKey())
+	if ratchetErr != nil {
+		return nil, nil, ratchetErr
+	}
+	sessionState.SetSenderChain(ourRatchetKey, derivedKeys.ChainKey)
 	if err := sessionState.SetRootKey(derivedKeys.RootKey); err != nil {
 		return nil, nil, err
 	}
@@ -357,7 +359,9 @@ func (b *Builder) processV3(sessionRecord *record.Session,
 		if pqrErr != nil {
 			return nil, nil, pqrErr
 		}
-		sessionState.SetPqRatchetState(pqrState)
+		if setErr := sessionState.SetPqRatchetState(pqrState); setErr != nil {
+			return nil, nil, setErr
+		}
 	}
 
 	// Set the session's registration ids and base key
@@ -516,7 +520,9 @@ func (b *Builder) ProcessBundle(preKey *prekey.Bundle) error {
 		if pqrErr != nil {
 			return pqrErr
 		}
-		sessionState.SetPqRatchetState(pqrState)
+		if setErr := sessionState.SetPqRatchetState(pqrState); setErr != nil {
+			return setErr
+		}
 	}
 
 	// Update our session record with the unacknowledged prekey message,
@@ -553,4 +559,35 @@ func (b *Builder) ProcessBundle(preKey *prekey.Bundle) error {
 	}
 
 	return nil
+}
+
+// cloneKeyPairForState returns a key pair whose private half is an independent
+// guarded copy, for handing a borrowed key to a session state, which takes
+// ownership of what it is given and destroys it when the chain is superseded.
+//
+// A heap-backed private key is copied too, not passed through: the state's
+// destruction path zeroizes a *ecc.DjbECPrivateKey in place, so sharing one
+// would wipe the caller's key — a signed pre-key still held by the pre-key
+// store, say — as a side effect of the session ratcheting forward. The copy is
+// guarded regardless of the representation it came from, which is also what the
+// protected-memory rule asks of live session state.
+func cloneKeyPairForState(keyPair *ecc.ECKeyPair) (*ecc.ECKeyPair, error) {
+	privateKey := keyPair.PrivateKey()
+	if guarded, ok := privateKey.(*ecc.GuardedECPrivateKey); ok {
+		clonedPrivate, err := guarded.Clone()
+		if err != nil {
+			return nil, err
+		}
+		return ecc.NewECKeyPair(keyPair.PublicKey(), clonedPrivate), nil
+	}
+	if privateKey == nil {
+		return keyPair, nil
+	}
+	material := privateKey.Serialize()
+	defer crypto.ZeroizeArray32(&material)
+	clonedPrivate, err := ecc.NewGuardedECPrivateKey(material)
+	if err != nil {
+		return nil, err
+	}
+	return ecc.NewECKeyPair(keyPair.PublicKey(), clonedPrivate), nil
 }

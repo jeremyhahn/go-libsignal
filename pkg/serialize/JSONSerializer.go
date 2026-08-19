@@ -101,6 +101,8 @@ func (j *JSONSignedPreKeyRecordSerializer) Deserialize(serialized []byte) (*reco
 	var signedPreKeyStructure record.SignedPreKeyStructure
 	err := json.Unmarshal(serialized, &signedPreKeyStructure)
 	if err != nil {
+		// A partial decode may already hold guarded key material.
+		signedPreKeyStructure.Zeroize()
 		logger.Error("Error deserializing signed prekey record: ", err)
 		return nil, err
 	}
@@ -128,6 +130,8 @@ func (j *JSONPreKeyRecordSerializer) Deserialize(serialized []byte) (*record.Pre
 	var preKeyStructure record.PreKeyStructure
 	err := json.Unmarshal(serialized, &preKeyStructure)
 	if err != nil {
+		// A partial decode may already hold guarded key material.
+		preKeyStructure.Zeroize()
 		logger.Error("Error deserializing prekey record: ", err)
 		return nil, err
 	}
@@ -155,6 +159,8 @@ func (j *JSONStateSerializer) Deserialize(serialized []byte) (*record.StateStruc
 	var stateStructure record.StateStructure
 	err := json.Unmarshal(serialized, &stateStructure)
 	if err != nil {
+		// A partial decode may already hold guarded key material.
+		stateStructure.Zeroize()
 		logger.Error("Error deserializing session state: ", err)
 		return nil, err
 	}
@@ -183,6 +189,8 @@ func (j *JSONSessionSerializer) Deserialize(serialized []byte) (*record.SessionS
 	var sessionStructure record.SessionStructure
 	err := json.Unmarshal(serialized, &sessionStructure)
 	if err != nil {
+		// A partial decode may already hold guarded key material.
+		sessionStructure.Zeroize()
 		logger.Error("Error deserializing session: ", err)
 		return nil, err
 	}

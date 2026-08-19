@@ -85,14 +85,18 @@ func (s *Secret32) Ptr() *[32]byte {
 }
 
 // Destroy zeroizes and frees the guarded memory. This method is idempotent
-// and safe to call multiple times.
+// and safe to call multiple times, including on a nil Secret32.
 func (s *Secret32) Destroy() {
+	if s == nil {
+		return
+	}
 	s.inner.Destroy()
 }
 
-// IsDestroyed reports whether the secret has been destroyed.
+// IsDestroyed reports whether the secret has been destroyed. A nil Secret32
+// holds no material and is reported as destroyed.
 func (s *Secret32) IsDestroyed() bool {
-	return s.inner.IsDestroyed()
+	return s == nil || s.inner.IsDestroyed()
 }
 
 // Clone creates an independent deep copy of the secret in new guarded memory.

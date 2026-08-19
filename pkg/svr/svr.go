@@ -58,44 +58,79 @@ func (er *EvaluationResult) Serialize() []byte {
 	return out
 }
 
-// Backup4 represents a v4 SVR backup request.
+// Backup4 represents a v4 SVR backup request. Both secret-bearing fields are
+// held in guarded memory for the lifetime of the request: the entropy seeds the
+// backup's key derivation, and Secret is the value being backed up.
 type Backup4 struct {
 	RequestID []byte
-	Entropy   []byte // 32 bytes random
-	Secret    Secret
+	Entropy   *cryptosecret.Secret // 32 bytes random
+	Secret    *cryptosecret.Secret32
 	MaxTries  uint32
+}
+
+// Destroy releases the guarded entropy and backup secret. It is idempotent and
+// safe to call on a Backup4 that carries neither.
+func (b *Backup4) Destroy() {
+	b.Entropy.Destroy()
+	b.Secret.Destroy()
 }
 
 // NewBackup4 creates a new v4 backup request with the given secret and maximum
 // number of allowed PIN attempts. It generates cryptographically random entropy
 // and a request identifier.
+//
+// The secret is copied into guarded memory and the request's copy is destroyed
+// by Destroy. Go passes the array by value, so the caller keeps its own copy
+// and should zeroize it once the request has been built.
 func NewBackup4(secret Secret, maxTries uint32) (*Backup4, error) {
 	if maxTries == 0 {
 		return nil, &Error{kind: errBadData}
 	}
 
-	entropy := make([]byte, entropySize)
-	if _, err := io.ReadFull(rand.Reader, entropy); err != nil {
+	// Generate the entropy directly into guarded memory so that it never
+	// exists on the Go heap.
+	entropy, err := cryptosecret.NewRandom(entropySize)
+	if err != nil {
 		return nil, &Error{kind: errBadData, cause: err}
 	}
 
+	// Move this function's copy of the secret into guarded memory. Passing it
+	// as a slice lets memguard zeroize this frame's copy as it takes ownership,
+	// rather than leaving a second plaintext copy behind in the constructor;
+	// the explicit Zeroize covers the allocation-failure path.
+	guardedSecret, sErr := cryptosecret.NewSecret32FromSlice(secret[:])
+	ucrypto.Zeroize(secret[:])
+	if sErr != nil {
+		entropy.Destroy()
+		return nil, &Error{kind: errBadData, cause: sErr}
+	}
+
 	requestID := make([]byte, requestIDSize)
-	if _, err := io.ReadFull(rand.Reader, requestID); err != nil {
-		return nil, &Error{kind: errBadData, cause: err}
+	if _, rErr := io.ReadFull(rand.Reader, requestID); rErr != nil {
+		entropy.Destroy()
+		guardedSecret.Destroy()
+		return nil, &Error{kind: errBadData, cause: rErr}
 	}
 
 	return &Backup4{
 		RequestID: requestID,
 		Entropy:   entropy,
-		Secret:    secret,
+		Secret:    guardedSecret,
 		MaxTries:  maxTries,
 	}, nil
 }
 
-// Restore4 represents a v4 SVR restore request.
+// Restore4 represents a v4 SVR restore request. As with Backup4, the entropy
+// is held in guarded memory.
 type Restore4 struct {
 	RequestID []byte
-	Entropy   []byte
+	Entropy   *cryptosecret.Secret
+}
+
+// Destroy releases the guarded entropy. It is idempotent and safe to call on a
+// Restore4 that carries no entropy.
+func (r *Restore4) Destroy() {
+	r.Entropy.Destroy()
 }
 
 // EncryptSecret encrypts a secret using AES-256-GCM-SIV with a zero nonce.

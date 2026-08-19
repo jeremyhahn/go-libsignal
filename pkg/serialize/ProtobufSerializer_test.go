@@ -241,7 +241,7 @@ func TestProtobufStateSerializer_RoundTrip(t *testing.T) {
 		LocalRegistrationID:  1111,
 		RemoteRegistrationID: 2222,
 		PreviousCounter:      10,
-		RootKey:              []byte{0x01, 0x02},
+		RootKey:              mustGuard(t, []byte{0x01, 0x02}),
 		LocalIdentityPublic:  []byte{0x05, 0x03},
 		RemoteIdentityPublic: []byte{0x05, 0x04},
 		SenderBaseKey:        []byte{0x05, 0x05},
@@ -274,7 +274,7 @@ func TestProtobufStateSerializer_WithChains(t *testing.T) {
 		SessionVersion: 3,
 		SenderChain: &record.ChainStructure{
 			SenderRatchetKeyPublic:  []byte{0x05, 0x01},
-			SenderRatchetKeyPrivate: []byte{0x02},
+			SenderRatchetKeyPrivate: mustGuard(t, []byte{0x02}),
 			ChainKey:                &chain.KeyStructure{Key: []byte{0x03}, Index: 5},
 			MessageKeys: []*message.KeysStructure{
 				{CipherKey: []byte{0x04}, MacKey: []byte{0x05}, IV: []byte{0x06}, Index: 0},
@@ -450,7 +450,7 @@ func TestProtobufPreKeyRecordSerializer_RoundTrip(t *testing.T) {
 	original := &record.PreKeyStructure{
 		ID:         5,
 		PublicKey:  []byte{0x01},
-		PrivateKey: []byte{0x02},
+		PrivateKey: mustGuard(t, []byte{0x02}),
 	}
 
 	serialized, err := s.Serialize(original)
@@ -483,7 +483,7 @@ func TestProtobufSignedPreKeyRecordSerializer_RoundTrip(t *testing.T) {
 	original := &record.SignedPreKeyStructure{
 		ID:         1,
 		PublicKey:  []byte{0x01},
-		PrivateKey: []byte{0x02},
+		PrivateKey: mustGuard(t, []byte{0x02}),
 		Signature:  []byte{0x03},
 		Timestamp:  1000,
 	}

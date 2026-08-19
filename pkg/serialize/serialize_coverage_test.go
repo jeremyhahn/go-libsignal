@@ -201,7 +201,7 @@ func TestProtobufStateSerializer_WithPqRatchetState(t *testing.T) {
 	pqState := []byte{0x01, 0x02, 0x03, 0x04, 0x05}
 	original := &record.StateStructure{
 		SessionVersion: 4,
-		PqRatchetState: pqState,
+		PqRatchetState: mustGuard(t, pqState),
 	}
 
 	serialized, err := s.Serialize(original)
@@ -214,13 +214,8 @@ func TestProtobufStateSerializer_WithPqRatchetState(t *testing.T) {
 		t.Fatalf("Deserialize failed: %v", err)
 	}
 
-	if len(deserialized.PqRatchetState) != len(pqState) {
-		t.Errorf("PqRatchetState length = %d, want %d", len(deserialized.PqRatchetState), len(pqState))
-	}
-	for i, b := range deserialized.PqRatchetState {
-		if b != pqState[i] {
-			t.Errorf("PqRatchetState[%d] = %d, want %d", i, b, pqState[i])
-			break
-		}
+	if !deserialized.PqRatchetState.EqualTo(pqState) {
+		t.Errorf("PqRatchetState round-trip mismatch: got %d guarded bytes, want %d",
+			deserialized.PqRatchetState.Size(), len(pqState))
 	}
 }

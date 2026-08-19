@@ -12,6 +12,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/proto/wirepb"
 	"github.com/jeremyhahn/go-libsignal/pkg/protocol"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/optional"
 	"google.golang.org/protobuf/proto"
 )
@@ -483,25 +484,14 @@ func (s *ProtobufSessionSerializer) Serialize(session *record.SessionStructure) 
 }
 
 // Deserialize will take in protobuf bytes and return a session structure.
-func (s *ProtobufSessionSerializer) Deserialize(serialized []byte) (*record.SessionStructure, error) {
+func (s *ProtobufSessionSerializer) Deserialize(serialized []byte) (_ *record.SessionStructure, err error) {
 	pb := &storagepb.RecordStructure{}
-	err := proto.Unmarshal(serialized, pb)
-	if err != nil {
+	if err = proto.Unmarshal(serialized, pb); err != nil {
 		logger.Error("Error deserializing session: ", err)
 		return nil, err
 	}
 
-	// Convert the current session.
-	var sessionState *record.StateStructure
-	if pb.GetCurrentSession() != nil {
-		var err error
-		sessionState, err = protoToStateStructure(pb.GetCurrentSession())
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// Convert previous sessions from opaque bytes.
+	// Bound the archived states before decoding anything.
 	// Bound to archivedStatesMaxLength (40) to prevent unbounded allocation from malformed data.
 	const archivedStatesMaxLength = 40
 	if len(pb.GetPreviousSessions()) > archivedStatesMaxLength {
@@ -512,25 +502,39 @@ func (s *ProtobufSessionSerializer) Deserialize(serialized []byte) (*record.Sess
 			Actual:      len(pb.GetPreviousSessions()),
 		}
 	}
-	previousStates := make([]*record.StateStructure, len(pb.GetPreviousSessions()))
+
+	structure := &record.SessionStructure{
+		PreviousStates: make([]*record.StateStructure, len(pb.GetPreviousSessions())),
+	}
+
+	// Release every state decoded so far if a later one fails, so that
+	// malformed input cannot strand mlock'd pages.
+	defer func() {
+		if err != nil {
+			structure.Zeroize()
+		}
+	}()
+
+	// Convert the current session.
+	if pb.GetCurrentSession() != nil {
+		if structure.SessionState, err = protoToStateStructure(pb.GetCurrentSession()); err != nil {
+			return nil, err
+		}
+	}
+
+	// Convert previous sessions from opaque bytes.
 	for i, prevBytes := range pb.GetPreviousSessions() {
 		prevPb := &storagepb.SessionStructure{}
-		err := proto.Unmarshal(prevBytes, prevPb)
-		if err != nil {
+		if err = proto.Unmarshal(prevBytes, prevPb); err != nil {
 			logger.Error("Error deserializing previous session state: ", err)
 			return nil, err
 		}
-		ps, psErr := protoToStateStructure(prevPb)
-		if psErr != nil {
-			return nil, psErr
+		if structure.PreviousStates[i], err = protoToStateStructure(prevPb); err != nil {
+			return nil, err
 		}
-		previousStates[i] = ps
 	}
 
-	return &record.SessionStructure{
-		SessionState:   sessionState,
-		PreviousStates: previousStates,
-	}, nil
+	return structure, nil
 }
 
 // =============================================================================
@@ -546,7 +550,7 @@ func (s *ProtobufPreKeyRecordSerializer) Serialize(preKey *record.PreKeyStructur
 	pb := &storagepb.PreKeyRecordStructure{
 		Id:         preKey.ID,
 		PublicKey:  preKey.PublicKey,
-		PrivateKey: preKey.PrivateKey,
+		PrivateKey: preKey.PrivateKey.BytesOrNil(),
 	}
 	serialized, err := proto.Marshal(pb)
 	if err != nil {
@@ -565,10 +569,15 @@ func (s *ProtobufPreKeyRecordSerializer) Deserialize(serialized []byte) (*record
 		return nil, err
 	}
 
+	privateKey, gErr := secret.NewValue(pb.GetPrivateKey())
+	if gErr != nil {
+		return nil, gErr
+	}
+
 	return &record.PreKeyStructure{
 		ID:         pb.GetId(),
 		PublicKey:  pb.GetPublicKey(),
-		PrivateKey: pb.GetPrivateKey(),
+		PrivateKey: privateKey,
 	}, nil
 }
 
@@ -585,7 +594,7 @@ func (s *ProtobufSignedPreKeyRecordSerializer) Serialize(signedPreKey *record.Si
 	pb := &storagepb.SignedPreKeyRecordStructure{
 		Id:         signedPreKey.ID,
 		PublicKey:  signedPreKey.PublicKey,
-		PrivateKey: signedPreKey.PrivateKey,
+		PrivateKey: signedPreKey.PrivateKey.BytesOrNil(),
 		Signature:  signedPreKey.Signature,
 		Timestamp:  uint64(signedPreKey.Timestamp),
 	}
@@ -606,10 +615,15 @@ func (s *ProtobufSignedPreKeyRecordSerializer) Deserialize(serialized []byte) (*
 		return nil, err
 	}
 
+	privateKey, gErr := secret.NewValue(pb.GetPrivateKey())
+	if gErr != nil {
+		return nil, gErr
+	}
+
 	return &record.SignedPreKeyStructure{
 		ID:         pb.GetId(),
 		PublicKey:  pb.GetPublicKey(),
-		PrivateKey: pb.GetPrivateKey(),
+		PrivateKey: privateKey,
 		Signature:  pb.GetSignature(),
 		Timestamp:  int64(pb.GetTimestamp()),
 	}, nil
@@ -716,7 +730,7 @@ func stateStructureToProto(state *record.StateStructure) *storagepb.SessionStruc
 		SessionVersion:       uint32(state.SessionVersion),
 		LocalIdentityPublic:  state.LocalIdentityPublic,
 		RemoteIdentityPublic: state.RemoteIdentityPublic,
-		RootKey:              state.RootKey,
+		RootKey:              state.RootKey.BytesOrNil(),
 		PreviousCounter:      state.PreviousCounter,
 		RemoteRegistrationId: state.RemoteRegistrationID,
 		LocalRegistrationId:  state.LocalRegistrationID,
@@ -759,37 +773,46 @@ func stateStructureToProto(state *record.StateStructure) *storagepb.SessionStruc
 	}
 
 	// Convert PQ ratchet state.
-	if len(state.PqRatchetState) > 0 {
-		pb.PqRatchetState = state.PqRatchetState
+	if pqRatchetState := state.PqRatchetState.BytesOrNil(); len(pqRatchetState) > 0 {
+		pb.PqRatchetState = pqRatchetState
 	}
 
 	return pb
 }
 
 // protoToStateStructure converts a protobuf SessionStructure to a Go StateStructure.
-func protoToStateStructure(pb *storagepb.SessionStructure) (*record.StateStructure, error) {
+func protoToStateStructure(pb *storagepb.SessionStructure) (_ *record.StateStructure, err error) {
 	if pb == nil {
 		return nil, nil
+	}
+
+	rootKey, err := secret.NewValue(pb.GetRootKey())
+	if err != nil {
+		return nil, err
 	}
 
 	state := &record.StateStructure{
 		SessionVersion:       int(pb.GetSessionVersion()),
 		LocalIdentityPublic:  pb.GetLocalIdentityPublic(),
 		RemoteIdentityPublic: pb.GetRemoteIdentityPublic(),
-		RootKey:              pb.GetRootKey(),
+		RootKey:              rootKey,
 		PreviousCounter:      pb.GetPreviousCounter(),
 		RemoteRegistrationID: pb.GetRemoteRegistrationId(),
 		LocalRegistrationID:  pb.GetLocalRegistrationId(),
 		SenderBaseKey:        pb.GetAliceBaseKey(),
 	}
 
-	// Convert sender chain.
-	if pb.GetSenderChain() != nil {
-		sc, err := protoToChainStructure(pb.GetSenderChain())
+	// Release the guarded material already decoded if any step below fails, so
+	// that malformed input cannot strand mlock'd pages.
+	defer func() {
 		if err != nil {
-			return nil, err
+			state.Zeroize()
 		}
-		state.SenderChain = sc
+	}()
+
+	// Convert sender chain.
+	if state.SenderChain, err = protoToChainStructure(pb.GetSenderChain()); err != nil {
+		return nil, err
 	}
 
 	// Convert receiver chains.
@@ -806,11 +829,9 @@ func protoToStateStructure(pb *storagepb.SessionStructure) (*record.StateStructu
 		}
 		state.ReceiverChains = make([]*record.ChainStructure, len(pb.GetReceiverChains()))
 		for i, rc := range pb.GetReceiverChains() {
-			cs, err := protoToChainStructure(rc)
-			if err != nil {
+			if state.ReceiverChains[i], err = protoToChainStructure(rc); err != nil {
 				return nil, err
 			}
-			state.ReceiverChains[i] = cs
 		}
 	}
 
@@ -837,7 +858,9 @@ func protoToStateStructure(pb *storagepb.SessionStructure) (*record.StateStructu
 	}
 
 	// Convert PQ ratchet state.
-	state.PqRatchetState = pb.GetPqRatchetState()
+	if state.PqRatchetState, err = secret.NewValue(pb.GetPqRatchetState()); err != nil {
+		return nil, err
+	}
 
 	return state, nil
 }
@@ -850,7 +873,7 @@ func chainStructureToProto(cs *record.ChainStructure) *storagepb.SessionStructur
 
 	pbChain := &storagepb.SessionStructure_Chain{
 		SenderRatchetKey:        cs.SenderRatchetKeyPublic,
-		SenderRatchetKeyPrivate: cs.SenderRatchetKeyPrivate,
+		SenderRatchetKeyPrivate: cs.SenderRatchetKeyPrivate.BytesOrNil(),
 	}
 
 	// Convert chain key.
@@ -879,15 +902,28 @@ func chainStructureToProto(cs *record.ChainStructure) *storagepb.SessionStructur
 }
 
 // protoToChainStructure converts a protobuf Chain to a Go ChainStructure.
-func protoToChainStructure(pbChain *storagepb.SessionStructure_Chain) (*record.ChainStructure, error) {
+func protoToChainStructure(pbChain *storagepb.SessionStructure_Chain) (_ *record.ChainStructure, err error) {
 	if pbChain == nil {
 		return nil, nil
 	}
 
+	senderRatchetKeyPrivate, err := secret.NewValue(pbChain.GetSenderRatchetKeyPrivate())
+	if err != nil {
+		return nil, err
+	}
+
 	cs := &record.ChainStructure{
 		SenderRatchetKeyPublic:  pbChain.GetSenderRatchetKey(),
-		SenderRatchetKeyPrivate: pbChain.GetSenderRatchetKeyPrivate(),
+		SenderRatchetKeyPrivate: senderRatchetKeyPrivate,
 	}
+
+	// Release the guarded material already decoded if any step below fails, so
+	// that malformed input cannot strand mlock'd pages.
+	defer func() {
+		if err != nil {
+			cs.Zeroize()
+		}
+	}()
 
 	// Convert chain key.
 	if pbChain.GetChainKey() != nil {

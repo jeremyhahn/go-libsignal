@@ -6,7 +6,12 @@ import (
 	"io"
 	"math"
 	"strings"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
+
+// mediaRootBackupKeyLen is the required length of BackupInfo.mediaRootBackupKey.
+const mediaRootBackupKeyLen = 32
 
 // BackupInfoVersion1 is the only supported BackupInfo version.
 // Rust libsignal ref: rust/message-backup/src/backup.rs BackupInfo.version
@@ -134,19 +139,46 @@ type BackupInfoRaw struct {
 	Version uint64
 	// BackupTimeMs is the backup creation timestamp in milliseconds since epoch.
 	BackupTimeMs uint64
-	// MediaRootBackupKey is the 32-byte media root backup key.
-	MediaRootBackupKey []byte
+	// MediaRootBackupKey is the 32-byte media root backup key, held in guarded
+	// memory: it is long-lived key material that derives every media
+	// encryption key in the backup, so it is kept out of the Go heap for the
+	// same reasons as the session state in pkg/state/record.
+	MediaRootBackupKey *secret.Secret
+}
+
+// Destroy releases the guarded media root backup key. It is idempotent and
+// safe to call on a nil BackupInfoRaw or one that carries no key.
+func (b *BackupInfoRaw) Destroy() {
+	if b == nil {
+		return
+	}
+	b.MediaRootBackupKey.Destroy()
 }
 
 // ValidatedReadResult is the result of ValidatedReadAll.
+//
+// The result owns the guarded media root backup key reached through Info, so
+// callers must Destroy it once they are done — nothing reclaims guarded memory
+// on its own. Info is a pointer so that copying the result cannot produce two
+// apparent owners of the same locked buffer.
 type ValidatedReadResult struct {
 	// Info is the parsed first-frame BackupInfo.
-	Info BackupInfoRaw
+	Info *BackupInfoRaw
 	// Frames contains the raw bytes of all subsequent frames (excluding BackupInfo).
 	Frames [][]byte
 	// FoundUnknownFields records unknown protobuf field numbers encountered
 	// in any frame.
 	FoundUnknownFields []FoundUnknownField
+}
+
+// Destroy releases the guarded key material the result carries. It is
+// idempotent and safe to call on a nil result or one that carries no key, so
+// `defer result.Destroy()` may be taken before the error is checked.
+func (r *ValidatedReadResult) Destroy() {
+	if r == nil {
+		return
+	}
+	r.Info.Destroy()
 }
 
 // ValidatedReadAll reads all frames, parses the first frame as BackupInfo,
@@ -159,8 +191,12 @@ type ValidatedReadResult struct {
 // Unknown field numbers in any frame are recorded in ValidatedReadResult.FoundUnknownFields
 // rather than causing an error, matching proto3 forward-compatibility rules.
 //
+// On success the caller owns the returned result, which carries the media root
+// backup key in guarded memory, and must call Destroy on it. A failed call
+// leaves nothing behind to release.
+//
 // Rust libsignal ref: rust/message-backup/src/backup.rs BackupReader::read_all
-func (br *BackupReader) ValidatedReadAll(purpose Purpose) (*ValidatedReadResult, error) {
+func (br *BackupReader) ValidatedReadAll(purpose Purpose) (_ *ValidatedReadResult, err error) {
 	result := &ValidatedReadResult{}
 
 	// Read and parse the first frame as BackupInfo.
@@ -176,6 +212,15 @@ func (br *BackupReader) ValidatedReadAll(purpose Purpose) (*ValidatedReadResult,
 	if err != nil {
 		return nil, &ErrInvalidBackupInfo{Err: err}
 	}
+	// From here on the parsed info owns guarded key material. Release it unless
+	// it reaches the caller in a successful result, so that a malformed backup
+	// cannot strand mlock'd pages.
+	defer func() {
+		if err != nil {
+			info.Destroy()
+		}
+	}()
+
 	for i, f := range unknownFields {
 		f.FrameIndex = 0
 		unknownFields[i] = f
@@ -192,11 +237,11 @@ func (br *BackupReader) ValidatedReadAll(purpose Purpose) (*ValidatedReadResult,
 	// Validate purpose: the Purpose field is passed by the caller; for remote
 	// backups we require that mediaRootBackupKey is present (32 bytes).
 	// Device-transfer backups do not require the key.
-	if purpose == PurposeRemoteBackup && len(info.MediaRootBackupKey) != 32 {
+	if purpose == PurposeRemoteBackup && info.MediaRootBackupKey.Size() != mediaRootBackupKeyLen {
 		return nil, &ErrPurposeMismatch{Want: purpose, Got: br.Purpose}
 	}
 
-	result.Info = *info
+	result.Info = info
 
 	// Read and parse all subsequent frames.
 	for frameIdx := 1; ; frameIdx++ {
@@ -240,10 +285,18 @@ func (br *BackupReader) ValidatedReadAll(purpose Purpose) (*ValidatedReadResult,
 //	  string firstAppVersion = 5;   // bytes
 //	  bytes debugInfo = 6;          // bytes
 //	}
-func parseBackupInfo(b []byte) (*BackupInfoRaw, []FoundUnknownField, error) {
+func parseBackupInfo(b []byte) (_ *BackupInfoRaw, unknowns []FoundUnknownField, err error) {
 	info := &BackupInfoRaw{}
-	var unknowns []FoundUnknownField
 	data := b
+
+	// Release the guarded key already decoded if parsing fails further along,
+	// so that malformed input cannot strand mlock'd pages.
+	defer func() {
+		if err != nil {
+			info.Destroy()
+		}
+	}()
+
 	for len(data) > 0 {
 		tag, n := binary.Uvarint(data)
 		if n <= 0 {
@@ -286,8 +339,16 @@ func parseBackupInfo(b []byte) (*BackupInfoRaw, []FoundUnknownField, error) {
 			if uint64(len(data)) < length {
 				return nil, nil, &ErrTruncatedField{Field: "BackupInfo.mediaRootBackupKey"}
 			}
-			info.MediaRootBackupKey = make([]byte, length)
-			copy(info.MediaRootBackupKey, data[:length])
+			key := make([]byte, length)
+			copy(key, data[:length])
+			guarded, gErr := secret.NewOptional(key)
+			if gErr != nil {
+				return nil, nil, gErr
+			}
+			// A singular protobuf field may legally repeat, last one wins.
+			// Release the superseded allocation rather than abandoning it.
+			info.MediaRootBackupKey.Destroy()
+			info.MediaRootBackupKey = guarded
 			data = data[length:]
 		case 4: // currentAppVersion, string (length-delimited)
 			if wireType != 2 {

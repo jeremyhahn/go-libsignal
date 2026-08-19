@@ -342,7 +342,7 @@ func (u *testUser) kyberBundle() *prekey.Bundle {
 		u.signedPreKey.Signature(),
 		u.identityKeyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		u.kyberPreKey.KeyPair().Public,
+		u.kyberPreKey.PublicKey(),
 		u.kyberPreKey.Signature(),
 	)
 }
@@ -360,7 +360,7 @@ func (u *testUser) kyberBundleWithPreKeyIndex(idx int) *prekey.Bundle {
 		u.signedPreKey.Signature(),
 		u.identityKeyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		u.kyberPreKey.KeyPair().Public,
+		u.kyberPreKey.PublicKey(),
 		u.kyberPreKey.Signature(),
 	)
 }
@@ -378,7 +378,7 @@ func (u *testUser) kyberBundleNoOneTimePreKey() *prekey.Bundle {
 		u.signedPreKey.Signature(),
 		u.identityKeyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		u.kyberPreKey.KeyPair().Public,
+		u.kyberPreKey.PublicKey(),
 		u.kyberPreKey.Signature(),
 	)
 }
@@ -1873,7 +1873,7 @@ func TestProcessBundleWithKyberPreKey(t *testing.T) {
 		bob.signedPreKey.Signature(),
 		bob.identityKeyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		kyberPreKey.KeyPair().Public,
+		kyberPreKey.PublicKey(),
 		kyberSig,
 	)
 
@@ -1957,7 +1957,7 @@ func TestProcessBundleKyberInvalidSignature(t *testing.T) {
 		bob.signedPreKey.Signature(),
 		bob.identityKeyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		kyberPreKey.KeyPair().Public,
+		kyberPreKey.PublicKey(),
 		badKyberSig,
 	)
 
@@ -2002,7 +2002,7 @@ func TestProcessBundleKyberShortSignature(t *testing.T) {
 		bob.signedPreKey.Signature(),
 		bob.identityKeyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		kyberPreKey.KeyPair().Public,
+		kyberPreKey.PublicKey(),
 		shortSig,
 	)
 
@@ -2052,7 +2052,7 @@ func TestProcessBundleWithKyberNotFreshSession(t *testing.T) {
 		bob.signedPreKey.Signature(),
 		bob.identityKeyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		kyberPreKey.KeyPair().Public,
+		kyberPreKey.PublicKey(),
 		kyberSig,
 	)
 
@@ -2987,7 +2987,7 @@ func TestEncryptWithKyberUnacknowledgedPreKey(t *testing.T) {
 		bob.signedPreKey.Signature(),
 		bob.identityKeyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		kyberPreKey.KeyPair().Public,
+		kyberPreKey.PublicKey(),
 		kyberSig,
 	)
 
@@ -3719,7 +3719,7 @@ func TestEncryptKyberPreKeyMessageContainsKyberFields(t *testing.T) {
 		bob.signedPreKey.Signature(),
 		bob.identityKeyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		kyberPreKey.KeyPair().Public,
+		kyberPreKey.PublicKey(),
 		kyberSig,
 	)
 	if err := aliceBuilder.ProcessBundle(bundle); err != nil {
@@ -3800,7 +3800,7 @@ func TestProcessBundleKyberPreKeyPresentButSignatureNil(t *testing.T) {
 		bob.signedPreKey.Signature(),
 		bob.identityKeyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		kyberPreKey.KeyPair().Public,
+		kyberPreKey.PublicKey(),
 		nil, // nil signature -- must cause error
 	)
 
@@ -3847,7 +3847,7 @@ func TestProcessBundleKyberPreKeyWithValidSignatureSucceeds(t *testing.T) {
 		bob.signedPreKey.Signature(),
 		bob.identityKeyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		kyberPreKey.KeyPair().Public,
+		kyberPreKey.PublicKey(),
 		kyberSig,
 	)
 

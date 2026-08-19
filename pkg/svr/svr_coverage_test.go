@@ -142,11 +142,11 @@ func TestNewBackup4_Success(t *testing.T) {
 	if backup.MaxTries != 5 {
 		t.Errorf("MaxTries = %d, want 5", backup.MaxTries)
 	}
-	if backup.Secret != secret {
+	if !backup.Secret.EqualTo(secret) {
 		t.Error("Secret mismatch")
 	}
-	if len(backup.Entropy) != 32 {
-		t.Errorf("Entropy length = %d, want 32", len(backup.Entropy))
+	if backup.Entropy.Size() != 32 {
+		t.Errorf("Entropy length = %d, want 32", backup.Entropy.Size())
 	}
 	if len(backup.RequestID) != 32 {
 		t.Errorf("RequestID length = %d, want 32", len(backup.RequestID))

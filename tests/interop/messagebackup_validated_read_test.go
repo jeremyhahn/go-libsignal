@@ -69,6 +69,7 @@ func TestMessageBackup_ValidatedReadLegacy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ValidatedReadAll: %v", err)
 	}
+	defer result.Destroy()
 
 	if result.Info.Version != backup.BackupInfoVersion1 {
 		t.Errorf("BackupInfo.Version = %d, want %d", result.Info.Version, backup.BackupInfoVersion1)
@@ -126,6 +127,7 @@ func TestMessageBackup_ValidatedReadModernMagicCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ValidatedReadAll (modern): %v", err)
 	}
+	defer result.Destroy()
 
 	if result.Info.Version != backup.BackupInfoVersion1 {
 		t.Errorf("BackupInfo.Version = %d, want %d", result.Info.Version, backup.BackupInfoVersion1)

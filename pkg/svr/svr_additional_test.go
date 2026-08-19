@@ -175,13 +175,13 @@ func TestNewBackup4Fields(t *testing.T) {
 	if b.MaxTries != 5 {
 		t.Errorf("MaxTries = %d, want 5", b.MaxTries)
 	}
-	if b.Secret != secret {
+	if !b.Secret.EqualTo(secret) {
 		t.Error("Secret mismatch")
 	}
 	if len(b.RequestID) != requestIDSize {
 		t.Errorf("RequestID length = %d, want %d", len(b.RequestID), requestIDSize)
 	}
-	if len(b.Entropy) != entropySize {
-		t.Errorf("Entropy length = %d, want %d", len(b.Entropy), entropySize)
+	if b.Entropy.Size() != entropySize {
+		t.Errorf("Entropy length = %d, want %d", b.Entropy.Size(), entropySize)
 	}
 }

@@ -6,7 +6,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/chain"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/message"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/bytehelper"
-	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
 // NewReceiverChainPair will return a new ReceiverChainPair object.
@@ -36,6 +36,11 @@ func NewChain(senderRatchetKeyPair *ecc.ECKeyPair, chainKey *chain.Key,
 
 // NewChainFromStructure will return a new Chain with the given
 // chain structure.
+//
+// The ratchet private key, the chain key and every message key are moved into
+// guarded memory as they are decoded. If the chain cannot be completed, all of
+// them are released before returning, so a failed call leaves no locked memory
+// behind.
 func NewChainFromStructure(structure *ChainStructure) (*Chain, error) {
 	if structure == nil {
 		return nil, nil
@@ -43,50 +48,59 @@ func NewChainFromStructure(structure *ChainStructure) (*Chain, error) {
 	// Alias to SliceToArray
 	getArray := bytehelper.SliceToArray
 
+	// Populate the chain as it is decoded so that every guarded allocation made
+	// so far is reachable by the cleanup below, whichever step fails.
+	chainState := &Chain{}
+	handedOver := false
+	defer func() {
+		if !handedOver {
+			destroyChain(chainState)
+		}
+	}()
+
 	// Build the sender ratchet key from bytes.
 	senderRatchetKeyPublic, err := ecc.DecodePoint(structure.SenderRatchetKeyPublic, 0)
 	if err != nil {
 		return nil, err
 	}
 	var senderRatchetKeyPrivate ecc.ECPrivateKeyable
-	if len(structure.SenderRatchetKeyPrivate) == 32 {
-		guardedKey, gErr := ecc.NewGuardedECPrivateKey(getArray(structure.SenderRatchetKeyPrivate))
+	if privateKeyBytes := structure.SenderRatchetKeyPrivate.BytesOrNil(); len(privateKeyBytes) == 32 {
+		guardedKey, gErr := ecc.NewGuardedECPrivateKey(getArray(privateKeyBytes))
 		if gErr != nil {
 			return nil, gErr
 		}
 		senderRatchetKeyPrivate = guardedKey
 	}
-	senderRatchetKeyPair := ecc.NewECKeyPair(senderRatchetKeyPublic, senderRatchetKeyPrivate)
+	chainState.senderRatchetKeyPair = ecc.NewECKeyPair(senderRatchetKeyPublic, senderRatchetKeyPrivate)
 
 	// Build our message keys from the message key structures.
-	messageKeys := make([]*message.Keys, len(structure.MessageKeys))
+	chainState.messageKeys = make([]*message.Keys, len(structure.MessageKeys))
 	for i := range structure.MessageKeys {
-		messageKeys[i] = message.NewKeysFromStruct(structure.MessageKeys[i])
+		chainState.messageKeys[i] = message.NewKeysFromStruct(structure.MessageKeys[i])
 	}
 
 	// Build our new chain state.
-	chainState := NewChain(
-		senderRatchetKeyPair,
-		chain.NewKeyFromStruct(structure.ChainKey, kdf.DeriveSecrets),
-		messageKeys,
-	)
+	chainState.chainKey = chain.NewKeyFromStruct(structure.ChainKey, kdf.DeriveSecrets)
 
+	handedOver = true
 	return chainState, nil
 }
 
-// ChainStructure is a serializeable structure for chain states.
+// ChainStructure is a serializeable structure for chain states. The sender
+// ratchet private key is held in guarded memory; see
+// PendingKeyExchangeStructure for the rationale.
 type ChainStructure struct {
 	SenderRatchetKeyPublic  []byte
-	SenderRatchetKeyPrivate []byte
+	SenderRatchetKeyPrivate secret.Secret
 	ChainKey                *chain.KeyStructure
 	MessageKeys             []*message.KeysStructure
 }
 
-// Zeroize overwrites all sensitive key material in the structure with zeros.
-// Call this (via defer) after the structure has been serialized to prevent
-// private key and chain key bytes from lingering in heap memory.
+// Zeroize destroys the guarded sender ratchet private key and overwrites the
+// remaining sensitive key material in the structure with zeros. Call this (via
+// defer) after the structure has been serialized.
 func (c *ChainStructure) Zeroize() {
-	crypto.Zeroize(c.SenderRatchetKeyPrivate)
+	c.SenderRatchetKeyPrivate.Destroy()
 	if c.ChainKey != nil {
 		c.ChainKey.Zeroize()
 	}
@@ -121,8 +135,16 @@ func (c *Chain) ChainKey() *chain.Key {
 	return c.chainKey
 }
 
-// SetChainKey will set the chain state's chain key.
+// SetChainKey will set the chain state's chain key. The key being replaced is
+// destroyed rather than abandoned: callers ratchet forward from a copy —
+// State.SenderChainKey and State.ReceiverChainKey both hand out copies — so
+// the chain's own key is the last reference, and memguard reclaims nothing on
+// its own. Without this, every message sent or accepted would cost the process
+// a locked page it never gets back.
 func (c *Chain) SetChainKey(key *chain.Key) {
+	if c.chainKey != nil && c.chainKey != key {
+		c.chainKey.Zeroize()
+	}
 	c.chainKey = key
 }
 
@@ -154,27 +176,34 @@ func (c *Chain) PopFirstMessageKeys() *message.Keys {
 }
 
 // structure returns a serializeable structure of the chain state.
-func (c *Chain) structure() *ChainStructure {
-	// Alias to ArrayToSlice
-	getSlice := bytehelper.ArrayToSlice
-
+// The caller owns the returned structure and must Zeroize it once the
+// serializer is done with it; on failure everything built so far is released
+// before returning.
+func (c *Chain) structure() (_ *ChainStructure, err error) {
 	// Convert our message keys into a serializeable structure.
 	messageKeys := make([]*message.KeysStructure, len(c.messageKeys))
 	for i := range c.messageKeys {
 		messageKeys[i] = message.NewStructFromKeys(c.messageKeys[i])
 	}
 
-	// Convert our sender ratchet key private
-	var senderRatchetKeyPrivate []byte
-	if c.senderRatchetKeyPair.PrivateKey() != nil {
-		senderRatchetKeyPrivate = getSlice(c.senderRatchetKeyPair.PrivateKey().Serialize())
+	structure := &ChainStructure{
+		SenderRatchetKeyPublic: c.senderRatchetKeyPair.PublicKey().Serialize(),
+		ChainKey:               chain.NewStructFromKey(c.chainKey),
+		MessageKeys:            messageKeys,
 	}
 
-	// Build the chain structure.
-	return &ChainStructure{
-		SenderRatchetKeyPublic:  c.senderRatchetKeyPair.PublicKey().Serialize(),
-		SenderRatchetKeyPrivate: senderRatchetKeyPrivate,
-		ChainKey:                chain.NewStructFromKey(c.chainKey),
-		MessageKeys:             messageKeys,
+	// Release the partially built structure if the step below fails, so that
+	// no key material outlives the failed call.
+	defer func() {
+		if err != nil {
+			structure.Zeroize()
+		}
+	}()
+
+	// Move the sender ratchet private key into guarded memory.
+	if structure.SenderRatchetKeyPrivate, err = guardECPrivateKey(c.senderRatchetKeyPair.PrivateKey()); err != nil {
+		return nil, err
 	}
+
+	return structure, nil
 }

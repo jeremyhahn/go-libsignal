@@ -79,7 +79,7 @@ func (u *user) kyberBundle() *prekey.Bundle {
 		u.signedPreKey.Signature(),
 		u.identityKeyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		u.kyberPreKey.KeyPair().Public,
+		u.kyberPreKey.PublicKey(),
 		u.kyberPreKey.Signature(),
 	)
 }

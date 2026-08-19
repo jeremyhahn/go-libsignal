@@ -16,6 +16,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/serialize"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/bytehelper"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/optional"
 )
 
@@ -96,7 +97,7 @@ func TestNewPreKeyFromStruct(t *testing.T) {
 	structure := &record.PreKeyStructure{
 		ID:         10,
 		PublicKey:  kp.PublicKey().Serialize(),
-		PrivateKey: privKey[:],
+		PrivateKey: mustGuard(t, privKey[:]),
 	}
 
 	pk, err := record.NewPreKeyFromStruct(structure, s.PreKeyRecord)
@@ -172,7 +173,7 @@ func TestNewSignedPreKeyFromStruct(t *testing.T) {
 	structure := &record.SignedPreKeyStructure{
 		ID:         3,
 		PublicKey:  kp.PublicKey().Serialize(),
-		PrivateKey: spkPrivKey[:],
+		PrivateKey: mustGuard(t, spkPrivKey[:]),
 		Signature:  make([]byte, 64),
 		Timestamp:  3000,
 	}
@@ -425,7 +426,7 @@ func TestNewChainFromStructure(t *testing.T) {
 
 	structure := &record.ChainStructure{
 		SenderRatchetKeyPublic:  kp.PublicKey().Serialize(),
-		SenderRatchetKeyPrivate: privKey[:],
+		SenderRatchetKeyPrivate: mustGuard(t, privKey[:]),
 		ChainKey:                &chain.KeyStructure{Key: make([]byte, 32), Index: 3},
 		MessageKeys: []*message.KeysStructure{
 			{CipherKey: []byte("c"), MacKey: []byte("m"), IV: []byte("i"), Index: 0},
@@ -465,7 +466,7 @@ func TestNewChainFromStructureNoPrivateKey(t *testing.T) {
 
 	structure := &record.ChainStructure{
 		SenderRatchetKeyPublic:  kp.PublicKey().Serialize(),
-		SenderRatchetKeyPrivate: nil,
+		SenderRatchetKeyPrivate: secret.Secret{},
 		ChainKey:                &chain.KeyStructure{Key: make([]byte, 32), Index: 0},
 	}
 
@@ -497,11 +498,7 @@ func (k *kyberPreKeySerializer) Deserialize(serialized []byte) (*record.KyberPre
 
 func TestNewKyberPreKey(t *testing.T) {
 	pubKey := kem.NewPublicKey(kem.KeyTypeKyber1024, make([]byte, 1568))
-	secKey, err := kem.NewSecretKey(kem.KeyTypeKyber1024, make([]byte, 3168))
-	if err != nil {
-		t.Fatalf("NewSecretKey() error: %v", err)
-	}
-	kp := &kem.KeyPair{Public: pubKey, Secret: secKey}
+	kp := mustGuardedKyberKeyPair(t, pubKey, make([]byte, 3168))
 	sig := []byte("test-signature")
 
 	kpk := record.NewKyberPreKey(42, 5000, kp, sig, &kyberPreKeySerializer{})
@@ -512,8 +509,8 @@ func TestNewKyberPreKey(t *testing.T) {
 	if kpk.Timestamp() != 5000 {
 		t.Fatal("timestamp mismatch")
 	}
-	if kpk.KeyPair() != kp {
-		t.Fatal("keypair mismatch")
+	if kpk.PublicKey() != kp.Public {
+		t.Fatal("public key mismatch")
 	}
 	retSig := kpk.Signature()
 	if !bytes.Equal(retSig, sig) {
@@ -523,11 +520,7 @@ func TestNewKyberPreKey(t *testing.T) {
 
 func TestKyberPreKeySerialize(t *testing.T) {
 	pubKey := kem.NewPublicKey(kem.KeyTypeKyber1024, make([]byte, 1568))
-	secKey, err := kem.NewSecretKey(kem.KeyTypeKyber1024, make([]byte, 3168))
-	if err != nil {
-		t.Fatalf("NewSecretKey() error: %v", err)
-	}
-	kp := &kem.KeyPair{Public: pubKey, Secret: secKey}
+	kp := mustGuardedKyberKeyPair(t, pubKey, make([]byte, 3168))
 
 	kpk := record.NewKyberPreKey(10, 1000, kp, []byte("sig"), &kyberPreKeySerializer{})
 
@@ -550,7 +543,7 @@ func TestNewKyberPreKeyFromStructure(t *testing.T) {
 	structure := record.KyberPreKeyStructure{
 		ID:         7,
 		PublicKey:  pubKey.Serialize(),
-		PrivateKey: secKey.Data(),
+		PrivateKey: mustGuard(t, secKey.Data()),
 		Signature:  []byte("sig-data"),
 		Timestamp:  2000,
 	}
@@ -565,8 +558,8 @@ func TestNewKyberPreKeyFromStructure(t *testing.T) {
 	if kpk.Timestamp() != 2000 {
 		t.Fatal("timestamp mismatch")
 	}
-	if kpk.KeyPair() == nil {
-		t.Fatal("keypair should not be nil")
+	if kpk.PublicKey() == nil {
+		t.Fatal("public key should not be nil")
 	}
 	if !bytes.Equal(kpk.Signature(), []byte("sig-data")) {
 		t.Fatal("signature mismatch")
@@ -795,7 +788,7 @@ func makeFullStateStructure(t *testing.T) *record.StateStructure {
 		LocalIdentityPublic:  pubKeyBytes,
 		RemoteIdentityPublic: pubKeyBytes,
 		SenderBaseKey:        pubKeyBytes,
-		RootKey:              make([]byte, 32),
+		RootKey:              mustGuard(t, make([]byte, 32)),
 		PendingPreKey: &record.PendingPreKeyStructure{
 			PreKeyID:       optional.NewOptionalUint32(1),
 			SignedPreKeyID: 1,
@@ -803,7 +796,7 @@ func makeFullStateStructure(t *testing.T) *record.StateStructure {
 		},
 		SenderChain: &record.ChainStructure{
 			SenderRatchetKeyPublic:  pubKeyBytes,
-			SenderRatchetKeyPrivate: privKeyArr[:],
+			SenderRatchetKeyPrivate: mustGuard(t, privKeyArr[:]),
 			ChainKey:                &chain.KeyStructure{Key: make([]byte, 32), Index: 0},
 		},
 	}
@@ -1246,11 +1239,11 @@ func TestStateFromStructureWithPendingKeyExchange(t *testing.T) {
 	structure.PendingKeyExchange = &record.PendingKeyExchangeStructure{
 		Sequence:                7,
 		LocalBaseKeyPublic:      getSlice(kp.PublicKey().PublicKey()),
-		LocalBaseKeyPrivate:     getSlice(privKey),
+		LocalBaseKeyPrivate:     mustGuard(t, getSlice(privKey)),
 		LocalRatchetKeyPublic:   getSlice(kp.PublicKey().PublicKey()),
-		LocalRatchetKeyPrivate:  getSlice(privKey),
+		LocalRatchetKeyPrivate:  mustGuard(t, getSlice(privKey)),
 		LocalIdentityKeyPublic:  getSlice(kp.PublicKey().PublicKey()),
-		LocalIdentityKeyPrivate: getSlice(privKey),
+		LocalIdentityKeyPrivate: mustGuard(t, getSlice(privKey)),
 	}
 
 	state, err := record.NewStateFromStructure(structure, s.State)
@@ -1381,11 +1374,11 @@ func TestNewPendingKeyExchangeFromStruct(t *testing.T) {
 	structure := &record.PendingKeyExchangeStructure{
 		Sequence:                42,
 		LocalBaseKeyPublic:      getSlice(kp.PublicKey().PublicKey()),
-		LocalBaseKeyPrivate:     getSlice(privKey),
+		LocalBaseKeyPrivate:     mustGuard(t, getSlice(privKey)),
 		LocalRatchetKeyPublic:   getSlice(kp.PublicKey().PublicKey()),
-		LocalRatchetKeyPrivate:  getSlice(privKey),
+		LocalRatchetKeyPrivate:  mustGuard(t, getSlice(privKey)),
 		LocalIdentityKeyPublic:  getSlice(kp.PublicKey().PublicKey()),
-		LocalIdentityKeyPrivate: getSlice(privKey),
+		LocalIdentityKeyPrivate: mustGuard(t, getSlice(privKey)),
 	}
 
 	pke, err := record.NewPendingKeyExchangeFromStruct(structure)

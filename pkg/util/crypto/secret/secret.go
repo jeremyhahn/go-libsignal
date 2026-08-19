@@ -91,16 +91,20 @@ func (s *Secret) Size() int {
 }
 
 // Destroy zeroizes and frees the guarded memory. This method is idempotent
-// and safe to call multiple times.
+// and safe to call multiple times, including on a nil Secret.
 func (s *Secret) Destroy() {
+	if s == nil {
+		return
+	}
 	if s.buf != nil && s.buf.IsAlive() {
 		s.buf.Destroy()
 	}
 }
 
-// IsDestroyed reports whether the secret has been destroyed.
+// IsDestroyed reports whether the secret has been destroyed. A nil Secret
+// holds no material and is reported as destroyed.
 func (s *Secret) IsDestroyed() bool {
-	return s.buf == nil || !s.buf.IsAlive()
+	return s == nil || s.buf == nil || !s.buf.IsAlive()
 }
 
 // Clone creates an independent deep copy of the secret in new guarded memory.

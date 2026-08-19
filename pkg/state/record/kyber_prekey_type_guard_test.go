@@ -38,19 +38,14 @@ func TestNewKyberPreKeyFromStructure_TypeConsistency(t *testing.T) {
 	secKeyData := make([]byte, 3168) // Kyber1024 secret key size
 
 	pubKey := kem.NewPublicKey(kem.KeyTypeKyber1024, pubKeyData)
-	secKey, err := kem.NewSecretKey(kem.KeyTypeKyber1024, secKeyData)
-	if err != nil {
-		t.Fatalf("kem.NewSecretKey: %v", err)
-	}
-
-	kp := &kem.KeyPair{Public: pubKey, Secret: secKey}
+	kp := mustGuardedKyberKeyPair(t, pubKey, append([]byte(nil), secKeyData...))
 	original := record.NewKyberPreKey(1, 12345, kp, []byte("test-sig"), &kyberPreKeySerializer{})
 
 	// Serialize and deserialize through the structure.
 	structure := record.KyberPreKeyStructure{
 		ID:         original.ID(),
 		PublicKey:  pubKey.Serialize(),
-		PrivateKey: secKey.Data(),
+		PrivateKey: mustGuard(t, secKeyData),
 		Signature:  original.Signature(),
 		Timestamp:  12345,
 	}
@@ -60,11 +55,16 @@ func TestNewKyberPreKeyFromStructure_TypeConsistency(t *testing.T) {
 		t.Fatalf("NewKyberPreKeyFromStructure failed for matching types: %v", err)
 	}
 
-	if rebuilt.KeyPair().Public.Type() != kem.KeyTypeKyber1024 {
-		t.Errorf("public key type = %d, want %d", rebuilt.KeyPair().Public.Type(), kem.KeyTypeKyber1024)
+	if rebuilt.PublicKey().Type() != kem.KeyTypeKyber1024 {
+		t.Errorf("public key type = %d, want %d", rebuilt.PublicKey().Type(), kem.KeyTypeKyber1024)
 	}
-	if rebuilt.KeyPair().Secret.Type() != kem.KeyTypeKyber1024 {
-		t.Errorf("secret key type = %d, want %d", rebuilt.KeyPair().Secret.Type(), kem.KeyTypeKyber1024)
+	guarded, err := rebuilt.GuardedKeyPair()
+	if err != nil {
+		t.Fatalf("GuardedKeyPair: %v", err)
+	}
+	defer guarded.Destroy()
+	if guarded.Secret.Type() != kem.KeyTypeKyber1024 {
+		t.Errorf("secret key type = %d, want %d", guarded.Secret.Type(), kem.KeyTypeKyber1024)
 	}
 }
 
@@ -95,7 +95,7 @@ func TestNewKyberPreKeyFromStructure_MismatchedPublicKey(t *testing.T) {
 	structure := record.KyberPreKeyStructure{
 		ID:         42,
 		PublicKey:  corruptedPub,
-		PrivateKey: secKeyData,
+		PrivateKey: mustGuard(t, secKeyData),
 		Signature:  []byte("sig"),
 		Timestamp:  0,
 	}
@@ -125,8 +125,8 @@ func TestNewKyberPreKeyFromStructure_InvalidPrivateKeyForType(t *testing.T) {
 
 	structure := record.KyberPreKeyStructure{
 		ID:         7,
-		PublicKey:  pubKey.Serialize(),             // valid Kyber1024 public key
-		PrivateKey: []byte{0x01, 0x02, 0x03, 0x04}, // wrong size for any KEM algorithm
+		PublicKey:  pubKey.Serialize(),                           // valid Kyber1024 public key
+		PrivateKey: mustGuard(t, []byte{0x01, 0x02, 0x03, 0x04}), // wrong size for any KEM algorithm
 		Signature:  []byte("sig"),
 		Timestamp:  0,
 	}

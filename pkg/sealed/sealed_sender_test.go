@@ -401,7 +401,7 @@ func TestSealedSenderFullEncryptDecrypt(t *testing.T) {
 		bobPreKeys[0].KeyPair().PublicKey(), bobSignedPreKey.KeyPair().PublicKey(),
 		bobSignedPreKey.Signature(), bobIdentity.PublicKey(),
 		&optional.Uint32{Value: 42},
-		bobKyberPreKey.KeyPair().Public,
+		bobKyberPreKey.PublicKey(),
 		bobKyberPreKey.Signature(),
 	)
 	if err := aliceBuilder.ProcessBundle(bundle); err != nil {
@@ -678,7 +678,7 @@ func TestSealedSenderDecryptSelfSend(t *testing.T) {
 	bundle := prekey.NewBundleWithKyber(2, 1, bobPreKeys[0].ID(), bobSignedPreKey.ID(),
 		bobPreKeys[0].KeyPair().PublicKey(), bobSignedPreKey.KeyPair().PublicKey(),
 		bobSignedPreKey.Signature(), bobIdentity.PublicKey(),
-		&optional.Uint32{Value: 42}, bobKyberPreKey.KeyPair().Public, bobKyberPreKey.Signature())
+		&optional.Uint32{Value: 42}, bobKyberPreKey.PublicKey(), bobKyberPreKey.Signature())
 	if err := aliceBuilder.ProcessBundle(bundle); err != nil {
 		t.Fatalf("ProcessBundle failed: %v", err)
 	}
@@ -807,7 +807,7 @@ func TestSealedSenderFullEncryptDecryptWhisperMessage(t *testing.T) {
 		bobPreKeys[0].KeyPair().PublicKey(), bobSignedPreKey.KeyPair().PublicKey(),
 		bobSignedPreKey.Signature(), bobIdentity.PublicKey(),
 		&optional.Uint32{Value: 42},
-		bobKyberPreKey.KeyPair().Public,
+		bobKyberPreKey.PublicKey(),
 		bobKyberPreKey.Signature(),
 	)
 	if err := aliceBuilder.ProcessBundle(bundle); err != nil {
@@ -1241,7 +1241,7 @@ func TestSealedSenderDecryptExpiredCertificate(t *testing.T) {
 	bundle := prekey.NewBundleWithKyber(2, 1, bobPreKeys[0].ID(), bobSignedPreKey.ID(),
 		bobPreKeys[0].KeyPair().PublicKey(), bobSignedPreKey.KeyPair().PublicKey(),
 		bobSignedPreKey.Signature(), bobIdentity.PublicKey(),
-		&optional.Uint32{Value: 42}, bobKyberPreKey.KeyPair().Public, bobKyberPreKey.Signature())
+		&optional.Uint32{Value: 42}, bobKyberPreKey.PublicKey(), bobKyberPreKey.Signature())
 	if err := aliceBuilder.ProcessBundle(bundle); err != nil {
 		t.Fatalf("ProcessBundle error: %v", err)
 	}

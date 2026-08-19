@@ -3,7 +3,7 @@ package record
 import (
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/bytehelper"
-	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
 // SignedPreKeySerializer is an interface for serializing and deserializing
@@ -22,18 +22,24 @@ func NewSignedPreKeyFromBytes(serialized []byte, serializer SignedPreKeySerializ
 	if err != nil {
 		return nil, err
 	}
+	// The structure decoded here is ours; release its guarded private key once
+	// the record has taken its own copy.
+	defer signedPreKeyStructure.Zeroize()
 
 	return NewSignedPreKeyFromStruct(signedPreKeyStructure, serializer)
 }
 
 // NewSignedPreKeyFromStruct returns a SignedPreKey record using the given
-// serializable structure.
+// serializable structure. The record copies the private key into its own
+// guarded memory; the caller keeps ownership of the structure and should
+// Zeroize it when done.
 func NewSignedPreKeyFromStruct(structure *SignedPreKeyStructure,
 	serializer SignedPreKeySerializer) (*SignedPreKey, error) {
 
 	// Create the signed prekey record from the structure.
 	signedPreKey := &SignedPreKey{
-		structure:  *structure,
+		id:         structure.ID,
+		timestamp:  structure.Timestamp,
 		serializer: serializer,
 		signature:  bytehelper.SliceToArray64(structure.Signature),
 	}
@@ -49,7 +55,7 @@ func NewSignedPreKeyFromStruct(structure *SignedPreKeyStructure,
 	if err != nil {
 		return nil, err
 	}
-	privateKey, gErr := ecc.NewGuardedECPrivateKey(bytehelper.SliceToArray(structure.PrivateKey))
+	privateKey, gErr := ecc.NewGuardedECPrivateKey(bytehelper.SliceToArray(structure.PrivateKey.BytesOrNil()))
 	if gErr != nil {
 		return nil, gErr
 	}
@@ -65,13 +71,8 @@ func NewSignedPreKey(id uint32, timestamp int64, keyPair *ecc.ECKeyPair,
 	sig [64]byte, serializer SignedPreKeySerializer) *SignedPreKey {
 
 	return &SignedPreKey{
-		structure: SignedPreKeyStructure{
-			ID:         id,
-			Timestamp:  timestamp,
-			PublicKey:  keyPair.PublicKey().Serialize(),
-			PrivateKey: bytehelper.ArrayToSlice(keyPair.PrivateKey().Serialize()),
-			Signature:  bytehelper.ArrayToSlice64(sig),
-		},
+		id:         id,
+		timestamp:  timestamp,
 		keyPair:    keyPair,
 		signature:  sig,
 		serializer: serializer,
@@ -79,25 +80,30 @@ func NewSignedPreKey(id uint32, timestamp int64, keyPair *ecc.ECKeyPair,
 }
 
 // SignedPreKeyStructure is a flat structure of a signed pre key, used
-// for serialization and deserialization.
+// for serialization and deserialization. The private key is held in guarded
+// memory for the crossing of the storage boundary; see
+// PendingKeyExchangeStructure for the rationale.
 type SignedPreKeyStructure struct {
 	ID         uint32
 	PublicKey  []byte
-	PrivateKey []byte
+	PrivateKey secret.Secret
 	Signature  []byte
 	Timestamp  int64
 }
 
-// Zeroize overwrites the private key material in the structure with zeros.
+// Zeroize destroys the guarded private key material in the structure.
 // Call this (via defer) after the structure has been serialized.
 func (s *SignedPreKeyStructure) Zeroize() {
-	crypto.Zeroize(s.PrivateKey)
+	s.PrivateKey.Destroy()
 }
 
 // SignedPreKey record is a structure for storing a signed
-// pre key in a SignedPreKey store.
+// pre key in a SignedPreKey store. The private key lives only in the guarded
+// memory of the record's key pair; the serializable structure is built on
+// demand.
 type SignedPreKey struct {
-	structure  SignedPreKeyStructure
+	id         uint32
+	timestamp  int64
 	keyPair    *ecc.ECKeyPair
 	signature  [64]byte
 	serializer SignedPreKeySerializer
@@ -105,12 +111,12 @@ type SignedPreKey struct {
 
 // ID returns the record's id.
 func (s *SignedPreKey) ID() uint32 {
-	return s.structure.ID
+	return s.id
 }
 
 // Timestamp returns the record's timestamp
 func (s *SignedPreKey) Timestamp() int64 {
-	return s.structure.Timestamp
+	return s.timestamp
 }
 
 // KeyPair returns the signed pre key record's key pair.
@@ -143,6 +149,27 @@ func (s *SignedPreKey) SerializedPublicKey() []byte {
 // Serialize uses the SignedPreKey serializer to return the SignedPreKey
 // as serialized bytes.
 func (s *SignedPreKey) Serialize() ([]byte, error) {
-	structure := s.structure
-	return s.serializer.Serialize(&structure)
+	structure, err := s.structure()
+	if err != nil {
+		return nil, err
+	}
+	defer structure.Zeroize()
+	return s.serializer.Serialize(structure)
+}
+
+// structure builds the serializable form of the record, copying the private
+// key out of the key pair into guarded memory. The caller owns the returned
+// structure and must Zeroize it once the serializer is done with it.
+func (s *SignedPreKey) structure() (*SignedPreKeyStructure, error) {
+	privateKey, err := guardECPrivateKey(s.keyPair.PrivateKey())
+	if err != nil {
+		return nil, err
+	}
+	return &SignedPreKeyStructure{
+		ID:         s.id,
+		Timestamp:  s.timestamp,
+		PublicKey:  s.keyPair.PublicKey().Serialize(),
+		PrivateKey: privateKey,
+		Signature:  bytehelper.ArrayToSlice64(s.signature),
+	}, nil
 }

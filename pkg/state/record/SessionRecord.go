@@ -25,6 +25,9 @@ func NewSessionFromBytes(serialized []byte, serializer SessionSerializer, stateS
 	if err != nil {
 		return nil, err
 	}
+	// The structure decoded here is ours; release its guarded key material once
+	// the session has taken its own copy.
+	defer sessionStructure.Zeroize()
 
 	return NewSessionFromStructure(sessionStructure, serializer, stateSerializer)
 }
@@ -44,11 +47,24 @@ func NewSession(serializer SessionSerializer, stateSerializer StateSerializer) *
 
 // NewSessionFromStructure will return a new Signal Session from the given
 // session structure and serializer.
+//
+// Each state decoded here moves key material into guarded memory. A record
+// whose later states are malformed would otherwise strand the buffers of the
+// earlier, well formed ones, so a failed call releases every state it managed
+// to build.
 func NewSessionFromStructure(structure *SessionStructure, serializer SessionSerializer,
 	stateSerializer StateSerializer) (*Session, error) {
 
 	// Build our previous states from structure.
 	previousStates := make([]*State, len(structure.PreviousStates))
+	handedOver := false
+	defer func() {
+		if !handedOver {
+			for _, previousState := range previousStates {
+				destroyState(previousState)
+			}
+		}
+	}()
 	for i := range structure.PreviousStates {
 		var err error
 		previousStates[i], err = NewStateFromStructure(structure.PreviousStates[i], stateSerializer)
@@ -62,6 +78,7 @@ func NewSessionFromStructure(structure *SessionStructure, serializer SessionSeri
 	if err != nil {
 		return nil, err
 	}
+	handedOver = true
 
 	// Build and return our session.
 	session := &Session{
@@ -201,9 +218,16 @@ func (r *Session) PromoteState(promotedState *State) {
 	r.previousStates = r.prependStates(r.previousStates, r.sessionState)
 	r.sessionState = promotedState
 
-	// Remove the last state if it has reached our maximum length
+	// Remove the last state if it has reached our maximum length. The evicted
+	// state owns guarded material — its root key, PQ ratchet state, chain keys,
+	// ratchet private keys and message keys — and the record was its only
+	// owner, so destroy it rather than dropping it: memguard reclaims nothing
+	// on its own, and a peer that establishes sessions can drive an eviction
+	// for each one.
 	if len(r.previousStates) > archivedStatesMaxLength {
+		evicted := r.previousStates[len(r.previousStates)-1]
 		r.previousStates = r.removeLastState(r.previousStates)
+		destroyState(evicted)
 	}
 }
 
@@ -220,7 +244,10 @@ func (r *Session) PromoteOldSession(index int, updatedState *State) {
 // Serialize will return the session as serialized bytes so it can be
 // persistently stored.
 func (r *Session) Serialize() ([]byte, error) {
-	st := r.structure()
+	st, err := r.structure()
+	if err != nil {
+		return nil, err
+	}
 	defer st.Zeroize()
 	return r.serializer.Serialize(st)
 }
@@ -252,6 +279,20 @@ func (r *Session) Copy() (copied *Session, err error) {
 		return nil, &SessionCopyError{Err: err}
 	}
 	prevClones := make([]*State, len(r.previousStates))
+
+	// Each clone holds its own guarded buffers. If a later one cannot be made,
+	// release the ones already made rather than abandoning them: the copy is
+	// never returned, so nothing else can reach them.
+	handedOver := false
+	defer func() {
+		if !handedOver {
+			destroyState(currentClone)
+			for _, previousClone := range prevClones {
+				destroyState(previousClone)
+			}
+		}
+	}()
+
 	for i, s := range r.previousStates {
 		c, err := s.Clone()
 		if err != nil {
@@ -259,6 +300,8 @@ func (r *Session) Copy() (copied *Session, err error) {
 		}
 		prevClones[i] = c
 	}
+
+	handedOver = true
 	return &Session{
 		serializer:     r.serializer,
 		sessionState:   currentClone,
@@ -270,13 +313,27 @@ func (r *Session) Copy() (copied *Session, err error) {
 // structure will return a simple serializable session structure
 // from the given structure. This is used for serialization to persistently
 // store a session record.
-func (r *Session) structure() *SessionStructure {
-	previousStates := make([]*StateStructure, len(r.previousStates))
+func (r *Session) structure() (_ *SessionStructure, err error) {
+	structure := &SessionStructure{
+		PreviousStates: make([]*StateStructure, len(r.previousStates)),
+	}
+
+	// Release the partially built structure if any step below fails, so that
+	// no guarded allocation outlives the failed call.
+	defer func() {
+		if err != nil {
+			structure.Zeroize()
+		}
+	}()
+
 	for i := range r.previousStates {
-		previousStates[i] = r.previousStates[i].structure()
+		if structure.PreviousStates[i], err = r.previousStates[i].structure(); err != nil {
+			return nil, err
+		}
 	}
-	return &SessionStructure{
-		SessionState:   r.sessionState.structure(),
-		PreviousStates: previousStates,
+	if structure.SessionState, err = r.sessionState.structure(); err != nil {
+		return nil, err
 	}
+
+	return structure, nil
 }

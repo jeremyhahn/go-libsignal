@@ -29,38 +29,44 @@ func withFailingRand(fn func()) {
 	fn()
 }
 
-// limitedReader returns exactly n bytes of zeros, then fails.
-type limitedReader struct {
-	remaining int
+// signingSeedFailReader serves randomness from the real reader for every
+// request except the second one of exactly seedSize bytes, which it fails.
+//
+// The first seedSize-byte request is the Kyber key-pair seed and the second is
+// the nonce ecc.CalculateSignature draws, so this fails signing while letting
+// key generation succeed. Guarded key generation also draws randomness through
+// memguard to scramble its buffers; failing by request size rather than by a
+// byte budget keeps the injection stable regardless of how much memguard
+// consumes, and never leaves a caller with a short read (crypto/rand treats
+// that as fatal).
+type signingSeedFailReader struct {
+	inner    io.Reader
+	seedSize int
+	seen     int
 }
 
-func (l *limitedReader) Read(p []byte) (int, error) {
-	if l.remaining <= 0 {
-		return 0, errors.New("simulated rand failure after partial read")
+func (r *signingSeedFailReader) Read(p []byte) (int, error) {
+	if len(p) == r.seedSize {
+		r.seen++
+		if r.seen > 1 {
+			return 0, errors.New("simulated rand failure while signing")
+		}
 	}
-	n := len(p)
-	if n > l.remaining {
-		n = l.remaining
-	}
-	for i := 0; i < n; i++ {
-		p[i] = 0x42
-	}
-	l.remaining -= n
-	return n, nil
+	return r.inner.Read(p)
 }
 
-// withLimitedRand replaces crypto/rand.Reader with one that provides exactly
-// n bytes before failing.
-func withLimitedRand(n int, fn func()) {
+// withRandFailingOnSecondSeed replaces crypto/rand.Reader with a reader that
+// fails the second seedSize-byte request, calls fn, then restores the original.
+func withRandFailingOnSecondSeed(seedSize int, fn func()) {
 	original := rand.Reader
-	rand.Reader = &limitedReader{remaining: n}
+	rand.Reader = &signingSeedFailReader{inner: original, seedSize: seedSize}
 	defer func() { rand.Reader = original }()
 	fn()
 }
 
 // ensure failingReader satisfies io.Reader at compile time.
 var _ io.Reader = (*failingReader)(nil)
-var _ io.Reader = (*limitedReader)(nil)
+var _ io.Reader = (*signingSeedFailReader)(nil)
 
 type mockKyberSerializer struct{}
 
@@ -80,7 +86,7 @@ func TestGenerateIdentityKeyPair(t *testing.T) {
 		t.Fatalf("GenerateIdentityKeyPair failed: %v", err)
 	}
 	if kp == nil {
-		t.Fatal("expected non-nil key pair")
+		t.Fatal("expected non-nil public key")
 	}
 	if kp.PublicKey() == nil {
 		t.Fatal("expected non-nil public key")
@@ -264,7 +270,7 @@ func TestGenerateSenderSigningKey(t *testing.T) {
 		t.Fatalf("GenerateSenderSigningKey failed: %v", err)
 	}
 	if kp == nil {
-		t.Fatal("expected non-nil key pair")
+		t.Fatal("expected non-nil public key")
 	}
 }
 
@@ -350,8 +356,8 @@ func TestGenerateKyberPreKey(t *testing.T) {
 	if kpk.ID() != 1 {
 		t.Fatalf("expected ID 1, got %d", kpk.ID())
 	}
-	if kpk.KeyPair() == nil {
-		t.Fatal("expected non-nil key pair")
+	if kpk.PublicKey() == nil {
+		t.Fatal("expected non-nil public key")
 	}
 	if len(kpk.Signature()) == 0 {
 		t.Fatal("expected non-empty signature")
@@ -496,10 +502,10 @@ func TestGenerateKyberPreKey_RandFailure_Signing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
-	// Kyber key generation reads 64 bytes from rand.Reader.
-	// Provide exactly that, so keygen succeeds but the subsequent
-	// ecc.CalculateSignature (which also needs 64 bytes) fails.
-	withLimitedRand(64, func() {
+	// Kyber key generation and ecc.CalculateSignature each read 64 bytes from
+	// rand.Reader; failing the second such read lets keygen succeed and makes
+	// signing fail.
+	withRandFailingOnSecondSeed(64, func() {
 		kpk, err := GenerateKyberPreKey(identityKP.PrivateKey(), 1, &mockKyberSerializer{})
 		if err == nil {
 			t.Fatal("expected error when rand.Reader fails during signing")

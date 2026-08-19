@@ -243,7 +243,7 @@ func setupV2Session(t *testing.T) (
 		bobPreKeys[0].KeyPair().PublicKey(), bobSignedPreKey.KeyPair().PublicKey(),
 		bobSignedPreKey.Signature(), bobStore.keyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		bobKyberPreKey.KeyPair().Public,
+		bobKyberPreKey.PublicKey(),
 		bobKyberPreKey.Signature(),
 	)
 	if err := aliceBuilder.ProcessBundle(bundle); err != nil {
@@ -1047,7 +1047,7 @@ func TestSealedSenderMultiRecipientEncryptMultipleDevices(t *testing.T) {
 		bobPreKeys1[0].KeyPair().PublicKey(), bobSignedPreKey1.KeyPair().PublicKey(),
 		bobSignedPreKey1.Signature(), bobStore.keyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		bobKyberPreKey1.KeyPair().Public,
+		bobKyberPreKey1.PublicKey(),
 		bobKyberPreKey1.Signature(),
 	)
 	if err := aliceBuilder1.ProcessBundle(bundle1); err != nil {
@@ -1084,7 +1084,7 @@ func TestSealedSenderMultiRecipientEncryptMultipleDevices(t *testing.T) {
 		bobPreKeys2[0].KeyPair().PublicKey(), bobSignedPreKey2.KeyPair().PublicKey(),
 		bobSignedPreKey2.Signature(), bobStore.keyPair.PublicKey(),
 		&optional.Uint32{Value: 43},
-		bobKyberPreKey2.KeyPair().Public,
+		bobKyberPreKey2.PublicKey(),
 		bobKyberPreKey2.Signature(),
 	)
 	if err := aliceBuilder2.ProcessBundle(bundle2); err != nil {

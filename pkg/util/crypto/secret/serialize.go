@@ -1,0 +1,109 @@
+package secret
+
+import "encoding/json"
+
+// NewValue creates a Secret held by value, for use as a struct field that
+// encoding/json decodes into. A pointer field cannot be used there: when JSON
+// supersedes an earlier value with null, encoding/json sets the pointer to nil
+// without calling UnmarshalJSON, abandoning the guarded allocation it already
+// made. A value field always routes the decode through UnmarshalJSON, so the
+// superseded material is destroyed.
+//
+// The zero Secret means "no material present", which is what an empty input
+// yields — guarded memory cannot be allocated with zero length. As with New,
+// the source slice is zeroized as part of the move into guarded memory.
+func NewValue(data []byte) (Secret, error) {
+	if len(data) == 0 {
+		return Secret{}, nil
+	}
+	guarded, err := New(data)
+	if err != nil {
+		return Secret{}, err
+	}
+	return *guarded, nil
+}
+
+// NewOptional creates a Secret from key material that may legitimately be
+// absent. It returns (nil, nil) when data is empty, because guarded memory
+// cannot be allocated with zero length; callers treat a nil *Secret as
+// "no material present".
+//
+// Use NewValue instead for a field that encoding/json decodes into.
+//
+// As with New, the source slice is zeroized as part of the move into guarded
+// memory.
+func NewOptional(data []byte) (*Secret, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	return New(data)
+}
+
+// FromSecret converts a Secret held by pointer into one held by value, taking
+// ownership of the guarded material: the caller must not use the pointer
+// afterwards. A nil pointer yields the zero Secret, which holds no material.
+//
+// This is the bridge from the guarded types used by the live key material
+// (which hand out *Secret) to the structure fields that cross the storage
+// boundary, so key material can move between the two without transiting the
+// Go heap.
+func FromSecret(s *Secret) Secret {
+	if s == nil {
+		return Secret{}
+	}
+	return *s
+}
+
+// BytesOrNil returns a view into the guarded memory, or nil if the secret is
+// nil or has been destroyed. Unlike Bytes it never panics, which makes it the
+// accessor of choice on serialization paths where the material is optional.
+// The returned slice must not be retained beyond the lifetime of the Secret.
+func (s *Secret) BytesOrNil() []byte {
+	if s == nil || s.IsDestroyed() {
+		return nil
+	}
+	return s.buf.Bytes()
+}
+
+// MarshalJSON encodes the secret exactly as encoding/json encodes a []byte:
+// a base64 string, or null when there is no material. This keeps persisted
+// state byte-identical to the plain []byte representation it replaced.
+//
+// The receiver is a value so that a Secret held by value in a struct still
+// encodes its material when that struct is marshaled without being
+// addressable; a pointer receiver would silently emit an empty object.
+//
+// Marshaling necessarily copies the plaintext into the unguarded JSON output
+// buffer. It exists for the persisted-state structures in pkg/state/record,
+// whose whole purpose is to cross the storage boundary; the plaintext window
+// is bounded by the caller destroying the structure after serialization.
+func (s Secret) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.BytesOrNil())
+}
+
+// UnmarshalJSON decodes a base64 string (or null) into freshly allocated
+// guarded memory. A null or empty value yields a secret holding no material,
+// for which BytesOrNil reports nil.
+//
+// Decoding over a secret that already holds material destroys that material:
+// encoding/json reuses an existing pointer field, so abandoning the old buffer
+// would strand a locked allocation on every decode. The existing material is
+// left untouched if the decode fails.
+func (s *Secret) UnmarshalJSON(data []byte) error {
+	var raw []byte
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if len(raw) == 0 {
+		s.Destroy()
+		s.buf = nil
+		return nil
+	}
+	loaded, err := New(raw)
+	if err != nil {
+		return err
+	}
+	s.Destroy()
+	s.buf = loaded.buf
+	return nil
+}

@@ -272,7 +272,7 @@ func main() {
 		bobSignedPreKey.Signature(),
 		bobIdentityKP.PublicKey(),
 		&optional.Uint32{Value: 1},
-		bobKyberPreKey.KeyPair().Public,
+		bobKyberPreKey.PublicKey(),
 		bobKyberPreKey.Signature(),
 	)
 	if err := aliceBuilder.ProcessBundle(bobBundle); err != nil {

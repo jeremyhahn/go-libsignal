@@ -757,7 +757,7 @@ func TestProcessBundleMissingKyberSignature(t *testing.T) {
 		bob.signedPreKey.Signature(),
 		bob.identityKeyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		bob.kyberPreKey.KeyPair().Public,
+		bob.kyberPreKey.PublicKey(),
 		nil, // missing signature
 	)
 
@@ -794,7 +794,7 @@ func TestProcessBundleInvalidKyberSignature(t *testing.T) {
 		bob.signedPreKey.Signature(),
 		bob.identityKeyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		bob.kyberPreKey.KeyPair().Public,
+		bob.kyberPreKey.PublicKey(),
 		badSig,
 	)
 

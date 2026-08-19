@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Persisted key material now crosses the storage boundary in memguard-protected
+  memory instead of on the Go heap: session state (root key, chain and ratchet
+  private keys, pending key exchange — including the long-term identity private
+  key — and serialized SPQR state), pre-key, signed pre-key and Kyber pre-key
+  records, the SVR v4 backup/restore entropy and backup secret, and the media
+  root backup key (`pkg/state/record`, `pkg/svr`, `pkg/backup`).
+- The live representations that outlive the storage boundary are guarded too:
+  `record.KyberPreKey` holds a `kem.GuardedKeyPair` and `record.State` holds its
+  SPQR ratchet state in a `secret.Secret`, so deserialization no longer moves
+  either back onto the heap.
+- A deserialization that fails part-way through now releases the guarded
+  buffers it had already allocated. `NewChainFromStructure`,
+  `NewPendingKeyExchangeFromStruct`, `NewStateFromStructure` and
+  `NewSessionFromStructure` previously abandoned the well formed components of
+  a malformed persisted record; because memguard registers no finalizer, those
+  buffers stayed mlock'd for the life of the process, so a peer able to supply
+  malformed records could drain the process's `RLIMIT_MEMLOCK` allowance
+  (`pkg/state/record`).
+- A decrypt that fails now releases the working clone it rolls back to, and
+  the message keys it had taken out of that clone. Every failed decryption —
+  a replay, a corrupted ciphertext — previously stranded a whole session
+  state's worth of locked buffers, so any peer could drain the process's
+  `RLIMIT_MEMLOCK` allowance one message at a time (`pkg/session`,
+  `record.State.DiscardClone`). `record.Session.Copy` likewise releases the
+  clones it made when a later one fails.
+- A decrypt that succeeds now releases the material the commit supersedes, via
+  the new `record.State.CommitClone`. Sending and receiving a message no longer
+  accumulate locked memory at all: the session state destroys the chain key,
+  sender chain, root key and evicted receiver chain each ratchet step replaces;
+  `RemoveMessageKeys` destroys the entry it takes out of the chain rather than
+  returning a copy and dropping the original; and the chain-key copies handed
+  out by `SenderChainKey`/`ReceiverChainKey`, together with message keys derived
+  before authentication, are released on the paths that do not consume them
+  (`pkg/session`, `pkg/state/record`).
+- Archiving a session releases the state it evicts. `record.Session.PromoteState`
+  drops the oldest archived state once the archive is full, and that state owns
+  a root key, PQ ratchet state, chain keys, ratchet private keys and message
+  keys — a peer that establishes sessions could strand all of it, one archive
+  eviction per session (`pkg/state/record`).
+- A successful backup read hands the media root backup key to the caller in
+  guarded memory, so `backup.ValidatedReadResult` now owns it and has a
+  `Destroy`. Without one, every validated remote backup left its key locked for
+  the life of the process (`pkg/backup`).
+
+### Changed
+
+- **Breaking** — `backup.ValidatedReadResult.Info` is a `*BackupInfoRaw`, so
+  copying a result cannot produce two apparent owners of the same guarded
+  buffer, and the result must be `Destroy`ed once the caller is done with it.
+- `record.State.SetSenderChain` now documents that the state takes ownership of
+  the ratchet key pair and chain key it is given and destroys the chain they
+  supersede. Session establishment hands the state its own copy of the signed
+  pre-key pair, which belongs to the pre-key store.
+- **Breaking** — `record.NewKyberPreKey` takes a `*kem.GuardedKeyPair`, and
+  `record.KyberPreKey.KeyPair()` is replaced by `PublicKey()` (public half),
+  `GuardedKeyPair()` (an independent guarded copy) and `Destroy()`.
+- **Breaking** — `record.State.SetPqRatchetState` returns an error, moves the
+  caller's slice into guarded memory and destroys the state it replaces;
+  `PqRatchetState()` returns a view into guarded memory that must not be
+  retained.
+- **Breaking** — `kem.NewGuardedSecretKeyFromSecret` returns an error and
+  validates key type and length as `kem.NewSecretKey` does.
+- **Breaking** — `svr.Backup4.Secret` is a `*secret.Secret32`; `NewBackup4`
+  moves the caller's secret into guarded memory and `Destroy` releases it.
+
+### Added
+
+- `record.State.DiscardClone`, which releases the guarded material of a working
+  clone that is thrown away instead of committed. It is valid only on a state
+  from `Clone` that was not passed to `CopyFrom`; live session states share
+  their guarded objects and are not destroyable this way.
+- `record.State.CommitClone`, which commits a working clone and releases what
+  the commit superseded. `CopyFrom` keeps its existing pointer-copy semantics
+  for callers that rely on them.
+- `kem.GuardedFromPublicAndPrivate`, `kem.GuardedSecretKey.CloneSecret` and
+  `secret.FromSecret`, for moving key material between the guarded key types
+  and the persisted-state structures without transiting the Go heap.
+
 ## [0.1.0] - 2026-05-24
 
 Initial release — complete pure-Go port of the Signal Protocol, byte-wire-compatible

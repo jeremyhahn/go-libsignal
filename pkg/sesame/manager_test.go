@@ -9,7 +9,20 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/chain"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/identity"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
+
+// guardedTestSecret moves a copy of the given bytes into guarded memory, for
+// building the persisted session state the tests exercise. It panics on
+// failure: its callers are serializer stubs with no *testing.T in scope, and a
+// guarded-allocation failure is fatal to the run either way.
+func guardedTestSecret(data []byte) secret.Secret {
+	guarded, err := secret.NewValue(append([]byte(nil), data...))
+	if err != nil {
+		panic("sesame test: " + err.Error())
+	}
+	return guarded
+}
 
 // testClock returns a clock function that always returns the given time.
 func testClock(t time.Time) func() time.Time {
@@ -100,7 +113,7 @@ func minimalStateStructure() *record.StateStructure {
 		LocalIdentityPublic:  zeroKey,
 		RemoteIdentityPublic: zeroKey,
 		SenderBaseKey:        zeroKey,
-		RootKey:              make([]byte, 32),
+		RootKey:              guardedTestSecret(make([]byte, 32)),
 		SenderChain: &record.ChainStructure{
 			SenderRatchetKeyPublic: zeroKey,
 			ChainKey: &chain.KeyStructure{

@@ -2,7 +2,7 @@ package record
 
 import (
 	"github.com/jeremyhahn/go-libsignal/pkg/kem"
-	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
 // KyberPreKeyID is a typed identifier for Kyber pre-key records at the storage
@@ -22,42 +22,45 @@ type KyberPreKeySerializer interface {
 	Deserialize(serialized []byte) (*KyberPreKeyStructure, error)
 }
 
-// KyberPreKeyStructure is a flat, serializable structure for Kyber pre-key records.
+// KyberPreKeyStructure is a flat, serializable structure for Kyber pre-key
+// records. The private key is held in guarded memory for the crossing of the
+// storage boundary; see PendingKeyExchangeStructure for the rationale.
 type KyberPreKeyStructure struct {
 	ID         uint32
-	PublicKey  []byte // Serialized KEM public key (with type prefix)
-	PrivateKey []byte // Raw KEM secret key bytes
-	Signature  []byte // Identity key signature over the public key
+	PublicKey  []byte        // Serialized KEM public key (with type prefix)
+	PrivateKey secret.Secret // Raw KEM secret key bytes
+	Signature  []byte        // Identity key signature over the public key
 	Timestamp  int64
 }
 
-// Zeroize overwrites the private key material in the structure with zeros.
+// Zeroize destroys the guarded private key material in the structure.
 // Call this (via defer) after the structure has been serialized.
 func (k *KyberPreKeyStructure) Zeroize() {
-	crypto.Zeroize(k.PrivateKey)
+	k.PrivateKey.Destroy()
 }
 
-// KyberPreKey stores a Kyber pre-key with its associated metadata.
+// KyberPreKey stores a Kyber pre-key with its associated metadata. The secret
+// key lives in memguard-protected memory for the whole lifetime of the record,
+// both when the record is generated and when it is read back from storage; the
+// serializable structure is built on demand and destroyed by the caller.
 type KyberPreKey struct {
-	structure  KyberPreKeyStructure
-	keyPair    *kem.KeyPair
+	id         uint32
+	timestamp  int64
+	keyPair    *kem.GuardedKeyPair
 	signature  []byte
 	serializer KyberPreKeySerializer
 }
 
 // NewKyberPreKey creates a new KyberPreKey record with the given properties.
-func NewKyberPreKey(id uint32, timestamp int64, keyPair *kem.KeyPair, signature []byte, serializer KyberPreKeySerializer) *KyberPreKey {
+// The record takes ownership of keyPair: the caller must not destroy it, and
+// must not use it after the record itself is destroyed.
+func NewKyberPreKey(id uint32, timestamp int64, keyPair *kem.GuardedKeyPair, signature []byte, serializer KyberPreKeySerializer) *KyberPreKey {
 	sig := make([]byte, len(signature))
 	copy(sig, signature)
 
 	return &KyberPreKey{
-		structure: KyberPreKeyStructure{
-			ID:         id,
-			PublicKey:  keyPair.Public.Serialize(),
-			PrivateKey: keyPair.Secret.Data(),
-			Signature:  sig,
-			Timestamp:  timestamp,
-		},
+		id:         id,
+		timestamp:  timestamp,
 		keyPair:    keyPair,
 		signature:  sig,
 		serializer: serializer,
@@ -67,22 +70,35 @@ func NewKyberPreKey(id uint32, timestamp int64, keyPair *kem.KeyPair, signature 
 // NewKyberPreKeyFromStructure reconstructs a KyberPreKey from a serializable structure.
 // It asserts that the public-key type tag in structure.PublicKey matches the
 // secret-key type, guarding against cross-type key pair loading.
+//
+// The secret key is cloned from the structure's guarded memory straight into
+// the record's own guarded memory, so it never reaches the Go heap. The caller
+// keeps ownership of the structure and should Zeroize it when done.
 func NewKyberPreKeyFromStructure(structure KyberPreKeyStructure, serializer KyberPreKeySerializer) (*KyberPreKey, error) {
 	publicKey, err := kem.DeserializePublicKey(structure.PublicKey)
 	if err != nil {
 		return nil, &KyberPreKeyDeserializeError{Operation: "failed to deserialize kyber pre-key public key", Err: err}
 	}
 
-	secretKey, skErr := kem.NewSecretKey(publicKey.Type(), structure.PrivateKey)
+	guardedSecret, cloneErr := structure.PrivateKey.Clone()
+	if cloneErr != nil {
+		return nil, &KyberPreKeyDeserializeError{Operation: "failed to clone kyber pre-key secret key", Err: cloneErr}
+	}
+
+	// NewGuardedSecretKeyFromSecret takes ownership of guardedSecret, and
+	// destroys it itself if the type or length check fails.
+	secretKey, skErr := kem.NewGuardedSecretKeyFromSecret(publicKey.Type(), guardedSecret)
 	if skErr != nil {
 		return nil, &KyberPreKeyDeserializeError{Operation: "failed to create kyber pre-key secret key", Err: skErr}
 	}
 
 	// Guard: the type tag embedded in the serialized public key must match the
-	// type used to construct the secret key. NewSecretKey receives publicKey.Type()
-	// explicitly, so secretKey.Type() == publicKey.Type() is always true here;
-	// this assertion catches future API changes that could break the invariant.
+	// type used to construct the secret key. NewGuardedSecretKeyFromSecret
+	// receives publicKey.Type() explicitly, so secretKey.Type() == publicKey.Type()
+	// is always true here; this assertion catches future API changes that could
+	// break the invariant.
 	if secretKey.Type() != publicKey.Type() {
+		secretKey.Destroy()
 		return nil, &ErrKyberPreKeyTypeMismatch{
 			PublicKeyType: publicKey.Type(),
 			SecretKeyType: secretKey.Type(),
@@ -93,8 +109,9 @@ func NewKyberPreKeyFromStructure(structure KyberPreKeyStructure, serializer Kybe
 	copy(sig, structure.Signature)
 
 	return &KyberPreKey{
-		structure: structure,
-		keyPair: &kem.KeyPair{
+		id:        structure.ID,
+		timestamp: structure.Timestamp,
+		keyPair: &kem.GuardedKeyPair{
 			Public: publicKey,
 			Secret: secretKey,
 		},
@@ -105,12 +122,19 @@ func NewKyberPreKeyFromStructure(structure KyberPreKeyStructure, serializer Kybe
 
 // ID returns the record's identifier.
 func (k *KyberPreKey) ID() uint32 {
-	return k.structure.ID
+	return k.id
 }
 
-// KeyPair returns the KEM key pair for this record.
-func (k *KyberPreKey) KeyPair() *kem.KeyPair {
-	return k.keyPair
+// PublicKey returns the KEM public key for this record. The secret half is
+// never handed out unguarded; use GuardedKeyPair for operations that need it.
+func (k *KyberPreKey) PublicKey() *kem.PublicKey {
+	return k.keyPair.Public
+}
+
+// Destroy releases the guarded secret key held by the record. It is idempotent,
+// and the record must not be used for KEM operations afterwards.
+func (k *KyberPreKey) Destroy() {
+	k.keyPair.Destroy()
 }
 
 // Signature returns the identity key signature over the public key.
@@ -120,15 +144,12 @@ func (k *KyberPreKey) Signature() []byte {
 	return sig
 }
 
-// GuardedKeyPair creates a GuardedKeyPair from this record's key material.
-// The secret key bytes are moved into memguard-protected memory. The caller
-// is responsible for calling Destroy() on the returned GuardedKeyPair when
-// it is no longer needed.
+// GuardedKeyPair returns an independent guarded copy of this record's key
+// material, cloned from guarded memory into guarded memory. The caller is
+// responsible for calling Destroy() on the returned GuardedKeyPair when it is
+// no longer needed; destroying it leaves the record's own key intact.
 func (k *KyberPreKey) GuardedKeyPair() (*kem.GuardedKeyPair, error) {
-	skData := k.keyPair.Secret.Data() // returns a copy
-	defer crypto.Zeroize(skData)
-
-	guardedSK, err := kem.NewGuardedSecretKey(k.keyPair.Public.Type(), skData)
+	guardedSK, err := k.keyPair.Secret.Clone()
 	if err != nil {
 		return nil, &KyberPreKeyDeserializeError{Operation: "failed to create guarded kyber key pair", Err: err}
 	}
@@ -141,7 +162,7 @@ func (k *KyberPreKey) GuardedKeyPair() (*kem.GuardedKeyPair, error) {
 
 // Timestamp returns the record's creation timestamp.
 func (k *KyberPreKey) Timestamp() int64 {
-	return k.structure.Timestamp
+	return k.timestamp
 }
 
 // SignatureBytes returns the signature as a plain byte slice, satisfying the
@@ -160,6 +181,29 @@ func (k *KyberPreKey) SerializedPublicKey() []byte {
 
 // Serialize uses the KyberPreKey serializer to return the record as serialized bytes.
 func (k *KyberPreKey) Serialize() ([]byte, error) {
-	structure := k.structure
-	return k.serializer.Serialize(&structure)
+	structure, err := k.structure()
+	if err != nil {
+		return nil, err
+	}
+	defer structure.Zeroize()
+	return k.serializer.Serialize(structure)
+}
+
+// structure builds the serializable form of the record, cloning the secret key
+// from the record's guarded memory into the structure's own guarded memory.
+// The caller owns the returned structure and must Zeroize it once the
+// serializer is done with it.
+func (k *KyberPreKey) structure() (*KyberPreKeyStructure, error) {
+	cloned, err := k.keyPair.Secret.CloneSecret()
+	if err != nil {
+		return nil, &KyberPreKeyDeserializeError{Operation: "failed to guard kyber pre-key secret key", Err: err}
+	}
+	privateKey := secret.FromSecret(cloned)
+	return &KyberPreKeyStructure{
+		ID:         k.id,
+		PublicKey:  k.keyPair.Public.Serialize(),
+		PrivateKey: privateKey,
+		Signature:  k.Signature(),
+		Timestamp:  k.timestamp,
+	}, nil
 }

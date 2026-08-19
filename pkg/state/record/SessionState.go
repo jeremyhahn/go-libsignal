@@ -9,7 +9,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/root"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/session"
 	"github.com/jeremyhahn/go-libsignal/pkg/logger"
-	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/errorhelper"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/optional"
 )
@@ -33,6 +33,9 @@ func NewStateFromBytes(serialized []byte, serializer StateSerializer) (*State, e
 	if err != nil {
 		return nil, err
 	}
+	// The structure decoded here is ours; release its guarded key material once
+	// the state has taken its own copy.
+	defer stateStructure.Zeroize()
 
 	return NewStateFromStructure(stateStructure, serializer)
 }
@@ -43,7 +46,9 @@ func NewState(serializer StateSerializer) *State {
 }
 
 // NewStateFromStructure will return a new session state with the
-// given state structure.
+// given state structure. The state copies the guarded key material out of the
+// structure; the caller keeps ownership of the structure and should Zeroize it
+// when done.
 func NewStateFromStructure(structure *StateStructure, serializer StateSerializer) (*State, error) {
 	// Keep a list of errors, so they can be handled once.
 	errors := errorhelper.NewMultiError()
@@ -71,40 +76,62 @@ func NewStateFromStructure(structure *StateStructure, serializer StateSerializer
 	pendingKeyExchange, pkeErr := NewPendingKeyExchangeFromStruct(structure.PendingKeyExchange)
 	errors.Add(pkeErr)
 
+	// The chains and the pending key exchange each moved key material into
+	// guarded memory as they decoded, and errors are accumulated rather than
+	// returned at the first failure, so by this point a record that is
+	// malformed anywhere holds locked buffers for every part of it that was
+	// well formed. Assemble the state as it is built and release it on any exit
+	// that does not hand it to the caller.
+	state := &State{
+		pendingKeyExchange: pendingKeyExchange,
+		receiverChains:     receiverChains,
+		senderChain:        senderChain,
+	}
+	handedOver := false
+	defer func() {
+		if !handedOver {
+			destroyState(state)
+		}
+	}()
+
 	// Handle any errors. The first error will always be returned if there are multiple.
 	if errors.HasErrors() {
 		return nil, errors
 	}
 
-	// Build our state object.
-	state := &State{
-		localIdentityPublic:  identity.NewKey(localIdentityPublic),
-		localRegistrationID:  structure.LocalRegistrationID,
-		needsRefresh:         structure.NeedsRefresh,
-		pendingKeyExchange:   pendingKeyExchange,
-		pendingPreKey:        pendingPreKey,
-		previousCounter:      structure.PreviousCounter,
-		receiverChains:       receiverChains,
-		remoteIdentityPublic: identity.NewKey(remoteIdentityPublic),
-		remoteRegistrationID: structure.RemoteRegistrationID,
-		rootKey:              root.NewKey(kdf.DeriveSecrets, copyBytes(structure.RootKey)),
-		senderBaseKey:        senderBaseKey,
-		senderChain:          senderChain,
-		serializer:           serializer,
-		sessionVersion:       structure.SessionVersion,
+	// Clone the PQ ratchet state guarded-to-guarded, so the serialized SPQR
+	// state — which carries live ratchet secrets — never lands on the Go heap.
+	// The structure keeps its own copy; the caller Zeroizes it.
+	if len(structure.PqRatchetState.BytesOrNil()) > 0 {
+		pqRatchetState, pqErr := structure.PqRatchetState.Clone()
+		if pqErr != nil {
+			return nil, pqErr
+		}
+		state.pqRatchetState = pqRatchetState
 	}
 
-	// Copy PQ ratchet state if present.
-	if len(structure.PqRatchetState) > 0 {
-		state.pqRatchetState = make([]byte, len(structure.PqRatchetState))
-		copy(state.pqRatchetState, structure.PqRatchetState)
-	}
+	// Finish building our state object.
+	state.localIdentityPublic = identity.NewKey(localIdentityPublic)
+	state.localRegistrationID = structure.LocalRegistrationID
+	state.needsRefresh = structure.NeedsRefresh
+	state.pendingPreKey = pendingPreKey
+	state.previousCounter = structure.PreviousCounter
+	state.remoteIdentityPublic = identity.NewKey(remoteIdentityPublic)
+	state.remoteRegistrationID = structure.RemoteRegistrationID
+	state.rootKey = root.NewKey(kdf.DeriveSecrets, copyBytes(structure.RootKey.BytesOrNil()))
+	state.senderBaseKey = senderBaseKey
+	state.serializer = serializer
+	state.sessionVersion = structure.SessionVersion
 
+	handedOver = true
 	return state, nil
 }
 
 // StateStructure is the structure of a session state. Fields are public
-// to be used for serialization and deserialization.
+// to be used for serialization and deserialization. The secret-bearing fields
+// — the root key and the serialized PQ ratchet state — are held in guarded
+// memory; see PendingKeyExchangeStructure for the rationale. SenderBaseKey is
+// Alice's public base key and stays plain.
 type StateStructure struct {
 	LocalIdentityPublic  []byte
 	LocalRegistrationID  uint32
@@ -115,20 +142,21 @@ type StateStructure struct {
 	ReceiverChains       []*ChainStructure
 	RemoteIdentityPublic []byte
 	RemoteRegistrationID uint32
-	RootKey              []byte
+	RootKey              secret.Secret
 	SenderBaseKey        []byte
 	SenderChain          *ChainStructure
 	SessionVersion       int
-	PqRatchetState       []byte
+	PqRatchetState       secret.Secret
 }
 
-// Zeroize overwrites all sensitive key material in the structure with zeros.
-// Call this (via defer) after the structure has been serialized to prevent
-// root key, chain key, private key, and PQ ratchet bytes from lingering in
-// heap memory.
+// Zeroize releases all sensitive key material in the structure: guarded
+// material is destroyed and the remaining plain material is overwritten with
+// zeros. Call this (via defer) after the structure has been serialized to
+// prevent root key, chain key, private key, and PQ ratchet bytes from
+// outliving the serialization.
 func (s *StateStructure) Zeroize() {
-	crypto.Zeroize(s.RootKey)
-	crypto.Zeroize(s.PqRatchetState)
+	s.RootKey.Destroy()
+	s.PqRatchetState.Destroy()
 	if s.PendingKeyExchange != nil {
 		s.PendingKeyExchange.Zeroize()
 	}
@@ -161,7 +189,7 @@ type State struct {
 	senderChain          *Chain
 	serializer           StateSerializer
 	sessionVersion       int
-	pqRatchetState       []byte
+	pqRatchetState       *secret.Secret
 }
 
 // SenderBaseKey returns the sender's base key in bytes.
@@ -255,14 +283,29 @@ func (s *State) SessionWithSelf() bool {
 	return true
 }
 
-// PqRatchetState returns the serialized SPQR ratchet state, or nil if not set.
+// PqRatchetState returns a view into the guarded memory holding the serialized
+// SPQR ratchet state, or nil if not set. The state carries live ratchet
+// secrets, so the returned slice must not be retained: it is invalidated by the
+// next SetPqRatchetState or CopyFrom on this state.
 func (s *State) PqRatchetState() []byte {
-	return s.pqRatchetState
+	return s.pqRatchetState.BytesOrNil()
 }
 
-// SetPqRatchetState sets the serialized SPQR ratchet state.
-func (s *State) SetPqRatchetState(state []byte) {
-	s.pqRatchetState = state
+// SetPqRatchetState moves the given serialized SPQR ratchet state into guarded
+// memory, destroying whatever state it replaces. The caller's slice is zeroized
+// as part of the move and must not be used afterwards. An empty state clears
+// the field.
+//
+// Returns an error only if guarded memory cannot be allocated; the previous
+// state is left in place in that case.
+func (s *State) SetPqRatchetState(state []byte) error {
+	guarded, err := secret.NewOptional(state)
+	if err != nil {
+		return err
+	}
+	s.pqRatchetState.Destroy()
+	s.pqRatchetState = guarded
+	return nil
 }
 
 // PreviousCounter returns the counter of the previous message.
@@ -287,7 +330,13 @@ func (s *State) SetRootKey(rootKey session.RootKeyable) error {
 	if !ok {
 		return &RootKeyTypeError{Got: rootKey}
 	}
+	// The root key being replaced is guarded and the state was its only owner,
+	// so a ratchet step must destroy it rather than drop it.
+	superseded := s.rootKey
 	s.rootKey = rk
+	if superseded != nil && superseded != rk {
+		superseded.Zeroize()
+	}
 	return nil
 }
 
@@ -372,22 +421,41 @@ func (s *State) AddReceiverChain(senderRatchetKey ecc.ECPublicKeyable, chainKey 
 	// Add the Chain state to our list of receiver chain states.
 	s.receiverChains = append(s.receiverChains, chain)
 
-	// If our list of receiver chains is too big, delete the oldest entry.
+	// If our list of receiver chains is too big, delete the oldest entry. The
+	// evicted chain's guarded material is destroyed rather than dropped: the
+	// state was its only owner and memguard reclaims nothing on its own.
 	if len(s.receiverChains) > maxReceiverChains {
 		i := 0
+		evicted := s.receiverChains[i]
 		s.receiverChains = append(s.receiverChains[:i], s.receiverChains[i+1:]...)
+		destroyChain(evicted)
 	}
 }
 
 // SetSenderChain will set the given ratchet key pair and chain key for this session
 // state.
+//
+// The state takes ownership of both: a later ratchet step, or a clone committed
+// over this state, destroys the chain this one supersedes, and that includes
+// the ratchet private key and the chain key. A caller that must keep using
+// either — a signed pre-key still held by the pre-key store, say — must pass a
+// copy.
 func (s *State) SetSenderChain(senderRatchetKeyPair *ecc.ECKeyPair, chainKey session.ChainKeyable) {
 	// Create a Chain state object that will hold our sender key, chain key, and
 	// message keys.
 	chain := NewChain(senderRatchetKeyPair, chainKey.(*chain.Key), []*message.Keys{})
 
+	// A ratchet step replaces the whole sender chain. Destroy the one it
+	// supersedes — its chain key and ratchet private key are guarded, and the
+	// state was their only owner.
+	superseded := s.senderChain
+
 	// Set the sender chain.
 	s.senderChain = chain
+
+	if superseded != nil && superseded != chain {
+		destroyChain(superseded)
+	}
 }
 
 // SenderChainKey will return the chain key of the session state.
@@ -480,6 +548,12 @@ func (s *State) RemoveMessageKeys(senderEphemeral ecc.ECPublicKeyable, counter u
 
 	// Delete the message key from the given position.
 	chainKey.messageKeys = append(chainKey.messageKeys[:rmIndex], chainKey.messageKeys[rmIndex+1:]...)
+
+	// The caller gets an independent copy below, and the entry is no longer in
+	// the chain, so the original's guarded material has no owner left. Destroy
+	// it rather than dropping it — memguard reclaims nothing on its own, and a
+	// peer can drive this path with any message that matches a stored key.
+	defer messageKey.Zeroize()
 
 	// Seed-only form: the key was stored with seed material only (cipher/mac/iv
 	// are nil). The caller (decryptWithClonedState) will re-derive the actual
@@ -686,7 +760,10 @@ func (s *State) LocalRegistrationID() uint32 {
 
 // Serialize will return the state as bytes using the given serializer.
 func (s *State) Serialize() ([]byte, error) {
-	st := s.structure()
+	st, err := s.structure()
+	if err != nil {
+		return nil, err
+	}
 	defer st.Zeroize()
 	return s.serializer.Serialize(st)
 }
@@ -709,8 +786,83 @@ func (s *State) Clone() (*State, error) {
 	return NewStateFromBytes(serialized, s.serializer)
 }
 
+// DiscardClone releases the guarded key material held by a state that Clone
+// produced and that is being thrown away instead of committed.
+//
+// A clone is the one kind of live state a caller owns outright: Clone
+// round-trips through the serializer, so every guarded buffer in the clone is
+// its own and nothing else can reach it. It stops being that the moment it is
+// committed — CopyFrom moves the clone's chains, root key and PQ ratchet state
+// into the state committed into — so a caller that commits must not also
+// discard. Discarding a clone that was never committed is what keeps a failed
+// speculative operation, such as a decrypt that fails MAC verification, from
+// stranding locked memory.
+//
+// This is deliberately not a general destruction model for session states.
+// Ordinary live states share their guarded objects; their ownership is a
+// separate question.
+func (s *State) DiscardClone() {
+	destroyState(s)
+}
+
+// CommitClone replaces this state with a working clone produced by Clone and
+// releases the guarded material the commit supersedes.
+//
+// This is the counterpart to DiscardClone: a speculative operation clones the
+// state, and the clone is either committed here or discarded there. Committing
+// adopts the clone's chains, root key, pending key exchange and PQ ratchet
+// state, which leaves this state's previous ones with no owner at all — and
+// memguard reclaims nothing on its own, so leaving them behind costs a locked
+// buffer per committed message for the life of the process. Only material the
+// commit actually replaced is released, so handing back a clone that still
+// shares an object with this state is safe.
+//
+// The clone belongs to this state afterwards and must not also be discarded.
+// Callers must not hold guarded sub-objects of this state — a *message.Keys
+// taken with RemoveMessageKeys, say — across a commit.
+func (s *State) CommitClone(clone *State) {
+	if clone == nil || clone == s {
+		return
+	}
+
+	supersededSenderChain := s.senderChain
+	supersededReceiverChains := s.receiverChains
+	supersededPendingKeyExchange := s.pendingKeyExchange
+	supersededRootKey := s.rootKey
+
+	s.CopyFrom(clone)
+
+	for _, supersededChain := range append([]*Chain{supersededSenderChain}, supersededReceiverChains...) {
+		if supersededChain != nil && !s.ownsChain(supersededChain) {
+			destroyChain(supersededChain)
+		}
+	}
+	if supersededPendingKeyExchange != nil && supersededPendingKeyExchange != s.pendingKeyExchange {
+		destroyPendingKeyExchange(supersededPendingKeyExchange)
+	}
+	if supersededRootKey != nil && supersededRootKey != s.rootKey {
+		supersededRootKey.Zeroize()
+	}
+}
+
+// ownsChain reports whether the given chain is one this state still holds,
+// which is how CommitClone tells a replaced chain from one the caller kept.
+func (s *State) ownsChain(candidate *Chain) bool {
+	if s.senderChain == candidate {
+		return true
+	}
+	for _, receiverChain := range s.receiverChains {
+		if receiverChain == candidate {
+			return true
+		}
+	}
+	return false
+}
+
 // CopyFrom replaces all fields of this state with those from the source state.
 // This is used to commit a successfully-modified clone back to the original.
+// The clone's guarded objects become this state's; the caller must not discard
+// the clone afterwards.
 func (s *State) CopyFrom(source *State) {
 	s.localIdentityPublic = source.localIdentityPublic
 	s.localRegistrationID = source.localRegistrationID
@@ -725,32 +877,23 @@ func (s *State) CopyFrom(source *State) {
 	s.senderBaseKey = source.senderBaseKey
 	s.senderChain = source.senderChain
 	s.sessionVersion = source.sessionVersion
-	s.pqRatchetState = source.pqRatchetState
+	// The guarded PQ ratchet state being replaced is destroyed rather than
+	// abandoned, so a locked allocation is not stranded on every committed
+	// clone. The pointer check keeps a self-copy from destroying live material.
+	if s.pqRatchetState != source.pqRatchetState {
+		s.pqRatchetState.Destroy()
+		s.pqRatchetState = source.pqRatchetState
+	}
 }
 
 // structure will return a serializable structure of the
-// the given state so it can be persistently stored.
-func (s *State) structure() *StateStructure {
-	// Convert our receiver chains into a serializeable structure
-	receiverChains := make([]*ChainStructure, len(s.receiverChains))
-	for i := range s.receiverChains {
-		receiverChains[i] = s.receiverChains[i].structure()
-	}
-
-	// Convert our pending key exchange into a serializeable structure
-	var pendingKeyExchange *PendingKeyExchangeStructure
-	if s.pendingKeyExchange != nil {
-		pendingKeyExchange = s.pendingKeyExchange.structure()
-	}
-
-	// Convert our pending pre key into a serializeable structure
-	var pendingPreKey *PendingPreKeyStructure
-	if s.pendingPreKey != nil {
-		pendingPreKey = s.pendingPreKey.structure()
-	}
-
-	// Serialize identity keys and sender base key with nil safety.
-	var localIdentityBytes, remoteIdentityBytes, senderBaseKeyBytes, rootKeyBytes []byte
+// the given state so it can be persistently stored. The caller owns the
+// returned structure and must Zeroize it once the serializer is done with it;
+// on failure everything built so far is released before returning.
+func (s *State) structure() (_ *StateStructure, err error) {
+	// Serialize identity keys and sender base key with nil safety. These are
+	// public and stay on the heap.
+	var localIdentityBytes, remoteIdentityBytes, senderBaseKeyBytes []byte
 	if s.localIdentityPublic != nil {
 		localIdentityBytes = s.localIdentityPublic.Serialize()
 	}
@@ -760,32 +903,68 @@ func (s *State) structure() *StateStructure {
 	if s.senderBaseKey != nil {
 		senderBaseKeyBytes = s.senderBaseKey.Serialize()
 	}
-	if s.rootKey != nil {
-		rootKeyBytes = copyBytes(s.rootKey.Bytes())
-	}
 
-	var senderChainStructure *ChainStructure
-	if s.senderChain != nil {
-		senderChainStructure = s.senderChain.structure()
-	}
-
-	// Build and return our state structure.
-	return &StateStructure{
+	structure := &StateStructure{
 		LocalIdentityPublic:  localIdentityBytes,
 		LocalRegistrationID:  s.localRegistrationID,
 		NeedsRefresh:         s.needsRefresh,
-		PendingKeyExchange:   pendingKeyExchange,
-		PendingPreKey:        pendingPreKey,
 		PreviousCounter:      s.previousCounter,
-		ReceiverChains:       receiverChains,
+		ReceiverChains:       make([]*ChainStructure, len(s.receiverChains)),
 		RemoteIdentityPublic: remoteIdentityBytes,
 		RemoteRegistrationID: s.remoteRegistrationID,
-		RootKey:              rootKeyBytes,
 		SenderBaseKey:        senderBaseKeyBytes,
-		SenderChain:          senderChainStructure,
 		SessionVersion:       s.sessionVersion,
-		PqRatchetState:       copyBytes(s.pqRatchetState),
 	}
+
+	// Release the partially built structure if any step below fails, so that
+	// no guarded allocation outlives the failed call.
+	defer func() {
+		if err != nil {
+			structure.Zeroize()
+		}
+	}()
+
+	// Convert our receiver chains into a serializeable structure.
+	for i := range s.receiverChains {
+		if structure.ReceiverChains[i], err = s.receiverChains[i].structure(); err != nil {
+			return nil, err
+		}
+	}
+
+	// Convert our sender chain into a serializeable structure.
+	if s.senderChain != nil {
+		if structure.SenderChain, err = s.senderChain.structure(); err != nil {
+			return nil, err
+		}
+	}
+
+	// Convert our pending key exchange into a serializeable structure.
+	if s.pendingKeyExchange != nil {
+		if structure.PendingKeyExchange, err = s.pendingKeyExchange.structure(); err != nil {
+			return nil, err
+		}
+	}
+
+	// Convert our pending pre key into a serializeable structure.
+	if s.pendingPreKey != nil {
+		structure.PendingPreKey = s.pendingPreKey.structure()
+	}
+
+	// Move the root key and the PQ ratchet state into guarded memory.
+	if s.rootKey != nil {
+		if structure.RootKey, err = secret.NewValue(copyBytes(s.rootKey.Bytes())); err != nil {
+			return nil, err
+		}
+	}
+	if !s.pqRatchetState.IsDestroyed() {
+		cloned, cloneErr := s.pqRatchetState.Clone()
+		if cloneErr != nil {
+			return nil, cloneErr
+		}
+		structure.PqRatchetState = secret.FromSecret(cloned)
+	}
+
+	return structure, nil
 }
 
 // copyBytes returns an independent copy of the given slice.

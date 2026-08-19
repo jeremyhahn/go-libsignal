@@ -81,10 +81,11 @@ func TestValidatedReadAllSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ValidatedReadAll: %v", err)
 	}
+	defer result.Destroy()
 	if result.Info.Version != BackupInfoVersion1 {
 		t.Errorf("Version = %d, want %d", result.Info.Version, BackupInfoVersion1)
 	}
-	if !bytes.Equal(result.Info.MediaRootBackupKey, key) {
+	if !result.Info.MediaRootBackupKey.EqualTo(key) {
 		t.Errorf("MediaRootBackupKey mismatch")
 	}
 	if len(result.Frames) != 2 {
@@ -149,6 +150,7 @@ func TestValidatedReadAllDeviceTransferNoKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ValidatedReadAll for DeviceTransfer: %v", err)
 	}
+	defer result.Destroy()
 	if result.Info.Version != BackupInfoVersion1 {
 		t.Errorf("Version = %d, want %d", result.Info.Version, BackupInfoVersion1)
 	}
@@ -169,6 +171,7 @@ func TestValidatedReadAllUnknownFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ValidatedReadAll: %v", err)
 	}
+	defer result.Destroy()
 	if len(result.FoundUnknownFields) == 0 {
 		t.Error("expected unknown fields to be recorded")
 	}
@@ -235,8 +238,8 @@ func TestParseBackupInfoRoundTrip(t *testing.T) {
 	if info.BackupTimeMs != 1_700_000_000_000 {
 		t.Errorf("BackupTimeMs = %d, want 1700000000000", info.BackupTimeMs)
 	}
-	if len(info.MediaRootBackupKey) != 32 {
-		t.Errorf("MediaRootBackupKey length = %d, want 32", len(info.MediaRootBackupKey))
+	if info.MediaRootBackupKey.Size() != 32 {
+		t.Errorf("MediaRootBackupKey length = %d, want 32", info.MediaRootBackupKey.Size())
 	}
 	if len(unknowns) != 0 {
 		t.Errorf("unexpected unknowns: %v", unknowns)

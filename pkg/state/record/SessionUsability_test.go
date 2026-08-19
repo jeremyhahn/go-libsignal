@@ -93,7 +93,9 @@ func newUsabilityState(t *testing.T, version int, pqRatchetState []byte) *record
 	kp := genKP(t)
 	ck := chain.NewKey(kdf.DeriveSecrets, make([]byte, 32), 0)
 	state.SetSenderChain(kp, ck)
-	state.SetPqRatchetState(pqRatchetState)
+	if err := state.SetPqRatchetState(pqRatchetState); err != nil {
+		t.Fatalf("SetPqRatchetState: %v", err)
+	}
 	return state
 }
 
@@ -169,7 +171,7 @@ func TestStateHasUsableSenderChain_NotStale_StaleUnacknowledged(t *testing.T) {
 		LocalIdentityPublic:  baseKeyBytes,
 		RemoteIdentityPublic: baseKeyBytes,
 		SenderBaseKey:        baseKeyBytes,
-		RootKey:              make([]byte, 32),
+		RootKey:              mustGuard(t, make([]byte, 32)),
 		PendingPreKey: &record.PendingPreKeyStructure{
 			PreKeyID:       optional.NewOptionalUint32(1),
 			SignedPreKeyID: 1,
@@ -178,7 +180,7 @@ func TestStateHasUsableSenderChain_NotStale_StaleUnacknowledged(t *testing.T) {
 		},
 		SenderChain: &record.ChainStructure{
 			SenderRatchetKeyPublic:  baseKeyBytes,
-			SenderRatchetKeyPrivate: privKeyArr[:],
+			SenderRatchetKeyPrivate: mustGuard(t, privKeyArr[:]),
 			ChainKey:                &chain.KeyStructure{Key: make([]byte, 32), Index: 0},
 		},
 	}

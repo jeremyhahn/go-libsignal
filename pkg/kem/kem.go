@@ -296,15 +296,8 @@ type SecretKey struct {
 // Returns ErrKeyTypeKyber768Unsupported for Round-3 Kyber-768 (0x07), which
 // has no backend in go-libsignal.
 func NewSecretKey(keyType KeyType, data []byte) (*SecretKey, error) {
-	if keyType == KeyTypeKyber768 {
-		return nil, ErrKeyTypeKyber768Unsupported
-	}
-	if !validKeyType(keyType) {
-		return nil, &BadKEMKeyTypeError{Value: byte(keyType)}
-	}
-	expected := expectedSecretKeySize(keyType)
-	if len(data) != expected {
-		return nil, &BadKeyLengthError{KeyType: keyType, Expected: expected, Actual: len(data)}
+	if err := validateSecretKeyMaterial(keyType, len(data)); err != nil {
+		return nil, err
 	}
 	buf := make([]byte, len(data))
 	copy(buf, data)

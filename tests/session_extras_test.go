@@ -164,7 +164,7 @@ func TestSession_ZeroPreKeyID(t *testing.T) {
 		bob.signedPreKey.Signature(),
 		bob.identityKeyPair.PublicKey(),
 		&optional.Uint32{Value: 42},
-		bob.kyberPreKey.KeyPair().Public,
+		bob.kyberPreKey.PublicKey(),
 		bob.kyberPreKey.Signature(),
 	)
 

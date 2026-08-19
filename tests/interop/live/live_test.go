@@ -446,7 +446,7 @@ func bobStoresFromRust(
 	if len(kpkPrivBytes) > 0 && kpkPrivBytes[0] == kpkPubBytes[0] {
 		kpkPrivRaw = kpkPrivBytes[1:]
 	}
-	kpkPair, err := kem.FromPublicAndPrivate(kpkPubBytes, kpkPrivRaw)
+	kpkPair, err := kem.GuardedFromPublicAndPrivate(kpkPubBytes, kpkPrivRaw)
 	if err != nil {
 		t.Fatalf("kem.FromPublicAndPrivate: %v", err)
 	}
@@ -895,7 +895,7 @@ func TestLiveInterop_SealedSenderV2_GoEncryptRustDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CalculateSignature bobSPK: %v", err)
 	}
-	bobKyberKEM := kem.NewKyber1024KEM()
+	bobKyberKEM := kem.NewGuardedKyber1024()
 	bobKyberPair, err := bobKyberKEM.Generate()
 	if err != nil {
 		t.Fatalf("kyber Generate: %v", err)

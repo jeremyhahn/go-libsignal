@@ -1,11 +1,14 @@
 package record_test
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 
+	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/kem"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/message"
+	"github.com/jeremyhahn/go-libsignal/pkg/keys/session"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/optional"
 )
@@ -182,13 +185,22 @@ func TestPqRatchetStateGetSet(t *testing.T) {
 		t.Fatal("PqRatchetState() should be nil on a new state")
 	}
 
-	// Set and retrieve.
-	payload := []byte("serialized-spqr-state")
-	state.SetPqRatchetState(payload)
+	// Set and retrieve. The setter moves the caller's slice into guarded
+	// memory and zeroizes it, so the expectation is kept as its own copy.
+	want := "serialized-spqr-state"
+	payload := []byte(want)
+	if err := state.SetPqRatchetState(payload); err != nil {
+		t.Fatalf("SetPqRatchetState: %v", err)
+	}
 
 	got := state.PqRatchetState()
-	if string(got) != string(payload) {
-		t.Fatalf("PqRatchetState() = %q, want %q", got, payload)
+	if string(got) != want {
+		t.Fatalf("PqRatchetState() = %q, want %q", got, want)
+	}
+	for _, b := range payload {
+		if b != 0 {
+			t.Fatal("SetPqRatchetState left the caller's plaintext slice intact")
+		}
 	}
 }
 
@@ -197,8 +209,12 @@ func TestPqRatchetStateSetNil(t *testing.T) {
 	s := newSerializer()
 	state := record.NewState(s.State)
 
-	state.SetPqRatchetState([]byte("data"))
-	state.SetPqRatchetState(nil)
+	if err := state.SetPqRatchetState([]byte("data")); err != nil {
+		t.Fatalf("SetPqRatchetState: %v", err)
+	}
+	if err := state.SetPqRatchetState(nil); err != nil {
+		t.Fatalf("SetPqRatchetState(nil): %v", err)
+	}
 
 	if state.PqRatchetState() != nil {
 		t.Fatal("PqRatchetState() should be nil after setting nil")
@@ -259,11 +275,7 @@ func TestUnacknowledgedTimestampClearedAfterClear(t *testing.T) {
 // GuardedKeyPair with matching public key type and a non-nil secret.
 func TestKyberPreKeyGuardedKeyPair(t *testing.T) {
 	pubKey := kem.NewPublicKey(kem.KeyTypeKyber1024, make([]byte, 1568))
-	secKey, err := kem.NewSecretKey(kem.KeyTypeKyber1024, make([]byte, 3168))
-	if err != nil {
-		t.Fatalf("kem.NewSecretKey failed: %v", err)
-	}
-	kp := &kem.KeyPair{Public: pubKey, Secret: secKey}
+	kp := mustGuardedKyberKeyPair(t, pubKey, make([]byte, 3168))
 
 	preKey := record.NewKyberPreKey(1, 0, kp, []byte("sig"), &kyberPreKeySerializer{})
 
@@ -401,7 +413,7 @@ func TestNewKyberPreKeyFromStructureInvalidPrivateKey(t *testing.T) {
 	structure := record.KyberPreKeyStructure{
 		ID:         1,
 		PublicKey:  pubKey.Serialize(),
-		PrivateKey: []byte{0xFF, 0x01}, // clearly invalid (too short) secret key
+		PrivateKey: mustGuard(t, []byte{0xFF, 0x01}), // clearly invalid (too short) secret key
 		Signature:  []byte("sig"),
 		Timestamp:  0,
 	}
@@ -428,5 +440,67 @@ func TestHasMessageKeysNilChain(t *testing.T) {
 	// No chain added.
 	if state.HasMessageKeys(kp.PublicKey(), 0) {
 		t.Fatal("HasMessageKeys() should return false when no receiver chain exists")
+	}
+}
+
+// ================== SetRootKey / SetSenderBaseKey error handling ==================
+
+// TestSetRootKeyRejectsForeignImplementation verifies that a RootKeyable that
+// is not a *root.Key is refused with a typed error rather than being stored.
+func TestSetRootKeyRejectsForeignImplementation(t *testing.T) {
+	s := newSerializer()
+	state := record.NewState(s.State)
+
+	err := state.SetRootKey(foreignRootKey{})
+	if err == nil {
+		t.Fatal("SetRootKey should reject a foreign RootKeyable implementation")
+	}
+
+	var typeErr *record.RootKeyTypeError
+	if !errors.As(err, &typeErr) {
+		t.Fatalf("expected *RootKeyTypeError, got %T: %v", err, err)
+	}
+	if typeErr.Error() == "" {
+		t.Error("RootKeyTypeError message should not be empty")
+	}
+	// The state must remain usable: a genuine root key still takes.
+	if err := state.SetRootKey(makeRootKey(t)); err != nil {
+		t.Fatalf("SetRootKey with a *root.Key: %v", err)
+	}
+	if !bytes.Equal(state.RootKey().Bytes(), make([]byte, 32)) {
+		t.Error("the root key set after the rejection was not stored")
+	}
+}
+
+// foreignRootKey is a RootKeyable implementation from outside the record
+// package, used to exercise the type guard in SetRootKey.
+type foreignRootKey struct{}
+
+func (foreignRootKey) Bytes() []byte { return make([]byte, 32) }
+
+func (foreignRootKey) CreateChain(theirRatchetKey ecc.ECPublicKeyable, ourRatchetKey *ecc.ECKeyPair) (*session.KeyPair, error) {
+	return nil, errors.New("not implemented")
+}
+
+// TestSetSenderBaseKeyInvalidInput verifies that absent and undecodable sender
+// base key bytes both clear the stored key instead of being kept.
+func TestSetSenderBaseKeyInvalidInput(t *testing.T) {
+	s := newSerializer()
+	state := record.NewState(s.State)
+
+	state.SetSenderBaseKey(genKP(t).PublicKey().Serialize())
+	if state.SenderBaseKey() == nil {
+		t.Fatal("a valid sender base key should be stored")
+	}
+
+	state.SetSenderBaseKey(nil)
+	if state.SenderBaseKey() != nil {
+		t.Error("an empty sender base key should clear the stored key")
+	}
+
+	state.SetSenderBaseKey(genKP(t).PublicKey().Serialize())
+	state.SetSenderBaseKey([]byte{0xFF, 0xFF})
+	if state.SenderBaseKey() != nil {
+		t.Error("an undecodable sender base key should clear the stored key")
 	}
 }
