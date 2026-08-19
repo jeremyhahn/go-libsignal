@@ -296,6 +296,11 @@ jobs:
           go-version: '1.26.6'
           cache: true
 
+      # The gate is only worth running if it still fails closed: this proves it
+      # rejects an unmeasurable profile before we trust its verdict below.
+      - name: Coverage gate self-test
+        run: make coverage-gate-selftest
+
       - name: Coverage
         shell: bash
         run: set -o pipefail; make coverage 2>&1 | tee coverage.log

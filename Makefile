@@ -11,6 +11,7 @@ GOTEST := go test
 GOVET := go vet
 GOBUILD := go build
 COVERAGE_DIR := coverage
+COVERAGE_SELFTEST_DIR := $(COVERAGE_DIR)/gate-selftest
 COVERAGE_MIN := 90
 
 # Per-package coverage minimums for packages with legitimately untestable branches.
@@ -67,7 +68,7 @@ TESTABLE_PACKAGES := pkg/accountkeys pkg/attest pkg/backup pkg/cipher pkg/device
 	interop-fixtures-check interop-fixtures-refresh \
 	interop-live-build interop-live interop-live-session interop-live-sealed \
 	interop-live-group interop-live-backup interop-docker \
-	vet lint clean coverage help \
+	vet lint clean coverage coverage-gate-selftest _coverage-gate help \
 	ci security gosec govulncheck staticcheck errcheck nilcheck \
 	modverify trivy trivy-image \
 	test-slow-session examples-build
@@ -179,6 +180,30 @@ $(addprefix test-,$(TESTABLE_PACKAGES)):
 # Code Coverage
 # ==============================================================================
 
+# Fail-closed coverage gate.
+#
+#   $(1) coverage profile   $(2) minimum percentage   $(3) report label
+#
+# The percentage is validated before it is compared: an empty or non-numeric
+# value means coverage could not be measured -- missing, empty or malformed
+# profile, or a `go tool cover` failure -- and is a hard failure, never a pass.
+# The comparison uses awk rather than bc so the gate carries no dependency
+# whose absence would silently disable it (`bc` is absent from many CI images,
+# and the previous `bc ... || echo 0` fallback turned that into a pass).
+define coverage-gate
+PCT=$$(go tool cover -func=$(1) | awk '/^total:/ { print $$3 }' | tr -d '%'); \
+case "$$PCT" in \
+	''|*[!0-9.]*) \
+		echo "FAIL: $(3) coverage could not be measured from $(1) -- failing closed"; \
+		exit 1 ;; \
+esac; \
+echo "=== $(3) COVERAGE: $$PCT% (min: $(2)%) ==="; \
+awk -v pct="$$PCT" -v min="$(2)" 'BEGIN { \
+	if (pct + 0 < min + 0) { printf "FAIL: coverage %s%% is below minimum %s%%\n", pct, min; exit 1 } \
+	printf "PASS: coverage %s%% meets minimum %s%%\n", pct, min \
+}'
+endef
+
 coverage:
 	@mkdir -p $(COVERAGE_DIR)
 	@echo "mode: atomic" > $(COVERAGE_DIR)/coverage.out
@@ -195,15 +220,7 @@ coverage:
 	@echo "HTML report: $(COVERAGE_DIR)/coverage.html"
 	@go tool cover -html=$(COVERAGE_DIR)/coverage.out -o $(COVERAGE_DIR)/coverage.html
 	@echo ""
-	@TOTAL=$$(go tool cover -func=$(COVERAGE_DIR)/coverage.out | grep '^total:' | awk '{print $$NF}'); \
-	echo "=== TOTAL CODE COVERAGE: $$TOTAL ==="; \
-	PCT=$$(echo "$$TOTAL" | tr -d '%'); \
-	if [ $$(echo "$$PCT < $(COVERAGE_MIN)" | bc -l 2>/dev/null || echo 0) -eq 1 ]; then \
-		echo "FAIL: Coverage $$TOTAL is below minimum $(COVERAGE_MIN)%"; \
-		exit 1; \
-	else \
-		echo "PASS: Coverage $$TOTAL meets minimum $(COVERAGE_MIN)%"; \
-	fi
+	@$(call coverage-gate,$(COVERAGE_DIR)/coverage.out,$(COVERAGE_MIN),TOTAL CODE)
 
 # Package-specific coverage targets: make coverage-cipher, make coverage-poksho, etc.
 # Uses COVERAGE_MIN_<pkg> when defined (for legitimately exempt packages), otherwise
@@ -216,15 +233,7 @@ $(addprefix coverage-,$(TESTABLE_PACKAGES)):
 	@echo ""
 	@PKG_KEY=$$(echo "$(subst coverage-,,$@)" | tr '/' '_'); \
 	PKG_MIN=$$(make -s --no-print-directory _pkg_min_$$PKG_KEY 2>/dev/null || echo $(COVERAGE_MIN)); \
-	TOTAL=$$(go tool cover -func=$(COVERAGE_DIR)/$(subst /,_,$(subst coverage-,,$@)).out | grep '^total:' | awk '{print $$NF}'); \
-	echo "=== $(subst coverage-,,$@) COVERAGE: $$TOTAL (min: $$PKG_MIN%) ==="; \
-	PCT=$$(echo "$$TOTAL" | tr -d '%'); \
-	if [ $$(echo "$$PCT < $$PKG_MIN" | bc -l 2>/dev/null || echo 0) -eq 1 ]; then \
-		echo "FAIL: Coverage $$TOTAL is below minimum $$PKG_MIN%"; \
-		exit 1; \
-	else \
-		echo "PASS: Coverage $$TOTAL meets minimum $$PKG_MIN%"; \
-	fi
+	$(call coverage-gate,$(COVERAGE_DIR)/$(subst /,_,$(subst coverage-,,$@)).out,$$PKG_MIN,$(subst coverage-,,$@))
 
 # Internal helper targets for per-package minimum lookup.
 _pkg_min_pkg_groups_ratchet:
@@ -235,6 +244,45 @@ _pkg_min_pkg_tripleratchet:
 	@echo $(COVERAGE_MIN_tripleratchet)
 _pkg_min_pkg_util_crypto_secret:
 	@echo $(COVERAGE_MIN_util_crypto_secret)
+
+# Internal: runs the fail-closed gate against PROFILE with minimum MIN, so the
+# self-test below exercises the real gate rather than a copy of it.
+_coverage-gate:
+	@$(call coverage-gate,$(PROFILE),$(MIN),gate)
+
+# Self-test for the fail-closed coverage gate. Proves the gate FAILS when the
+# percentage cannot be measured at all -- a missing or malformed profile, the
+# case the previous `bc ... || echo 0` comparison waved through -- and when a
+# measured percentage is below the minimum, while still passing a good one.
+coverage-gate-selftest:
+	@mkdir -p $(COVERAGE_SELFTEST_DIR)
+	@$(GOTEST) -coverprofile=$(COVERAGE_SELFTEST_DIR)/good.out -covermode=atomic . >/dev/null
+	@echo 'this is not a coverage profile' > $(COVERAGE_SELFTEST_DIR)/malformed.out
+	@: > $(COVERAGE_SELFTEST_DIR)/empty.out
+	@rm -f $(COVERAGE_SELFTEST_DIR)/missing.out
+	@failures=0; \
+	for case in "missing.out 90 fail" "malformed.out 90 fail" "empty.out 90 fail" \
+	            "good.out 101 fail" "good.out 0 pass"; do \
+		set -- $$case; \
+		if $(MAKE) -s --no-print-directory _coverage-gate \
+				PROFILE=$(COVERAGE_SELFTEST_DIR)/$$1 MIN=$$2 >/dev/null 2>&1; then \
+			got=pass; \
+		else \
+			got=fail; \
+		fi; \
+		if [ "$$got" = "$$3" ]; then \
+			echo "ok:  profile=$$1 min=$$2 gate=$$got"; \
+		else \
+			echo "BAD: profile=$$1 min=$$2 gate=$$got, expected $$3"; \
+			failures=$$((failures + 1)); \
+		fi; \
+	done; \
+	rm -rf $(COVERAGE_SELFTEST_DIR); \
+	if [ "$$failures" -ne 0 ]; then \
+		echo "FAIL: coverage gate self-test: $$failures case(s) behaved incorrectly"; \
+		exit 1; \
+	fi; \
+	echo "PASS: coverage gate self-test"
 
 # ==============================================================================
 # Benchmarks
@@ -418,6 +466,7 @@ help:
 	@echo "  Coverage:"
 	@echo "    make coverage           - Generate coverage report for all packages"
 	@echo "    make coverage-PACKAGE   - Generate coverage for a specific package"
+	@echo "    make coverage-gate-selftest - Verify the coverage gate fails closed"
 	@echo ""
 	@echo "  Benchmarks:"
 	@echo "    make bench              - Run all benchmarks"
