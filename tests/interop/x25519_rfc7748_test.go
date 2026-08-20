@@ -1,3 +1,12 @@
+//go:build !fips140only
+
+// FIPS 140-3 exemption -- see docs/FIPS.md.
+//
+// 3 tests in this file exercise X25519. FIPS 140-3 does not approve that,
+// but the vectors are RFC 7748 sections 5.2 and 6.1, which exist to pin that
+// algorithm, so the fips140only build tag drops this file from the FIPS
+// gate. `make test` and `make coverage` still run it.
+
 // X25519 conformance test using the RFC 7748 reference vectors.
 //
 // X25519 (Curve25519 ECDH) is the foundational scalar-multiplication

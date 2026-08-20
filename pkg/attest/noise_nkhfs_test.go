@@ -1,3 +1,13 @@
+//go:build !fips140only
+
+// FIPS 140-3 exemption -- see docs/FIPS.md.
+//
+// 4 tests in this file exercise X25519 and ChaCha20-Poly1305. FIPS 140-3
+// does not approve that, but the
+// Noise_NKhfs_25519+Kyber1024_ChaChaPoly_SHA256 pattern names both (Noise
+// Protocol Framework rev 34), so the fips140only build tag drops this file
+// from the FIPS gate. `make test` and `make coverage` still run it.
+
 // Copyright 2024 Signal Messenger, LLC.
 // SPDX-License-Identifier: AGPL-3.0-only
 

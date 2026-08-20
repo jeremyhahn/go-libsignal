@@ -1,3 +1,13 @@
+//go:build !fips140only
+
+// FIPS 140-3 exemption -- see docs/FIPS.md.
+//
+// 21 tests in this file exercise X25519. FIPS 140-3 does not approve that,
+// but RFC 9180 fixes DHKEM(X25519, HKDF-SHA256) for the
+// Base_X25519_HkdfSha256_Aes256Gcm suite this package implements
+// (rust/crypto/src/hpke.rs), so the fips140only build tag drops this file
+// from the FIPS gate. `make test` and `make coverage` still run it.
+
 package cipher
 
 import (

@@ -17,7 +17,7 @@ func TestOPRFBackup4_Zeroize_WithNilOutput(t *testing.T) {
 
 // TestOPRFBackup4_Zeroize_WithValidOutput verifies Zeroize destroys the Output secret.
 func TestOPRFBackup4_Zeroize_WithValidOutput(t *testing.T) {
-	backup, err := NewOPRFBackup4([]uint64{1}, []byte("password"), 5)
+	backup, err := NewOPRFBackup4([]uint64{1}, testPassword("password"), 5)
 	if err != nil {
 		t.Fatalf("NewOPRFBackup4 failed: %v", err)
 	}

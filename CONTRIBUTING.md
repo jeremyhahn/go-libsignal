@@ -134,6 +134,16 @@ The following gates must all pass before a PR is merged:
 | `make test` | Unit tests for all packages |
 | `make integration-test` | End-to-end integration tests |
 | `make interop-fixtures-check` | Byte-level diff against Rust-emitted vectors |
+| `make fips` | Build + unit tests under `GODEBUG=fips140=only` |
+
+`make fips` runs the suite against the Go Cryptographic Module with every
+non-approved operation set to fail. `tests/fipsaudit` backs it with a static
+scan of all production source, so a non-approved primitive is caught whether or
+not a gated test reaches it. If either goes red, read `docs/FIPS.md` before
+doing anything else: the answer is normally to fix the call site or the
+fixture, and only a primitive an external protocol or conformance vector fixes
+earns an entry in that document's exemption register. Reverting the flag,
+skipping the job or narrowing its scope are not options.
 
 **Coverage targets (minimum per package)**
 

@@ -73,6 +73,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validates key type and length as `kem.NewSecretKey` does.
 - **Breaking** — `svr.Backup4.Secret` is a `*secret.Secret32`; `NewBackup4`
   moves the caller's secret into guarded memory and `Destroy` releases it.
+- CI's FIPS job runs `GODEBUG=fips140=only` instead of `fips140=on`, so a
+  non-approved cryptographic operation now fails the gate instead of quietly
+  succeeding (`automatethethings` `software/conventions/configuration.md` §5).
+  The new `make fips` target reproduces the job locally.
+- Test fixtures in `pkg/svr`, `pkg/net`, `pkg/kdf` and `pkg/keys/chain` now use
+  key material of the length production actually passes (32-byte SVR passwords,
+  master secrets, IKMs and chain keys) rather than short strings.
 
 ### Added
 
@@ -86,6 +93,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `kem.GuardedFromPublicAndPrivate`, `kem.GuardedSecretKey.CloneSecret` and
   `secret.FromSecret`, for moving key material between the guarded key types
   and the persisted-state structures without transiting the Go heap.
+- `docs/FIPS.md` — the repository's FIPS 140-3 posture and the exemption
+  register for the tests that exercise primitives the Signal Protocol or an
+  external conformance vector mandates and FIPS 140-3 does not approve. Those
+  tests carry a `//go:build !fips140only` tag and run in every other job.
+- `tests/fipsaudit` — a static audit of every non-test `.go` file in the module
+  for non-approved primitives, against a file-and-symbol-scoped register. It
+  catches a non-approved call in production code whether or not a gated test
+  reaches it, and fails on stale register entries too. It is allowlist-based:
+  inside the policed namespaces every package must be classified as approved or
+  registered, so an unenumerated primitive fails closed. It covers the pure-Go
+  primitives `GODEBUG=fips140=only` can never reject — Ristretto255,
+  edwards25519, Argon2id, Round-3 Kyber — which do their own field arithmetic
+  and never enter the Go Cryptographic Module, and it classifies every `go.mod`
+  dependency so a new cryptographic one cannot arrive unpoliced.
 
 ## [0.1.0] - 2026-05-24
 

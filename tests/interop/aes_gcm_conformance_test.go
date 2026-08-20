@@ -1,3 +1,12 @@
+//go:build !fips140only
+
+// FIPS 140-3 exemption -- see docs/FIPS.md.
+//
+// 1 test in this file exercises AES-256-GCM under a vector-supplied nonce.
+// FIPS 140-3 does not approve that, but the Wycheproof vectors fix the
+// nonce, so the fips140only build tag drops this file from the FIPS gate.
+// `make test` and `make coverage` still run it.
+
 // Wycheproof AES-GCM Known-Answer-Tests run against pkg/cipher.AESGCMEncrypt
 // and pkg/cipher.AESGCMDecrypt, mirroring the conformance suite that Rust
 // libsignal runs in rust/crypto/tests/aes_gcm.rs against
@@ -17,7 +26,6 @@
 package interop
 
 import (
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -178,25 +186,4 @@ func TestAESGCM_Wycheproof(t *testing.T) {
 	if runValid == 0 || runInvalid == 0 {
 		t.Fatalf("KAT corpus produced no valid/invalid runs (valid=%d invalid=%d); fixture may have changed shape", runValid, runInvalid)
 	}
-}
-
-func mustHex(t *testing.T, s string) []byte {
-	t.Helper()
-	b, err := hex.DecodeString(s)
-	if err != nil {
-		t.Fatalf("hex.DecodeString(%q): %v", s, err)
-	}
-	return b
-}
-
-func bytesEq(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

@@ -1,3 +1,13 @@
+//go:build !fips140only
+
+// FIPS 140-3 exemption -- see docs/FIPS.md.
+//
+// 1 test in this file exercises HKDF-SHA256 under a key below 112 bits. FIPS
+// 140-3 does not approve that, but the Rust-emitted SVR4 fixture pinned by
+// /RUST_REV replays a 13-byte and an empty password as HKDF input key
+// material, so the fips140only build tag drops this file from the FIPS gate.
+// `make test` and `make coverage` still run it.
+
 // Conformance test: SVR4 OPRF protocol parity with Rust libsignal svrb crate.
 //
 // Mirrors rust/svrb/src/lib.rs::test::{output_to_encryption} and the KDF

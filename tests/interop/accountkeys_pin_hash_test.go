@@ -1,3 +1,14 @@
+//go:build !fips140only
+
+// FIPS 140-3 exemption -- see docs/FIPS.md.
+//
+// 1 test in this file exercises HKDF-SHA256 under an eight-byte key. FIPS
+// 140-3 does not approve that, but the key is the username, which Rust
+// PinHash::make_salt (rust/account-keys/src/hash.rs) feeds to HKDF as input
+// key material, and the vector pins it to "username", so the fips140only
+// build tag drops this file from the FIPS gate. `make test` and `make
+// coverage` still run it.
+
 // Conformance test: PIN hashing and salt derivation against Rust libsignal.
 //
 // Mirrors the inline tests in rust/account-keys/src/hash.rs:

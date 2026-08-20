@@ -90,7 +90,7 @@ func TestKey_BaseMaterial(t *testing.T) {
 }
 
 func TestKey_BaseMaterial_DifferentSeeds(t *testing.T) {
-	key := NewKey(kdf.DeriveSecrets, []byte("key-material"), 0)
+	key := NewKey(kdf.DeriveSecrets, []byte("chain-key-material-32-bytes-ok!?"), 0)
 	m1 := key.BaseMaterial([]byte{0x01})
 	m2 := key.BaseMaterial([]byte{0x02})
 	if bytes.Equal(m1, m2) {

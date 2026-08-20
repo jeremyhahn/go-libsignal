@@ -1,3 +1,13 @@
+//go:build !fips140only
+
+// FIPS 140-3 exemption -- see docs/FIPS.md.
+//
+// 1 test in this file exercises HKDF-SHA256 under an empty key. FIPS 140-3
+// does not approve that, but the Noise Protocol Framework rev 34 section 5.2
+// defines Split() as HKDF(ck, zerolen, 2), so the fips140only build tag
+// drops this file from the FIPS gate. `make test` and `make coverage` still
+// run it.
+
 // LOW J: Noise NKhfs interop fixture.
 //
 // FIXTURE FEASIBILITY ASSESSMENT (Rust upstream 98915c44):

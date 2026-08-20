@@ -7,7 +7,21 @@
 
 MODULE := github.com/jeremyhahn/go-libsignal
 VERSION := $(shell cat VERSION 2>/dev/null || echo "0.0.0")
-GOTEST := go test
+# Every test target carries an explicit -timeout. Go's default is 600s per test
+# binary, and pkg/session alone measured 178.7s on an idle CI runner -- only
+# 3.4x headroom on a host measured varying 2.9x-8.7x between runs. On
+# 2026-08-19 that cliff was hit: pkg/session died at 600s while every other
+# package, none of them touched, inflated 2.9x-8.7x from contention alone.
+#
+# 900s is the per-TEST-BINARY budget, not the job's. Measured on that run: the
+# job spent 777s of wall clock against ci.yml's 1800s cap, so letting a package
+# reach 900s still leaves the Go timeout -- which names the package and dumps
+# goroutines -- firing well before the job timeout, which reports nothing.
+#
+# GOTEST_TIMEOUT governs EVERY suite, the FIPS gate included. Overriding it, or
+# overriding GOTEST wholesale, relaxes the compliance gate along with the rest.
+GOTEST_TIMEOUT := 900s
+GOTEST := go test -timeout=$(GOTEST_TIMEOUT)
 GOVET := go vet
 GOBUILD := go build
 COVERAGE_DIR := coverage
@@ -71,6 +85,7 @@ TESTABLE_PACKAGES := pkg/accountkeys pkg/attest pkg/backup pkg/cipher pkg/device
 	vet lint clean coverage coverage-gate-selftest _coverage-gate help \
 	ci security gosec govulncheck staticcheck errcheck nilcheck \
 	modverify trivy trivy-image \
+	fips fips-build fips-test \
 	test-slow-session examples-build
 
 # ==============================================================================
@@ -109,7 +124,7 @@ test-slow-session:
 	GOWORK=off $(GOTEST) -race -count=1 -tags=slow -run TestRust_ChainJumpOverLimit ./pkg/session/...
 
 test-interop:
-	GOWORK=off go test -race -v ./tests/interop/...
+	GOWORK=off $(GOTEST) -race -v ./tests/interop/...
 
 # Verify every fixture under tests/interop/fixtures/ matches its sha256 in
 # MANIFEST.toml. With LIBSIGNAL_UPSTREAM=/path/to/libsignal-checkout the
@@ -136,26 +151,26 @@ interop-live-build:
 interop-live: interop-live-build
 	LIBSIGNAL_INTEROP_BIN=$(CURDIR)/tests/interop/rust/target/release/libsignal-interop \
 	LIBSIGNAL_INTEROP_LIVE_BIN=$(CURDIR)/tests/interop/rust/target/release/interop_runner \
-	GOWORK=off go test -tags=interop_live -race -v ./tests/interop/live/...
+	GOWORK=off $(GOTEST) -tags=interop_live -race -v ./tests/interop/live/...
 
 interop-live-session:
 	LIBSIGNAL_INTEROP_LIVE_BIN=$(CURDIR)/tests/interop/rust/target/release/interop_runner \
-	GOWORK=off go test -tags=interop_live -race -v -run TestLiveInterop_SessionRoundTrip \
+	GOWORK=off $(GOTEST) -tags=interop_live -race -v -run TestLiveInterop_SessionRoundTrip \
 		./tests/interop/live/...
 
 interop-live-sealed:
 	LIBSIGNAL_INTEROP_LIVE_BIN=$(CURDIR)/tests/interop/rust/target/release/interop_runner \
-	GOWORK=off go test -tags=interop_live -race -v -run TestLiveInterop_SealedSender \
+	GOWORK=off $(GOTEST) -tags=interop_live -race -v -run TestLiveInterop_SealedSender \
 		./tests/interop/live/...
 
 interop-live-group:
 	LIBSIGNAL_INTEROP_LIVE_BIN=$(CURDIR)/tests/interop/rust/target/release/interop_runner \
-	GOWORK=off go test -tags=interop_live -race -v -run TestLiveInterop_SenderKey \
+	GOWORK=off $(GOTEST) -tags=interop_live -race -v -run TestLiveInterop_SenderKey \
 		./tests/interop/live/...
 
 interop-live-backup:
 	LIBSIGNAL_INTEROP_LIVE_BIN=$(CURDIR)/tests/interop/rust/target/release/interop_runner \
-	GOWORK=off go test -tags=interop_live -race -v -run TestLiveInterop_Backup \
+	GOWORK=off $(GOTEST) -tags=interop_live -race -v -run TestLiveInterop_Backup \
 		./tests/interop/live/...
 
 interop-docker:
@@ -175,6 +190,34 @@ interop-wire-emit:
 # Package-specific test targets: make test-cipher, make test-poksho, etc.
 $(addprefix test-,$(TESTABLE_PACKAGES)):
 	$(GOTEST) -v ./$(subst test-,,$@)/...
+
+# ==============================================================================
+# FIPS 140-3 gate
+# ==============================================================================
+
+# GODEBUG=fips140=only puts the Go Cryptographic Module in the mode where a
+# non-approved operation fails instead of quietly succeeding; fips140=on merely
+# loads the module and still permits MD5, SHA-1 and friends, so a gate built on
+# it cannot fail on the thing it exists to catch (configuration.md §5).
+#
+# These targets set GOFIPS140/GODEBUG themselves so a bare `make fips` locally
+# reproduces the CI job exactly. ci.yml also sets them at the job level to stay
+# aligned with the ci-template; the values are identical.
+#
+# The fips140only build tag excludes the tests listed in docs/FIPS.md -- the
+# exemption register -- from the gate. Each entry there exercises a primitive
+# that an external protocol or standard mandates and FIPS 140-3 does not
+# approve, and carries the citation that mandates it. Production code is never
+# tagged: `make fips-build` compiles the library exactly as it ships.
+FIPS_ENV := GOFIPS140=latest GODEBUG=fips140=only
+
+fips: fips-build fips-test
+
+fips-build:
+	$(FIPS_ENV) $(GOBUILD) ./...
+
+fips-test:
+	$(FIPS_ENV) $(GOTEST) -count=1 -tags fips140only ./...
 
 # ==============================================================================
 # Code Coverage
@@ -486,6 +529,11 @@ help:
 	@echo "    make trivy-image        - Scan the interop harness image (see Makefile note)"
 	@echo "    make errcheck           - Run errcheck (unchecked error returns)"
 	@echo "    make nilcheck           - Run nilaway (nil dereference analysis, non-blocking)"
+	@echo ""
+	@echo "  FIPS:"
+	@echo "    make fips               - FIPS 140-3 gate: build + unit tests under GODEBUG=fips140=only"
+	@echo "    make fips-build         - Build all packages under GODEBUG=fips140=only"
+	@echo "    make fips-test          - Run unit tests under GODEBUG=fips140=only (see docs/FIPS.md)"
 	@echo ""
 	@echo "  CI:"
 	@echo "    make ci                 - Run full CI pipeline: vet lint security test coverage examples-build"

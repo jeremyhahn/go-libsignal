@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 30
     env:
       GOFIPS140: latest
-      GODEBUG: fips140=on
+      GODEBUG: fips140=only
     steps:
       - uses: actions/checkout@v6
 
@@ -42,11 +42,31 @@ jobs:
         with:
           go-version-file: 'go.mod'
 
+      # This job runs the same memguard-heavy tests as `test` below, so it
+      # needs the same RLIMIT_MEMLOCK. Report it here too: exhaustion surfaces
+      # as "memcall could not acquire lock", which is easy to misread as a
+      # FIPS finding. See the note on the `test` job for the measurements.
+      - name: Report locked-memory limit
+        run: |
+          echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+
+      # Repo-specific: the two steps below run `make fips-build` / `make
+      # fips-test` rather than the template's bare `go build` / `go test`, so a
+      # developer running `make fips` locally gets the identical invocation.
+      # The make targets set GOFIPS140/GODEBUG to the same values as the job
+      # env above.
+      #
+      # fips-build is deliberately untagged: the library must compile exactly
+      # as it ships. fips-test carries the fips140only build tag, which drops
+      # the tests listed in docs/FIPS.md -- primitives the Signal Protocol or
+      # an external standard mandates and FIPS 140-3 does not approve, each
+      # with its citation. Everything else is gated, so a NEW non-approved
+      # call anywhere outside that register fails this job.
       - name: Build all packages (FIPS mode)
-        run: go build ./...
+        run: make fips-build
 
       - name: Unit tests (FIPS mode)
-        run: go test -count=1 -timeout=900s ./...
+        run: make fips-test
 
   test:
     name: Test

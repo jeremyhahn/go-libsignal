@@ -354,7 +354,7 @@ func TestNewSvrBNetClient(t *testing.T) {
 func TestSvrBNetClient_Prepare(t *testing.T) {
 	client := NewSvrBNetClient(&mockSvrBConnector{}, []uint64{1, 2})
 
-	backup, err := client.Prepare([]byte("password"), 255)
+	backup, err := client.Prepare(svrTestPassword("password"), 255)
 	if err != nil {
 		t.Fatalf("Prepare() error = %v", err)
 	}
@@ -505,7 +505,7 @@ func TestSvrBNetClient_Restore_ConnectorError(t *testing.T) {
 	connector := &mockSvrBConnector{err: errors.New("nope")}
 	client := NewSvrBNetClient(connector, []uint64{1})
 
-	_, err := client.Restore(context.Background(), []byte("pass"))
+	_, err := client.Restore(context.Background(), svrTestPassword("pass"))
 	if err == nil {
 		t.Fatal("Restore() should have returned an error")
 	}
@@ -527,7 +527,7 @@ func TestSvrBNetClient_Restore_ConnectionFailure(t *testing.T) {
 	}
 	client := NewSvrBNetClient(connector, []uint64{1, 2})
 
-	_, err := client.Restore(context.Background(), []byte("pass"))
+	_, err := client.Restore(context.Background(), svrTestPassword("pass"))
 	if err == nil {
 		t.Fatal("Restore() should have returned an error")
 	}
@@ -946,7 +946,7 @@ func TestSvrBNetClient_Restore_ClosesTransportsOnError(t *testing.T) {
 	}
 	client := NewSvrBNetClient(connector, []uint64{1})
 
-	_, _ = client.Restore(context.Background(), []byte("pass"))
+	_, _ = client.Restore(context.Background(), svrTestPassword("pass"))
 
 	if !transport.closed {
 		t.Error("transport should have been closed after error")
@@ -1037,7 +1037,7 @@ func TestSvrBNetClient_Restore_Phase1ReceiveError(t *testing.T) {
 	}
 	client := NewSvrBNetClient(connector, []uint64{1})
 
-	_, err := client.Restore(context.Background(), []byte("pass"))
+	_, err := client.Restore(context.Background(), svrTestPassword("pass"))
 	if err == nil {
 		t.Fatal("Restore() should have returned an error")
 	}

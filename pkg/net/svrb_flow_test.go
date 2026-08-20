@@ -16,6 +16,16 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/svr/svrpb"
 )
 
+// svrTestPassword builds an SVR password fixture of the length production
+// uses. Signal always passes BackupKey.DeriveForwardSecrecyPassword output,
+// which is 32 bytes (docs/backup/account-keys.md), and HKDF under the FIPS
+// 140-3 gate rejects keys shorter than 112 bits (docs/FIPS.md).
+func svrTestPassword(label string) []byte {
+	pw := make([]byte, 32)
+	copy(pw, label)
+	return pw
+}
+
 // svrTestServerVersion holds a single version's data for a test server.
 type svrTestServerVersion struct {
 	authCommitment        *ristretto255.Element
@@ -303,7 +313,7 @@ func (t *svrTestTransport) Close() error {
 
 func TestSvrBNetClient_Restore_FullSuccessFlow(t *testing.T) {
 	serverIDs := []uint64{1}
-	password := []byte("my-password")
+	password := svrTestPassword("my-password")
 
 	server := newSvrTestServer()
 	handshakeHash := makeTestBytes(32, 0xAA)
@@ -344,7 +354,7 @@ func TestSvrBNetClient_Restore_FullSuccessFlow(t *testing.T) {
 
 func TestSvrBNetClient_Restore_MultiServerSuccess(t *testing.T) {
 	serverIDs := []uint64{1, 2, 3}
-	password := []byte("multi-server-password")
+	password := svrTestPassword("multi-server-password")
 
 	servers := make([]*svrTestServer, len(serverIDs))
 	transports := make([]SvrBTransport, len(serverIDs))
@@ -387,7 +397,7 @@ func TestSvrBNetClient_Restore_MultiServerSuccess(t *testing.T) {
 
 func TestSvrBNetClient_Finalize_FullSuccessFlow(t *testing.T) {
 	serverIDs := []uint64{1}
-	password := []byte("finalize-password")
+	password := svrTestPassword("finalize-password")
 
 	server := newSvrTestServer()
 
@@ -421,7 +431,7 @@ func TestSvrBNetClient_Finalize_FullSuccessFlow(t *testing.T) {
 
 func TestSvrBNetClient_Query_FullSuccessFlow(t *testing.T) {
 	serverIDs := []uint64{1}
-	password := []byte("query-password")
+	password := svrTestPassword("query-password")
 
 	server := newSvrTestServer()
 
@@ -457,7 +467,7 @@ func TestSvrBNetClient_Query_FullSuccessFlow(t *testing.T) {
 
 func TestSvrBNetClient_Remove_FullSuccessFlow(t *testing.T) {
 	serverIDs := []uint64{1}
-	password := []byte("remove-password")
+	password := svrTestPassword("remove-password")
 
 	server := newSvrTestServer()
 
@@ -513,7 +523,7 @@ func TestSvrBNetClient_Restore_Phase2RestoreError(t *testing.T) {
 	// Set up a transport that returns valid phase1 and valid phase2 responses,
 	// but phase2 returns wrong encryption share size to trigger Restore error.
 	serverIDs := []uint64{1}
-	password := []byte("test-password")
+	password := svrTestPassword("test-password")
 
 	backup, err := svr.NewOPRFBackup4(serverIDs, password, 10)
 	if err != nil {

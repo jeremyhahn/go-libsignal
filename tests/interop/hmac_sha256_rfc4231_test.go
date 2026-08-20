@@ -1,3 +1,13 @@
+//go:build !fips140only
+
+// FIPS 140-3 exemption -- see docs/FIPS.md.
+//
+// 1 test in this file exercises HMAC-SHA256 under keys below 112 bits. FIPS
+// 140-3 does not approve that, but RFC 4231 fixes the key of every test
+// case, and several are shorter than 14 bytes, so the fips140only build tag
+// drops this file from the FIPS gate. `make test` and `make coverage` still
+// run it.
+
 // HMAC-SHA-256 conformance test using the RFC 4231 reference vectors.
 //
 // HMAC is used pervasively by go-libsignal (every HKDF call, every
@@ -80,11 +90,6 @@ var rfc4231Cases = []rfc4231Case{
 		HMACSHA256Hex: "9b09ffa71b942fcb27635fbcd5b0e944" +
 			"bfdc63644f0713938a7f51535c3a35e2",
 	},
-}
-
-// hexBytes encodes an ASCII string into lower-case hex.
-func hexBytes(s string) string {
-	return hex.EncodeToString([]byte(s))
 }
 
 // TestHMACSHA256_RFC4231 runs every reproduced RFC 4231 vector through

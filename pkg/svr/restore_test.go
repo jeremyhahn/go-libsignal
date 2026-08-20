@@ -263,7 +263,7 @@ func TestFullCreateRestore(t *testing.T) {
 
 func TestFullCreateRestoreSingleServer(t *testing.T) {
 	serverIDs := []uint64{42}
-	password := []byte("my-password")
+	password := testPassword("my-password")
 
 	backup, err := NewOPRFBackup4(serverIDs, password, 5)
 	if err != nil {
@@ -298,14 +298,14 @@ func TestFullCreateRestoreSingleServer(t *testing.T) {
 
 func TestRestore1BadInputs(t *testing.T) {
 	t.Run("empty server IDs", func(t *testing.T) {
-		_, err := NewRestore1(nil, []byte("pass"))
+		_, err := NewRestore1(nil, testPassword("pass"))
 		if err == nil {
 			t.Fatal("expected error for empty server IDs")
 		}
 	})
 
 	t.Run("response count mismatch", func(t *testing.T) {
-		r1, err := NewRestore1([]uint64{1, 2}, []byte("pass"))
+		r1, err := NewRestore1([]uint64{1, 2}, testPassword("pass"))
 		if err != nil {
 			t.Fatalf("NewRestore1 failed: %v", err)
 		}
@@ -316,7 +316,7 @@ func TestRestore1BadInputs(t *testing.T) {
 	})
 
 	t.Run("handshake hash count mismatch", func(t *testing.T) {
-		r1, err := NewRestore1([]uint64{1, 2}, []byte("pass"))
+		r1, err := NewRestore1([]uint64{1, 2}, testPassword("pass"))
 		if err != nil {
 			t.Fatalf("NewRestore1 failed: %v", err)
 		}
@@ -416,7 +416,7 @@ func TestRestore2BadInputs(t *testing.T) {
 }
 
 func TestRestore1ErrorStatus(t *testing.T) {
-	r1, err := NewRestore1([]uint64{1}, []byte("pass"))
+	r1, err := NewRestore1([]uint64{1}, testPassword("pass"))
 	if err != nil {
 		t.Fatalf("NewRestore1 failed: %v", err)
 	}
@@ -445,7 +445,7 @@ func TestRestore1ErrorStatus(t *testing.T) {
 }
 
 func TestRestore1NoUsableVersion(t *testing.T) {
-	r1, err := NewRestore1([]uint64{1, 2}, []byte("pass"))
+	r1, err := NewRestore1([]uint64{1, 2}, testPassword("pass"))
 	if err != nil {
 		t.Fatalf("NewRestore1 failed: %v", err)
 	}
@@ -483,14 +483,14 @@ func TestRestore1NoUsableVersion(t *testing.T) {
 
 func TestOPRFBackup4BadInputs(t *testing.T) {
 	t.Run("empty server IDs", func(t *testing.T) {
-		_, err := NewOPRFBackup4(nil, []byte("pass"), 10)
+		_, err := NewOPRFBackup4(nil, testPassword("pass"), 10)
 		if err == nil {
 			t.Fatal("expected error for empty server IDs")
 		}
 	})
 
 	t.Run("zero max tries", func(t *testing.T) {
-		_, err := NewOPRFBackup4([]uint64{1}, []byte("pass"), 0)
+		_, err := NewOPRFBackup4([]uint64{1}, testPassword("pass"), 0)
 		if err == nil {
 			t.Fatal("expected error for zero max tries")
 		}
@@ -515,7 +515,7 @@ func TestEncryptionKeyKnownVector(t *testing.T) {
 
 func TestMultipleRestoresFromSameBackup(t *testing.T) {
 	serverIDs := []uint64{1, 2}
-	password := []byte("consistent-password")
+	password := testPassword("consistent-password")
 
 	backup, err := NewOPRFBackup4(serverIDs, password, 10)
 	if err != nil {

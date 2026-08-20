@@ -1,3 +1,12 @@
+//go:build !fips140only
+
+// FIPS 140-3 exemption -- see docs/FIPS.md.
+//
+// 1 test in this file exercises ChaCha20-Poly1305. FIPS 140-3 does not
+// approve that, but the vectors are RFC 7539 section 2.8.2 and appendix A.5,
+// which exist to pin that algorithm, so the fips140only build tag drops this
+// file from the FIPS gate. `make test` and `make coverage` still run it.
+
 // ChaCha20-Poly1305 conformance test using the RFC 7539 reference vectors.
 //
 // ChaCha20-Poly1305 is the AEAD cipher used in the Noise NKhfs handshake

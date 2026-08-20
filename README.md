@@ -400,6 +400,12 @@ The `docs/` directory is organized by topic area:
 | `docs/protocol` | Core message types, ServiceId, and address encoding |
 | `docs/sessions` | X3DH session establishment and Double Ratchet |
 
+Single documents:
+
+| File | Contents |
+|---|---|
+| `docs/FIPS.md` | FIPS 140-3 posture, the `make fips` gate, and its exemption register |
+
 ## Architecture
 
 go-libsignal mirrors the package layout of Rust libsignal. Each Go package documents the Rust source it ports in its package-level doc comment. The pinned commit in `/RUST_REV` is the byte-format oracle for every wire-level test; `tests/interop/fixtures/wire/*.json` are Rust-emitted vectors that the Go test suite consumes verbatim. Rust libsignal's tests are the primary correctness oracle; Java libsignal-protocol-java is a secondary oracle for flows not covered by Rust vectors. The library has no CGo dependency — all cryptographic primitives are pure Go, using the standard library (`crypto/mlkem`, `crypto/ecdh`) and the audited third-party libraries listed in the Dependencies section below.

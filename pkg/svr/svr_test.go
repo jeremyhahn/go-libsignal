@@ -117,8 +117,11 @@ func TestDeriveStorageKey(t *testing.T) {
 	})
 
 	t.Run("different inputs produce different keys", func(t *testing.T) {
-		k1, _ := DeriveStorageKey([]byte("secret1"))
-		k2, _ := DeriveStorageKey([]byte("secret2"))
+		// A master secret is a 32-byte Secret in production; the fixtures use
+		// that length rather than seven-byte strings, which fall below the
+		// 112-bit HKDF key floor the FIPS 140-3 gate enforces.
+		k1, _ := DeriveStorageKey(bytes.Repeat([]byte{0x01}, 32))
+		k2, _ := DeriveStorageKey(bytes.Repeat([]byte{0x02}, 32))
 		if k1 == k2 {
 			t.Error("different inputs produced same storage key")
 		}

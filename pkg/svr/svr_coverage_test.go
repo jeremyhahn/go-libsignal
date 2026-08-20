@@ -14,7 +14,7 @@ import (
 // --- RestoreFull tests ---
 
 func TestRestoreFull_EmptyServerIDs(t *testing.T) {
-	_, err := RestoreFull(nil, []byte("pass"), nil, nil, nil)
+	_, err := RestoreFull(nil, testPassword("pass"), nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for empty server IDs")
 	}
@@ -22,7 +22,7 @@ func TestRestoreFull_EmptyServerIDs(t *testing.T) {
 
 func TestRestoreFull_Restore2Error(t *testing.T) {
 	serverIDs := []uint64{1}
-	password := []byte("pass")
+	password := testPassword("pass")
 
 	// Create restore1 responses with ERROR status
 	resp := &svrpb.Response4{
@@ -50,7 +50,7 @@ func TestRestoreFull_Restore2Error(t *testing.T) {
 
 func TestRestoreFull_SendRequestsError(t *testing.T) {
 	serverIDs := []uint64{1}
-	password := []byte("pass")
+	password := testPassword("pass")
 
 	backup, err := NewOPRFBackup4(serverIDs, password, 10)
 	if err != nil {
@@ -83,7 +83,7 @@ func TestRestoreFull_SendRequestsError(t *testing.T) {
 
 func TestRestoreFull_Restore2PhaseError(t *testing.T) {
 	serverIDs := []uint64{1}
-	password := []byte("pass")
+	password := testPassword("pass")
 
 	backup, err := NewOPRFBackup4(serverIDs, password, 10)
 	if err != nil {
@@ -200,7 +200,7 @@ func TestDecryptSecret_WrongKey(t *testing.T) {
 // --- Restore2.Restore bad element in Restore1 ---
 
 func TestRestore1_Restore2_BadElementInAuth(t *testing.T) {
-	r1, _ := NewRestore1([]uint64{1}, []byte("pass"))
+	r1, _ := NewRestore1([]uint64{1}, testPassword("pass"))
 
 	resp := &svrpb.Response4{
 		Inner: &svrpb.Response4_Restore1_{
@@ -310,7 +310,7 @@ func TestEncryptDecryptSecret_Roundtrip(t *testing.T) {
 // --- authsWithVersion: missing version in one response ---
 
 func TestAuthsWithVersion_MissingVersion(t *testing.T) {
-	r1, _ := NewRestore1([]uint64{1, 2}, []byte("pass"))
+	r1, _ := NewRestore1([]uint64{1, 2}, testPassword("pass"))
 
 	// First response has version 5, second has version 6 only.
 	// authsWithVersion(5, ...) should fail because server 2 lacks version 5.
@@ -336,7 +336,7 @@ func TestAuthsWithVersion_MissingVersion(t *testing.T) {
 // --- Restore1.Restore2: bad protobuf in response ---
 
 func TestRestore1_Restore2_BadProtobuf(t *testing.T) {
-	r1, _ := NewRestore1([]uint64{1}, []byte("pass"))
+	r1, _ := NewRestore1([]uint64{1}, testPassword("pass"))
 	_, err := r1.Restore2([][]byte{{0xFF, 0xFF}}, [][]byte{make([]byte, 32)})
 	if !errors.Is(err, ErrBadResponse) {
 		t.Fatalf("expected ErrBadResponse, got %v", err)
@@ -346,7 +346,7 @@ func TestRestore1_Restore2_BadProtobuf(t *testing.T) {
 // --- Restore1.Restore2: wrong inner type ---
 
 func TestRestore1_Restore2_WrongInnerType(t *testing.T) {
-	r1, _ := NewRestore1([]uint64{1}, []byte("pass"))
+	r1, _ := NewRestore1([]uint64{1}, testPassword("pass"))
 
 	resp := &svrpb.Response4{
 		Inner: &svrpb.Response4_Query_{
@@ -363,7 +363,7 @@ func TestRestore1_Restore2_WrongInnerType(t *testing.T) {
 // --- Restore1.Restore2: MISSING status with no tries (no triesRemaining set) ---
 
 func TestRestore1_Restore2_MissingStatus(t *testing.T) {
-	r1, _ := NewRestore1([]uint64{1}, []byte("pass"))
+	r1, _ := NewRestore1([]uint64{1}, testPassword("pass"))
 
 	resp := &svrpb.Response4{
 		Inner: &svrpb.Response4_Restore1_{
@@ -397,7 +397,9 @@ func TestBytesXORingTo_SingleElement(t *testing.T) {
 
 func TestKDF_NilInput2(t *testing.T) {
 	info := []byte("test")
-	input1 := []byte("data")
+	// A 32-byte input1 matches what production hands kdf; a four-byte one is
+	// below the 112-bit HKDF key floor the FIPS 140-3 gate enforces.
+	input1 := bytes.Repeat([]byte{0x33}, 32)
 
 	a := kdf32(info, input1, nil)
 	b := kdf32(info, input1, nil)
@@ -477,7 +479,7 @@ func TestError_StatusAndTriesRemaining(t *testing.T) {
 
 func TestAuthCommitments_Deterministic(t *testing.T) {
 	serverIDs := []uint64{1, 2}
-	input := passwordToUniformInput([]byte("password"))
+	input := passwordToUniformInput(testPassword("password"))
 	kOprf := randomScalar()
 	ap := authPt(&input, kOprf)
 
@@ -497,7 +499,7 @@ func TestAuthCommitments_Deterministic(t *testing.T) {
 // --- authSecret: deterministic ---
 
 func TestAuthSecret_Deterministic(t *testing.T) {
-	input := passwordToUniformInput([]byte("pass"))
+	input := passwordToUniformInput(testPassword("pass"))
 	pt := ristretto255.NewIdentityElement().ScalarBaseMult(randomScalar())
 
 	a := authSecret(&input, pt)
@@ -512,7 +514,7 @@ func TestAuthSecret_Deterministic(t *testing.T) {
 // --- inputHashPt: deterministic ---
 
 func TestInputHashPt_Deterministic(t *testing.T) {
-	input := passwordToUniformInput([]byte("test"))
+	input := passwordToUniformInput(testPassword("test"))
 	pt1 := inputHashPt(&input)
 	pt2 := inputHashPt(&input)
 	if pt1.Equal(pt2) != 1 {

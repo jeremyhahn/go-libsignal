@@ -76,7 +76,7 @@ func TestFinalizeBackup4(t *testing.T) {
 
 func TestOPRFBackup4RequestCount(t *testing.T) {
 	serverIDs := []uint64{1, 2, 3, 4, 5}
-	backup, err := NewOPRFBackup4(serverIDs, []byte("pass"), 10)
+	backup, err := NewOPRFBackup4(serverIDs, testPassword("pass"), 10)
 	if err != nil {
 		t.Fatalf("NewOPRFBackup4 failed: %v", err)
 	}

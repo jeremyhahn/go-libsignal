@@ -1,9 +1,17 @@
+//go:build !fips140only
+
+// FIPS 140-3 exemption -- see docs/FIPS.md.
+//
+// 45 tests in this file exercise X25519. FIPS 140-3 does not approve that,
+// but the X3DH key agreement specification (section 2.1) requires it, so the
+// fips140only build tag drops this file from the FIPS gate. `make test` and
+// `make coverage` still run it.
+
 package record_test
 
 import (
 	"bytes"
 	"crypto/subtle"
-	"encoding/json"
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
@@ -13,16 +21,11 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/identity"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/message"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/root"
-	"github.com/jeremyhahn/go-libsignal/pkg/serialize"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/bytehelper"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/optional"
 )
-
-func newSerializer() *serialize.Serializer {
-	return serialize.NewJSONSerializer()
-}
 
 func genKP(t *testing.T) *ecc.ECKeyPair {
 	t.Helper()
@@ -480,21 +483,6 @@ func TestNewChainFromStructureNoPrivateKey(t *testing.T) {
 }
 
 // ================== KyberPreKeyRecord ==================
-
-type kyberPreKeySerializer struct{}
-
-func (k *kyberPreKeySerializer) Serialize(preKey *record.KyberPreKeyStructure) ([]byte, error) {
-	return json.Marshal(preKey)
-}
-
-func (k *kyberPreKeySerializer) Deserialize(serialized []byte) (*record.KyberPreKeyStructure, error) {
-	var s record.KyberPreKeyStructure
-	err := json.Unmarshal(serialized, &s)
-	if err != nil {
-		return nil, err
-	}
-	return &s, nil
-}
 
 func TestNewKyberPreKey(t *testing.T) {
 	pubKey := kem.NewPublicKey(kem.KeyTypeKyber1024, make([]byte, 1568))

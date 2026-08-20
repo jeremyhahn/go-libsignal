@@ -1,3 +1,12 @@
+//go:build !fips140only
+
+// FIPS 140-3 exemption -- see docs/FIPS.md.
+//
+// 1 test in this file exercises X25519. FIPS 140-3 does not approve that,
+// but the X3DH key agreement specification (section 2.1) requires it, so the
+// fips140only build tag drops this file from the FIPS gate. `make test` and
+// `make coverage` still run it.
+
 // Conformance test: Sealed Sender v2 received-format wire parity vs Rust libsignal.
 //
 // The Rust emitter produced a sealed sender v2 single-recipient received-format

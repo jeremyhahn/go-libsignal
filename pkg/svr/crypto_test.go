@@ -1,6 +1,7 @@
 package svr
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/gtank/ristretto255"
@@ -98,18 +99,31 @@ func TestBytesXORingToPanic(t *testing.T) {
 	bytesXORingTo(0, []byte{1})
 }
 
+// testPassword builds an SVR password fixture of the length production uses.
+// Every caller of NewOPRFBackup4 / NewRestore1 in Signal passes
+// BackupKey.DeriveForwardSecrecyPassword output, which is always 32 bytes
+// (docs/backup/account-keys.md). Fixtures match that length so the tests
+// exercise the same key size as production -- and so they stay inside the
+// FIPS 140-3 gate, which rejects HKDF keys shorter than 112 bits
+// (docs/FIPS.md).
+func testPassword(label string) []byte {
+	pw := make([]byte, 32)
+	copy(pw, label)
+	return pw
+}
+
 func TestPasswordToUniformInput(t *testing.T) {
 	t.Run("deterministic", func(t *testing.T) {
-		a := passwordToUniformInput([]byte("password"))
-		b := passwordToUniformInput([]byte("password"))
+		a := passwordToUniformInput(testPassword("password"))
+		b := passwordToUniformInput(testPassword("password"))
 		if a != b {
 			t.Fatal("same password should produce same output")
 		}
 	})
 
 	t.Run("different passwords", func(t *testing.T) {
-		a := passwordToUniformInput([]byte("password1"))
-		b := passwordToUniformInput([]byte("password2"))
+		a := passwordToUniformInput(testPassword("password1"))
+		b := passwordToUniformInput(testPassword("password2"))
 		if a == b {
 			t.Fatal("different passwords should produce different output")
 		}
@@ -164,8 +178,11 @@ func TestDecodeScalarValid(t *testing.T) {
 
 func TestKDF32And64(t *testing.T) {
 	info := []byte("test-info")
-	input1 := []byte("input1")
-	input2 := []byte("input2")
+	// kdf concatenates input1||input2 into the HKDF IKM. Production always
+	// feeds it 32- or 64-byte key material, so the fixtures do too rather
+	// than the six-byte strings they used to carry.
+	input1 := bytes.Repeat([]byte{0x11}, 32)
+	input2 := bytes.Repeat([]byte{0x22}, 32)
 
 	t.Run("kdf32 deterministic", func(t *testing.T) {
 		a := kdf32(info, input1, input2)

@@ -59,7 +59,7 @@ func TestSvrBErrorFromSvrLogicError_RestoreFailed(t *testing.T) {
 		},
 	}
 	b, _ := proto.Marshal(resp)
-	r1, _ := svr.NewRestore1([]uint64{1}, []byte("pass"))
+	r1, _ := svr.NewRestore1([]uint64{1}, svrTestPassword("pass"))
 	// This will fail because the response has no Auth entries (no usable version).
 	// But first, create a response with ERROR status and tries remaining.
 	errorResp := &svrpb.Response4{
@@ -130,7 +130,7 @@ func TestSvrBNetClient_Restore_Phase1BadResponse(t *testing.T) {
 	}
 	client := NewSvrBNetClient(connector, []uint64{1})
 
-	_, err := client.Restore(context.Background(), []byte("pass"))
+	_, err := client.Restore(context.Background(), svrTestPassword("pass"))
 	if err == nil {
 		t.Fatal("Restore() should have returned an error for bad phase1 response")
 	}
@@ -286,7 +286,7 @@ func TestSvrBNetClient_Finalize_FinalizeBackupError(t *testing.T) {
 	}
 	client := NewSvrBNetClient(connector, []uint64{1})
 
-	backup, err := client.Prepare([]byte("password"), 255)
+	backup, err := client.Prepare(svrTestPassword("password"), 255)
 	if err != nil {
 		t.Fatalf("Prepare() error = %v", err)
 	}
@@ -332,7 +332,7 @@ func TestSvrBNetClient_Restore_Phase2SendError(t *testing.T) {
 	}
 	client := NewSvrBNetClient(connector, []uint64{1})
 
-	_, err := client.Restore(context.Background(), []byte("pass"))
+	_, err := client.Restore(context.Background(), svrTestPassword("pass"))
 	if err == nil {
 		t.Fatal("Restore() should have returned an error")
 	}
@@ -402,7 +402,7 @@ func TestSvrBNetClient_Finalize_SendAllError(t *testing.T) {
 	}
 	client := NewSvrBNetClient(connector, []uint64{1})
 
-	backup, err := client.Prepare([]byte("password"), 255)
+	backup, err := client.Prepare(svrTestPassword("password"), 255)
 	if err != nil {
 		t.Fatalf("Prepare() error = %v", err)
 	}
@@ -429,7 +429,7 @@ func TestSvrBNetClient_Restore_Phase1SendError(t *testing.T) {
 	}
 	client := NewSvrBNetClient(connector, []uint64{1})
 
-	_, err := client.Restore(context.Background(), []byte("pass"))
+	_, err := client.Restore(context.Background(), svrTestPassword("pass"))
 	if err == nil {
 		t.Fatal("Restore() should have returned an error when phase 1 send fails")
 	}

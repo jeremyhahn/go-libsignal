@@ -1,3 +1,13 @@
+//go:build !fips140only
+
+// FIPS 140-3 exemption -- see docs/FIPS.md.
+//
+// 1 test in this file exercises HMAC-SHA256 under a four-byte key. FIPS
+// 140-3 does not approve that, but the key is INITIAL_SEED_KEY = [1, 2, 3,
+// 4], the constant rust/protocol/src/sender_keys.rs fixes for the test this
+// one ports, so the fips140only build tag drops this file from the FIPS
+// gate. `make test` and `make coverage` still run it.
+
 package record
 
 // sender_key_state_machine_test.go — ports the remaining Rust sender-key state
