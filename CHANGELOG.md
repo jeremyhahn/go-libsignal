@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0-alpha] - 2026-08-19
+
+MINOR rather than PATCH: this release changes five exported signatures. Pre-1.0,
+breakage lives in MINOR (`conventions/release-versioning.md` §1). See
+**Changed** for the `Breaking` entries before upgrading.
+
 ### Security
 
 - Persisted key material now crosses the storage boundary in memguard-protected
@@ -215,5 +221,6 @@ with Rust libsignal pinned at `RUST_REV = 98915c442d814cd420f4e1a15630ade0d48e66
   documented exclusions in `staticcheck.conf` with an explanatory rationale and
   will be addressed alongside the v1.0 API freeze.
 
-[Unreleased]: https://github.com/jeremyhahn/go-libsignal/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jeremyhahn/go-libsignal/compare/v0.2.0-alpha...HEAD
+[0.2.0-alpha]: https://github.com/jeremyhahn/go-libsignal/compare/v0.1.2-alpha...v0.2.0-alpha
 [0.1.0]: https://github.com/jeremyhahn/go-libsignal/releases/tag/v0.1.0
