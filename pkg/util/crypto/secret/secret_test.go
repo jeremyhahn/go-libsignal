@@ -3,6 +3,7 @@ package secret
 import (
 	"bytes"
 	"errors"
+	"runtime"
 	"testing"
 )
 
@@ -316,6 +317,53 @@ func TestSecret_Clone_Independence(t *testing.T) {
 		t.Error("clone content should survive original destruction")
 	}
 	cloned.Destroy()
+}
+
+// TestSecret_Clone_DoesNotStageOnTheHeap is the regression test for the review
+// finding on PR #18: Clone used to allocate an ordinary []byte, copy the
+// plaintext into it and hand that to New, putting every cloned key on a
+// swappable, core-dumpable page. Independence and equality tests cannot see
+// that — the clone is correct either way — so the property has to be measured.
+//
+// Guarded memory is mmap'd rather than heap-allocated, so a guarded-to-guarded
+// copy leaves heap growth flat while a staged copy grows it by at least the
+// secret's size. The threshold is a quarter of the payload: far above the
+// bookkeeping a correct Clone allocates, far below the payload a staged one
+// must.
+func TestSecret_Clone_DoesNotStageOnTheHeap(t *testing.T) {
+	const size = 1 << 20 // 1 MiB, large enough to dwarf incidental allocation
+
+	original, err := NewRandom(size)
+	if err != nil {
+		t.Fatalf("NewRandom: %v", err)
+	}
+	defer original.Destroy()
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+
+	cloned, err := original.Clone()
+	if err != nil {
+		t.Fatalf("Clone: %v", err)
+	}
+	defer cloned.Destroy()
+
+	runtime.ReadMemStats(&after)
+
+	grew := after.TotalAlloc - before.TotalAlloc
+	if grew > size/4 {
+		t.Errorf("Clone allocated %d heap bytes for a %d-byte secret; the payload "+
+			"is being staged on the heap instead of copied guarded-to-guarded", grew, size)
+	}
+
+	// The copy still has to be a correct one.
+	if !cloned.EqualTo(original.Bytes()) {
+		t.Error("clone does not match the original")
+	}
+	if cloned.Size() != size {
+		t.Errorf("clone size = %d, want %d", cloned.Size(), size)
+	}
 }
 
 func TestSecret_Clone_AfterDestroy(t *testing.T) {

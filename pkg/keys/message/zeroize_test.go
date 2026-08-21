@@ -3,6 +3,8 @@ package message
 import (
 	"bytes"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
 // TestKeysZeroize verifies that Zeroize destroys all guarded memory fields
@@ -72,14 +74,15 @@ func TestKeysZeroizeNilFields(t *testing.T) {
 func TestNewKeysFromStruct_WithSeedMaterialZeroize(t *testing.T) {
 	expectedSeed := []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04}
 	structure := &KeysStructure{
-		CipherKey:    []byte{0xAA, 0xBB},
-		MacKey:       []byte{0xCC, 0xDD},
-		IV:           []byte{0xEE, 0xFF},
+		CipherKey:    mustGuard(t, []byte{0xAA, 0xBB}),
+		MacKey:       mustGuard(t, []byte{0xCC, 0xDD}),
+		IV:           mustGuard(t, []byte{0xEE, 0xFF}),
 		Index:        7,
-		SeedMaterial: expectedSeed,
+		SeedMaterial: mustGuard(t, expectedSeed),
 	}
+	defer structure.Zeroize()
 
-	keys := NewKeysFromStruct(structure)
+	keys := mustKeysFromStruct(t, structure)
 
 	if keys.Index() != 7 {
 		t.Errorf("Index() = %d, want 7", keys.Index())
@@ -99,14 +102,15 @@ func TestNewKeysFromStruct_WithSeedMaterialZeroize(t *testing.T) {
 // field does not trigger the guarded seed allocation branch.
 func TestNewKeysFromStruct_EmptySeedMaterial(t *testing.T) {
 	structure := &KeysStructure{
-		CipherKey:    []byte{0x01},
-		MacKey:       []byte{0x02},
-		IV:           []byte{0x03},
-		Index:        0,
-		SeedMaterial: nil,
+		CipherKey: mustGuard(t, []byte{0x01}),
+		MacKey:    mustGuard(t, []byte{0x02}),
+		IV:        mustGuard(t, []byte{0x03}),
+		Index:     0,
+		// SeedMaterial intentionally left as the zero Secret.
 	}
+	defer structure.Zeroize()
 
-	keys := NewKeysFromStruct(structure)
+	keys := mustKeysFromStruct(t, structure)
 
 	// SeedMaterial should be nil since the structure had none.
 	if keys.SeedMaterial() != nil {
@@ -133,49 +137,38 @@ func TestSetSeedMaterial_NilInput(t *testing.T) {
 	}
 }
 
-// TestKeysStructureZeroize verifies that KeysStructure.Zeroize overwrites all
-// sensitive byte fields with zeros to prevent key material from lingering.
+// TestKeysStructureZeroize verifies that KeysStructure.Zeroize releases every
+// guarded field, so no key material survives serialization, and that calling it
+// again is safe.
 func TestKeysStructureZeroize(t *testing.T) {
 	structure := &KeysStructure{
-		CipherKey:    []byte{0xAA, 0xBB, 0xCC},
-		MacKey:       []byte{0x11, 0x22, 0x33},
-		IV:           []byte{0xFF, 0xEE, 0xDD},
+		CipherKey:    mustGuard(t, []byte{0xAA, 0xBB, 0xCC}),
+		MacKey:       mustGuard(t, []byte{0x11, 0x22, 0x33}),
+		IV:           mustGuard(t, []byte{0xFF, 0xEE, 0xDD}),
 		Index:        42,
-		SeedMaterial: []byte{0x55, 0x66, 0x77},
+		SeedMaterial: mustGuard(t, []byte{0x55, 0x66, 0x77}),
 	}
 
 	structure.Zeroize()
 
-	for i, b := range structure.CipherKey {
-		if b != 0 {
-			t.Errorf("CipherKey[%d] = 0x%02X, want 0x00 after Zeroize", i, b)
+	for name, field := range map[string]*secret.Secret{
+		"CipherKey":    &structure.CipherKey,
+		"MacKey":       &structure.MacKey,
+		"IV":           &structure.IV,
+		"SeedMaterial": &structure.SeedMaterial,
+	} {
+		if got := field.BytesOrNil(); got != nil {
+			t.Errorf("%s still readable after Zeroize: %x", name, got)
 		}
 	}
-	for i, b := range structure.MacKey {
-		if b != 0 {
-			t.Errorf("MacKey[%d] = 0x%02X, want 0x00 after Zeroize", i, b)
-		}
-	}
-	for i, b := range structure.IV {
-		if b != 0 {
-			t.Errorf("IV[%d] = 0x%02X, want 0x00 after Zeroize", i, b)
-		}
-	}
-	for i, b := range structure.SeedMaterial {
-		if b != 0 {
-			t.Errorf("SeedMaterial[%d] = 0x%02X, want 0x00 after Zeroize", i, b)
-		}
-	}
+
+	structure.Zeroize() // idempotent
 }
 
-// TestKeysStructureZeroizeNilFields verifies Zeroize is safe when fields are nil.
+// TestKeysStructureZeroizeNilFields verifies Zeroize is safe on a structure
+// that never held any material.
 func TestKeysStructureZeroizeNilFields(t *testing.T) {
-	structure := &KeysStructure{
-		CipherKey:    nil,
-		MacKey:       nil,
-		IV:           nil,
-		SeedMaterial: nil,
-	}
+	structure := &KeysStructure{}
 	// Must not panic.
 	structure.Zeroize()
 }

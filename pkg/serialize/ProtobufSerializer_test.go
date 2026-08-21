@@ -275,15 +275,15 @@ func TestProtobufStateSerializer_WithChains(t *testing.T) {
 		SenderChain: &record.ChainStructure{
 			SenderRatchetKeyPublic:  []byte{0x05, 0x01},
 			SenderRatchetKeyPrivate: mustGuard(t, []byte{0x02}),
-			ChainKey:                &chain.KeyStructure{Key: []byte{0x03}, Index: 5},
+			ChainKey:                &chain.KeyStructure{Key: mustGuard(t, []byte{0x03}), Index: 5},
 			MessageKeys: []*message.KeysStructure{
-				{CipherKey: []byte{0x04}, MacKey: []byte{0x05}, IV: []byte{0x06}, Index: 0},
+				{CipherKey: mustGuard(t, []byte{0x04}), MacKey: mustGuard(t, []byte{0x05}), IV: mustGuard(t, []byte{0x06}), Index: 0},
 			},
 		},
 		ReceiverChains: []*record.ChainStructure{
 			{
 				SenderRatchetKeyPublic: []byte{0x05, 0x07},
-				ChainKey:               &chain.KeyStructure{Key: []byte{0x08}, Index: 3},
+				ChainKey:               &chain.KeyStructure{Key: mustGuard(t, []byte{0x08}), Index: 3},
 			},
 		},
 	}

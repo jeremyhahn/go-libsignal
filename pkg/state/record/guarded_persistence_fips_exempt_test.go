@@ -179,7 +179,7 @@ func TestChainStructureAbsentPrivateKey(t *testing.T) {
 	structure := &record.ChainStructure{
 		SenderRatchetKeyPublic:  kp.PublicKey().Serialize(),
 		SenderRatchetKeyPrivate: secret.Secret{},
-		ChainKey:                &chain.KeyStructure{Key: make([]byte, 32), Index: 0},
+		ChainKey:                &chain.KeyStructure{Key: mustGuard(t, make([]byte, 32)), Index: 0},
 	}
 
 	chainState, err := record.NewChainFromStructure(structure)

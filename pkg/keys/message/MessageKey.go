@@ -80,30 +80,59 @@ func NewSeedOnlyKeys(index uint32, seed []byte) *Keys {
 // When SeedMaterial is empty (derived-keys form, matching Rust Keys branch),
 // cipher_key, mac_key, and iv are loaded into guarded memory.
 //
-// Panics if memguard allocation fails (fatal condition).
-func NewKeysFromStruct(structure *KeysStructure) *Keys {
+// Every component is cloned from the structure's guarded memory straight into
+// the returned Keys' own guarded memory, so the material never lands on the Go
+// heap and the source structure is left intact for its owner to Zeroize. If a
+// later clone fails, the ones already made are released before returning.
+//
+// Returns *MissingKeyError when the derived-keys form is missing one of its
+// three components; that form is only meaningful with all three present.
+func NewKeysFromStruct(structure *KeysStructure) (_ *Keys, err error) {
+	if structure == nil {
+		return nil, &MissingKeyError{Field: "structure"}
+	}
+
 	// Seed-only form: matches Rust MessageKeyGenerator::from_pb Seed branch.
-	if len(structure.SeedMaterial) > 0 {
-		seedCopy := make([]byte, len(structure.SeedMaterial))
-		copy(seedCopy, structure.SeedMaterial)
-		guardedSeed, err := secret.New(seedCopy)
-		if err != nil {
-			panic("message: failed to allocate guarded memory for seed material: " + err.Error())
+	if !structure.SeedMaterial.IsZero() {
+		guardedSeed, cloneErr := structure.SeedMaterial.Clone()
+		if cloneErr != nil {
+			return nil, cloneErr
 		}
 		return &Keys{
 			index:        structure.Index,
 			seedMaterial: guardedSeed,
-		}
+		}, nil
 	}
 
 	// Derived-keys form: matches Rust MessageKeyGenerator::from_pb Keys branch.
-	cipherCopy := make([]byte, len(structure.CipherKey))
-	copy(cipherCopy, structure.CipherKey)
-	macCopy := make([]byte, len(structure.MacKey))
-	copy(macCopy, structure.MacKey)
-	ivCopy := make([]byte, len(structure.IV))
-	copy(ivCopy, structure.IV)
-	return NewKeys(cipherCopy, macCopy, ivCopy, structure.Index)
+	if structure.CipherKey.IsZero() {
+		return nil, &MissingKeyError{Field: "cipher key"}
+	}
+	if structure.MacKey.IsZero() {
+		return nil, &MissingKeyError{Field: "mac key"}
+	}
+	if structure.IV.IsZero() {
+		return nil, &MissingKeyError{Field: "iv"}
+	}
+
+	// Populate as the clones are made, so that whichever step fails, everything
+	// allocated so far is reachable by the cleanup below.
+	keys := &Keys{index: structure.Index}
+	defer func() {
+		if err != nil {
+			keys.Zeroize()
+		}
+	}()
+	if keys.cipherKey, err = structure.CipherKey.Clone(); err != nil {
+		return nil, err
+	}
+	if keys.macKey, err = structure.MacKey.Clone(); err != nil {
+		return nil, err
+	}
+	if keys.iv, err = structure.IV.Clone(); err != nil {
+		return nil, err
+	}
+	return keys, nil
 }
 
 // NewStructFromKeys returns a serializeable structure of message keys.
@@ -116,63 +145,78 @@ func NewKeysFromStruct(structure *KeysStructure) *Keys {
 // decrypt time. When no seed material is present, the fully-derived keys are
 // stored (cipher_key, mac_key, iv populated; seed empty), matching the Keys
 // variant of into_pb.
-func NewStructFromKeys(keys *Keys) *KeysStructure {
+//
+// Every component is cloned guarded-to-guarded, so serialization no longer
+// stages message key material on the heap. Callers must Zeroize the returned
+// structure once the serializer has consumed it; on failure everything cloned
+// so far is released before returning.
+func NewStructFromKeys(keys *Keys) (_ *KeysStructure, err error) {
 	// Seed-only form: matches Rust MessageKeyGenerator::into_pb Seed variant.
-	if keys.seedMaterial != nil && !keys.seedMaterial.IsDestroyed() {
-		seedBytes := keys.seedMaterial.Bytes()
-		seedCopy := make([]byte, len(seedBytes))
-		copy(seedCopy, seedBytes)
+	if !keys.seedMaterial.IsDestroyed() {
+		clonedSeed, cloneErr := keys.seedMaterial.Clone()
+		if cloneErr != nil {
+			return nil, cloneErr
+		}
 		return &KeysStructure{
 			Index:        keys.index,
-			SeedMaterial: seedCopy,
-		}
+			SeedMaterial: secret.FromSecret(clonedSeed),
+		}, nil
 	}
 
 	// Derived-keys form: matches Rust MessageKeyGenerator::into_pb Keys variant.
-	cipherBytes := keys.cipherKey.Bytes()
-	macBytes := keys.macKey.Bytes()
-	ivBytes := keys.iv.Bytes()
-
-	cipherCopy := make([]byte, len(cipherBytes))
-	copy(cipherCopy, cipherBytes)
-	macCopy := make([]byte, len(macBytes))
-	copy(macCopy, macBytes)
-	ivCopy := make([]byte, len(ivBytes))
-	copy(ivCopy, ivBytes)
-
-	return &KeysStructure{
-		CipherKey: cipherCopy,
-		MacKey:    macCopy,
-		IV:        ivCopy,
-		Index:     keys.index,
+	// Populate as the clones are made so the cleanup below can reach them.
+	structure := &KeysStructure{Index: keys.index}
+	defer func() {
+		if err != nil {
+			structure.Zeroize()
+		}
+	}()
+	if structure.CipherKey, err = cloneInto(keys.cipherKey); err != nil {
+		return nil, err
 	}
+	if structure.MacKey, err = cloneInto(keys.macKey); err != nil {
+		return nil, err
+	}
+	if structure.IV, err = cloneInto(keys.iv); err != nil {
+		return nil, err
+	}
+	return structure, nil
 }
 
-// KeysStructure is a serializeable structure of message keys.
+// cloneInto clones live guarded material into a Secret held by value, ready to
+// be stored in a structure that crosses the storage boundary.
+func cloneInto(live *secret.Secret) (secret.Secret, error) {
+	cloned, err := live.Clone()
+	if err != nil {
+		return secret.Secret{}, err
+	}
+	return secret.FromSecret(cloned), nil
+}
+
+// KeysStructure is a serializeable structure of message keys. Every key
+// component is held in guarded memory: these structures cross the storage
+// boundary, and a cipher key, MAC key, IV or PQR seed on the plain heap can be
+// swapped out or captured in a core dump, which zeroizing it afterwards does
+// not undo.
+//
+// SeedMaterial carries omitzero rather than omitempty because the field is now
+// a struct; see secret.Secret.IsZero for why the two are equivalent here and
+// why the distinction matters for the persisted layout.
 type KeysStructure struct {
-	CipherKey    []byte
-	MacKey       []byte
-	IV           []byte
+	CipherKey    secret.Secret
+	MacKey       secret.Secret
+	IV           secret.Secret
 	Index        uint32
-	SeedMaterial []byte `json:",omitempty"`
+	SeedMaterial secret.Secret `json:",omitzero"`
 }
 
-// Zeroize overwrites all sensitive key material in the structure with zeros.
-// Call this (via defer) after the structure has been serialized to prevent
-// plaintext key bytes from lingering in heap memory.
+// Zeroize releases all guarded key material in the structure. Call this (via
+// defer) after the structure has been serialized. It is idempotent.
 func (k *KeysStructure) Zeroize() {
-	for i := range k.CipherKey {
-		k.CipherKey[i] = 0
-	}
-	for i := range k.MacKey {
-		k.MacKey[i] = 0
-	}
-	for i := range k.IV {
-		k.IV[i] = 0
-	}
-	for i := range k.SeedMaterial {
-		k.SeedMaterial[i] = 0
-	}
+	k.CipherKey.Destroy()
+	k.MacKey.Destroy()
+	k.IV.Destroy()
+	k.SeedMaterial.Destroy()
 }
 
 // Keys is a structure to hold all the keys for a single MessageKey, including the

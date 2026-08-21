@@ -7,8 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Persisted chain keys and message keys now cross the storage boundary in
+  memguard-protected memory. `chain.KeyStructure.Key` and the four secret
+  fields of `message.KeysStructure` (`CipherKey`, `MacKey`, `IV`,
+  `SeedMaterial`) were the last families on the persisted-state path still
+  held as plain `[]byte`; the 0.2.0-alpha conversion covered the fields the
+  protected-memory audit enumerated and these were not in that list. The live
+  objects behind them were already guarded and the structures were zeroized
+  after serialization, so the exposure was the serialization window rather
+  than a key resident for a session's lifetime — but a plain heap page can be
+  swapped out or captured in a core dump, which zeroizing it afterwards does
+  not undo. Material now moves guarded-to-guarded in both directions and never
+  touches the Go heap.
+- `secret.Secret.Clone` copies guarded buffer to guarded buffer. It used to
+  allocate an ordinary `[]byte`, copy the plaintext into it and hand that to
+  `secret.New`, so **every** cloned secret — not only the ones added here —
+  spent the length of the call on a swappable, core-dumpable page. Zeroizing
+  such a slice afterwards undoes neither exposure. `Secret32.Clone` inherits
+  the fix. Guarded by a test that measures heap growth while cloning a 1 MiB
+  secret, since independence and equality assertions cannot see the difference.
+- Deserializing a chain releases everything it has already guarded when a
+  later step fails, so malformed persisted or wire-supplied state cannot
+  strand mlock'd pages. Covered by a locked-memory regression test.
+
 ### Changed
 
+- **Breaking:** `chain.NewKeyFromStruct`, `chain.NewStructFromKey`,
+  `message.NewKeysFromStruct` and `message.NewStructFromKeys` return
+  `(T, error)` instead of `T`. Moving guarded material can fail, and these
+  constructors previously had nowhere to say so — a structure carrying no
+  chain key panicked out of a `memguard` allocation on input an attacker
+  could supply. They now return the typed `*chain.MissingKeyError` /
+  `*message.MissingKeyError` and fail closed.
 - `parseIntelRootKey` and `parseAttestKey` build the DCAP public key with
   `ecdsa.ParseUncompressedPublicKey` instead of validating the point through
   `crypto/ecdh` and then reassembling it from `big.Int` coordinates. Go 1.26

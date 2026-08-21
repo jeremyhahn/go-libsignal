@@ -92,11 +92,11 @@ func chainStructure(t *testing.T, fill byte) *record.ChainStructure {
 	return &record.ChainStructure{
 		SenderRatchetKeyPublic:  publicKeyBytes(fill),
 		SenderRatchetKeyPrivate: mustGuard(t, bytes.Repeat([]byte{fill}, 32)),
-		ChainKey:                &chain.KeyStructure{Key: bytes.Repeat([]byte{fill}, 32)},
+		ChainKey:                &chain.KeyStructure{Key: mustGuard(t, bytes.Repeat([]byte{fill}, 32))},
 		MessageKeys: []*message.KeysStructure{{
-			CipherKey: bytes.Repeat([]byte{fill}, 32),
-			MacKey:    bytes.Repeat([]byte{fill}, 32),
-			IV:        bytes.Repeat([]byte{fill}, 16),
+			CipherKey: mustGuard(t, bytes.Repeat([]byte{fill}, 32)),
+			MacKey:    mustGuard(t, bytes.Repeat([]byte{fill}, 32)),
+			IV:        mustGuard(t, bytes.Repeat([]byte{fill}, 16)),
 		}},
 	}
 }
@@ -107,6 +107,17 @@ func malformedChainStructure(t *testing.T, fill byte) *record.ChainStructure {
 	t.Helper()
 	structure := chainStructure(t, fill)
 	structure.SenderRatchetKeyPublic = bytes.Repeat([]byte{0xFF}, 33)
+	return structure
+}
+
+// chainStructureMissingChainKey carries a full set of message keys but no chain
+// key. NewChainFromStructure clones the message keys first and the chain key
+// last, so this is the shape that leaves the most already-guarded material
+// behind when the decode fails.
+func chainStructureMissingChainKey(t *testing.T, fill byte) *record.ChainStructure {
+	t.Helper()
+	structure := chainStructure(t, fill)
+	structure.ChainKey.Zeroize()
 	return structure
 }
 
@@ -138,6 +149,20 @@ func TestNewStateFromStructureReleasesGuardedMemoryOnMalformedChain(t *testing.T
 
 		if _, err := record.NewStateFromStructure(structure, nil); err == nil {
 			t.Fatal("expected an error for the malformed receiver chain")
+		}
+	})
+}
+
+func TestNewStateFromStructureReleasesGuardedMemoryOnMissingChainKey(t *testing.T) {
+	assertNoLockedMemoryGrowth(t, "failed state deserializations", func() {
+		structure := stateStructure(t, []*record.ChainStructure{
+			chainStructure(t, 0x0A),
+			chainStructureMissingChainKey(t, 0x0B),
+		})
+		defer structure.Zeroize()
+
+		if _, err := record.NewStateFromStructure(structure, nil); err == nil {
+			t.Fatal("expected an error for the receiver chain with no chain key")
 		}
 	})
 }

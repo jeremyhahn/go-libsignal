@@ -117,7 +117,7 @@ func minimalStateStructure() *record.StateStructure {
 		SenderChain: &record.ChainStructure{
 			SenderRatchetKeyPublic: zeroKey,
 			ChainKey: &chain.KeyStructure{
-				Key:   make([]byte, 32),
+				Key:   guardedTestSecret(make([]byte, 32)),
 				Index: 0,
 			},
 		},

@@ -880,7 +880,7 @@ func chainStructureToProto(cs *record.ChainStructure) *storagepb.SessionStructur
 	if cs.ChainKey != nil {
 		pbChain.ChainKey = &storagepb.SessionStructure_Chain_ChainKey{
 			Index: cs.ChainKey.Index,
-			Key:   cs.ChainKey.Key,
+			Key:   cs.ChainKey.Key.BytesOrNil(),
 		}
 	}
 
@@ -890,10 +890,10 @@ func chainStructureToProto(cs *record.ChainStructure) *storagepb.SessionStructur
 		for i, mk := range cs.MessageKeys {
 			pbChain.MessageKeys[i] = &storagepb.SessionStructure_Chain_MessageKey{
 				Index:     mk.Index,
-				CipherKey: mk.CipherKey,
-				MacKey:    mk.MacKey,
-				Iv:        mk.IV,
-				Seed:      mk.SeedMaterial,
+				CipherKey: mk.CipherKey.BytesOrNil(),
+				MacKey:    mk.MacKey.BytesOrNil(),
+				Iv:        mk.IV.BytesOrNil(),
+				Seed:      mk.SeedMaterial.BytesOrNil(),
 			}
 		}
 	}
@@ -927,9 +927,9 @@ func protoToChainStructure(pbChain *storagepb.SessionStructure_Chain) (_ *record
 
 	// Convert chain key.
 	if pbChain.GetChainKey() != nil {
-		cs.ChainKey = &chain.KeyStructure{
-			Index: pbChain.GetChainKey().GetIndex(),
-			Key:   pbChain.GetChainKey().GetKey(),
+		cs.ChainKey = &chain.KeyStructure{Index: pbChain.GetChainKey().GetIndex()}
+		if cs.ChainKey.Key, err = secret.NewValue(pbChain.GetChainKey().GetKey()); err != nil {
+			return nil, err
 		}
 	}
 
@@ -947,12 +947,22 @@ func protoToChainStructure(pbChain *storagepb.SessionStructure_Chain) (_ *record
 		}
 		cs.MessageKeys = make([]*message.KeysStructure, len(pbChain.GetMessageKeys()))
 		for i, mk := range pbChain.GetMessageKeys() {
-			cs.MessageKeys[i] = &message.KeysStructure{
-				Index:        mk.GetIndex(),
-				CipherKey:    mk.GetCipherKey(),
-				MacKey:       mk.GetMacKey(),
-				IV:           mk.GetIv(),
-				SeedMaterial: mk.GetSeed(),
+			// Attached to cs before any of its fields are filled, so that a
+			// failure part-way through this entry still leaves what was
+			// already guarded reachable by the cleanup above.
+			ks := &message.KeysStructure{Index: mk.GetIndex()}
+			cs.MessageKeys[i] = ks
+			if ks.CipherKey, err = secret.NewValue(mk.GetCipherKey()); err != nil {
+				return nil, err
+			}
+			if ks.MacKey, err = secret.NewValue(mk.GetMacKey()); err != nil {
+				return nil, err
+			}
+			if ks.IV, err = secret.NewValue(mk.GetIv()); err != nil {
+				return nil, err
+			}
+			if ks.SeedMaterial, err = secret.NewValue(mk.GetSeed()); err != nil {
+				return nil, err
 			}
 		}
 	}

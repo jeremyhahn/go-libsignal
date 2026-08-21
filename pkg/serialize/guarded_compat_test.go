@@ -2,9 +2,12 @@ package serialize
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"testing"
 
+	"github.com/jeremyhahn/go-libsignal/pkg/keys/chain"
+	"github.com/jeremyhahn/go-libsignal/pkg/keys/message"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
 )
 
@@ -22,6 +25,28 @@ const (
 		`"PendingKeyExchange":null,"PendingPreKey":null,"PreviousCounter":0,"ReceiverChains":null,` +
 		`"RemoteIdentityPublic":null,"RemoteRegistrationID":0,"RootKey":"AQI=","SenderBaseKey":null,` +
 		`"SenderChain":null,"SessionVersion":3,"PqRatchetState":"CQ=="}`
+
+	// The chain key and the message key components made the same move, one
+	// commit later. This literal is the layout the []byte fields produced,
+	// captured from the tree immediately before the conversion. It carries both
+	// message-key forms deliberately: the derived form, where SeedMaterial is
+	// absent entirely (the field's omitempty, now omitzero), and the seed-only
+	// form, where the other three are present as null.
+	legacyChainStateJSON = `{"LocalIdentityPublic":null,"LocalRegistrationID":0,"NeedsRefresh":false,` +
+		`"PendingKeyExchange":null,"PendingPreKey":null,"PreviousCounter":0,` +
+		`"ReceiverChains":[{"SenderRatchetKeyPublic":"BQI=","SenderRatchetKeyPrivate":null,` +
+		`"ChainKey":{"Key":"Dw==","Index":6},"MessageKeys":null}],` +
+		`"RemoteIdentityPublic":null,"RemoteRegistrationID":0,"RootKey":"AQI=","SenderBaseKey":null,` +
+		`"SenderChain":{"SenderRatchetKeyPublic":"BQE=","SenderRatchetKeyPrivate":"Ag==",` +
+		`"ChainKey":{"Key":"Cg==","Index":4},"MessageKeys":[` +
+		`{"CipherKey":"Cw==","MacKey":"DA==","IV":"DQ==","Index":1},` +
+		`{"CipherKey":null,"MacKey":null,"IV":null,"Index":2,"SeedMaterial":"Dg=="}]},` +
+		`"SessionVersion":3,"PqRatchetState":"CQ=="}`
+
+	// The same fixture through the protobuf serializer, captured from the same
+	// pre-conversion tree.
+	legacyChainStateProtoHex = "08032202010232220a0205011201021a05080412010a220b080112010b1a010c22010d" +
+		"220508022a010e3a0b0a0205021a05080612010f7a0109"
 )
 
 func TestJSONPreKeyRecordSerializerLegacyLayout(t *testing.T) {
@@ -93,6 +118,117 @@ func TestJSONStateSerializerLegacyLayout(t *testing.T) {
 	}
 	if string(serialized) != legacyStateJSON {
 		t.Errorf("re-serialized layout changed:\ngot  %s\nwant %s", serialized, legacyStateJSON)
+	}
+}
+
+// chainStateFixture builds the state whose encodings the two legacy literals
+// above record: a sender chain with a chain key and both message-key forms,
+// plus a receiver chain carrying only a chain key.
+func chainStateFixture(t *testing.T) *record.StateStructure {
+	t.Helper()
+	return &record.StateStructure{
+		SessionVersion: 3,
+		RootKey:        mustGuard(t, []byte{0x01, 0x02}),
+		PqRatchetState: mustGuard(t, []byte{0x09}),
+		SenderChain: &record.ChainStructure{
+			SenderRatchetKeyPublic:  []byte{0x05, 0x01},
+			SenderRatchetKeyPrivate: mustGuard(t, []byte{0x02}),
+			ChainKey:                &chain.KeyStructure{Key: mustGuard(t, []byte{0x0a}), Index: 4},
+			MessageKeys: []*message.KeysStructure{
+				{
+					CipherKey: mustGuard(t, []byte{0x0b}),
+					MacKey:    mustGuard(t, []byte{0x0c}),
+					IV:        mustGuard(t, []byte{0x0d}),
+					Index:     1,
+				},
+				{Index: 2, SeedMaterial: mustGuard(t, []byte{0x0e})},
+			},
+		},
+		ReceiverChains: []*record.ChainStructure{{
+			SenderRatchetKeyPublic: []byte{0x05, 0x02},
+			ChainKey:               &chain.KeyStructure{Key: mustGuard(t, []byte{0x0f}), Index: 6},
+		}},
+	}
+}
+
+// TestJSONStateSerializerLegacyChainLayout is the byte-identity gate for moving
+// the chain key and the message key components into guarded memory. It asserts
+// in both directions: a record written before the conversion still loads, and
+// what this tree writes is byte-for-byte what the []byte fields wrote.
+func TestJSONStateSerializerLegacyChainLayout(t *testing.T) {
+	s := &JSONStateSerializer{}
+
+	t.Run("this tree writes the legacy layout", func(t *testing.T) {
+		fixture := chainStateFixture(t)
+		defer fixture.Zeroize()
+
+		serialized, err := s.Serialize(fixture)
+		if err != nil {
+			t.Fatalf("Serialize: %v", err)
+		}
+		if string(serialized) != legacyChainStateJSON {
+			t.Errorf("layout changed:\ngot  %s\nwant %s", serialized, legacyChainStateJSON)
+		}
+	})
+
+	t.Run("a legacy record still loads and re-serializes verbatim", func(t *testing.T) {
+		structure, err := s.Deserialize([]byte(legacyChainStateJSON))
+		if err != nil {
+			t.Fatalf("Deserialize legacy state: %v", err)
+		}
+		defer structure.Zeroize()
+
+		if !structure.SenderChain.ChainKey.Key.EqualTo([]byte{0x0a}) {
+			t.Error("chain key did not load into guarded memory")
+		}
+		derived := structure.SenderChain.MessageKeys[0]
+		if !derived.CipherKey.EqualTo([]byte{0x0b}) || !derived.MacKey.EqualTo([]byte{0x0c}) ||
+			!derived.IV.EqualTo([]byte{0x0d}) {
+			t.Error("derived message key components did not load into guarded memory")
+		}
+		if !derived.SeedMaterial.IsZero() {
+			t.Error("derived form must carry no seed material")
+		}
+		if !structure.SenderChain.MessageKeys[1].SeedMaterial.EqualTo([]byte{0x0e}) {
+			t.Error("seed material did not load into guarded memory")
+		}
+
+		serialized, err := s.Serialize(structure)
+		if err != nil {
+			t.Fatalf("Serialize: %v", err)
+		}
+		if string(serialized) != legacyChainStateJSON {
+			t.Errorf("re-serialized layout changed:\ngot  %s\nwant %s", serialized, legacyChainStateJSON)
+		}
+	})
+}
+
+// TestProtobufStateSerializerLegacyChainLayout is the same gate for the wire
+// format, which is the one interoperability actually depends on.
+func TestProtobufStateSerializerLegacyChainLayout(t *testing.T) {
+	s := &ProtobufStateSerializer{}
+	fixture := chainStateFixture(t)
+	defer fixture.Zeroize()
+
+	serialized, err := s.Serialize(fixture)
+	if err != nil {
+		t.Fatalf("Serialize: %v", err)
+	}
+	if got := hex.EncodeToString(serialized); got != legacyChainStateProtoHex {
+		t.Errorf("wire bytes changed:\ngot  %s\nwant %s", got, legacyChainStateProtoHex)
+	}
+
+	decoded, err := s.Deserialize(serialized)
+	if err != nil {
+		t.Fatalf("Deserialize: %v", err)
+	}
+	defer decoded.Zeroize()
+
+	if !decoded.SenderChain.ChainKey.Key.EqualTo([]byte{0x0a}) {
+		t.Error("chain key did not survive the protobuf round trip in guarded memory")
+	}
+	if !decoded.SenderChain.MessageKeys[1].SeedMaterial.EqualTo([]byte{0x0e}) {
+		t.Error("seed material did not survive the protobuf round trip in guarded memory")
 	}
 }
 

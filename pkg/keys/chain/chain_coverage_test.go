@@ -242,24 +242,25 @@ func TestMessageKeysWithSalt_WithPQRSalt(t *testing.T) {
 	}
 }
 
-// TestKeyStructureZeroize verifies that Zeroize overwrites all key bytes with zeros.
+// TestKeyStructureZeroize verifies that Zeroize releases the guarded chain key
+// and that doing so twice is safe.
 func TestKeyStructureZeroize(t *testing.T) {
 	ks := &KeyStructure{
-		Key:   []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08},
+		Key:   mustGuard(t, []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}),
 		Index: 7,
 	}
 
 	ks.Zeroize()
 
-	for i, b := range ks.Key {
-		if b != 0 {
-			t.Errorf("Key[%d] = 0x%02x after Zeroize, want 0x00", i, b)
-		}
+	if got := ks.Key.BytesOrNil(); got != nil {
+		t.Errorf("Key still readable after Zeroize: %x", got)
 	}
+	ks.Zeroize() // idempotent
 }
 
-// TestKeyStructureZeroizeEmptyKey verifies Zeroize is safe on an empty key slice.
+// TestKeyStructureZeroizeEmptyKey verifies Zeroize is safe on a structure that
+// never held any material.
 func TestKeyStructureZeroizeEmptyKey(t *testing.T) {
-	ks := &KeyStructure{Key: nil, Index: 0}
+	ks := &KeyStructure{Index: 0}
 	ks.Zeroize() // must not panic
 }

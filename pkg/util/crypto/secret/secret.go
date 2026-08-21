@@ -109,17 +109,30 @@ func (s *Secret) IsDestroyed() bool {
 
 // Clone creates an independent deep copy of the secret in new guarded memory.
 //
+// The copy goes guarded buffer to guarded buffer. It must not stage the
+// plaintext in an ordinary `[]byte` on the way: this used to allocate a heap
+// slice, copy the key into it and hand that to New, which put every cloned key
+// on a swappable, core-dumpable page for the length of the call. Zeroizing
+// such a slice afterwards does not undo either exposure, which is why the
+// protected-memory rule is about where the material lives rather than how
+// briefly it lives there.
+//
 // Returns ErrSecretDestroyed if the source has been destroyed, or
 // ErrSecretAlloc if the allocation fails.
 func (s *Secret) Clone() (*Secret, error) {
 	if s.IsDestroyed() {
 		return nil, &Error{kind: errSecretDestroyed}
 	}
-	// Copy bytes out then move into new guarded memory.
 	src := s.buf.Bytes()
-	tmp := make([]byte, len(src))
-	copy(tmp, src)
-	return New(tmp)
+	cloned, err := NewEmpty(len(src))
+	if err != nil {
+		return nil, err
+	}
+	if copy(cloned.buf.Bytes(), src) != len(src) {
+		cloned.Destroy()
+		return nil, newAllocError("clone destination is smaller than the source")
+	}
+	return cloned, nil
 }
 
 // EqualTo performs a constant-time comparison of the secret against the given

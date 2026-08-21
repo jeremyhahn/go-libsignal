@@ -65,6 +65,24 @@ func (s *Secret) BytesOrNil() []byte {
 	return s.buf.Bytes()
 }
 
+// IsZero reports whether the secret holds no material, which is what the
+// `json:",omitzero"` tag option consults to decide whether to write the field
+// at all.
+//
+// It exists so that a field carrying `omitempty` as a []byte keeps being
+// omitted after it becomes a Secret. `omitempty` looks only at a small set of
+// built-in kinds and silently does nothing to a struct, so a straight
+// conversion would start writing `"Field":null` where the []byte wrote
+// nothing — a change to the persisted layout. `omitzero` plus this method
+// reproduces the old behaviour exactly: absent when there are no bytes,
+// present otherwise.
+//
+// The receiver is a value for the same reason MarshalJSON's is: the field is
+// held by value and is not addressable when its struct is marshaled.
+func (s Secret) IsZero() bool {
+	return len(s.BytesOrNil()) == 0
+}
+
 // MarshalJSON encodes the secret exactly as encoding/json encodes a []byte:
 // a base64 string, or null when there is no material. This keeps persisted
 // state byte-identical to the plain []byte representation it replaced.

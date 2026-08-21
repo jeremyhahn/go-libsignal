@@ -76,11 +76,15 @@ func NewChainFromStructure(structure *ChainStructure) (*Chain, error) {
 	// Build our message keys from the message key structures.
 	chainState.messageKeys = make([]*message.Keys, len(structure.MessageKeys))
 	for i := range structure.MessageKeys {
-		chainState.messageKeys[i] = message.NewKeysFromStruct(structure.MessageKeys[i])
+		if chainState.messageKeys[i], err = message.NewKeysFromStruct(structure.MessageKeys[i]); err != nil {
+			return nil, err
+		}
 	}
 
 	// Build our new chain state.
-	chainState.chainKey = chain.NewKeyFromStruct(structure.ChainKey, kdf.DeriveSecrets)
+	if chainState.chainKey, err = chain.NewKeyFromStruct(structure.ChainKey, kdf.DeriveSecrets); err != nil {
+		return nil, err
+	}
 
 	handedOver = true
 	return chainState, nil
@@ -180,25 +184,30 @@ func (c *Chain) PopFirstMessageKeys() *message.Keys {
 // serializer is done with it; on failure everything built so far is released
 // before returning.
 func (c *Chain) structure() (_ *ChainStructure, err error) {
-	// Convert our message keys into a serializeable structure.
-	messageKeys := make([]*message.KeysStructure, len(c.messageKeys))
-	for i := range c.messageKeys {
-		messageKeys[i] = message.NewStructFromKeys(c.messageKeys[i])
-	}
-
 	structure := &ChainStructure{
 		SenderRatchetKeyPublic: c.senderRatchetKeyPair.PublicKey().Serialize(),
-		ChainKey:               chain.NewStructFromKey(c.chainKey),
-		MessageKeys:            messageKeys,
+		MessageKeys:            make([]*message.KeysStructure, len(c.messageKeys)),
 	}
 
-	// Release the partially built structure if the step below fails, so that
-	// no key material outlives the failed call.
+	// Release the partially built structure if any step below fails, so that no
+	// key material outlives the failed call. Registered before the first clone
+	// so that every guarded allocation made from here on is covered.
 	defer func() {
 		if err != nil {
 			structure.Zeroize()
 		}
 	}()
+
+	// Convert our message keys into a serializeable structure.
+	for i := range c.messageKeys {
+		if structure.MessageKeys[i], err = message.NewStructFromKeys(c.messageKeys[i]); err != nil {
+			return nil, err
+		}
+	}
+
+	if structure.ChainKey, err = chain.NewStructFromKey(c.chainKey); err != nil {
+		return nil, err
+	}
 
 	// Move the sender ratchet private key into guarded memory.
 	if structure.SenderRatchetKeyPrivate, err = guardECPrivateKey(c.senderRatchetKeyPair.PrivateKey()); err != nil {

@@ -430,15 +430,15 @@ func TestJSONStateSerializer_WithChains(t *testing.T) {
 		SessionVersion: 3,
 		SenderChain: &record.ChainStructure{
 			SenderRatchetKeyPublic: []byte{0x05, 0x01},
-			ChainKey:               &chain.KeyStructure{Key: []byte{0x01}, Index: 0},
+			ChainKey:               &chain.KeyStructure{Key: mustGuard(t, []byte{0x01}), Index: 0},
 			MessageKeys: []*message.KeysStructure{
-				{CipherKey: []byte{0x01}, MacKey: []byte{0x02}, IV: []byte{0x03}, Index: 0},
+				{CipherKey: mustGuard(t, []byte{0x01}), MacKey: mustGuard(t, []byte{0x02}), IV: mustGuard(t, []byte{0x03}), Index: 0},
 			},
 		},
 		ReceiverChains: []*record.ChainStructure{
 			{
 				SenderRatchetKeyPublic: []byte{0x05, 0x02},
-				ChainKey:               &chain.KeyStructure{Key: []byte{0x03}, Index: 1},
+				ChainKey:               &chain.KeyStructure{Key: mustGuard(t, []byte{0x03}), Index: 1},
 			},
 		},
 		PendingPreKey: &record.PendingPreKeyStructure{

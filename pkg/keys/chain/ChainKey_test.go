@@ -2,9 +2,11 @@ package chain
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/kdf"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
 func TestNewKey(t *testing.T) {
@@ -124,26 +126,81 @@ func TestKey_MessageKeys(t *testing.T) {
 func TestNewKeyFromStruct(t *testing.T) {
 	expected := []byte("struct-key")
 	structure := &KeyStructure{
-		Key:   append([]byte(nil), expected...), // copy so struct keeps its data
+		Key:   mustGuard(t, expected),
 		Index: 10,
 	}
-	key := NewKeyFromStruct(structure, kdf.DeriveSecrets)
+	defer structure.Zeroize()
+
+	key, err := NewKeyFromStruct(structure, kdf.DeriveSecrets)
+	if err != nil {
+		t.Fatalf("NewKeyFromStruct: %v", err)
+	}
 	if !bytes.Equal(key.Key(), expected) {
 		t.Fatal("Key mismatch from struct")
 	}
 	if key.Index() != 10 {
 		t.Fatalf("expected index 10, got %d", key.Index())
 	}
+	// The clone must be independent: the source structure keeps its material,
+	// and destroying it must not disturb the key built from it.
+	if !bytes.Equal(structure.Key.BytesOrNil(), expected) {
+		t.Fatal("NewKeyFromStruct consumed the source structure's material")
+	}
+}
+
+// TestNewKeyFromStruct_NoMaterial covers the error path: a structure with no
+// chain key must be rejected rather than yielding a Key that cannot ratchet.
+func TestNewKeyFromStruct_NoMaterial(t *testing.T) {
+	for name, structure := range map[string]*KeyStructure{
+		"nil structure": nil,
+		"zero key":      {Index: 3},
+	} {
+		t.Run(name, func(t *testing.T) {
+			key, err := NewKeyFromStruct(structure, kdf.DeriveSecrets)
+			if key != nil {
+				t.Fatal("expected no key")
+			}
+			var missing *MissingKeyError
+			if !errors.As(err, &missing) {
+				t.Fatalf("expected *MissingKeyError, got %#v", err)
+			}
+		})
+	}
 }
 
 func TestNewStructFromKey(t *testing.T) {
 	key := NewKey(kdf.DeriveSecrets, []byte("key-data"), 7)
-	structure := NewStructFromKey(key)
-	if !bytes.Equal(structure.Key, []byte("key-data")) {
+	structure, err := NewStructFromKey(key)
+	if err != nil {
+		t.Fatalf("NewStructFromKey: %v", err)
+	}
+	defer structure.Zeroize()
+
+	if !bytes.Equal(structure.Key.BytesOrNil(), []byte("key-data")) {
 		t.Fatal("Key mismatch in structure")
 	}
 	if structure.Index != 7 {
 		t.Fatalf("expected index 7, got %d", structure.Index)
+	}
+	// The structure holds its own clone, not a view into the live key.
+	key.Zeroize()
+	if !bytes.Equal(structure.Key.BytesOrNil(), []byte("key-data")) {
+		t.Fatal("structure shares guarded memory with the live key")
+	}
+}
+
+// TestNewStructFromKey_DestroyedKey covers the error path: a key whose guarded
+// material is already gone cannot be serialized.
+func TestNewStructFromKey_DestroyedKey(t *testing.T) {
+	key := NewKey(kdf.DeriveSecrets, []byte("key-data"), 7)
+	key.Zeroize()
+
+	structure, err := NewStructFromKey(key)
+	if structure != nil {
+		t.Fatal("expected no structure")
+	}
+	if !errors.Is(err, secret.ErrSecretDestroyed) {
+		t.Fatalf("expected ErrSecretDestroyed, got %#v", err)
 	}
 }
 
@@ -193,8 +250,16 @@ func TestKey_Zeroize_EmptyKey(t *testing.T) {
 
 func TestKeyFromStruct_RoundTrip(t *testing.T) {
 	original := NewKey(kdf.DeriveSecrets, []byte("round-trip-key"), 15)
-	structure := NewStructFromKey(original)
-	reconstructed := NewKeyFromStruct(structure, kdf.DeriveSecrets)
+	structure, err := NewStructFromKey(original)
+	if err != nil {
+		t.Fatalf("NewStructFromKey: %v", err)
+	}
+	defer structure.Zeroize()
+
+	reconstructed, err := NewKeyFromStruct(structure, kdf.DeriveSecrets)
+	if err != nil {
+		t.Fatalf("NewKeyFromStruct: %v", err)
+	}
 	if !bytes.Equal(reconstructed.Key(), original.Key()) {
 		t.Fatal("round-trip key mismatch")
 	}

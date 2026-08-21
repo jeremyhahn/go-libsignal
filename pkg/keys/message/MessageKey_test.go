@@ -2,7 +2,10 @@ package message
 
 import (
 	"bytes"
+	"errors"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
 func TestNewKeys(t *testing.T) {
@@ -50,12 +53,14 @@ func TestNewKeysFromStruct(t *testing.T) {
 	expectedIV := []byte("iv")
 
 	structure := &KeysStructure{
-		CipherKey: append([]byte(nil), expectedCipher...),
-		MacKey:    append([]byte(nil), expectedMac...),
-		IV:        append([]byte(nil), expectedIV...),
+		CipherKey: mustGuard(t, expectedCipher),
+		MacKey:    mustGuard(t, expectedMac),
+		IV:        mustGuard(t, expectedIV),
 		Index:     99,
 	}
-	keys := NewKeysFromStruct(structure)
+	defer structure.Zeroize()
+
+	keys := mustKeysFromStruct(t, structure)
 	if !bytes.Equal(keys.CipherKey(), expectedCipher) {
 		t.Fatal("CipherKey mismatch")
 	}
@@ -68,29 +73,101 @@ func TestNewKeysFromStruct(t *testing.T) {
 	if keys.Index() != 99 {
 		t.Fatalf("expected index 99, got %d", keys.Index())
 	}
+	// The clones must be independent: the source structure keeps its material.
+	if !bytes.Equal(structure.CipherKey.BytesOrNil(), expectedCipher) {
+		t.Fatal("NewKeysFromStruct consumed the source structure's material")
+	}
+}
+
+// TestNewKeysFromStruct_MissingComponent covers the error path: the
+// derived-keys form is only meaningful with all three components present, so a
+// structure missing one must be rejected rather than half-built.
+func TestNewKeysFromStruct_MissingComponent(t *testing.T) {
+	full := func(t *testing.T) *KeysStructure {
+		return &KeysStructure{
+			CipherKey: mustGuard(t, []byte("cipher")),
+			MacKey:    mustGuard(t, []byte("mac")),
+			IV:        mustGuard(t, []byte("iv")),
+			Index:     1,
+		}
+	}
+	for name, drop := range map[string]func(*KeysStructure){
+		"cipher key": func(s *KeysStructure) { s.CipherKey.Destroy() },
+		"mac key":    func(s *KeysStructure) { s.MacKey.Destroy() },
+		"iv":         func(s *KeysStructure) { s.IV.Destroy() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			structure := full(t)
+			defer structure.Zeroize()
+			drop(structure)
+
+			keys, err := NewKeysFromStruct(structure)
+			if keys != nil {
+				t.Fatal("expected no keys")
+			}
+			var missing *MissingKeyError
+			if !errors.As(err, &missing) {
+				t.Fatalf("expected *MissingKeyError, got %#v", err)
+			}
+			if missing.Field != name {
+				t.Fatalf("Field = %q, want %q", missing.Field, name)
+			}
+		})
+	}
+
+	t.Run("nil structure", func(t *testing.T) {
+		keys, err := NewKeysFromStruct(nil)
+		if keys != nil {
+			t.Fatal("expected no keys")
+		}
+		var missing *MissingKeyError
+		if !errors.As(err, &missing) {
+			t.Fatalf("expected *MissingKeyError, got %#v", err)
+		}
+	})
 }
 
 func TestNewStructFromKeys(t *testing.T) {
 	keys := NewKeys([]byte("c"), []byte("m"), []byte("i"), 7)
-	structure := NewStructFromKeys(keys)
-	if !bytes.Equal(structure.CipherKey, []byte("c")) {
+	structure := mustStructFromKeys(t, keys)
+	if !bytes.Equal(structure.CipherKey.BytesOrNil(), []byte("c")) {
 		t.Fatal("CipherKey mismatch in structure")
 	}
-	if !bytes.Equal(structure.MacKey, []byte("m")) {
+	if !bytes.Equal(structure.MacKey.BytesOrNil(), []byte("m")) {
 		t.Fatal("MacKey mismatch in structure")
 	}
-	if !bytes.Equal(structure.IV, []byte("i")) {
+	if !bytes.Equal(structure.IV.BytesOrNil(), []byte("i")) {
 		t.Fatal("IV mismatch in structure")
 	}
 	if structure.Index != 7 {
 		t.Fatalf("expected index 7, got %d", structure.Index)
 	}
+	// The structure holds its own clones, not views into the live keys.
+	keys.Zeroize()
+	if !bytes.Equal(structure.CipherKey.BytesOrNil(), []byte("c")) {
+		t.Fatal("structure shares guarded memory with the live keys")
+	}
+}
+
+// TestNewStructFromKeys_DestroyedKeys covers the error path: keys whose guarded
+// material is already gone cannot be serialized.
+func TestNewStructFromKeys_DestroyedKeys(t *testing.T) {
+	keys := NewKeys([]byte("c"), []byte("m"), []byte("i"), 7)
+	keys.Zeroize()
+
+	structure, err := NewStructFromKeys(keys)
+	if structure != nil {
+		t.Fatal("expected no structure")
+	}
+	if !errors.Is(err, secret.ErrSecretDestroyed) {
+		t.Fatalf("expected ErrSecretDestroyed, got %#v", err)
+	}
 }
 
 func TestNewKeysFromStruct_RoundTrip(t *testing.T) {
 	original := NewKeys([]byte("cipher32"), []byte("mac32key"), []byte("iv16"), 100)
-	structure := NewStructFromKeys(original)
-	reconstructed := NewKeysFromStruct(structure)
+	structure := mustStructFromKeys(t, original)
+	reconstructed := mustKeysFromStruct(t, structure)
 
 	if !bytes.Equal(reconstructed.CipherKey(), original.CipherKey()) {
 		t.Fatal("round-trip CipherKey mismatch")
@@ -285,21 +362,22 @@ func TestSetSeedMaterial_NilClearsPrevious(t *testing.T) {
 func TestNewKeysFromStruct_WithSeedMaterial(t *testing.T) {
 	seed := []byte("seed-material-32-bytes-long-xxxx")
 	structure := &KeysStructure{
-		CipherKey:    []byte("cipher"),
-		MacKey:       []byte("mac"),
-		IV:           []byte("iv"),
+		CipherKey:    mustGuard(t, []byte("cipher")),
+		MacKey:       mustGuard(t, []byte("mac")),
+		IV:           mustGuard(t, []byte("iv")),
 		Index:        5,
-		SeedMaterial: append([]byte(nil), seed...),
+		SeedMaterial: mustGuard(t, seed),
 	}
+	defer structure.Zeroize()
 
-	keys := NewKeysFromStruct(structure)
+	keys := mustKeysFromStruct(t, structure)
 
 	if !bytes.Equal(keys.SeedMaterial(), seed) {
 		t.Fatalf("SeedMaterial not propagated from struct: got %v, want %v", keys.SeedMaterial(), seed)
 	}
-	// Confirm source struct is not mutated (copy semantics).
-	if !bytes.Equal(structure.SeedMaterial, seed) {
-		t.Fatal("NewKeysFromStruct must not mutate source SeedMaterial")
+	// Confirm source struct is not consumed (clone semantics).
+	if !bytes.Equal(structure.SeedMaterial.BytesOrNil(), seed) {
+		t.Fatal("NewKeysFromStruct must not consume source SeedMaterial")
 	}
 }
 
@@ -308,23 +386,24 @@ func TestNewStructFromKeys_WithSeedMaterial(t *testing.T) {
 	keys := NewKeys([]byte("cipher"), []byte("mac"), []byte("iv"), 3)
 	keys.SetSeedMaterial(seed)
 
-	structure := NewStructFromKeys(keys)
+	structure := mustStructFromKeys(t, keys)
 
-	if !bytes.Equal(structure.SeedMaterial, seed) {
-		t.Fatalf("SeedMaterial not copied to struct: got %v, want %v", structure.SeedMaterial, seed)
+	if !bytes.Equal(structure.SeedMaterial.BytesOrNil(), seed) {
+		t.Fatalf("SeedMaterial not copied to struct: got %v, want %v", structure.SeedMaterial.BytesOrNil(), seed)
 	}
-	// Confirm the struct holds an independent copy (mutation must not affect keys).
-	structure.SeedMaterial[0] ^= 0xFF
-	if bytes.Equal(keys.SeedMaterial(), structure.SeedMaterial) {
+	// Confirm the struct holds an independent clone: releasing the live keys
+	// must leave the structure's copy intact.
+	keys.Zeroize()
+	if !bytes.Equal(structure.SeedMaterial.BytesOrNil(), seed) {
 		t.Fatal("NewStructFromKeys must return an independent copy of SeedMaterial")
 	}
 }
 
 func TestNewStructFromKeys_NoSeedMaterial(t *testing.T) {
 	keys := NewKeys([]byte("cipher"), []byte("mac"), []byte("iv"), 0)
-	structure := NewStructFromKeys(keys)
-	if structure.SeedMaterial != nil {
-		t.Fatalf("expected nil SeedMaterial in struct when not set, got %v", structure.SeedMaterial)
+	structure := mustStructFromKeys(t, keys)
+	if got := structure.SeedMaterial.BytesOrNil(); got != nil {
+		t.Fatalf("expected no SeedMaterial in struct when not set, got %v", got)
 	}
 }
 
@@ -336,8 +415,8 @@ func TestSeedMaterial_RoundTrip(t *testing.T) {
 	original := NewKeys([]byte("cipher-32-bytes-padded-xxxxxxxxx"), []byte("mac-32-bytes-padded-xxxxxxxxxxxxx"), []byte("iv-16-bytes-pad!"), 77)
 	original.SetSeedMaterial(seed)
 
-	structure := NewStructFromKeys(original)
-	reconstructed := NewKeysFromStruct(structure)
+	structure := mustStructFromKeys(t, original)
+	reconstructed := mustKeysFromStruct(t, structure)
 
 	if !bytes.Equal(reconstructed.SeedMaterial(), seed) {
 		t.Fatal("SeedMaterial round-trip mismatch")
@@ -402,18 +481,18 @@ func TestNewStructFromKeys_SeedOnlyForm(t *testing.T) {
 		seed[i] = byte(i + 10)
 	}
 	keys := NewSeedOnlyKeys(3, seed)
-	structure := NewStructFromKeys(keys)
+	structure := mustStructFromKeys(t, keys)
 
-	if len(structure.CipherKey) != 0 {
-		t.Fatalf("expected empty CipherKey in seed-only form, got %v", structure.CipherKey)
+	if got := structure.CipherKey.BytesOrNil(); got != nil {
+		t.Fatalf("expected empty CipherKey in seed-only form, got %v", got)
 	}
-	if len(structure.MacKey) != 0 {
-		t.Fatalf("expected empty MacKey in seed-only form, got %v", structure.MacKey)
+	if got := structure.MacKey.BytesOrNil(); got != nil {
+		t.Fatalf("expected empty MacKey in seed-only form, got %v", got)
 	}
-	if len(structure.IV) != 0 {
-		t.Fatalf("expected empty IV in seed-only form, got %v", structure.IV)
+	if got := structure.IV.BytesOrNil(); got != nil {
+		t.Fatalf("expected empty IV in seed-only form, got %v", got)
 	}
-	if !bytes.Equal(structure.SeedMaterial, seed) {
+	if !bytes.Equal(structure.SeedMaterial.BytesOrNil(), seed) {
 		t.Fatal("SeedMaterial mismatch in seed-only structure")
 	}
 	if structure.Index != 3 {
@@ -432,10 +511,12 @@ func TestNewKeysFromStruct_SeedOnlyBranch(t *testing.T) {
 	}
 	structure := &KeysStructure{
 		Index:        9,
-		SeedMaterial: append([]byte(nil), seed...),
+		SeedMaterial: mustGuard(t, seed),
 		// CipherKey, MacKey, IV intentionally absent (seed-only form).
 	}
-	keys := NewKeysFromStruct(structure)
+	defer structure.Zeroize()
+
+	keys := mustKeysFromStruct(t, structure)
 
 	if keys.cipherKey != nil {
 		t.Fatal("cipherKey must be nil in seed-only branch of NewKeysFromStruct")

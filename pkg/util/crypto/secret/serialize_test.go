@@ -330,3 +330,56 @@ func TestFromSecretNil(t *testing.T) {
 	}
 	value.Destroy() // must not panic
 }
+
+func TestIsZero(t *testing.T) {
+	loaded, err := NewValue([]byte{0x01})
+	if err != nil {
+		t.Fatalf("NewValue: %v", err)
+	}
+	if loaded.IsZero() {
+		t.Error("a secret holding material must not report zero")
+	}
+
+	loaded.Destroy()
+	if !loaded.IsZero() {
+		t.Error("a destroyed secret must report zero")
+	}
+
+	var never Secret
+	if !never.IsZero() {
+		t.Error("a secret that never held material must report zero")
+	}
+}
+
+// TestIsZeroDrivesOmitzero is the point of IsZero: a Secret field tagged
+// omitzero must be written exactly when a []byte field tagged omitempty would
+// have been, so converting such a field does not change the persisted layout.
+func TestIsZeroDrivesOmitzero(t *testing.T) {
+	type guarded struct {
+		Material Secret `json:",omitzero"`
+	}
+	type legacy struct {
+		Material []byte `json:",omitempty"`
+	}
+
+	for _, material := range [][]byte{nil, {}, {0x01, 0x02}} {
+		want, err := json.Marshal(legacy{Material: material})
+		if err != nil {
+			t.Fatalf("json.Marshal legacy: %v", err)
+		}
+
+		value, err := NewValue(append([]byte(nil), material...))
+		if err != nil {
+			t.Fatalf("NewValue: %v", err)
+		}
+		got, err := json.Marshal(guarded{Material: value})
+		value.Destroy()
+		if err != nil {
+			t.Fatalf("json.Marshal guarded: %v", err)
+		}
+
+		if !bytes.Equal(got, want) {
+			t.Errorf("material %x: got %s, want %s", material, got, want)
+		}
+	}
+}

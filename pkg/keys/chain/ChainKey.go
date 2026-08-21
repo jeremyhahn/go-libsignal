@@ -31,45 +31,56 @@ func NewKey(kdf kdf.HKDF, key []byte, index uint32) *Key {
 }
 
 // NewKeyFromStruct will return a chain key built from the given structure.
-// The key bytes are copied before being moved into guarded memory so that
-// the source structure is not zeroized by memguard.
-func NewKeyFromStruct(structure *KeyStructure, kdf kdf.HKDF) *Key {
-	keyCopy := make([]byte, len(structure.Key))
-	copy(keyCopy, structure.Key)
-	return NewKey(
-		kdf,
-		keyCopy,
-		structure.Index,
-	)
+// The key is cloned from the structure's guarded memory straight into the
+// returned key's own guarded memory, so the material never lands on the Go
+// heap and the source structure is left intact for its owner to Zeroize.
+//
+// Returns *MissingKeyError if the structure carries no key material — a chain
+// key is mandatory, and decoding one that is absent or already destroyed must
+// fail rather than yield a Key nothing can ratchet.
+func NewKeyFromStruct(structure *KeyStructure, kdf kdf.HKDF) (*Key, error) {
+	if structure == nil || structure.Key.IsZero() {
+		return nil, &MissingKeyError{}
+	}
+	guardedKey, err := structure.Key.Clone()
+	if err != nil {
+		return nil, err
+	}
+	return &Key{
+		kdf:   kdf,
+		key:   guardedKey,
+		index: structure.Index,
+	}, nil
 }
 
 // NewStructFromKey will return a chain key structure for serialization.
-// The returned structure contains a copy of the key bytes for safe serialization.
-// Callers must call Zeroize() on the returned structure after the serializer
-// has consumed it to prevent key material lingering on the heap.
-func NewStructFromKey(key *Key) *KeyStructure {
-	keyBytes := key.key.Bytes()
-	keyCopy := make([]byte, len(keyBytes))
-	copy(keyCopy, keyBytes)
-	return &KeyStructure{
-		Key:   keyCopy,
-		Index: key.index,
+// The key is cloned guarded-to-guarded, so serialization no longer stages the
+// chain key on the heap. Callers must call Zeroize() on the returned structure
+// once the serializer has consumed it.
+func NewStructFromKey(key *Key) (*KeyStructure, error) {
+	cloned, err := key.key.Clone()
+	if err != nil {
+		return nil, err
 	}
+	return &KeyStructure{
+		Key:   secret.FromSecret(cloned),
+		Index: key.index,
+	}, nil
 }
 
-// KeyStructure is a serializeable structure for chain keys.
+// KeyStructure is a serializeable structure for chain keys. The key is held in
+// guarded memory: it crosses the storage boundary, and a chain key on the
+// plain heap can be swapped out or captured in a core dump, which zeroizing it
+// afterwards does not undo.
 type KeyStructure struct {
-	Key   []byte
+	Key   secret.Secret
 	Index uint32
 }
 
-// Zeroize overwrites all sensitive key material in the structure with zeros.
-// Call this (via defer) after the structure has been serialized to prevent
-// plaintext key bytes from lingering in heap memory.
+// Zeroize releases the guarded chain key. Call this (via defer) after the
+// structure has been serialized. It is idempotent.
 func (k *KeyStructure) Zeroize() {
-	for i := range k.Key {
-		k.Key[i] = 0
-	}
+	k.Key.Destroy()
 }
 
 // Key is used for generating message keys. This key "ratchets" every time a

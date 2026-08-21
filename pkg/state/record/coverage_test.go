@@ -292,7 +292,7 @@ func TestChainStructureWithoutPrivateKey(t *testing.T) {
 func TestNewChainFromStructureInvalidPublicKey(t *testing.T) {
 	structure := &record.ChainStructure{
 		SenderRatchetKeyPublic: []byte{0xFF}, // Invalid ECC point
-		ChainKey:               &chain.KeyStructure{Key: make([]byte, 32), Index: 0},
+		ChainKey:               &chain.KeyStructure{Key: mustGuard(t, make([]byte, 32)), Index: 0},
 	}
 
 	_, err := record.NewChainFromStructure(structure)

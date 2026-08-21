@@ -430,9 +430,9 @@ func TestNewChainFromStructure(t *testing.T) {
 	structure := &record.ChainStructure{
 		SenderRatchetKeyPublic:  kp.PublicKey().Serialize(),
 		SenderRatchetKeyPrivate: mustGuard(t, privKey[:]),
-		ChainKey:                &chain.KeyStructure{Key: make([]byte, 32), Index: 3},
+		ChainKey:                &chain.KeyStructure{Key: mustGuard(t, make([]byte, 32)), Index: 3},
 		MessageKeys: []*message.KeysStructure{
-			{CipherKey: []byte("c"), MacKey: []byte("m"), IV: []byte("i"), Index: 0},
+			{CipherKey: mustGuard(t, []byte("c")), MacKey: mustGuard(t, []byte("m")), IV: mustGuard(t, []byte("i")), Index: 0},
 		},
 	}
 
@@ -470,7 +470,7 @@ func TestNewChainFromStructureNoPrivateKey(t *testing.T) {
 	structure := &record.ChainStructure{
 		SenderRatchetKeyPublic:  kp.PublicKey().Serialize(),
 		SenderRatchetKeyPrivate: secret.Secret{},
-		ChainKey:                &chain.KeyStructure{Key: make([]byte, 32), Index: 0},
+		ChainKey:                &chain.KeyStructure{Key: mustGuard(t, make([]byte, 32)), Index: 0},
 	}
 
 	ch, err := record.NewChainFromStructure(structure)
@@ -785,7 +785,7 @@ func makeFullStateStructure(t *testing.T) *record.StateStructure {
 		SenderChain: &record.ChainStructure{
 			SenderRatchetKeyPublic:  pubKeyBytes,
 			SenderRatchetKeyPrivate: mustGuard(t, privKeyArr[:]),
-			ChainKey:                &chain.KeyStructure{Key: make([]byte, 32), Index: 0},
+			ChainKey:                &chain.KeyStructure{Key: mustGuard(t, make([]byte, 32)), Index: 0},
 		},
 	}
 }
@@ -1202,7 +1202,7 @@ func TestStateFromStructureWithReceiverChains(t *testing.T) {
 	structure.ReceiverChains = []*record.ChainStructure{
 		{
 			SenderRatchetKeyPublic: kp.PublicKey().Serialize(),
-			ChainKey:               &chain.KeyStructure{Key: make([]byte, 32), Index: 0},
+			ChainKey:               &chain.KeyStructure{Key: mustGuard(t, make([]byte, 32)), Index: 0},
 		},
 	}
 

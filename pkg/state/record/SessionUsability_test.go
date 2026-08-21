@@ -190,7 +190,7 @@ func TestStateHasUsableSenderChain_NotStale_StaleUnacknowledged(t *testing.T) {
 		SenderChain: &record.ChainStructure{
 			SenderRatchetKeyPublic:  baseKeyBytes,
 			SenderRatchetKeyPrivate: mustGuard(t, privKeyArr[:]),
-			ChainKey:                &chain.KeyStructure{Key: make([]byte, 32), Index: 0},
+			ChainKey:                &chain.KeyStructure{Key: mustGuard(t, make([]byte, 32)), Index: 0},
 		},
 	}
 
