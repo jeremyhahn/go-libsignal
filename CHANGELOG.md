@@ -55,6 +55,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `make coverage` fails when a package does not run to completion. The
+  per-package loop discarded `go test`'s stderr and ignored its exit status, so
+  a package that failed, panicked or timed out contributed nothing and the run
+  moved on in silence. Because a failing test still writes its coverage
+  profile, the aggregate stayed well-formed and the threshold gate added in
+  #13 passed it honestly — a different hole from the one #13 closed, and both
+  were real. Measured on this tree before the fix: with one package
+  deliberately failing, `make coverage` exited 0 and reported the same 90.4% as
+  a clean run. `go list ./...` failing is now fatal for the same reason. The
+  loop moved into `_coverage-collect`, parameterised the way `_coverage-gate`
+  already was, so `coverage-loop-selftest` exercises the real recipe rather
+  than a copy of it; CI runs it next to the existing gate self-test.
+- The same loop now checks that each package's profile was actually appended to
+  the aggregate, and that the temporary is removed afterwards. An unchecked
+  append could drop a package while leaving the aggregate syntactically valid —
+  the identical silent contribution loss, arrived at from the write side rather
+  than the test side — and a temporary that outlived its package would be
+  counted again by the next package whose tests write no profile.
+- The 138 generated `test-*`, `coverage-*` and `bench-*` targets are `.PHONY`,
+  as is `bench`. `bench` was not, and a `bench/` directory exists, so
+  `make bench` matched the directory and reported `'bench' is up to date`
+  while running no benchmarks at all.
+- `make help` advertises the real generated target names. It listed
+  `make test-PACKAGE`, which reads as `make test-cipher`; the targets are named
+  for the package path, so the real name is `make test-pkg/cipher`. Same for
+  the `coverage-` and `bench-` families and the comments above each.
 - The Lint job pins golangci-lint at v2.12.2. It previously took `latest`,
   which moved to v2.13.0 — that release ships a staticcheck whose nilness pass
   panics. `make lint` takes the pin from the same `GOLANGCI_LINT_VERSION`

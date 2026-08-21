@@ -33,6 +33,7 @@ GOBUILD := go build
 GOLANGCI_LINT_VERSION := v2.12.2
 COVERAGE_DIR := coverage
 COVERAGE_SELFTEST_DIR := $(COVERAGE_DIR)/gate-selftest
+COVERAGE_LOOP_SELFTEST_DIR := $(COVERAGE_DIR)/loop-selftest
 COVERAGE_MIN := 90
 
 # Per-package coverage minimums for packages with legitimately untestable branches.
@@ -90,10 +91,23 @@ TESTABLE_PACKAGES := pkg/accountkeys pkg/attest pkg/backup pkg/cipher pkg/device
 	interop-live-build interop-live interop-live-session interop-live-sealed \
 	interop-live-group interop-live-backup interop-docker \
 	vet lint clean coverage coverage-gate-selftest _coverage-gate help \
+	coverage-loop-selftest _coverage-collect \
 	ci security gosec govulncheck staticcheck errcheck nilcheck \
 	modverify trivy trivy-image \
 	fips fips-build fips-test \
-	test-slow-session examples-build
+	test-slow-session examples-build bench \
+	_pkg_min_pkg_groups_ratchet _pkg_min_pkg_mlkembraid \
+	_pkg_min_pkg_tripleratchet _pkg_min_pkg_util_crypto_secret
+
+# The generated per-package targets are actions, never files, so they have to
+# be .PHONY as well. `bench` above is the cautionary case rather than a
+# hypothetical: a `bench/` DIRECTORY exists in this repo, so without the
+# declaration make considered the target already satisfied and reported
+# "'bench' is up to date" while running no benchmarks at all. Any name below
+# acquires the same shadow the day someone adds a matching path.
+.PHONY: $(addprefix test-,$(TESTABLE_PACKAGES)) \
+	$(addprefix coverage-,$(TESTABLE_PACKAGES)) \
+	$(addprefix bench-,$(TESTABLE_PACKAGES))
 
 # ==============================================================================
 # Build
@@ -194,7 +208,8 @@ interop-wire-emit:
 		--out tests/interop/fixtures/wire/ \
 		--frame-aes-out tests/interop/fixtures/messagebackup/frame_aes.json
 
-# Package-specific test targets: make test-cipher, make test-poksho, etc.
+# Package-specific test targets, named for the package PATH, not its base:
+#   make test-pkg/cipher, make test-pkg/poksho, make test-pkg/keys/chain
 $(addprefix test-,$(TESTABLE_PACKAGES)):
 	$(GOTEST) -v ./$(subst test-,,$@)/...
 
@@ -254,17 +269,108 @@ awk -v pct="$$PCT" -v min="$(2)" 'BEGIN { \
 }'
 endef
 
+# Internal: runs the per-package collection over PKGS, appending each package's
+# profile to PROFILE and failing if any package did not run to completion.
+#
+# Parameterised so the self-test below exercises the REAL loop rather than a
+# copy of it -- the same arrangement _coverage-gate uses for the threshold.
+#
+# The two things this fixes are both fail-open holes, and they compound:
+# `go test`'s exit status was ignored and its diagnostics went to /dev/null, so
+# a package that failed, panicked or timed out contributed silently and the run
+# moved on. A failing test still WRITES its coverage profile, so the resulting
+# aggregate stayed perfectly well-formed and the threshold gate #13 added
+# passed it honestly. Measured on this tree before the fix: with one package
+# deliberately failing, `make coverage` exited 0 and reported the same 90.4% as
+# a clean run.
+_coverage-collect:
+	@rm -f $(COVERAGE_DIR)/pkg.out
+	@failed=""; \
+	for pkg in $(PKGS); do \
+		if ! $(GOTEST) -coverprofile=$(COVERAGE_DIR)/pkg.out -covermode=atomic "$$pkg"; then \
+			failed="$$failed $$pkg"; \
+		fi; \
+		if [ -f $(COVERAGE_DIR)/pkg.out ]; then \
+			if ! tail -n +2 $(COVERAGE_DIR)/pkg.out >> $(PROFILE); then \
+				echo ""; \
+				echo "FAIL: could not append $$pkg's profile to $(PROFILE)."; \
+				echo "      Continuing would drop that package from the aggregate while"; \
+				echo "      leaving the aggregate syntactically valid -- the same silent"; \
+				echo "      contribution loss this loop exists to stop."; \
+				exit 1; \
+			fi; \
+			if ! rm -f $(COVERAGE_DIR)/pkg.out; then \
+				echo ""; \
+				echo "FAIL: could not remove $(COVERAGE_DIR)/pkg.out after $$pkg."; \
+				echo "      A package whose test writes no profile would then inherit"; \
+				echo "      this one's, counting it twice and attributing it wrongly."; \
+				exit 1; \
+			fi; \
+		fi; \
+	done; \
+	if [ -n "$$failed" ]; then \
+		echo ""; \
+		echo "FAIL: these packages did not run to completion:"; \
+		for pkg in $$failed; do echo "        $$pkg"; done; \
+		echo "      A percentage measured over the packages that did survive is a"; \
+		echo "      real number for a broken tree, with nothing to mark it wrong, so"; \
+		echo "      the run stops here instead of reporting one."; \
+		exit 1; \
+	fi
+
+# Self-test for the fail-closed collection loop, in the shape of
+# coverage-gate-selftest: drive the real recipe over inputs whose outcome is
+# known, and check the outcome. Two ways a package's coverage can go missing,
+# both of which used to be swallowed:
+#
+#   - the package does not run. An import path that cannot be loaded produces
+#     no profile and exits nonzero.
+#   - the package runs but its profile cannot be appended. A PROFILE that is a
+#     DIRECTORY makes the append fail deterministically, with no need to
+#     simulate a full disk or a quota.
+#
+# The third case is the positive control: a real package must still pass, so a
+# gate that fails everything cannot be mistaken for a gate that works.
+coverage-loop-selftest:
+	@mkdir -p $(COVERAGE_DIR) $(COVERAGE_LOOP_SELFTEST_DIR)/unwritable
+	@failures=0; \
+	for case in "github.com/jeremyhahn/go-libsignal/pkg/nonexistent $(COVERAGE_LOOP_SELFTEST_DIR)/out fail" \
+	            ". $(COVERAGE_LOOP_SELFTEST_DIR)/unwritable fail" \
+	            ". $(COVERAGE_LOOP_SELFTEST_DIR)/out pass"; do \
+		set -- $$case; \
+		[ -d "$$2" ] || : > "$$2"; \
+		if $(MAKE) -s --no-print-directory _coverage-collect \
+				PROFILE="$$2" PKGS="$$1" >/dev/null 2>&1; then \
+			got=pass; \
+		else \
+			got=fail; \
+		fi; \
+		if [ "$$got" = "$$3" ]; then \
+			echo "ok:  pkg=$$1 profile=$$2 loop=$$got"; \
+		else \
+			echo "BAD: pkg=$$1 profile=$$2 loop=$$got, expected $$3"; \
+			failures=$$((failures + 1)); \
+		fi; \
+	done; \
+	rm -rf $(COVERAGE_LOOP_SELFTEST_DIR); \
+	if [ "$$failures" -ne 0 ]; then \
+		echo "FAIL: coverage loop self-test: $$failures case(s) behaved incorrectly"; \
+		exit 1; \
+	fi; \
+	echo "PASS: coverage loop self-test"
+
 coverage:
 	@mkdir -p $(COVERAGE_DIR)
 	@echo "mode: atomic" > $(COVERAGE_DIR)/coverage.out
-	@PKGS=$$(go list ./... 2>/dev/null | grep -vE '$(COVERAGE_EXCLUDE_PATTERN)'); \
-	for pkg in $$PKGS; do \
-		$(GOTEST) -coverprofile=$(COVERAGE_DIR)/pkg.out -covermode=atomic "$$pkg" 2>/dev/null; \
-		if [ -f $(COVERAGE_DIR)/pkg.out ]; then \
-			tail -n +2 $(COVERAGE_DIR)/pkg.out >> $(COVERAGE_DIR)/coverage.out; \
-			rm -f $(COVERAGE_DIR)/pkg.out; \
-		fi; \
-	done
+	@PKGS=$$(go list ./...) || { \
+		echo "FAIL: go list ./... failed -- the package list is incomplete, so any"; \
+		echo "      coverage measured from it would be measured over an unknown"; \
+		echo "      subset of the tree."; \
+		exit 1; \
+	}; \
+	$(MAKE) -s --no-print-directory _coverage-collect \
+		PROFILE=$(COVERAGE_DIR)/coverage.out \
+		PKGS="$$(echo "$$PKGS" | grep -vE '$(COVERAGE_EXCLUDE_PATTERN)' | tr '\n' ' ')"
 	@go tool cover -func=$(COVERAGE_DIR)/coverage.out
 	@echo ""
 	@echo "HTML report: $(COVERAGE_DIR)/coverage.html"
@@ -272,7 +378,8 @@ coverage:
 	@echo ""
 	@$(call coverage-gate,$(COVERAGE_DIR)/coverage.out,$(COVERAGE_MIN),TOTAL CODE)
 
-# Package-specific coverage targets: make coverage-cipher, make coverage-poksho, etc.
+# Package-specific coverage targets, named for the package PATH:
+#   make coverage-pkg/cipher, make coverage-pkg/poksho
 # Uses COVERAGE_MIN_<pkg> when defined (for legitimately exempt packages), otherwise
 # falls back to COVERAGE_MIN (90%). Exempt packages are documented above.
 $(addprefix coverage-,$(TESTABLE_PACKAGES)):
@@ -341,7 +448,8 @@ coverage-gate-selftest:
 bench:
 	$(GOTEST) -bench=. -benchmem ./...
 
-# Package-specific benchmark targets: make bench-cipher, make bench-poksho, etc.
+# Package-specific benchmark targets, named for the package PATH:
+#   make bench-pkg/cipher, make bench-pkg/poksho
 $(addprefix bench-,$(TESTABLE_PACKAGES)):
 	$(GOTEST) -bench=. -benchmem -v ./$(subst bench-,,$@)/...
 
@@ -523,7 +631,7 @@ help:
 	@echo "  Testing:"
 	@echo "    make test               - Run all unit tests"
 	@echo "    make test-verbose       - Run all unit tests with verbose output"
-	@echo "    make test-PACKAGE       - Run tests for a specific package"
+	@echo "    make test-pkg/NAME      - Run tests for one package (e.g. test-pkg/cipher)"
 	@echo "    make test-interop         - Run Phase 3a Rust<->Go interop fixture tests"
 	@echo "    make interop-live-build   - Build Rust interop binaries (interop_runner + wire_emitter)"
 	@echo "    make interop-live         - Build and run all Phase 3b live interop tests"
@@ -535,12 +643,13 @@ help:
 	@echo ""
 	@echo "  Coverage:"
 	@echo "    make coverage           - Generate coverage report for all packages"
-	@echo "    make coverage-PACKAGE   - Generate coverage for a specific package"
-	@echo "    make coverage-gate-selftest - Verify the coverage gate fails closed"
+	@echo "    make coverage-pkg/NAME  - Coverage for one package (e.g. coverage-pkg/cipher)"
+	@echo "    make coverage-gate-selftest - Verify the coverage threshold fails closed"
+	@echo "    make coverage-loop-selftest - Verify the per-package loop fails closed"
 	@echo ""
 	@echo "  Benchmarks:"
 	@echo "    make bench              - Run all benchmarks"
-	@echo "    make bench-PACKAGE      - Run benchmarks for a specific package"
+	@echo "    make bench-pkg/NAME     - Benchmarks for one package (e.g. bench-pkg/cipher)"
 	@echo ""
 	@echo "  Quality:"
 	@echo "    make vet                - Run go vet"

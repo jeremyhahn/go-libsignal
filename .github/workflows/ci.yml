@@ -331,6 +331,13 @@ jobs:
       - name: Coverage gate self-test
         run: make coverage-gate-selftest
 
+      # The threshold gate and the loop that feeds it are separate holes. The
+      # gate above reads the aggregate; this proves the loop that BUILDS the
+      # aggregate stops when a package fails, instead of leaving it out and
+      # handing the gate a well-formed profile measured over a broken tree.
+      - name: Coverage loop self-test
+        run: make coverage-loop-selftest
+
       - name: Coverage
         shell: bash
         run: set -o pipefail; make coverage 2>&1 | tee coverage.log
