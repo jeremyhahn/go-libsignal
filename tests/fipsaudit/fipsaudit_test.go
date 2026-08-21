@@ -329,7 +329,7 @@ var register = map[string]map[string]int{
 	// counted entry behind one package. Unlike every other entry here, no
 	// external protocol mandates this primitive -- it is the library that was
 	// chosen, and replacing it is an owner-level decision (docs/FIPS.md).
-	"pkg/util/crypto/secret/secret.go": {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption": 7},
+	"pkg/util/crypto/secret/secret.go": {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption": 6},
 }
 
 // reachRegister is the second half of the allowlist, and the one that survives

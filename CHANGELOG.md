@@ -58,6 +58,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   go1.26.5 bump on 2026-08-14 nothing was failing. Unrelated to the Go 1.27
   wave, which is blocked on `cockroachdb/swiss`.
 
+### Security
+
+- `secret.Secret.Seal` encrypts the secret straight out of guarded memory. It
+  used to copy the plaintext into an ordinary `[]byte` and hand that to
+  `memguard.NewEnclave`, so the key sat on a swappable, core-dumpable heap page
+  until `NewEnclave` wiped it — the same defect fixed in `Secret.Clone`, on the
+  sibling method. Latent rather than live: `Seal` and `OpenEnclave` have no
+  production callers, so nothing was exposed; the point is that the next caller
+  would have inherited it silently. The FIPS exemption register drops from 7
+  memguard-enclave uses in that file to 6.
+
 ### Fixed
 
 - `make coverage` fails when a package does not run to completion. The

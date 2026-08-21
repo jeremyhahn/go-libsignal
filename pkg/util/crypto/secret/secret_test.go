@@ -2,6 +2,7 @@ package secret
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"runtime"
 	"testing"
@@ -508,6 +509,64 @@ func TestSecret_Seal_AfterDestroy(t *testing.T) {
 	enclave := s.Seal()
 	if enclave != nil {
 		t.Error("Seal() should return nil for destroyed secret")
+	}
+}
+
+// TestSecret_Seal_DoesNotStageOnTheHeap is the counterpart to
+// TestSecret_Clone_DoesNotStageOnTheHeap, for the sibling method that carried
+// the same defect: Seal used to copy the plaintext into an ordinary []byte and
+// pass that to memguard.NewEnclave. The round-trip tests above cannot see it —
+// a staged seal is still a correct seal — so the property is measured.
+//
+// The threshold is 1.5x the payload rather than a fraction of it, and that
+// difference matters. Unlike Clone, whose destination is mmap'd and therefore
+// invisible to the heap, an Enclave stores its CIPHERTEXT in an ordinary
+// []byte by construction. One payload of heap growth is the unavoidable floor
+// here; a staged plaintext copy adds a second on top of it. Measured on this
+// tree at a 1 MiB payload: 1.01x sealing from guarded memory, 2.01x with the
+// staged copy restored.
+func TestSecret_Seal_DoesNotStageOnTheHeap(t *testing.T) {
+	const size = 1 << 20 // 1 MiB, large enough to dwarf incidental allocation
+
+	s, err := NewRandom(size)
+	if err != nil {
+		t.Fatalf("NewRandom: %v", err)
+	}
+	// A digest, not a copy. Retaining the plaintext to compare against would put
+	// a megabyte of it on the ordinary heap for the length of the test — the
+	// exact exposure this test exists to forbid, committed by the test itself.
+	// SHA-256 of a 1 MiB random value identifies it without being it.
+	expected := sha256.Sum256(s.Bytes())
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+
+	enclave := s.Seal()
+
+	runtime.ReadMemStats(&after)
+
+	if enclave == nil {
+		t.Fatal("Seal returned nil for a live secret")
+	}
+	grew := after.TotalAlloc - before.TotalAlloc
+	if grew > size+size/2 {
+		t.Errorf("Seal allocated %d heap bytes (%.2fx) for a %d-byte secret; only the "+
+			"enclave's ciphertext should be on the heap, so the plaintext is being "+
+			"staged there as well", grew, float64(grew)/float64(size), size)
+	}
+
+	// The seal still has to be a correct one, and still has to consume the source.
+	if !s.IsDestroyed() {
+		t.Error("Seal must destroy the plaintext secret")
+	}
+	opened, err := OpenEnclave(enclave)
+	if err != nil {
+		t.Fatalf("OpenEnclave: %v", err)
+	}
+	defer opened.Destroy()
+	if sha256.Sum256(opened.Bytes()) != expected {
+		t.Error("sealed secret did not survive the enclave round trip")
 	}
 }
 

@@ -164,16 +164,20 @@ func (s *Secret) Melt() {
 // the plaintext LockedBuffer. The returned Enclave can later be opened with
 // OpenEnclave to recover the secret.
 //
-// Returns nil if the secret has already been destroyed.
+// The encryption reads the locked buffer directly. It must not stage the
+// plaintext in an ordinary []byte first: this used to copy the key into a heap
+// slice and pass that to memguard.NewEnclave, which put it on a swappable,
+// core-dumpable page until NewEnclave wiped it. Wiping afterwards undoes
+// neither exposure. Clone carried the same defect; see the note there.
+//
+// Returns nil if the secret has already been destroyed. The explicit guard
+// covers a nil Secret and a nil buffer as well, which a bare call through
+// s.buf would not.
 func (s *Secret) Seal() *Enclave {
 	if s.IsDestroyed() {
 		return nil
 	}
-	data := s.buf.Bytes()
-	tmp := make([]byte, len(data))
-	copy(tmp, data)
-	s.Destroy()
-	return memguard.NewEnclave(tmp)
+	return s.buf.Seal()
 }
 
 // OpenEnclave decrypts an Enclave and returns the secret in guarded memory.
