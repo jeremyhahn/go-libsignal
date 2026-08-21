@@ -917,9 +917,43 @@ func TestProtoEpochLinkToChain_NilLinkReturnsError(t *testing.T) {
 	}
 }
 
+// TestInsertionSortEpochs is what actually pins the shift loop. Driving the
+// sort through a map cannot: Go randomises iteration order, so a map-based test
+// exercises the shift only on the runs where the shuffle happens to come out
+// unsorted — which is why the function's measured coverage moved between
+// otherwise identical runs. Feeding the slice directly makes every case
+// deterministic.
+func TestInsertionSortEpochs(t *testing.T) {
+	for name, tc := range map[string]struct {
+		in   []uint64
+		want []uint64
+	}{
+		"reverse order":      {[]uint64{2, 1, 0}, []uint64{0, 1, 2}},
+		"already sorted":     {[]uint64{0, 1, 2}, []uint64{0, 1, 2}},
+		"last element first": {[]uint64{2, 0, 1}, []uint64{0, 1, 2}},
+		"duplicates":         {[]uint64{1, 0, 1}, []uint64{0, 1, 1}},
+		"single":             {[]uint64{7}, []uint64{7}},
+		"empty":              {[]uint64{}, []uint64{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := append([]uint64(nil), tc.in...)
+			insertionSortEpochs(got)
+			if len(got) != len(tc.want) {
+				t.Fatalf("length changed: got %v, want %v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("got %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
 // TestSortedEpochs_MultiEpoch verifies that sortedEpochs returns epochs in
-// ascending order regardless of map iteration order. This exercises the inner
-// swap body of the insertion sort.
+// ascending order regardless of map iteration order. It cannot control that
+// order, so it pins the collection-and-sort contract rather than the shift
+// loop; TestInsertionSortEpochs above covers the loop deterministically.
 func TestSortedEpochs_MultiEpoch(t *testing.T) {
 	chains := map[uint64]*EpochChain{
 		2: {},

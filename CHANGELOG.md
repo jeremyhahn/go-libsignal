@@ -86,6 +86,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `make test-PACKAGE`, which reads as `make test-cipher`; the targets are named
   for the package path, so the real name is `make test-pkg/cipher`. Same for
   the `coverage-` and `bench-` families and the comments above each.
+- `sortedEpochs`'s insertion sort is measured deterministically. Its shift loop
+  runs only when Go's randomised map iteration order happens to hand it
+  unsorted keys, so the function's coverage varied between runs on identical
+  source — measured at 81.8% in 1 run of 12 on go1.26.6, 100% otherwise — and
+  moved the repository total between 90.4% and 90.5% at random. The sort moved
+  into `insertionSortEpochs`, which takes a slice and can therefore be tested
+  on input the test chooses; the existing map-level tests keep covering the
+  collection contract (`pkg/spqr`).
 - The Lint job pins golangci-lint at v2.12.2. It previously took `latest`,
   which moved to v2.13.0 — that release ships a staticcheck whose nilness pass
   panics. `make lint` takes the pin from the same `GOLANGCI_LINT_VERSION`

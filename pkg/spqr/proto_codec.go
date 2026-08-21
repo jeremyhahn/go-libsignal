@@ -334,12 +334,24 @@ func chainRecvDirToProto(chain *EpochChain, skipped []skippedRecvRecord) *pqratc
 }
 
 // sortedEpochs returns the epoch keys from chains in ascending order.
-// Uses insertion sort — chain maps are always tiny (≤ 3 epochs).
 func sortedEpochs(chains map[uint64]*EpochChain) []uint64 {
 	epochs := make([]uint64, 0, len(chains))
 	for ep := range chains {
 		epochs = append(epochs, ep)
 	}
+	insertionSortEpochs(epochs)
+	return epochs
+}
+
+// insertionSortEpochs sorts epochs ascending in place. Insertion sort — chain
+// maps are always tiny (≤ 3 epochs).
+//
+// Split out from sortedEpochs so it can be tested on input the test chooses.
+// Driven through the map, the shift loop below runs only when Go's randomised
+// iteration order happens to hand it unsorted keys, so its coverage varied
+// between runs on identical source and moved the repository total by 0.1pp at
+// random (measured 1 run in 12 on go1.26.6).
+func insertionSortEpochs(epochs []uint64) {
 	for i := 1; i < len(epochs); i++ {
 		key := epochs[i]
 		j := i - 1
@@ -349,7 +361,6 @@ func sortedEpochs(chains map[uint64]*EpochChain) []uint64 {
 		}
 		epochs[j+1] = key
 	}
-	return epochs
 }
 
 // mlkembraidStateToProto converts a mlkembraid.State to pqratchetpb.V1State.
