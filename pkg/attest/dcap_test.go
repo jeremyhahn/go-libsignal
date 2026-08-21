@@ -981,11 +981,8 @@ func TestVerifyCertificates_FullChain(t *testing.T) {
 	}
 }
 
-func TestVerifyRootCertificate_NonECDSAPublicKey(t *testing.T) {
-	// We can't easily create a non-ECDSA cert here since we rely on the Go stdlib.
-	// Instead test the key mismatch path more thoroughly.
+func TestVerifyRootCertificate_UnrepresentableIntelKey(t *testing.T) {
 	key1, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	key2, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 
 	template := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
@@ -999,17 +996,24 @@ func TestVerifyRootCertificate_NonECDSAPublicKey(t *testing.T) {
 	certBytes, _ := x509.CreateCertificate(rand.Reader, template, template, &key1.PublicKey, key1)
 	cert, _ := x509.ParseCertificate(certBytes)
 
-	// X matches but Y doesn't — deliberate malformed-key fixture for negative test.
-	// SA1019: accessing X/Y is intentional here; we need a structurally invalid key
-	// that parseIntelRootKey / verifyRootCertificate must reject.
-	mismatchKey := &ecdsa.PublicKey{
-		Curve: elliptic.P256(),
-		X:     key1.X,
-		Y:     key2.Y,
+	// verifyRootCertificate converts the Intel key through ECDH() before
+	// comparing it to the certificate's key, and must reject a key that
+	// conversion cannot represent. P-224 is a valid ECDSA curve that
+	// crypto/ecdh does not implement, so it exercises that branch through the
+	// supported API — an off-curve P-256 point is deliberately unconstructible
+	// via ecdsa.ParseUncompressedPublicKey.
+	unrepresentableKey, err := ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generating P-224 key: %v", err)
 	}
-	err := verifyRootCertificate(cert, mismatchKey)
-	if err == nil {
-		t.Fatal("expected error for Y coordinate mismatch")
+
+	err = verifyRootCertificate(cert, &unrepresentableKey.PublicKey)
+	var chainErr *CertChainError
+	if !errors.As(err, &chainErr) {
+		t.Fatalf("expected *CertChainError, got %#v", err)
+	}
+	if chainErr.Detail != "Intel root key is not a valid P-256 point" {
+		t.Fatalf("rejected on the wrong branch: %q", chainErr.Detail)
 	}
 }
 

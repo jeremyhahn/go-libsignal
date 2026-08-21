@@ -24,6 +24,13 @@ GOTEST_TIMEOUT := 900s
 GOTEST := go test -timeout=$(GOTEST_TIMEOUT)
 GOVET := go vet
 GOBUILD := go build
+
+# PINNED (devops.md §9, documented): v2.13.0 (2026-08-19) ships
+# honnef.co/go/tools v0.8.0-rc.1 whose nilness pass panics ("unhandled builtin
+# recover", crashes on sentry-go) — red gate with zero findings. Unpin when
+# golangci-lint ships a non-rc staticcheck that passes on main. Keep this in
+# lockstep with the version the Lint job pins in .github/workflows/ci.yml.
+GOLANGCI_LINT_VERSION := v2.12.2
 COVERAGE_DIR := coverage
 COVERAGE_SELFTEST_DIR := $(COVERAGE_DIR)/gate-selftest
 COVERAGE_MIN := 90
@@ -355,10 +362,30 @@ fmtcheck:
 	fi
 	@echo "gofmt: all files formatted"
 
+# Checking the VERSION, not mere presence, is the point: an already-installed
+# golangci-lint of a different version answers `which` perfectly well, so a
+# presence test runs whatever the developer happens to have and the pin buys
+# nothing. That is not hypothetical -- @latest is how v2.13.1 got onto this
+# machine and into CI in the first place.
+#
+# Install on mismatch, then re-check and fail closed. The re-check should not
+# be reachable, because line 68 puts $(GOBIN) -- where `go install` writes --
+# at the front of PATH for every recipe. It is here so that if that ever stops
+# holding, or the install fails, the target says so instead of quietly linting
+# with the wrong analyser.
 lint:
-	@which golangci-lint > /dev/null 2>&1 || \
-		(echo "Installing golangci-lint..." && \
-		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest)
+	@have=$$(golangci-lint version 2>/dev/null | sed -nE 's/.*has version ([0-9]+\.[0-9]+\.[0-9]+).*/v\1/p'); \
+	if [ "$$have" != "$(GOLANGCI_LINT_VERSION)" ]; then \
+		echo "golangci-lint $${have:-not installed}, want $(GOLANGCI_LINT_VERSION) -- installing"; \
+		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
+		have=$$(golangci-lint version 2>/dev/null | sed -nE 's/.*has version ([0-9]+\.[0-9]+\.[0-9]+).*/v\1/p'); \
+	fi; \
+	if [ "$$have" != "$(GOLANGCI_LINT_VERSION)" ]; then \
+		echo "FAIL: golangci-lint resolves to $${have:-nothing} after installing"; \
+		echo "      $(GOLANGCI_LINT_VERSION) into $(GOBIN). Linting with a version CI does"; \
+		echo "      not run tells you nothing, so this fails rather than proceeding."; \
+		exit 1; \
+	fi
 	golangci-lint run ./...
 
 # ==============================================================================

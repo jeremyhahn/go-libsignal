@@ -5,7 +5,6 @@ package attest
 
 import (
 	"bytes"
-	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/sha256"
@@ -1049,21 +1048,14 @@ func verifyClaimsHash(evidence *dcapEvidence) error {
 
 // parseIntelRootKey parses Intel's root public key from the uncompressed point.
 func parseIntelRootKey() (*ecdsa.PublicKey, error) {
-	ecdhKey, err := ecdh.P256().NewPublicKey(IntelRootPubKey)
+	// ParseUncompressedPublicKey accepts the same 0x04 || X || Y encoding that
+	// ecdh.Curve.NewPublicKey does, and rejects points that are malformed, off
+	// the curve, or at infinity.
+	key, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), IntelRootPubKey)
 	if err != nil {
 		return nil, &AttestKeyError{Detail: "failed to unmarshal Intel root public key"}
 	}
-	raw := ecdhKey.Bytes() // 65-byte uncompressed: 0x04 || X || Y
-	if len(raw) != 65 {
-		return nil, &AttestKeyError{Detail: "unexpected Intel root key encoding length"}
-	}
-	x := new(big.Int).SetBytes(raw[1:33])
-	y := new(big.Int).SetBytes(raw[33:65])
-	return &ecdsa.PublicKey{
-		Curve: elliptic.P256(),
-		X:     x,
-		Y:     y,
-	}, nil
+	return key, nil
 }
 
 // verifyRootCertificate verifies that the root certificate is self-signed
@@ -1122,30 +1114,22 @@ func verifyCertChain(chain []*x509.Certificate, root *x509.Certificate, currentT
 }
 
 // parseAttestKey parses a 64-byte uncompressed P-256 point (without 0x04 prefix)
-// into an ECDSA public key. The ecdh package validates that the point is on the curve.
+// into an ECDSA public key. Parsing validates that the point is on the curve.
 func parseAttestKey(pubKeyBytes []byte) (*ecdsa.PublicKey, error) {
 	if len(pubKeyBytes) != 64 {
 		return nil, &AttestKeyError{Detail: fmt.Sprintf("attest key must be 64 bytes, got %d", len(pubKeyBytes))}
 	}
 
-	// Prepend the 0x04 uncompressed-point prefix required by ecdh.
+	// Prepend the 0x04 prefix that the uncompressed-point encoding requires.
 	uncompressed := make([]byte, 65)
 	uncompressed[0] = 0x04
 	copy(uncompressed[1:], pubKeyBytes)
 
-	ecdhKey, err := ecdh.P256().NewPublicKey(uncompressed)
+	key, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), uncompressed)
 	if err != nil {
 		return nil, &AttestKeyError{Detail: "attest key point is not on P-256 curve"}
 	}
-
-	x := new(big.Int).SetBytes(pubKeyBytes[:32])
-	y := new(big.Int).SetBytes(pubKeyBytes[32:])
-	_ = ecdhKey // curve validation done above
-	return &ecdsa.PublicKey{
-		Curve: elliptic.P256(),
-		X:     x,
-		Y:     y,
-	}, nil
+	return key, nil
 }
 
 // ecdsaRawToDER converts a raw 64-byte ECDSA signature (r||s) to DER format.

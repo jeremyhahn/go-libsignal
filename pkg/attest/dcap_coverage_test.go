@@ -279,11 +279,15 @@ func TestVerifyEnclaveSignatures_FullValidPath(t *testing.T) {
 	qeSig, _ := ecdsa.SignASN1(rand.Reader, pckKey, reportBodyHash[:])
 
 	attestKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// Bytes() returns 0x04 || X || Y with both coordinates already padded to
+	// the curve's fixed width, which is exactly the encoding parseAttestKey
+	// expects once the prefix is dropped.
+	attestPub, encErr := attestKey.PublicKey.Bytes()
+	if encErr != nil {
+		t.Fatalf("encoding attest public key: %v", encErr)
+	}
 	var attestPubKeyBytes [64]byte
-	xBytes := attestKey.X.Bytes()
-	yBytes := attestKey.Y.Bytes()
-	copy(attestPubKeyBytes[32-len(xBytes):32], xBytes)
-	copy(attestPubKeyBytes[64-len(yBytes):64], yBytes)
+	copy(attestPubKeyBytes[:], attestPub[1:])
 
 	authData := []byte{}
 	h := sha256.New()
@@ -403,11 +407,15 @@ func TestVerifyEnclaveSignatures_NonZeroPaddingInReportData(t *testing.T) {
 	qeSig, _ := ecdsa.SignASN1(rand.Reader, pckKey, reportBodyHash[:])
 
 	attestKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	// Bytes() returns 0x04 || X || Y with both coordinates already padded to
+	// the curve's fixed width, which is exactly the encoding parseAttestKey
+	// expects once the prefix is dropped.
+	attestPub, encErr := attestKey.PublicKey.Bytes()
+	if encErr != nil {
+		t.Fatalf("encoding attest public key: %v", encErr)
+	}
 	var attestPubKeyBytes [64]byte
-	xBytes := attestKey.X.Bytes()
-	yBytes := attestKey.Y.Bytes()
-	copy(attestPubKeyBytes[32-len(xBytes):32], xBytes)
-	copy(attestPubKeyBytes[64-len(yBytes):64], yBytes)
+	copy(attestPubKeyBytes[:], attestPub[1:])
 
 	authData := []byte{}
 	h := sha256.New()

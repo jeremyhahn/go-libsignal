@@ -258,11 +258,21 @@ jobs:
       - name: Vet
         run: make vet
 
-      # Latest action major and latest linter: devops.md §9.
+      # Latest action major: devops.md §9. The linter itself is pinned.
+      #
+      # PINNED (devops.md §9, documented): v2.13.0 (2026-08-19) ships
+      # honnef.co/go/tools v0.8.0-rc.1 whose nilness pass panics ("unhandled
+      # builtin recover", crashes on sentry-go) — red gate with zero findings.
+      # Unpin when golangci-lint ships a non-rc staticcheck that passes on main.
+      #
+      # v2.12.2 bundles an older staticcheck that does not know the Go 1.26
+      # ecdsa deprecations, so this job alone would not have caught them. The
+      # Security Scan job installs staticcheck@latest directly and does; that
+      # is the gate that keeps new SA findings visible while this pin holds.
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.12.2
 
   integration-test:
     name: Integration Test

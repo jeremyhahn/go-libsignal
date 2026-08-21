@@ -61,7 +61,6 @@ func checkMP4BoxDepth(input []byte) error {
 				break // truncated box header; mp4ff will handle it
 			}
 			rawSize := int64(binary.BigEndian.Uint32(input[offset : offset+4]))
-			boxType := string(input[offset+4 : offset+8])
 
 			var (
 				size      int64
@@ -97,7 +96,10 @@ func checkMP4BoxDepth(input []byte) error {
 				break // box extends beyond boundary; mp4ff will reject
 			}
 
-			if containerBoxTypes[boxType] {
+			// Kept inline rather than hoisted into a local: the compiler
+			// elides the allocation only for a conversion used directly as a
+			// map key.
+			if containerBoxTypes[string(input[offset+4:offset+8])] {
 				childDepth := frame.depth + 1
 				if childDepth > maxBoxDepth {
 					return &MediaValidationError{Detail: "MP4 box nesting depth exceeds maximum allowed depth"}

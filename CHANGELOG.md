@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `parseIntelRootKey` and `parseAttestKey` build the DCAP public key with
+  `ecdsa.ParseUncompressedPublicKey` instead of validating the point through
+  `crypto/ecdh` and then reassembling it from `big.Int` coordinates. Go 1.26
+  deprecated `ecdsa.PublicKey.X`/`.Y` because reassembling a key that way can
+  produce an invalid key and because `big.Int` methods are not suitable for
+  operating on cryptographic values. The parser accepts the same encoding and
+  performs the same on-curve and point-at-infinity checks, so accepted and
+  rejected inputs are unchanged (`pkg/attest`).
+- `checkMP4BoxDepth` looks the box type up directly in `containerBoxTypes`
+  rather than materialising a string first, which the compiler lowers to an
+  allocation-free map lookup (`pkg/media`).
+
+### Fixed
+
+- The Lint job pins golangci-lint at v2.12.2. It previously took `latest`,
+  which moved to v2.13.0 — that release ships a staticcheck whose nilness pass
+  panics. `make lint` takes the pin from the same `GOLANGCI_LINT_VERSION`
+  variable, and now compares the installed linter's **version** rather than
+  testing that some golangci-lint exists: a binary of the wrong version answers
+  a presence test perfectly well, which is how a local run could disagree with
+  CI. It installs the pin on mismatch and fails rather than linting with a
+  version CI does not run. The Security Scan job still installs staticcheck at
+  `@latest`, so new SA findings remain visible while the pin holds.
+
 ## [0.2.0-alpha] - 2026-08-19
 
 MINOR rather than PATCH: this release changes five exported signatures. Pre-1.0,
