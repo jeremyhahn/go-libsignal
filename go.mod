@@ -1,6 +1,6 @@
 module github.com/jeremyhahn/go-libsignal
 
-go 1.26.6
+go 1.26.7
 
 require (
 	filippo.io/edwards25519 v1.2.0

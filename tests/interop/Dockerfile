@@ -31,7 +31,7 @@ RUN touch src/main.rs && cargo build --release
 # ---------------------------------------------------------------------------
 # Stage 2: Go test runner
 # ---------------------------------------------------------------------------
-FROM golang:1.26.6-bookworm AS test-runner
+FROM golang:1.26.7-bookworm AS test-runner
 
 # Install the Rust interop binary from stage 1.
 COPY --from=rust-builder /build/target/release/libsignal-interop /usr/local/bin/libsignal-interop

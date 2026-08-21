@@ -52,6 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `checkMP4BoxDepth` looks the box type up directly in `containerBoxTypes`
   rather than materialising a string first, which the compiler lowers to an
   allocation-free map lookup (`pkg/media`).
+- The declared Go toolchain is 1.26.7, the latest 1.26.x, in `go.mod`, every CI
+  workflow and the interop test image. Routine currency rather than a fix:
+  `govulncheck` is clean against the go1.26.6 standard library, so unlike the
+  go1.26.5 bump on 2026-08-14 nothing was failing. Unrelated to the Go 1.27
+  wave, which is blocked on `cockroachdb/swiss`.
 
 ### Fixed
 
