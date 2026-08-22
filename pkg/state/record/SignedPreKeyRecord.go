@@ -161,7 +161,7 @@ func (s *SignedPreKey) Serialize() ([]byte, error) {
 // key out of the key pair into guarded memory. The caller owns the returned
 // structure and must Zeroize it once the serializer is done with it.
 func (s *SignedPreKey) structure() (*SignedPreKeyStructure, error) {
-	privateKey, err := guardECPrivateKey(s.keyPair.PrivateKey())
+	privateKey, err := ecc.GuardPrivateKey(s.keyPair.PrivateKey())
 	if err != nil {
 		return nil, err
 	}

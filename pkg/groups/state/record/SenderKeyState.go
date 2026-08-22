@@ -4,7 +4,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/groups/ratchet"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/bytehelper"
-	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
 const maxMessageKeys = 2000
@@ -30,6 +30,12 @@ func NewSenderKeyStateFromBytes(serialized []byte, serializer SenderKeyStateSeri
 	if err != nil {
 		return nil, err
 	}
+	// The structure decoded here is ours. Now that Deserialize returns guarded
+	// fields, releasing it is mandatory rather than tidy: NewSenderKeyStateFromStructure
+	// clones out of it and deliberately leaves the source intact for its owner,
+	// and memguard sets no finalizer -- so without this every successful load
+	// would strand a duplicate set of secrets mlock'd for the process lifetime.
+	defer stateStructure.Zeroize()
 
 	return NewSenderKeyStateFromStructure(stateStructure, serializer)
 }
@@ -75,44 +81,86 @@ func NewSenderKeyStateFromStructure(structure *SenderKeyStateStructure,
 	if err != nil {
 		return nil, err
 	}
-	signingKeyPrivate, gErr := ecc.NewGuardedECPrivateKey(bytehelper.SliceToArray(structure.SigningKeyPrivate))
+	signingKeyPrivate, gErr := ecc.NewGuardedECPrivateKey(
+		bytehelper.SliceToArray(structure.SigningKeyPrivate.BytesOrNil()))
 	if gErr != nil {
 		return nil, gErr
 	}
 
-	// Build our sender message keys from structure
-	senderMessageKeys := make([]*ratchet.SenderMessageKey, len(structure.Keys))
-	for i := range structure.Keys {
-		senderMessageKeys[i] = ratchet.NewSenderMessageKeyFromStruct(structure.Keys[i])
-	}
-
-	// Build our state object.
+	// Populate the state as it is decoded, so that every guarded allocation made
+	// so far is reachable by the cleanup below, whichever step fails.
 	state := &SenderKeyState{
-		keys:           senderMessageKeys,
 		keyID:          structure.KeyID,
 		messageVersion: structure.MessageVersion,
-		senderChainKey: ratchet.NewSenderChainKeyFromStruct(structure.SenderChainKey),
 		signingKeyPair: ecc.NewECKeyPair(signingKeyPublic, signingKeyPrivate),
 		serializer:     serializer,
 	}
+	handedOver := false
+	defer func() {
+		if !handedOver {
+			destroySenderKeyState(state)
+		}
+	}()
 
+	// Build our sender message keys from structure.
+	state.keys = make([]*ratchet.SenderMessageKey, len(structure.Keys))
+	for i := range structure.Keys {
+		var mkErr error
+		if state.keys[i], mkErr = ratchet.NewSenderMessageKeyFromStruct(structure.Keys[i]); mkErr != nil {
+			return nil, mkErr
+		}
+	}
+
+	var ckErr error
+	if state.senderChainKey, ckErr = ratchet.NewSenderChainKeyFromStruct(structure.SenderChainKey); ckErr != nil {
+		return nil, ckErr
+	}
+
+	handedOver = true
 	return state, nil
 }
 
-// SenderKeyStateStructure is a serializeable structure of SenderKeyState.
+// destroySenderKeyState releases every guarded buffer a partially built state
+// owns. memguard sets no finalizer, so a state abandoned mid-construction keeps
+// its buffers mlock'd for the life of the process unless they are destroyed
+// explicitly.
+func destroySenderKeyState(state *SenderKeyState) {
+	if state == nil {
+		return
+	}
+	if state.senderChainKey != nil {
+		state.senderChainKey.Zeroize()
+	}
+	for _, key := range state.keys {
+		if key != nil {
+			key.Zeroize()
+		}
+	}
+	if state.signingKeyPair != nil {
+		if private, ok := state.signingKeyPair.PrivateKey().(interface{ Destroy() }); ok {
+			private.Destroy()
+		}
+	}
+}
+
+// SenderKeyStateStructure is a serializeable structure of SenderKeyState. The
+// signing private key is held in guarded memory. Unlike a chain or message key
+// it is long-lived — it authenticates every SenderKeyMessage in the group — so
+// a plain-heap copy of it is the worst of the three to leave swappable or
+// capturable in a core dump.
 type SenderKeyStateStructure struct {
 	Keys              []*ratchet.SenderMessageKeyStructure
 	KeyID             uint32
 	MessageVersion    uint32
 	SenderChainKey    *ratchet.SenderChainKeyStructure
-	SigningKeyPrivate []byte
+	SigningKeyPrivate secret.Secret
 	SigningKeyPublic  []byte
 }
 
-// Zeroize overwrites all sensitive key material in the structure with zeros.
-// Call this (via defer) after the structure has been serialized.
+// Zeroize releases all guarded key material in the structure. Call this (via
+// defer) after the structure has been serialized. It is idempotent.
 func (s *SenderKeyStateStructure) Zeroize() {
-	crypto.Zeroize(s.SigningKeyPrivate)
+	s.SigningKeyPrivate.Destroy()
 	if s.SenderChainKey != nil {
 		s.SenderChainKey.Zeroize()
 	}
@@ -201,27 +249,48 @@ func (k *SenderKeyState) RemoveSenderMessageKey(iteration uint32) *ratchet.Sende
 
 // Serialize will return the state as bytes using the given serializer.
 func (k *SenderKeyState) Serialize() ([]byte, error) {
-	st := k.structure()
+	st, err := k.structure()
+	if err != nil {
+		return nil, err
+	}
 	defer st.Zeroize()
 	return k.serializer.Serialize(st)
 }
 
 // structure will return a serializable structure of the
 // the given state so it can be persistently stored.
-func (k *SenderKeyState) structure() *SenderKeyStateStructure {
-	// Convert our sender message keys into a serializeable structure
-	keys := make([]*ratchet.SenderMessageKeyStructure, len(k.keys))
-	for i := range k.keys {
-		keys[i] = ratchet.NewStructFromSenderMessageKey(k.keys[i])
+// The caller owns the returned structure and must Zeroize it once the
+// serializer is done with it; on failure everything built so far is released
+// before returning.
+func (k *SenderKeyState) structure() (_ *SenderKeyStateStructure, err error) {
+	structure := &SenderKeyStateStructure{
+		Keys:             make([]*ratchet.SenderMessageKeyStructure, len(k.keys)),
+		KeyID:            k.keyID,
+		MessageVersion:   k.messageVersion,
+		SigningKeyPublic: k.signingKeyPair.PublicKey().Serialize(),
 	}
 
-	// Build and return our state structure.
-	return &SenderKeyStateStructure{
-		Keys:              keys,
-		KeyID:             k.keyID,
-		MessageVersion:    k.messageVersion,
-		SenderChainKey:    ratchet.NewStructFromSenderChainKey(k.senderChainKey),
-		SigningKeyPrivate: bytehelper.ArrayToSlice(k.signingKeyPair.PrivateKey().Serialize()),
-		SigningKeyPublic:  k.signingKeyPair.PublicKey().Serialize(),
+	// Registered before the first clone, so every guarded allocation made from
+	// here on is covered whichever step fails.
+	defer func() {
+		if err != nil {
+			structure.Zeroize()
+		}
+	}()
+
+	for i := range k.keys {
+		if structure.Keys[i], err = ratchet.NewStructFromSenderMessageKey(k.keys[i]); err != nil {
+			return nil, err
+		}
 	}
+
+	if structure.SenderChainKey, err = ratchet.NewStructFromSenderChainKey(k.senderChainKey); err != nil {
+		return nil, err
+	}
+
+	if structure.SigningKeyPrivate, err = ecc.GuardPrivateKey(k.signingKeyPair.PrivateKey()); err != nil {
+		return nil, err
+	}
+
+	return structure, nil
 }

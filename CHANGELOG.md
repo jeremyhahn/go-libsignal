@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- The group-messaging (sender key) persisted structures now cross the storage
+  boundary in memguard-protected memory: the signing private key
+  (`SenderKeyStateStructure.SigningKeyPrivate`), the sender chain key
+  (`SenderChainKeyStructure.ChainKey`), and each sender message key's IV,
+  cipher key and seed. These were the same exposure as the 1:1 structures
+  below, on the group side. The signing key is the notable one: unlike a chain
+  or message key it is long-lived, authenticating every `SenderKeyMessage` in
+  the group. Decoding a sender key state now also releases everything it has
+  already guarded when a later step fails, so malformed state cannot strand
+  mlock'd pages.
 - Persisted chain keys and message keys now cross the storage boundary in
   memguard-protected memory. `chain.KeyStructure.Key` and the four secret
   fields of `message.KeysStructure` (`CipherKey`, `MacKey`, `IV`,
@@ -34,6 +44,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** `ratchet.NewSenderChainKeyFromStruct`,
+  `ratchet.NewStructFromSenderChainKey`, `ratchet.NewSenderMessageKeyFromStruct`
+  and `ratchet.NewStructFromSenderMessageKey` return `(T, error)` instead of
+  `T`, and reject an absent sender chain key with the typed
+  `*ratchet.MissingKeyError` rather than panicking out of a `memguard`
+  allocation on input an attacker can supply.
+- `ecc.GuardPrivateKey` replaces the unexported helper that was duplicated
+  between the 1:1 and group record layers. It lives in `pkg/ecc` because both
+  need exactly this conversion and neither package can import the other.
 - **Breaking:** `chain.NewKeyFromStruct`, `chain.NewStructFromKey`,
   `message.NewKeysFromStruct` and `message.NewStructFromKeys` return
   `(T, error)` instead of `T`. Moving guarded material can fail, and these

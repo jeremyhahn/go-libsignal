@@ -23,6 +23,10 @@ func NewSenderKeyFromBytes(serialized []byte, serializer SenderKeySerializer,
 	if err != nil {
 		return nil, err
 	}
+	// Ours to release, for the same reason as NewSenderKeyStateFromBytes: the
+	// structure now carries guarded material for every state, and
+	// NewSenderKeyFromStruct clones rather than consumes it.
+	defer senderKeyStructure.Zeroize()
 
 	return NewSenderKeyFromStruct(senderKeyStructure, serializer, stateSerializer)
 }
@@ -31,8 +35,20 @@ func NewSenderKeyFromBytes(serialized []byte, serializer SenderKeySerializer,
 func NewSenderKeyFromStruct(structure *SenderKeyStructure, serializer SenderKeySerializer,
 	stateSerializer SenderKeyStateSerializer) (*SenderKey, error) {
 
-	// Build our sender key states from structure.
+	// Build our sender key states from structure. Each successful call allocates
+	// guarded clones, so a malformed later state must not abandon the earlier
+	// ones: without the cleanup below, a peer supplying records whose last state
+	// is invalid could strand every preceding state's signing key, chain key and
+	// message keys, one record at a time.
 	senderKeyStates := make([]*SenderKeyState, len(structure.SenderKeyStates))
+	handedOver := false
+	defer func() {
+		if !handedOver {
+			for _, state := range senderKeyStates {
+				destroySenderKeyState(state)
+			}
+		}
+	}()
 	for i := range structure.SenderKeyStates {
 		var err error
 		senderKeyStates[i], err = NewSenderKeyStateFromStructure(structure.SenderKeyStates[i], stateSerializer)
@@ -47,6 +63,7 @@ func NewSenderKeyFromStruct(structure *SenderKeyStructure, serializer SenderKeyS
 		serializer:      serializer,
 	}
 
+	handedOver = true
 	return senderKey, nil
 
 }
@@ -168,7 +185,10 @@ func (k *SenderKey) SetSenderKeyState(messageVersion uint32, id uint32, iteratio
 // Serialize will return the record as serialized bytes so it can be
 // persistently stored.
 func (k *SenderKey) Serialize() ([]byte, error) {
-	st := k.structure()
+	st, err := k.structure()
+	if err != nil {
+		return nil, err
+	}
 	defer st.Zeroize()
 	return k.serializer.Serialize(st)
 }
@@ -177,14 +197,22 @@ func (k *SenderKey) Serialize() ([]byte, error) {
 // This is used for serialization to persistently store a session record.
 // Each SenderKeyStateStructure is zeroized after the enclosing Serialize call
 // via the deferred Zeroize on the returned SenderKeyStructure.
-func (k *SenderKey) structure() *SenderKeyStructure {
-	senderKeyStates := make([]*SenderKeyStateStructure, len(k.senderKeyStates))
+// On failure every state structure built so far is released before returning.
+func (k *SenderKey) structure() (_ *SenderKeyStructure, err error) {
+	structure := &SenderKeyStructure{
+		SenderKeyStates: make([]*SenderKeyStateStructure, len(k.senderKeyStates)),
+	}
+	defer func() {
+		if err != nil {
+			structure.Zeroize()
+		}
+	}()
 	for i := range k.senderKeyStates {
-		senderKeyStates[i] = k.senderKeyStates[i].structure()
+		if structure.SenderKeyStates[i], err = k.senderKeyStates[i].structure(); err != nil {
+			return nil, err
+		}
 	}
-	return &SenderKeyStructure{
-		SenderKeyStates: senderKeyStates,
-	}
+	return structure, nil
 }
 
 // Zeroize overwrites all sensitive key material in the record structure.

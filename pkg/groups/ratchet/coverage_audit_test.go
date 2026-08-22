@@ -10,12 +10,12 @@ import (
 func TestSenderChainKeyStructure_Zeroize(t *testing.T) {
 	structure := &SenderChainKeyStructure{
 		Iteration: 5,
-		ChainKey:  []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32},
+		ChainKey:  mustGuard(t, []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}),
 	}
 
 	// Verify non-zero before zeroize.
 	allZero := true
-	for _, b := range structure.ChainKey {
+	for _, b := range structure.ChainKey.BytesOrNil() {
 		if b != 0 {
 			allZero = false
 			break
@@ -27,7 +27,7 @@ func TestSenderChainKeyStructure_Zeroize(t *testing.T) {
 
 	structure.Zeroize()
 
-	for i, b := range structure.ChainKey {
+	for i, b := range structure.ChainKey.BytesOrNil() {
 		if b != 0 {
 			t.Errorf("ChainKey[%d] = %d after Zeroize, want 0", i, b)
 		}
@@ -38,7 +38,6 @@ func TestSenderChainKeyStructure_Zeroize_NilChainKey(t *testing.T) {
 	// A structure with nil ChainKey should not panic on Zeroize.
 	structure := &SenderChainKeyStructure{
 		Iteration: 0,
-		ChainKey:  nil,
 	}
 	structure.Zeroize() // must not panic
 }
@@ -46,7 +45,7 @@ func TestSenderChainKeyStructure_Zeroize_NilChainKey(t *testing.T) {
 func TestSenderChainKeyStructure_Zeroize_EmptyChainKey(t *testing.T) {
 	structure := &SenderChainKeyStructure{
 		Iteration: 1,
-		ChainKey:  []byte{},
+		ChainKey:  mustGuard(t, []byte{}),
 	}
 	structure.Zeroize() // must not panic
 }
@@ -56,24 +55,24 @@ func TestSenderChainKeyStructure_Zeroize_EmptyChainKey(t *testing.T) {
 func TestSenderMessageKeyStructure_Zeroize(t *testing.T) {
 	structure := &SenderMessageKeyStructure{
 		Iteration: 7,
-		IV:        []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
-		CipherKey: []byte{17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48},
-		Seed:      []byte{49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80},
+		IV:        mustGuard(t, []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
+		CipherKey: mustGuard(t, []byte{17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48}),
+		Seed:      mustGuard(t, []byte{49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80}),
 	}
 
 	structure.Zeroize()
 
-	for i, b := range structure.IV {
+	for i, b := range structure.IV.BytesOrNil() {
 		if b != 0 {
 			t.Errorf("IV[%d] = %d after Zeroize, want 0", i, b)
 		}
 	}
-	for i, b := range structure.CipherKey {
+	for i, b := range structure.CipherKey.BytesOrNil() {
 		if b != 0 {
 			t.Errorf("CipherKey[%d] = %d after Zeroize, want 0", i, b)
 		}
 	}
-	for i, b := range structure.Seed {
+	for i, b := range structure.Seed.BytesOrNil() {
 		if b != 0 {
 			t.Errorf("Seed[%d] = %d after Zeroize, want 0", i, b)
 		}
@@ -84,9 +83,6 @@ func TestSenderMessageKeyStructure_Zeroize_NilFields(t *testing.T) {
 	// A structure with nil fields should not panic on Zeroize.
 	structure := &SenderMessageKeyStructure{
 		Iteration: 0,
-		IV:        nil,
-		CipherKey: nil,
-		Seed:      nil,
 	}
 	structure.Zeroize() // must not panic
 }
@@ -96,18 +92,17 @@ func TestSenderMessageKeyStructure_Zeroize_NilFields(t *testing.T) {
 func TestSenderMessageKeyStructure_Zeroize_PartialFields(t *testing.T) {
 	structure := &SenderMessageKeyStructure{
 		Iteration: 3,
-		IV:        []byte{0x01, 0x02, 0x03, 0x04},
-		CipherKey: nil,
-		Seed:      []byte{0xAA, 0xBB},
+		IV:        mustGuard(t, []byte{0x01, 0x02, 0x03, 0x04}),
+		Seed:      mustGuard(t, []byte{0xAA, 0xBB}),
 	}
 	structure.Zeroize() // must not panic and must zero the non-nil fields
 
-	for i, b := range structure.IV {
+	for i, b := range structure.IV.BytesOrNil() {
 		if b != 0 {
 			t.Errorf("IV[%d] = %d after Zeroize, want 0", i, b)
 		}
 	}
-	for i, b := range structure.Seed {
+	for i, b := range structure.Seed.BytesOrNil() {
 		if b != 0 {
 			t.Errorf("Seed[%d] = %d after Zeroize, want 0", i, b)
 		}
@@ -224,11 +219,16 @@ func TestSenderMessageKeyStructure_RoundTripWithZeroize(t *testing.T) {
 		t.Fatalf("NewSenderMessageKey failed: %v", err)
 	}
 
-	structure := NewStructFromSenderMessageKey(key)
+	structure, err := NewStructFromSenderMessageKey(key)
 
+	if err != nil {
+
+		t.Fatalf("NewStructFromSenderMessageKey: %v", err)
+
+	}
 	// Save copies of the structure values before zeroize.
-	ivCopy := make([]byte, len(structure.IV))
-	copy(ivCopy, structure.IV)
+	ivCopy := make([]byte, len(structure.IV.BytesOrNil()))
+	copy(ivCopy, structure.IV.BytesOrNil())
 
 	// Zeroize the structure.
 	structure.Zeroize()

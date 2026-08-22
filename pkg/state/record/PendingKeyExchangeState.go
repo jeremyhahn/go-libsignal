@@ -142,13 +142,13 @@ func (p *PendingKeyExchange) structure() (_ *PendingKeyExchangeStructure, err er
 		}
 	}()
 
-	if structure.LocalBaseKeyPrivate, err = guardECPrivateKey(p.localBaseKeyPair.PrivateKey()); err != nil {
+	if structure.LocalBaseKeyPrivate, err = ecc.GuardPrivateKey(p.localBaseKeyPair.PrivateKey()); err != nil {
 		return nil, err
 	}
-	if structure.LocalRatchetKeyPrivate, err = guardECPrivateKey(p.localRatchetKeyPair.PrivateKey()); err != nil {
+	if structure.LocalRatchetKeyPrivate, err = ecc.GuardPrivateKey(p.localRatchetKeyPair.PrivateKey()); err != nil {
 		return nil, err
 	}
-	if structure.LocalIdentityKeyPrivate, err = guardECPrivateKey(p.localIdentityKeyPair.PrivateKey()); err != nil {
+	if structure.LocalIdentityKeyPrivate, err = ecc.GuardPrivateKey(p.localIdentityKeyPair.PrivateKey()); err != nil {
 		return nil, err
 	}
 

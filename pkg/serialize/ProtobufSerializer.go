@@ -657,7 +657,7 @@ func (s *ProtobufSenderKeyStateSerializer) Deserialize(serialized []byte) (*grou
 		return nil, err
 	}
 
-	return protoToSenderKeyStateStructure(pb), nil
+	return protoToSenderKeyStateStructure(pb)
 }
 
 // =============================================================================
@@ -706,14 +706,29 @@ func (s *ProtobufSenderKeyRecordSerializer) Deserialize(serialized []byte) (*gro
 			Actual:      len(pb.GetSenderKeyStates()),
 		}
 	}
-	states := make([]*groupRecord.SenderKeyStateStructure, len(pb.GetSenderKeyStates()))
-	for i, statePb := range pb.GetSenderKeyStates() {
-		states[i] = protoToSenderKeyStateStructure(statePb)
+	record := &groupRecord.SenderKeyStructure{
+		SenderKeyStates: make([]*groupRecord.SenderKeyStateStructure, len(pb.GetSenderKeyStates())),
 	}
 
-	return &groupRecord.SenderKeyStructure{
-		SenderKeyStates: states,
-	}, nil
+	// Release the states already decoded if a later one fails, so that a
+	// malformed record cannot strand mlock'd pages.
+	handedOver := false
+	defer func() {
+		if !handedOver {
+			record.Zeroize()
+		}
+	}()
+
+	for i, statePb := range pb.GetSenderKeyStates() {
+		state, sErr := protoToSenderKeyStateStructure(statePb)
+		if sErr != nil {
+			return nil, sErr
+		}
+		record.SenderKeyStates[i] = state
+	}
+
+	handedOver = true
+	return record, nil
 }
 
 // =============================================================================
@@ -985,7 +1000,7 @@ func senderKeyStateStructureToProto(state *groupRecord.SenderKeyStateStructure) 
 		MessageVersion: state.MessageVersion,
 		SenderSigningKey: &storagepb.SenderKeyStateStructure_SenderSigningKey{
 			Public:  state.SigningKeyPublic,
-			Private: state.SigningKeyPrivate,
+			Private: state.SigningKeyPrivate.BytesOrNil(),
 		},
 	}
 
@@ -993,7 +1008,7 @@ func senderKeyStateStructureToProto(state *groupRecord.SenderKeyStateStructure) 
 	if state.SenderChainKey != nil {
 		pb.SenderChainKey = &storagepb.SenderKeyStateStructure_SenderChainKey{
 			Iteration: state.SenderChainKey.Iteration,
-			Seed:      state.SenderChainKey.ChainKey,
+			Seed:      state.SenderChainKey.ChainKey.BytesOrNil(),
 		}
 	}
 
@@ -1003,7 +1018,7 @@ func senderKeyStateStructureToProto(state *groupRecord.SenderKeyStateStructure) 
 		for i, key := range state.Keys {
 			pb.SenderMessageKeys[i] = &storagepb.SenderKeyStateStructure_SenderMessageKey{
 				Iteration: key.Iteration,
-				Seed:      key.Seed,
+				Seed:      key.Seed.BytesOrNil(),
 			}
 		}
 	}
@@ -1012,9 +1027,9 @@ func senderKeyStateStructureToProto(state *groupRecord.SenderKeyStateStructure) 
 }
 
 // protoToSenderKeyStateStructure converts a protobuf SenderKeyStateStructure to a Go SenderKeyStateStructure.
-func protoToSenderKeyStateStructure(pb *storagepb.SenderKeyStateStructure) *groupRecord.SenderKeyStateStructure {
+func protoToSenderKeyStateStructure(pb *storagepb.SenderKeyStateStructure) (_ *groupRecord.SenderKeyStateStructure, err error) {
 	if pb == nil {
-		return nil
+		return nil, nil
 	}
 
 	state := &groupRecord.SenderKeyStateStructure{
@@ -1022,17 +1037,29 @@ func protoToSenderKeyStateStructure(pb *storagepb.SenderKeyStateStructure) *grou
 		MessageVersion: pb.GetMessageVersion(),
 	}
 
+	// Release the guarded material already decoded if any step below fails, so
+	// that malformed input cannot strand mlock'd pages.
+	defer func() {
+		if err != nil {
+			state.Zeroize()
+		}
+	}()
+
 	// Convert signing key.
 	if pb.GetSenderSigningKey() != nil {
 		state.SigningKeyPublic = pb.GetSenderSigningKey().GetPublic()
-		state.SigningKeyPrivate = pb.GetSenderSigningKey().GetPrivate()
+		if state.SigningKeyPrivate, err = secret.NewValue(pb.GetSenderSigningKey().GetPrivate()); err != nil {
+			return nil, err
+		}
 	}
 
 	// Convert sender chain key.
 	if pb.GetSenderChainKey() != nil {
 		state.SenderChainKey = &ratchet.SenderChainKeyStructure{
 			Iteration: pb.GetSenderChainKey().GetIteration(),
-			ChainKey:  pb.GetSenderChainKey().GetSeed(),
+		}
+		if state.SenderChainKey.ChainKey, err = secret.NewValue(pb.GetSenderChainKey().GetSeed()); err != nil {
+			return nil, err
 		}
 	}
 
@@ -1040,12 +1067,15 @@ func protoToSenderKeyStateStructure(pb *storagepb.SenderKeyStateStructure) *grou
 	if pb.GetSenderMessageKeys() != nil {
 		state.Keys = make([]*ratchet.SenderMessageKeyStructure, len(pb.GetSenderMessageKeys()))
 		for i, mk := range pb.GetSenderMessageKeys() {
-			state.Keys[i] = &ratchet.SenderMessageKeyStructure{
-				Iteration: mk.GetIteration(),
-				Seed:      mk.GetSeed(),
+			// Attached to state before its field is filled, so a failure part-way
+			// through leaves what was already guarded reachable by the cleanup.
+			ks := &ratchet.SenderMessageKeyStructure{Iteration: mk.GetIteration()}
+			state.Keys[i] = ks
+			if ks.Seed, err = secret.NewValue(mk.GetSeed()); err != nil {
+				return nil, err
 			}
 		}
 	}
 
-	return state
+	return state, nil
 }

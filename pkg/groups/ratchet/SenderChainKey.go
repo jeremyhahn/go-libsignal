@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"math"
 
-	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
@@ -38,35 +37,57 @@ func NewSenderChainKey(iteration uint32, chainKey []byte) *SenderChainKey {
 }
 
 // NewSenderChainKeyFromStruct will return a new chain key object from the
-// given serializeable structure.
-func NewSenderChainKeyFromStruct(structure *SenderChainKeyStructure) *SenderChainKey {
-	cp := make([]byte, len(structure.ChainKey))
-	copy(cp, structure.ChainKey)
-	return NewSenderChainKey(structure.Iteration, cp)
+// given serializeable structure. The key is cloned from the structure's
+// guarded memory straight into the returned key's own, so the material never
+// lands on the Go heap and the source structure is left intact for its owner
+// to Zeroize.
+//
+// Returns *MissingKeyError if the structure carries no chain key: a sender
+// chain key is mandatory, and decoding one that is absent or already destroyed
+// must fail rather than yield a key nothing can ratchet.
+func NewSenderChainKeyFromStruct(structure *SenderChainKeyStructure) (*SenderChainKey, error) {
+	if structure == nil || structure.ChainKey.IsZero() {
+		return nil, &MissingKeyError{Field: "sender chain key"}
+	}
+	guarded, err := structure.ChainKey.Clone()
+	if err != nil {
+		return nil, err
+	}
+	return &SenderChainKey{
+		iteration: structure.Iteration,
+		chainKey:  guarded,
+	}, nil
 }
 
 // NewStructFromSenderChainKey returns a serializable structure of a SenderChainKey,
-// suitable for persistence and transmission. Mirrors NewSenderChainKeyFromStruct.
-func NewStructFromSenderChainKey(key *SenderChainKey) *SenderChainKeyStructure {
-	src := key.chainKey.Bytes()
-	cp := make([]byte, len(src))
-	copy(cp, src)
+// suitable for persistence and transmission. Mirrors NewSenderChainKeyFromStruct:
+// the key is cloned guarded-to-guarded, so serialization no longer stages it on
+// the heap. Callers must Zeroize the returned structure once the serializer has
+// consumed it.
+func NewStructFromSenderChainKey(key *SenderChainKey) (*SenderChainKeyStructure, error) {
+	cloned, err := key.chainKey.Clone()
+	if err != nil {
+		return nil, err
+	}
 	return &SenderChainKeyStructure{
 		Iteration: key.iteration,
-		ChainKey:  cp,
-	}
+		ChainKey:  secret.FromSecret(cloned),
+	}, nil
 }
 
-// SenderChainKeyStructure is a serializeable structure of SenderChainKeys.
+// SenderChainKeyStructure is a serializeable structure of SenderChainKeys. The
+// chain key is held in guarded memory: it crosses the storage boundary, and a
+// chain key on the plain heap can be swapped out or captured in a core dump,
+// which zeroizing it afterwards does not undo.
 type SenderChainKeyStructure struct {
 	Iteration uint32
-	ChainKey  []byte
+	ChainKey  secret.Secret
 }
 
-// Zeroize overwrites the chain key bytes in the structure with zeros.
-// Call this (via defer) after the structure has been serialized.
+// Zeroize releases the guarded chain key. Call this (via defer) after the
+// structure has been serialized. It is idempotent.
 func (s *SenderChainKeyStructure) Zeroize() {
-	crypto.Zeroize(s.ChainKey)
+	s.ChainKey.Destroy()
 }
 
 // SenderChainKey holds sender chain key material in guarded memory.

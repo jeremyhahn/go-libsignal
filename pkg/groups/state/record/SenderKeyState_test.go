@@ -11,32 +11,11 @@ package record
 
 import (
 	"bytes"
-	"encoding/json"
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/groups/ratchet"
 )
-
-// jsonSenderKeyStateSerializer is a test serializer for SenderKeyState.
-type jsonSenderKeyStateSerializer struct{}
-
-func (s *jsonSenderKeyStateSerializer) Serialize(state *SenderKeyStateStructure) ([]byte, error) {
-	return json.Marshal(state)
-}
-
-func (s *jsonSenderKeyStateSerializer) Deserialize(serialized []byte) (*SenderKeyStateStructure, error) {
-	var structure SenderKeyStateStructure
-	err := json.Unmarshal(serialized, &structure)
-	if err != nil {
-		return nil, err
-	}
-	return &structure, nil
-}
-
-func newTestStateSerializer() SenderKeyStateSerializer {
-	return &jsonSenderKeyStateSerializer{}
-}
 
 func newTestKeyPair(t *testing.T) *ecc.ECKeyPair {
 	t.Helper()
@@ -228,9 +207,9 @@ func TestNewSenderKeyStateFromStructure(t *testing.T) {
 		KeyID: 55,
 		SenderChainKey: &ratchet.SenderChainKeyStructure{
 			Iteration: 3,
-			ChainKey:  chainKey,
+			ChainKey:  mustGuard(t, chainKey),
 		},
-		SigningKeyPrivate: privArr[:],
+		SigningKeyPrivate: mustGuard(t, privArr[:]),
 		SigningKeyPublic:  keyPair.PublicKey().Serialize(),
 	}
 
@@ -253,9 +232,9 @@ func TestNewSenderKeyStateFromStructureWithKeys(t *testing.T) {
 
 	msgKeyStruct := &ratchet.SenderMessageKeyStructure{
 		Iteration: 7,
-		IV:        make([]byte, 16),
-		CipherKey: make([]byte, 32),
-		Seed:      make([]byte, 32),
+		IV:        mustGuard(t, make([]byte, 16)),
+		CipherKey: mustGuard(t, make([]byte, 32)),
+		Seed:      mustGuard(t, make([]byte, 32)),
 	}
 
 	privArr2 := keyPair.PrivateKey().Serialize()
@@ -264,9 +243,9 @@ func TestNewSenderKeyStateFromStructureWithKeys(t *testing.T) {
 		KeyID: 10,
 		SenderChainKey: &ratchet.SenderChainKeyStructure{
 			Iteration: 0,
-			ChainKey:  chainKey,
+			ChainKey:  mustGuard(t, chainKey),
 		},
-		SigningKeyPrivate: privArr2[:],
+		SigningKeyPrivate: mustGuard(t, privArr2[:]),
 		SigningKeyPublic:  keyPair.PublicKey().Serialize(),
 	}
 

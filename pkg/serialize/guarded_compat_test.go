@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/jeremyhahn/go-libsignal/pkg/groups/ratchet"
+	groupRecord "github.com/jeremyhahn/go-libsignal/pkg/groups/state/record"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/chain"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/message"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
@@ -446,5 +448,129 @@ func TestJSONStateSerializerDecodeOverPopulatedStructure(t *testing.T) {
 	}
 	if !structure.RootKey.EqualTo([]byte{0x01, 0x02}) {
 		t.Error("the second decode did not repopulate the root key")
+	}
+}
+
+// The sender-key (group messaging) structures made the same move: the signing
+// private key, the sender chain key, and each sender message key's IV, cipher
+// key and seed. These literals are the layout the []byte fields produced,
+// captured from the tree immediately before that conversion.
+//
+// The fixture carries both message-key shapes on purpose: one fully populated,
+// and one seed-only, where the other two fields render as null. The protobuf
+// schema for a sender message key carries only iteration and seed, so the IV
+// and cipher key appear in the JSON literal and not the wire one — which is
+// exactly the sort of asymmetry a hand-written expectation gets wrong.
+const (
+	legacySenderKeyStateJSON = `{"Keys":[{"Iteration":1,"IV":"QQ==","CipherKey":"Qg==","Seed":"Qw=="},` +
+		`{"Iteration":2,"IV":null,"CipherKey":null,"Seed":"RA=="}],"KeyID":7,"MessageVersion":3,` +
+		`"SenderChainKey":{"Iteration":4,"ChainKey":"MTI="},"SigningKeyPrivate":"IiM=",` +
+		`"SigningKeyPublic":"BRE="}`
+
+	legacySenderKeyStateProtoHex = "080712060804120231321a080a020511120222232205080112014322050802120144" +
+		"2803"
+)
+
+// senderKeyStateFixture builds the state whose encodings the two literals above
+// record.
+func senderKeyStateFixture(t *testing.T) *groupRecord.SenderKeyStateStructure {
+	t.Helper()
+	return &groupRecord.SenderKeyStateStructure{
+		KeyID:             7,
+		MessageVersion:    3,
+		SigningKeyPublic:  []byte{0x05, 0x11},
+		SigningKeyPrivate: mustGuard(t, []byte{0x22, 0x23}),
+		SenderChainKey: &ratchet.SenderChainKeyStructure{
+			Iteration: 4,
+			ChainKey:  mustGuard(t, []byte{0x31, 0x32}),
+		},
+		Keys: []*ratchet.SenderMessageKeyStructure{
+			{
+				Iteration: 1,
+				IV:        mustGuard(t, []byte{0x41}),
+				CipherKey: mustGuard(t, []byte{0x42}),
+				Seed:      mustGuard(t, []byte{0x43}),
+			},
+			{Iteration: 2, Seed: mustGuard(t, []byte{0x44})},
+		},
+	}
+}
+
+// TestJSONSenderKeyStateSerializerLegacyLayout is the byte-identity gate for
+// moving the sender-key material into guarded memory, asserted in both
+// directions: what this tree writes must match what the []byte fields wrote,
+// and a record written before the conversion must still load.
+func TestJSONSenderKeyStateSerializerLegacyLayout(t *testing.T) {
+	s := &JSONSenderKeyStateSerializer{}
+
+	t.Run("this tree writes the legacy layout", func(t *testing.T) {
+		fixture := senderKeyStateFixture(t)
+		defer fixture.Zeroize()
+
+		serialized, err := s.Serialize(fixture)
+		if err != nil {
+			t.Fatalf("Serialize: %v", err)
+		}
+		if string(serialized) != legacySenderKeyStateJSON {
+			t.Errorf("layout changed:\ngot  %s\nwant %s", serialized, legacySenderKeyStateJSON)
+		}
+	})
+
+	t.Run("a legacy record still loads and re-serializes verbatim", func(t *testing.T) {
+		structure, err := s.Deserialize([]byte(legacySenderKeyStateJSON))
+		if err != nil {
+			t.Fatalf("Deserialize legacy state: %v", err)
+		}
+		defer structure.Zeroize()
+
+		if !structure.SigningKeyPrivate.EqualTo([]byte{0x22, 0x23}) {
+			t.Error("signing private key did not load into guarded memory")
+		}
+		if !structure.SenderChainKey.ChainKey.EqualTo([]byte{0x31, 0x32}) {
+			t.Error("sender chain key did not load into guarded memory")
+		}
+		if !structure.Keys[0].IV.EqualTo([]byte{0x41}) || !structure.Keys[0].CipherKey.EqualTo([]byte{0x42}) {
+			t.Error("message key components did not load into guarded memory")
+		}
+		if !structure.Keys[1].IV.IsZero() {
+			t.Error("the seed-only key must carry no IV")
+		}
+
+		serialized, err := s.Serialize(structure)
+		if err != nil {
+			t.Fatalf("Serialize: %v", err)
+		}
+		if string(serialized) != legacySenderKeyStateJSON {
+			t.Errorf("re-serialized layout changed:\ngot  %s\nwant %s", serialized, legacySenderKeyStateJSON)
+		}
+	})
+}
+
+// TestProtobufSenderKeyStateSerializerLegacyLayout is the same gate for the
+// wire format.
+func TestProtobufSenderKeyStateSerializerLegacyLayout(t *testing.T) {
+	s := &ProtobufSenderKeyStateSerializer{}
+	fixture := senderKeyStateFixture(t)
+	defer fixture.Zeroize()
+
+	serialized, err := s.Serialize(fixture)
+	if err != nil {
+		t.Fatalf("Serialize: %v", err)
+	}
+	if got := hex.EncodeToString(serialized); got != legacySenderKeyStateProtoHex {
+		t.Errorf("wire bytes changed:\ngot  %s\nwant %s", got, legacySenderKeyStateProtoHex)
+	}
+
+	decoded, err := s.Deserialize(serialized)
+	if err != nil {
+		t.Fatalf("Deserialize: %v", err)
+	}
+	defer decoded.Zeroize()
+
+	if !decoded.SigningKeyPrivate.EqualTo([]byte{0x22, 0x23}) {
+		t.Error("signing private key did not survive the protobuf round trip in guarded memory")
+	}
+	if !decoded.SenderChainKey.ChainKey.EqualTo([]byte{0x31, 0x32}) {
+		t.Error("sender chain key did not survive the protobuf round trip in guarded memory")
 	}
 }

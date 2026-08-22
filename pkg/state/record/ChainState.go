@@ -210,7 +210,7 @@ func (c *Chain) structure() (_ *ChainStructure, err error) {
 	}
 
 	// Move the sender ratchet private key into guarded memory.
-	if structure.SenderRatchetKeyPrivate, err = guardECPrivateKey(c.senderRatchetKeyPair.PrivateKey()); err != nil {
+	if structure.SenderRatchetKeyPrivate, err = ecc.GuardPrivateKey(c.senderRatchetKeyPair.PrivateKey()); err != nil {
 		return nil, err
 	}
 

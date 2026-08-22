@@ -521,13 +521,13 @@ func TestProtobufSenderKeyStateSerializer_RoundTrip(t *testing.T) {
 	original := &groupRecord.SenderKeyStateStructure{
 		KeyID:             5,
 		SigningKeyPublic:  []byte{0x01},
-		SigningKeyPrivate: []byte{0x02},
+		SigningKeyPrivate: mustGuard(t, []byte{0x02}),
 		SenderChainKey: &ratchet.SenderChainKeyStructure{
 			Iteration: 10,
-			ChainKey:  []byte{0x03},
+			ChainKey:  mustGuard(t, []byte{0x03}),
 		},
 		Keys: []*ratchet.SenderMessageKeyStructure{
-			{Iteration: 1, Seed: []byte{0x04}},
+			{Iteration: 1, Seed: mustGuard(t, []byte{0x04})},
 		},
 	}
 
@@ -566,7 +566,10 @@ func TestProtobufSenderKeyStateSerializer_NilHelpers(t *testing.T) {
 		t.Fatal("expected nil for nil state")
 	}
 
-	result2 := protoToSenderKeyStateStructure(nil)
+	result2, err := protoToSenderKeyStateStructure(nil)
+	if err != nil {
+		t.Fatalf("protoToSenderKeyStateStructure(nil): %v", err)
+	}
 	if result2 != nil {
 		t.Fatal("expected nil for nil proto")
 	}
@@ -905,7 +908,6 @@ func TestProtobufStateSerializer_WithNilChainKey(t *testing.T) {
 		SessionVersion: 3,
 		SenderChain: &record.ChainStructure{
 			SenderRatchetKeyPublic: []byte{0x05, 0x01},
-			ChainKey:               nil,
 			MessageKeys:            nil,
 		},
 	}

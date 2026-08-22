@@ -300,9 +300,9 @@ func TestNewSenderKeyStateFromStructure_InvalidPublicKey(t *testing.T) {
 		KeyID: 1,
 		SenderChainKey: &ratchet.SenderChainKeyStructure{
 			Iteration: 0,
-			ChainKey:  make([]byte, 32),
+			ChainKey:  mustGuard(t, make([]byte, 32)),
 		},
-		SigningKeyPrivate: privArr[:],
+		SigningKeyPrivate: mustGuard(t, privArr[:]),
 		SigningKeyPublic:  []byte{0xFF, 0x01, 0x02}, // invalid key type prefix
 	}
 

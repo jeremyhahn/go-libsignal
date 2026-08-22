@@ -10,32 +10,11 @@
 package record
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/groups/ratchet"
 )
-
-// jsonSenderKeyRecordSerializer is a test serializer for SenderKey records.
-type jsonSenderKeyRecordSerializer struct{}
-
-func (s *jsonSenderKeyRecordSerializer) Serialize(record *SenderKeyStructure) ([]byte, error) {
-	return json.Marshal(record)
-}
-
-func (s *jsonSenderKeyRecordSerializer) Deserialize(serialized []byte) (*SenderKeyStructure, error) {
-	var structure SenderKeyStructure
-	err := json.Unmarshal(serialized, &structure)
-	if err != nil {
-		return nil, err
-	}
-	return &structure, nil
-}
-
-func newTestRecordSerializer() SenderKeySerializer {
-	return &jsonSenderKeyRecordSerializer{}
-}
 
 func TestNewSenderKey(t *testing.T) {
 	recSerializer := newTestRecordSerializer()
@@ -293,9 +272,9 @@ func TestNewSenderKeyFromStruct(t *testing.T) {
 				KeyID: 100,
 				SenderChainKey: &ratchet.SenderChainKeyStructure{
 					Iteration: 0,
-					ChainKey:  make([]byte, 32),
+					ChainKey:  mustGuard(t, make([]byte, 32)),
 				},
-				SigningKeyPrivate: privKey[:],
+				SigningKeyPrivate: mustGuard(t, privKey[:]),
 				SigningKeyPublic:  kp.PublicKey().Serialize(),
 			},
 		},
@@ -326,9 +305,9 @@ func TestNewSenderKeyFromStructInvalidKey(t *testing.T) {
 				KeyID: 1,
 				SenderChainKey: &ratchet.SenderChainKeyStructure{
 					Iteration: 0,
-					ChainKey:  make([]byte, 32),
+					ChainKey:  mustGuard(t, make([]byte, 32)),
 				},
-				SigningKeyPrivate: make([]byte, 32),
+				SigningKeyPrivate: mustGuard(t, make([]byte, 32)),
 				SigningKeyPublic:  []byte{0xFF}, // Invalid key type
 			},
 		},

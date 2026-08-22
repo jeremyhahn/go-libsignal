@@ -88,11 +88,12 @@ func TestNewSenderMessageKeyFromStructOnlyIV(t *testing.T) {
 	}
 	structure := &SenderMessageKeyStructure{
 		Iteration: 3,
-		IV:        iv,
-		CipherKey: nil,
-		Seed:      nil,
+		IV:        mustGuard(t, iv),
 	}
-	key := NewSenderMessageKeyFromStruct(structure)
+	key, err := NewSenderMessageKeyFromStruct(structure)
+	if err != nil {
+		t.Fatalf("NewSenderMessageKeyFromStruct: %v", err)
+	}
 	if key.Iteration() != 3 {
 		t.Errorf("Iteration() = %d, want 3", key.Iteration())
 	}
@@ -116,11 +117,12 @@ func TestNewSenderMessageKeyFromStructOnlySeed(t *testing.T) {
 	}
 	structure := &SenderMessageKeyStructure{
 		Iteration: 9,
-		IV:        nil,
-		CipherKey: nil,
-		Seed:      seed,
+		Seed:      mustGuard(t, seed),
 	}
-	key := NewSenderMessageKeyFromStruct(structure)
+	key, err := NewSenderMessageKeyFromStruct(structure)
+	if err != nil {
+		t.Fatalf("NewSenderMessageKeyFromStruct: %v", err)
+	}
 	if key.Iteration() != 9 {
 		t.Errorf("Iteration() = %d, want 9", key.Iteration())
 	}
@@ -144,11 +146,12 @@ func TestNewSenderMessageKeyFromStructOnlyCipherKey(t *testing.T) {
 	}
 	structure := &SenderMessageKeyStructure{
 		Iteration: 11,
-		IV:        nil,
-		CipherKey: ck,
-		Seed:      nil,
+		CipherKey: mustGuard(t, ck),
 	}
-	key := NewSenderMessageKeyFromStruct(structure)
+	key, err := NewSenderMessageKeyFromStruct(structure)
+	if err != nil {
+		t.Fatalf("NewSenderMessageKeyFromStruct: %v", err)
+	}
 	if key.Iteration() != 11 {
 		t.Errorf("Iteration() = %d, want 11", key.Iteration())
 	}

@@ -133,14 +133,20 @@ func TestSenderChainKeySenderMessageKeyDeterministic(t *testing.T) {
 func TestNewSenderChainKeyFromStruct(t *testing.T) {
 	structure := &SenderChainKeyStructure{
 		Iteration: 10,
-		ChainKey:  []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32},
+		ChainKey:  mustGuard(t, []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}),
 	}
 
-	key := NewSenderChainKeyFromStruct(structure)
+	key, err := NewSenderChainKeyFromStruct(structure)
+
+	if err != nil {
+
+		t.Fatalf("NewSenderChainKeyFromStruct: %v", err)
+
+	}
 	if key.Iteration() != 10 {
 		t.Errorf("Iteration() = %d, want 10", key.Iteration())
 	}
-	if !bytes.Equal(key.Seed(), structure.ChainKey) {
+	if !bytes.Equal(key.Seed(), structure.ChainKey.BytesOrNil()) {
 		t.Error("Seed does not match structure ChainKey")
 	}
 }
@@ -148,9 +154,12 @@ func TestNewSenderChainKeyFromStruct(t *testing.T) {
 func TestNewSenderChainKeyFromStructZeroIteration(t *testing.T) {
 	structure := &SenderChainKeyStructure{
 		Iteration: 0,
-		ChainKey:  make([]byte, 32),
+		ChainKey:  mustGuard(t, make([]byte, 32)),
 	}
-	key := NewSenderChainKeyFromStruct(structure)
+	key, err := NewSenderChainKeyFromStruct(structure)
+	if err != nil {
+		t.Fatalf("NewSenderChainKeyFromStruct: %v", err)
+	}
 	if key.Iteration() != 0 {
 		t.Errorf("Iteration() = %d, want 0", key.Iteration())
 	}
@@ -163,12 +172,18 @@ func TestNewStructFromSenderChainKey(t *testing.T) {
 	}
 	key := NewSenderChainKey(99, chainKey)
 
-	structure := NewStructFromSenderChainKey(key)
+	structure, err := NewStructFromSenderChainKey(key)
+
+	if err != nil {
+
+		t.Fatalf("NewStructFromSenderChainKey: %v", err)
+
+	}
 	if structure.Iteration != 99 {
 		t.Errorf("Structure.Iteration = %d, want 99", structure.Iteration)
 	}
-	if !bytes.Equal(structure.ChainKey, chainKey) {
-		t.Error("Structure.ChainKey does not match original chain key")
+	if !bytes.Equal(structure.ChainKey.BytesOrNil(), chainKey) {
+		t.Error("Structure.ChainKey.BytesOrNil() does not match original chain key")
 	}
 }
 
@@ -179,9 +194,17 @@ func TestSenderChainKeyRoundTrip(t *testing.T) {
 	}
 	original := NewSenderChainKey(77, chainKey)
 
-	structure := NewStructFromSenderChainKey(original)
-	restored := NewSenderChainKeyFromStruct(structure)
+	structure, err := NewStructFromSenderChainKey(original)
 
+	if err != nil {
+
+		t.Fatalf("NewStructFromSenderChainKey: %v", err)
+
+	}
+	restored, err := NewSenderChainKeyFromStruct(structure)
+	if err != nil {
+		t.Fatalf("NewSenderChainKeyFromStruct: %v", err)
+	}
 	if original.Iteration() != restored.Iteration() {
 		t.Errorf("Iteration mismatch: %d vs %d", original.Iteration(), restored.Iteration())
 	}

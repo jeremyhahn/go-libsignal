@@ -78,34 +78,47 @@ func TestNewSenderMessageKeyDifferentSeeds(t *testing.T) {
 }
 
 func TestNewSenderMessageKeyFromStruct(t *testing.T) {
+	// Fill the plaintext first, then guard it once. Guarded memory cannot be
+	// written through BytesOrNil -- memguard makes the mapping read-only, so an
+	// in-place mutation faults rather than failing an assertion.
+	iv := make([]byte, 16)
+	for i := range iv {
+		iv[i] = byte(i)
+	}
+	cipherKey := make([]byte, 32)
+	for i := range cipherKey {
+		cipherKey[i] = byte(i + 16)
+	}
+	seed := make([]byte, 32)
+	for i := range seed {
+		seed[i] = byte(i + 48)
+	}
+
 	structure := &SenderMessageKeyStructure{
 		Iteration: 42,
-		IV:        make([]byte, 16),
-		CipherKey: make([]byte, 32),
-		Seed:      make([]byte, 32),
+		IV:        mustGuard(t, iv),
+		CipherKey: mustGuard(t, cipherKey),
+		Seed:      mustGuard(t, seed),
 	}
-	for i := range structure.IV {
-		structure.IV[i] = byte(i)
-	}
-	for i := range structure.CipherKey {
-		structure.CipherKey[i] = byte(i + 16)
-	}
-	for i := range structure.Seed {
-		structure.Seed[i] = byte(i + 48)
-	}
+	defer structure.Zeroize()
 
-	key := NewSenderMessageKeyFromStruct(structure)
+	key, err := NewSenderMessageKeyFromStruct(structure)
 
+	if err != nil {
+
+		t.Fatalf("NewSenderMessageKeyFromStruct: %v", err)
+
+	}
 	if key.Iteration() != 42 {
 		t.Errorf("Iteration() = %d, want 42", key.Iteration())
 	}
-	if !bytes.Equal(key.Iv(), structure.IV) {
+	if !bytes.Equal(key.Iv(), structure.IV.BytesOrNil()) {
 		t.Error("IV does not match")
 	}
-	if !bytes.Equal(key.CipherKey(), structure.CipherKey) {
+	if !bytes.Equal(key.CipherKey(), structure.CipherKey.BytesOrNil()) {
 		t.Error("CipherKey does not match")
 	}
-	if !bytes.Equal(key.Seed(), structure.Seed) {
+	if !bytes.Equal(key.Seed(), structure.Seed.BytesOrNil()) {
 		t.Error("Seed does not match")
 	}
 }
@@ -113,12 +126,15 @@ func TestNewSenderMessageKeyFromStruct(t *testing.T) {
 func TestNewSenderMessageKeyFromStructEmpty(t *testing.T) {
 	structure := &SenderMessageKeyStructure{
 		Iteration: 0,
-		IV:        nil,
-		CipherKey: nil,
-		Seed:      nil,
 	}
 
-	key := NewSenderMessageKeyFromStruct(structure)
+	key, err := NewSenderMessageKeyFromStruct(structure)
+
+	if err != nil {
+
+		t.Fatalf("NewSenderMessageKeyFromStruct: %v", err)
+
+	}
 	if key.Iteration() != 0 {
 		t.Errorf("Iteration() = %d, want 0", key.Iteration())
 	}
@@ -138,19 +154,24 @@ func TestNewStructFromSenderMessageKey(t *testing.T) {
 		t.Fatalf("NewSenderMessageKey() error: %v", err)
 	}
 
-	structure := NewStructFromSenderMessageKey(key)
+	structure, err := NewStructFromSenderMessageKey(key)
 
+	if err != nil {
+
+		t.Fatalf("NewStructFromSenderMessageKey: %v", err)
+
+	}
 	if structure.Iteration != 10 {
 		t.Errorf("Structure.Iteration = %d, want 10", structure.Iteration)
 	}
-	if !bytes.Equal(structure.IV, key.Iv()) {
-		t.Error("Structure.IV does not match key IV")
+	if !bytes.Equal(structure.IV.BytesOrNil(), key.Iv()) {
+		t.Error("Structure.IV.BytesOrNil() does not match key IV")
 	}
-	if !bytes.Equal(structure.CipherKey, key.CipherKey()) {
-		t.Error("Structure.CipherKey does not match key CipherKey")
+	if !bytes.Equal(structure.CipherKey.BytesOrNil(), key.CipherKey()) {
+		t.Error("Structure.CipherKey.BytesOrNil() does not match key CipherKey")
 	}
-	if !bytes.Equal(structure.Seed, key.Seed()) {
-		t.Error("Structure.Seed does not match key Seed")
+	if !bytes.Equal(structure.Seed.BytesOrNil(), key.Seed()) {
+		t.Error("Structure.Seed.BytesOrNil() does not match key Seed")
 	}
 }
 
@@ -165,9 +186,17 @@ func TestSenderMessageKeyRoundTrip(t *testing.T) {
 		t.Fatalf("NewSenderMessageKey() error: %v", err)
 	}
 
-	structure := NewStructFromSenderMessageKey(original)
-	restored := NewSenderMessageKeyFromStruct(structure)
+	structure, err := NewStructFromSenderMessageKey(original)
 
+	if err != nil {
+
+		t.Fatalf("NewStructFromSenderMessageKey: %v", err)
+
+	}
+	restored, err := NewSenderMessageKeyFromStruct(structure)
+	if err != nil {
+		t.Fatalf("NewSenderMessageKeyFromStruct: %v", err)
+	}
 	if original.Iteration() != restored.Iteration() {
 		t.Errorf("Iteration mismatch: %d vs %d", original.Iteration(), restored.Iteration())
 	}
@@ -272,12 +301,16 @@ func TestNewSenderMessageKeyFromStructPartialFields(t *testing.T) {
 	// Test with only IV set (CipherKey and Seed nil) to exercise nil-guard branches.
 	structure := &SenderMessageKeyStructure{
 		Iteration: 7,
-		IV:        []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
-		CipherKey: nil,
-		Seed:      nil,
+		IV:        mustGuard(t, []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}),
 	}
 
-	key := NewSenderMessageKeyFromStruct(structure)
+	key, err := NewSenderMessageKeyFromStruct(structure)
+
+	if err != nil {
+
+		t.Fatalf("NewSenderMessageKeyFromStruct: %v", err)
+
+	}
 	if key.Iteration() != 7 {
 		t.Errorf("Iteration() = %d, want 7", key.Iteration())
 	}
@@ -296,18 +329,20 @@ func TestNewStructFromSenderMessageKeyNilFields(t *testing.T) {
 	// Exercise the nil-guard branches in NewStructFromSenderMessageKey
 	// with a SenderMessageKey that has nil secret fields.
 	key := &SenderMessageKey{iteration: 3}
-	structure := NewStructFromSenderMessageKey(key)
-
+	structure, err := NewStructFromSenderMessageKey(key)
+	if err != nil {
+		t.Fatalf("NewStructFromSenderMessageKey: %v", err)
+	}
 	if structure.Iteration != 3 {
 		t.Errorf("Iteration = %d, want 3", structure.Iteration)
 	}
-	if structure.IV != nil {
+	if structure.IV.BytesOrNil() != nil {
 		t.Error("IV should be nil when source iv is nil")
 	}
-	if structure.CipherKey != nil {
+	if structure.CipherKey.BytesOrNil() != nil {
 		t.Error("CipherKey should be nil when source cipherKey is nil")
 	}
-	if structure.Seed != nil {
+	if structure.Seed.BytesOrNil() != nil {
 		t.Error("Seed should be nil when source seed is nil")
 	}
 }
