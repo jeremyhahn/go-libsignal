@@ -31,6 +31,30 @@ GOBUILD := go build
 # golangci-lint ships a non-rc staticcheck that passes on main. Keep this in
 # lockstep with the version the Lint job pins in .github/workflows/ci.yml.
 GOLANGCI_LINT_VERSION := v2.12.2
+
+# PINNED for REPRODUCIBILITY, not to dodge a bad release (devops.md §9).
+# v0.8.1 is the latest and is clean on this tree -- unlike the golangci-lint pin
+# above, which exists because v2.13.x is broken. The reason to pin at all is
+# that $(GOBIN) is shared across every agent lane on this host: `which
+# staticcheck` answers perfectly well for whatever version a neighbour last
+# installed, so a presence test runs an analyser nobody chose. That is not
+# hypothetical -- the shared golangci-lint drifted to v2.13.1 for part of
+# 2026-08-21 by exactly that route.
+#
+# CI's Security Scan job deliberately installs @latest instead, on a clean
+# runner where drift cannot happen: discovery of NEW SA findings is its job.
+# When CI reports a finding a local run missed, bump this pin -- that is the
+# intended workflow, not a mystery.
+#
+# The verification and the run happen in ONE shell command against
+# $(STATICCHECK_BIN), so there is no window in which the checked binary and the
+# executed binary can differ -- a check in one recipe line and a bare
+# `staticcheck ./...` in the next is a TOCTOU race on a shared GOBIN.
+#
+# staticcheck reports two identities ("staticcheck 2026.2.1 (0.8.1)"): the
+# release name and the module version. The parenthesised one is the module
+# version, which is what `go install` takes.
+STATICCHECK_VERSION := v0.8.1
 COVERAGE_DIR := coverage
 COVERAGE_SELFTEST_DIR := $(COVERAGE_DIR)/gate-selftest
 COVERAGE_LOOP_SELFTEST_DIR := $(COVERAGE_DIR)/loop-selftest
@@ -66,6 +90,25 @@ COVERAGE_MIN_mlkembraid := 87
 COVERAGE_MIN_tripleratchet := 87
 COVERAGE_MIN_util_crypto_secret := 88
 GOBIN := $(shell go env GOPATH)/bin
+
+# Analysers this repo pins live HERE, not in $(GOBIN). $(GOBIN) is shared across
+# every agent lane on this host, so a version verified there can be replaced by
+# a neighbour between the check and the run -- and installing into it makes this
+# repo the thing that changes other lanes' tools. A repo-local directory removes
+# both: nothing else writes to it, and the check and the run name the same path.
+TOOLS_BIN := $(CURDIR)/.tools/bin
+CI_WORKFLOW := .github/workflows/ci.yml
+STATICCHECK_BIN := $(TOOLS_BIN)/staticcheck
+STATICCHECK_LATEST_BIN := $(TOOLS_BIN)-latest/staticcheck
+
+# The lint retry loop invokes $(LINT_CMD) rather than a bare `golangci-lint`,
+# so lint-retry-selftest can drive it with a stub by overriding this variable.
+# A stub planted on PATH would NOT work: the `export PATH` below prepends
+# $(GOBIN), the real linter wins, and the self-test passes against any recipe.
+LINT_CMD := golangci-lint run ./...
+LINT_RETRY_MAX := 5
+LINT_RETRY_DELAY := 10
+
 export PATH := $(GOBIN):$(PATH)
 export GOWORK := off
 
@@ -90,10 +133,11 @@ TESTABLE_PACKAGES := pkg/accountkeys pkg/attest pkg/backup pkg/cipher pkg/device
 	interop-fixtures-check interop-fixtures-refresh \
 	interop-live-build interop-live interop-live-session interop-live-sealed \
 	interop-live-group interop-live-backup interop-docker \
-	vet lint clean coverage coverage-gate-selftest _coverage-gate help \
+	vet lint _lint-retry lint-retry-selftest \
+	clean coverage coverage-gate-selftest _coverage-gate help \
 	coverage-loop-selftest _coverage-collect \
 	ci security gosec govulncheck staticcheck errcheck nilcheck \
-	modverify trivy trivy-image \
+	modverify trivy trivy-image staticcheck-latest staticcheck-selftest \
 	fips fips-build fips-test \
 	test-slow-session test-proptest test-proptest-selftest examples-build bench \
 	_pkg_min_pkg_groups_ratchet _pkg_min_pkg_mlkembraid \
@@ -240,6 +284,60 @@ test-proptest-selftest:
 		exit 1; \
 	fi; \
 	echo "PASS: property-test target self-test"
+# Self-test for the pinned-analyser property, in the shape of
+# coverage-gate-selftest. The concurrency Codex raised on #33 cannot be
+# reproduced by racing a real neighbour, so assert the two properties that make
+# the race impossible instead:
+#
+#   1. the recipe EXECUTES $(STATICCHECK_BIN) rather than a bare `staticcheck`
+#      that PATH would resolve;
+#   2. $(STATICCHECK_BIN) lives OUTSIDE $(GOBIN), so no other lane writes to the
+#      path that was verified.
+#
+# Together those close the window: same path checked and run, in one shell, on a
+# directory nobody else touches.
+#
+# An earlier draft of this target tried to prove (1) behaviourally, by planting a
+# hostile `staticcheck` on PATH and checking the target ignored it. That check
+# PASSED against a deliberately broken recipe -- the `export PATH` above prepends
+# $(GOBIN) for every recipe, so the planted binary never won and the check could
+# not fail for the reason it claimed. It is gone rather than left looking
+# reassuring. lint-retry-selftest avoids the same trap by naming its stub through
+# $(LINT_CMD) instead of planting it on PATH.
+staticcheck-selftest:
+	@failures=0; \
+	recipe=$$($(MAKE) -n staticcheck 2>/dev/null); \
+	case "$$recipe" in \
+		*"$(STATICCHECK_BIN) ./..."*) echo "ok:  recipe executes the pinned $(STATICCHECK_BIN)";; \
+		*) echo "BAD: recipe does not execute $(STATICCHECK_BIN)"; failures=$$((failures + 1));; \
+	esac; \
+	case "$(STATICCHECK_BIN)" in \
+		$(GOBIN)/*) \
+			echo "BAD: $(STATICCHECK_BIN) is inside the shared $(GOBIN);"; \
+			echo "     another lane can replace it between the check and the run"; \
+			failures=$$((failures + 1));; \
+		*) echo "ok:  pinned analyser lives outside the shared $(GOBIN)";; \
+	esac; \
+	case "$$(grep -A2 'Run staticcheck' $(CI_WORKFLOW) | grep 'make staticcheck')" in \
+		*"make staticcheck-latest"*) echo "ok:  CI's Security Scan runs staticcheck-latest, not the pin";; \
+		*) \
+			echo "BAD: CI's Security Scan does not run make staticcheck-latest."; \
+			echo "     A workflow that calls the pinned target gets the pin, so the"; \
+			echo "     discovery gate would report success on the very version it"; \
+			echo "     exists to improve on."; \
+			failures=$$((failures + 1));; \
+	esac; \
+	case "$(STATICCHECK_LATEST_BIN)" in \
+		$(STATICCHECK_BIN)) \
+			echo "BAD: the latest and pinned analysers are the same path"; \
+			failures=$$((failures + 1));; \
+		*) echo "ok:  latest and pinned analysers are separate binaries";; \
+	esac; \
+	if [ "$$failures" -ne 0 ]; then \
+		echo "FAIL: pinned-analyser self-test: $$failures check(s) failed"; \
+		exit 1; \
+	fi; \
+	echo "PASS: pinned-analyser self-test"
 
 test-interop:
 	GOWORK=off $(GOTEST) -race -v ./tests/interop/...
@@ -591,7 +689,94 @@ lint:
 		echo "      not run tells you nothing, so this fails rather than proceeding."; \
 		exit 1; \
 	fi
-	golangci-lint run ./...
+	@$(MAKE) --no-print-directory _lint-retry
+
+# golangci-lint takes a global lock, and $(GOBIN) is shared across every agent
+# lane on this host. A concurrent run exits 3 with "parallel golangci-lint is
+# running" -- which reads exactly like a lint failure, and `make ci` includes
+# lint, so the phantom gets debugged. Observed 3 consecutive times on
+# 2026-08-21 before the 4th attempt worked.
+#
+# Retry ONLY that signature. A real finding must fail on the first attempt,
+# because a target that retries failures hides them. Split out of `lint` so
+# lint-retry-selftest can drive it with a stub $(LINT_CMD); the contract it
+# holds to is the four cases that self-test asserts.
+_lint-retry:
+	@attempt=1; \
+	while :; do \
+		out=$$($(LINT_CMD) 2>&1); status=$$?; \
+		case "$$out" in \
+			*"parallel golangci-lint is running"*) ;; \
+			*) printf '%s\n' "$$out"; exit $$status;; \
+		esac; \
+		if [ "$$attempt" -ge $(LINT_RETRY_MAX) ]; then \
+			printf '%s\n' "$$out"; \
+			echo "FAIL: another golangci-lint held the lock for $(LINT_RETRY_MAX) attempts."; \
+			echo "      This is host contention, not a finding -- retry later."; \
+			[ "$$status" -ne 0 ] || status=1; \
+			exit $$status; \
+		fi; \
+		echo "golangci-lint: another run holds the lock (attempt $$attempt) -- contention, not a finding; retrying"; \
+		attempt=$$((attempt + 1)); \
+		sleep $(LINT_RETRY_DELAY); \
+	done
+
+# Self-test for the retry contract Codex raised on #33: an untested retry loop
+# can start retrying genuine findings, or report success after exhausting its
+# attempts, with nothing failing. Four cases, each driven by a stub linter
+# passed as $(LINT_CMD) -- NOT planted on PATH, which $(GOBIN) would shadow.
+# `:=` rather than `?=` on those variables so a stray environment variable
+# cannot redirect what a real `make lint` executes; a command-line override,
+# which is how this target passes its stubs, still wins.
+#
+# LINT_RETRY_DELAY=0 keeps the exhaustion case from sleeping through its own
+# retries; the delay is not part of the contract being asserted.
+lint-retry-selftest:
+	@dir=$$(mktemp -d); trap 'rm -rf "$$dir"' EXIT; failures=0; \
+	printf '#!/bin/sh\nn=$$(cat "$$1"); n=$$((n + 1)); echo "$$n" > "$$1"\n' > $$dir/count.sh; \
+	chmod +x $$dir/count.sh; \
+	printf '#!/bin/sh\n"%s" "%s"\nif [ "$$(cat "%s")" -lt 3 ]; then\n  echo "ERRO Running error: context loading failed: parallel golangci-lint is running"\n  exit 3\nfi\necho "0 issues."\n' \
+		$$dir/count.sh $$dir/n1 $$dir/n1 > $$dir/recovers; \
+	printf '#!/bin/sh\n"%s" "%s"\necho "pkg/foo.go:12:2: undefined: bar (typecheck)"\nexit 1\n' \
+		$$dir/count.sh $$dir/n2 > $$dir/finding; \
+	printf '#!/bin/sh\n"%s" "%s"\necho "ERRO Running error: context loading failed: parallel golangci-lint is running"\nexit 3\n' \
+		$$dir/count.sh $$dir/n3 > $$dir/stuck; \
+	printf '#!/bin/sh\necho "ERRO parallel golangci-lint is running"\nexit 0\n' > $$dir/stuck0; \
+	chmod +x $$dir/recovers $$dir/finding $$dir/stuck $$dir/stuck0; \
+	for f in n1 n2 n3; do echo 0 > $$dir/$$f; done; \
+	out=$$($(MAKE) --no-print-directory _lint-retry LINT_CMD=$$dir/recovers LINT_RETRY_DELAY=0 2>&1); st=$$?; \
+	if [ "$$st" -eq 0 ] && [ "$$(cat $$dir/n1)" -eq 3 ]; then \
+		echo "ok:  a lock failure is retried and recovers (3 attempts, exit 0)"; \
+	else \
+		echo "BAD: lock failure did not recover: exit $$st after $$(cat $$dir/n1) attempt(s)"; \
+		printf '%s\n' "$$out"; failures=$$((failures + 1)); \
+	fi; \
+	out=$$($(MAKE) --no-print-directory _lint-retry LINT_CMD=$$dir/finding LINT_RETRY_DELAY=0 2>&1); st=$$?; \
+	if [ "$$st" -ne 0 ] && [ "$$(cat $$dir/n2)" -eq 1 ] && case "$$out" in *"undefined: bar"*) true;; *) false;; esac; then \
+		echo "ok:  a genuine finding runs once, keeps its status and its output"; \
+	else \
+		echo "BAD: genuine finding: exit $$st after $$(cat $$dir/n2) attempt(s), output:"; \
+		printf '%s\n' "$$out"; failures=$$((failures + 1)); \
+	fi; \
+	out=$$($(MAKE) --no-print-directory _lint-retry LINT_CMD=$$dir/stuck LINT_RETRY_DELAY=0 2>&1); st=$$?; \
+	if [ "$$st" -ne 0 ] && [ "$$(cat $$dir/n3)" -eq $(LINT_RETRY_MAX) ]; then \
+		echo "ok:  a persistent lock stops after $(LINT_RETRY_MAX) attempts, nonzero"; \
+	else \
+		echo "BAD: persistent lock: exit $$st after $$(cat $$dir/n3) attempt(s)"; \
+		printf '%s\n' "$$out"; failures=$$((failures + 1)); \
+	fi; \
+	$(MAKE) --no-print-directory _lint-retry LINT_CMD=$$dir/stuck0 LINT_RETRY_DELAY=0 >/dev/null 2>&1; st=$$?; \
+	if [ "$$st" -ne 0 ]; then \
+		echo "ok:  exhaustion fails closed even when the linter exited 0"; \
+	else \
+		echo "BAD: exhausted retries returned success because the linter exited 0"; \
+		failures=$$((failures + 1)); \
+	fi; \
+	if [ "$$failures" -ne 0 ]; then \
+		echo "FAIL: lint-retry self-test: $$failures check(s) failed"; \
+		exit 1; \
+	fi; \
+	echo "PASS: lint-retry self-test"
 
 # ==============================================================================
 # Security Scanning
@@ -626,11 +811,65 @@ govulncheck:
 		go install golang.org/x/vuln/cmd/govulncheck@latest)
 	govulncheck ./...
 
+# Checking the VERSION, not mere presence -- the same defect fixed for
+# golangci-lint in #17, on the tool that actually reports the SA findings.
+# SA1019 and SA6001 are what took main red on 2026-08-20, so an analyser nobody
+# chose can both miss findings and invent them.
+#
+# Install on mismatch, then re-check and fail closed. The re-check should not be
+# reachable, because $(GOBIN) -- where `go install` writes -- is at the front of
+# PATH for every recipe. It is here so that if that stops holding, the target
+# says so instead of quietly analysing with the wrong version.
+# Two targets because there are two policies, and collapsing them loses one.
+#
+#   staticcheck        pinned, reproducible -- what a local run and `make
+#                      security` use, so a neighbour's install cannot change
+#                      the answer.
+#   staticcheck-latest DISCOVERY -- what CI's Security Scan runs. Pinning this
+#                      one too would mean no new SA rule is ever found, and
+#                      SA1019/SA6001 taking main red on 2026-08-20 is what that
+#                      would have cost.
+#
+# The pinned target ignores whatever is in $(GOBIN), so a workflow that installs
+# @latest there and then calls `make staticcheck` silently gets the pin -- the
+# discovery gate reporting success while running the version it was meant to
+# improve on. That is why CI calls this target by name.
+#
+# It installs into its own directory rather than $(GOBIN) for the same reason
+# the pinned one does: this repo should not decide which staticcheck other lanes
+# get. On a clean CI runner that costs one download.
+staticcheck-latest:
+	@mkdir -p $(dir $(STATICCHECK_LATEST_BIN))
+	@GOBIN=$(dir $(STATICCHECK_LATEST_BIN)) go install honnef.co/go/tools/cmd/staticcheck@latest; \
+	have=$$($(STATICCHECK_LATEST_BIN) -version 2>/dev/null | sed -nE 's/.*\(([0-9]+\.[0-9]+\.[0-9]+)\).*/v\1/p'); \
+	if [ -z "$$have" ]; then \
+		echo "FAIL: staticcheck@latest did not install to $(STATICCHECK_LATEST_BIN)"; \
+		exit 1; \
+	fi; \
+	if [ "$$have" != "$(STATICCHECK_VERSION)" ]; then \
+		echo "NOTE: staticcheck@latest is $$have, the pin is $(STATICCHECK_VERSION)."; \
+		echo "      If this job reports findings the pinned local run does not,"; \
+		echo "      bump STATICCHECK_VERSION -- that is the intended workflow."; \
+	fi; \
+	echo "staticcheck $$have (latest, $(STATICCHECK_LATEST_BIN))"; \
+	$(STATICCHECK_LATEST_BIN) ./...
+
 staticcheck:
-	@which staticcheck > /dev/null 2>&1 || \
-		(echo "Installing staticcheck..." && \
-		go install honnef.co/go/tools/cmd/staticcheck@latest)
-	staticcheck ./...
+	@mkdir -p $(TOOLS_BIN)
+	@have=$$($(STATICCHECK_BIN) -version 2>/dev/null | sed -nE 's/.*\(([0-9]+\.[0-9]+\.[0-9]+)\).*/v\1/p'); \
+	if [ "$$have" != "$(STATICCHECK_VERSION)" ]; then \
+		echo "staticcheck $${have:-not installed}, want $(STATICCHECK_VERSION) -- installing"; \
+		GOBIN=$(TOOLS_BIN) go install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION); \
+		have=$$($(STATICCHECK_BIN) -version 2>/dev/null | sed -nE 's/.*\(([0-9]+\.[0-9]+\.[0-9]+)\).*/v\1/p'); \
+	fi; \
+	if [ "$$have" != "$(STATICCHECK_VERSION)" ]; then \
+		echo "FAIL: $(STATICCHECK_BIN) resolves to $${have:-nothing} after installing"; \
+		echo "      $(STATICCHECK_VERSION). Analysing with a version CI does not run"; \
+		echo "      tells you nothing, so this fails rather than proceeding."; \
+		exit 1; \
+	fi; \
+	echo "staticcheck $$have ($(STATICCHECK_BIN))"; \
+	$(STATICCHECK_BIN) ./...
 
 errcheck:
 	@which errcheck > /dev/null 2>&1 || \
@@ -752,6 +991,7 @@ help:
 	@echo "  Quality:"
 	@echo "    make vet                - Run go vet"
 	@echo "    make lint               - Run golangci-lint"
+	@echo "    make lint-retry-selftest - Verify lint retries contention, not findings"
 	@echo ""
 	@echo "  Security:"
 	@echo "    make security           - Full devops.md §8 suite (gosec, govulncheck, staticcheck, go mod verify, trivy fs)"

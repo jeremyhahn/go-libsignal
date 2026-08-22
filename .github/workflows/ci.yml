@@ -193,7 +193,6 @@ jobs:
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
           go install golang.org/x/vuln/cmd/govulncheck@latest
-          go install honnef.co/go/tools/cmd/staticcheck@latest
 
       - name: Run gosec
         shell: bash
@@ -203,9 +202,13 @@ jobs:
         shell: bash
         run: set -o pipefail; make govulncheck 2>&1 | tee govulncheck.log
 
-      - name: Run staticcheck
+      # staticcheck-latest, NOT staticcheck. This job's purpose is discovering
+      # SA findings a newer analyser reports; `make staticcheck` is pinned for
+      # local reproducibility and would silently run the pin here, reporting
+      # success on the very version this gate exists to improve on.
+      - name: Run staticcheck (latest, discovery)
         shell: bash
-        run: set -o pipefail; make staticcheck 2>&1 | tee staticcheck.log
+        run: set -o pipefail; make staticcheck-latest 2>&1 | tee staticcheck.log
 
       - name: Upload security logs
         if: always() && github.server_url == 'https://github.com'
@@ -301,6 +304,12 @@ jobs:
 
       - name: Vet
         run: make vet
+
+      # Both self-tests assert Makefile contracts and need no analyser, so they
+      # run here rather than in Security Scan. Without a CI gate a self-test only
+      # protects the developer who remembers to run it.
+      - name: Analyser and lint-retry self-tests
+        run: make staticcheck-selftest lint-retry-selftest
 
       # Latest action major: devops.md §9. The linter itself is pinned.
       #

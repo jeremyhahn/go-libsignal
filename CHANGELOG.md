@@ -108,6 +108,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the job cannot pass by testing nothing. Coverage is unaffected (90.4% before
   and after): these are differential tests over paths the unit tests already
   cover.
+- `make staticcheck` compares the installed analyser's **version** instead of
+  testing that some staticcheck exists, pinned via `STATICCHECK_VERSION`
+  (v0.8.1). It is the same defect fixed for golangci-lint, on the tool that
+  actually reports the SA findings — `SA1019` and `SA6001` are what took `main`
+  red on 2026-08-20, and `$(GOBIN)` is shared across agent lanes, so a presence
+  test ran whatever a neighbour last installed. Pinned for reproducibility
+  rather than to dodge a bad release: CI's Security Scan job deliberately keeps
+  `@latest` on a clean runner, because discovering new SA findings is its job.
+  When CI reports one a local run missed, bump the pin. The pinned analyser is
+  installed to a repo-local `.tools/bin` rather than the shared `$(GOBIN)`, and
+  verified and executed in one shell against that path — a check in one recipe
+  line and a bare `staticcheck` in the next is a time-of-check/time-of-use race
+  on a directory other lanes write to. CI's Security Scan calls a separate
+  `make staticcheck-latest`, because a workflow that installs `@latest` and then
+  calls the *pinned* target silently gets the pin, reporting success on the very
+  version the discovery gate exists to improve on.
+- `make lint` retries the `parallel golangci-lint is running` lock error rather
+  than reporting it as a finding. golangci-lint takes a global lock and the host
+  is shared, so a concurrent run exits 3 with a message that reads exactly like
+  a lint failure — observed three times consecutively on 2026-08-21, and
+  `make ci` includes the target. Only that signature is retried; a real finding
+  still fails on the first attempt. The loop lives in its own `_lint-retry`
+  target invoking `$(LINT_CMD)`, so `make lint-retry-selftest` can drive it with
+  a stub linter and assert the whole contract: a lock error is retried and
+  recovers, a genuine finding runs exactly once and keeps its status and output,
+  and a persistent lock stops after `LINT_RETRY_MAX` attempts with a nonzero
+  status — including when the linter itself exited 0, which the loop previously
+  would have passed through as success. The stub is named through `$(LINT_CMD)`
+  rather than planted on `PATH`, because the Makefile prepends `$(GOBIN)` to
+  `PATH` for every recipe and a PATH-planted stub is unreachable — the trap that
+  made an earlier `staticcheck` self-test pass against a deliberately broken
+  recipe. `staticcheck-selftest` and `lint-retry-selftest` both now run in CI's
+  Lint job; neither was gated anywhere before, and an ungated self-test only
+  protects the developer who remembers to run it.
 
 - `make coverage` fails when a package does not run to completion. The
   per-package loop discarded `go test`'s stderr and ignored its exit status, so
