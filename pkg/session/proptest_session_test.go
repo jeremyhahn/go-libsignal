@@ -1,12 +1,27 @@
-//go:build !fips140only
+//go:build proptest && !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
+// Two tags, for two unrelated reasons.
 //
-// 4 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) and the Double Ratchet
-// specification (section 5.2) require it, so the fips140only build tag drops
-// this file from the FIPS gate. `make test` and `make coverage` still run
-// it.
+// proptest: these four tests take 167s of pkg/session's 213s -- 79% of the
+// package -- which left the 900s per-binary cap only 4.4x above a host
+// measured varying up to 8.7x between runs, and that margin is what took the
+// Test job down on 2026-08-21 (#30). They run in their own target and their
+// own CI job, on every PR, with their own budget. Raising GOTEST_TIMEOUT was
+// the alternative and is worse: it governs every suite including the FIPS
+// gate, and the Go timeout is what names the package and dumps goroutines
+// where the job timeout reports nothing.
+//
+// !fips140only: FIPS 140-3 exemption -- see docs/FIPS.md. 4 tests in this
+// file exercise X25519. FIPS 140-3 does not approve that, but the X3DH
+// specification (section 2.1) and the Double Ratchet specification
+// (section 5.2) require it.
+//
+// `make test` no longer runs these; `make test-proptest` does, in CI on every
+// PR. `make coverage` does NOT, and deliberately: measured on the split,
+// pkg/session reports 89.4% with the tag and 89.4% without it. These are
+// differential and property tests over paths the unit tests already cover, so
+// they add no unique statements -- passing -tags proptest to the coverage loop
+// would buy nothing and put 167s back into the Coverage job.
 
 package session_test
 

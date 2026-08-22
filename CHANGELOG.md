@@ -90,6 +90,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `pkg/session`'s four `TestProptest_*` cases move behind a `proptest` build
+  tag with their own `make test-proptest` target and their own CI job. They
+  were 167s of that package's 213s — 79% of it — which left the 900s
+  per-binary cap only 4.4x above a host measured varying 2.9x–8.7x between
+  runs. On 2026-08-21 the margin ran out and the timeout took the whole `Test`
+  job down, on a failure none of the other 225 tests in the package caused.
+  `make test` drops to 46s for that package, taking the margin to roughly 19x.
+  The target carries its own `PROPTEST_TIMEOUT` (2400s) rather than inheriting
+  the shared 900s — a separate job that still times out would only be a
+  smaller blast radius for the same failure — and sits below the job's
+  45-minute cap so Go's timeout fires first and names the package.
+  `GOTEST_TIMEOUT` is deliberately unchanged: it governs every suite including
+  the FIPS gate, and a Go timeout names the package and dumps goroutines where
+  a job timeout reports nothing. The property tests still run on every PR, and
+  `make test-proptest` fails if fewer of them run than the source declares, so
+  the job cannot pass by testing nothing. Coverage is unaffected (90.4% before
+  and after): these are differential tests over paths the unit tests already
+  cover.
+
 - `make coverage` fails when a package does not run to completion. The
   per-package loop discarded `go test`'s stderr and ignored its exit status, so
   a package that failed, panicked or timed out contributed nothing and the run

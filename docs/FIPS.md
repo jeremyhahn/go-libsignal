@@ -498,7 +498,7 @@ overwhelmingly clean, the offending tests were moved into a dedicated
 | `coverage_test.go` | 35 | X25519 | the X3DH specification (section 2.1) and the Double Ratchet specification (section 5.2) require it |
 | `encrypt_decrypt_errors_test.go` | 8 | X25519 | the X3DH specification (section 2.1) and the Double Ratchet specification (section 5.2) require it |
 | `nil_prekey_test.go` | 1 | X25519 | the X3DH specification (section 2.1) and the Double Ratchet specification (section 5.2) require it |
-| `proptest_session_test.go` | 4 | X25519 | the X3DH specification (section 2.1) and the Double Ratchet specification (section 5.2) require it |
+| `proptest_session_test.go` | 4 | X25519 | the X3DH specification (section 2.1) and the Double Ratchet specification (section 5.2) require it. Also carries `//go:build proptest` for an unrelated reason — runtime, not FIPS (#30) — so it is excluded from `make test` as well as from the FIPS gate, and runs in its own CI job |
 | `rust_integration_test.go` | 5 | X25519 | the X3DH specification (section 2.1) and the Double Ratchet specification (section 5.2) require it |
 | `setidentitystore_test.go` | 1 | X25519 | the X3DH specification (section 2.1) and the Double Ratchet specification (section 5.2) require it |
 | `store_errors_test.go` | 11 | X25519 | the X3DH specification (section 2.1) and the Double Ratchet specification (section 5.2) require it |

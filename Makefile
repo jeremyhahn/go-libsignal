@@ -95,7 +95,7 @@ TESTABLE_PACKAGES := pkg/accountkeys pkg/attest pkg/backup pkg/cipher pkg/device
 	ci security gosec govulncheck staticcheck errcheck nilcheck \
 	modverify trivy trivy-image \
 	fips fips-build fips-test \
-	test-slow-session examples-build bench \
+	test-slow-session test-proptest test-proptest-selftest examples-build bench \
 	_pkg_min_pkg_groups_ratchet _pkg_min_pkg_mlkembraid \
 	_pkg_min_pkg_tripleratchet _pkg_min_pkg_util_crypto_secret
 
@@ -143,6 +143,103 @@ integration-test:
 #   Expected runtime: ~60-120 s.
 test-slow-session:
 	GOWORK=off $(GOTEST) -race -count=1 -tags=slow -run TestRust_ChainJumpOverLimit ./pkg/session/...
+
+# Property tests: marked //go:build proptest; excluded from make test.
+#
+# The four TestProptest_* cases are 167s of pkg/session's 213s -- 79% of the
+# package. That left the 900s per-binary cap only 4.4x above a host measured
+# varying 2.9x-8.7x between runs, and on 2026-08-21 the margin ran out: the
+# whole Test job died on a timeout none of the other 225 tests caused (#30).
+# They now run here, in their own CI job with their own budget. Raising
+# GOTEST_TIMEOUT was the alternative and is worse -- it governs every suite
+# including the FIPS gate.
+#
+# -run is a filter, not the selector: the build tag is what includes the file.
+# The count check below is why both are safe. `go test -run` that matches
+# nothing prints "ok ... [no tests to run]" and exits 0, so a target that only
+# ran the command would pass just as loudly after someone renamed a test or
+# dropped the tag. Deriving the expected count from the source means adding a
+# fifth property test cannot silently escape the job either.
+#
+# The whole point of isolating these is giving them their OWN budget, so the
+# target must not inherit GOTEST_TIMEOUT -- that is the 900s cap this split
+# exists because they outgrew. 167s at the worst observed contention (8.7x) is
+# ~1453s, which 900s does not cover; a separate job that still times out is
+# just a smaller blast radius for the same failure.
+#
+# 2400s is 14.4x the measured 167s and 1.65x that worst case, and sits BELOW
+# the job's 45-minute cap on purpose: Go's timeout has to fire first, because
+# it names the package and dumps goroutines where the job timeout reports
+# nothing. Keep that ordering if either number changes.
+PROPTEST_TIMEOUT := 2400s
+PROPTEST_FILE := pkg/session/proptest_session_test.go
+PROPTEST_LOG := proptest.out
+
+test-proptest:
+	@expected=$$(grep -c '^func TestProptest_' $(PROPTEST_FILE)); \
+	if [ "$$expected" -eq 0 ]; then \
+		echo "FAIL: no TestProptest_ functions found in $(PROPTEST_FILE);"; \
+		echo "      the file moved or was renamed, and this job would have"; \
+		echo "      reported success while testing nothing."; \
+		exit 1; \
+	fi; \
+	echo "expecting $$expected property tests from $(PROPTEST_FILE)"; \
+	GOWORK=off go test -timeout=$(PROPTEST_TIMEOUT) -race -count=1 -tags=proptest -v -run '^TestProptest_' ./pkg/session/ > $(PROPTEST_LOG) 2>&1; \
+	status=$$?; \
+	cat $(PROPTEST_LOG); \
+	ran=$$(grep -cE '^--- (PASS|FAIL): TestProptest_' $(PROPTEST_LOG) || true); \
+	rm -f $(PROPTEST_LOG); \
+	if [ "$$status" -ne 0 ]; then exit $$status; fi; \
+	if [ "$$ran" -ne "$$expected" ]; then \
+		echo "FAIL: $$ran property tests ran, but $$expected are declared in"; \
+		echo "      $(PROPTEST_FILE). A property test that never runs is worse"; \
+		echo "      than one that fails, because nothing says so."; \
+		exit 1; \
+	fi; \
+	echo "PASS: all $$expected property tests ran"
+
+# Self-test for the property-test target, in the shape of
+# coverage-gate-selftest: check the properties that make the target worth
+# having, rather than trusting that it still has them.
+#
+# The timeout checks are static because that is what they are about -- which
+# timeout the recipe carries. The fail-closed check is behavioural and cheap:
+# pointed at a file declaring no property tests, the target must exit non-zero
+# without running anything.
+test-proptest-selftest:
+	@failures=0; \
+	recipe=$$($(MAKE) -n test-proptest 2>/dev/null); \
+	if [ "$(PROPTEST_TIMEOUT)" = "$(GOTEST_TIMEOUT)" ]; then \
+		echo "BAD: PROPTEST_TIMEOUT equals GOTEST_TIMEOUT ($(GOTEST_TIMEOUT)) -- the"; \
+		echo "     dedicated budget is the reason this target exists"; \
+		failures=$$((failures + 1)); \
+	else \
+		echo "ok:  PROPTEST_TIMEOUT ($(PROPTEST_TIMEOUT)) differs from GOTEST_TIMEOUT ($(GOTEST_TIMEOUT))"; \
+	fi; \
+	case "$$recipe" in \
+		*-timeout=$(PROPTEST_TIMEOUT)*) echo "ok:  recipe carries -timeout=$(PROPTEST_TIMEOUT)";; \
+		*) echo "BAD: recipe does not carry -timeout=$(PROPTEST_TIMEOUT)"; failures=$$((failures + 1));; \
+	esac; \
+	case "$$recipe" in \
+		*-timeout=$(GOTEST_TIMEOUT)*) \
+			echo "BAD: recipe still carries the shared -timeout=$(GOTEST_TIMEOUT)"; \
+			failures=$$((failures + 1));; \
+		*) echo "ok:  recipe does not inherit GOTEST_TIMEOUT";; \
+	esac; \
+	probe=$$(mktemp); \
+	echo 'package session_test' > $$probe; \
+	if $(MAKE) -s --no-print-directory test-proptest PROPTEST_FILE=$$probe >/dev/null 2>&1; then \
+		echo "BAD: target passed against a file declaring no property tests"; \
+		failures=$$((failures + 1)); \
+	else \
+		echo "ok:  fails closed when no property tests are declared"; \
+	fi; \
+	rm -f $$probe; \
+	if [ "$$failures" -ne 0 ]; then \
+		echo "FAIL: property-test target self-test: $$failures check(s) failed"; \
+		exit 1; \
+	fi; \
+	echo "PASS: property-test target self-test"
 
 test-interop:
 	GOWORK=off $(GOTEST) -race -v ./tests/interop/...
@@ -606,7 +703,7 @@ security: gosec govulncheck staticcheck modverify trivy
 examples-build:
 	GOWORK=off go build ./examples/...
 
-ci: fmtcheck vet lint security test coverage examples-build
+ci: fmtcheck vet lint security test test-proptest coverage examples-build
 
 # ==============================================================================
 # Cleanup
@@ -632,6 +729,7 @@ help:
 	@echo "    make test               - Run all unit tests"
 	@echo "    make test-verbose       - Run all unit tests with verbose output"
 	@echo "    make test-pkg/NAME      - Run tests for one package (e.g. test-pkg/cipher)"
+	@echo "    make test-proptest      - Run the pkg/session property tests (own CI job)"
 	@echo "    make test-interop         - Run Phase 3a Rust<->Go interop fixture tests"
 	@echo "    make interop-live-build   - Build Rust interop binaries (interop_runner + wire_emitter)"
 	@echo "    make interop-live         - Build and run all Phase 3b live interop tests"

@@ -117,6 +117,50 @@ jobs:
           name: test-log
           path: test.log
 
+  # The four TestProptest_* cases were 79% of pkg/session's runtime and left
+  # the 900s per-binary cap only 4.4x above a host measured varying up to 8.7x.
+  # On 2026-08-21 that margin ran out and took the whole Test job with it, on a
+  # timeout none of the other 225 tests in the package caused (#30).
+  #
+  # Split out rather than raising GOTEST_TIMEOUT, which governs every suite
+  # including the FIPS gate. Still runs on every PR -- the point is isolation
+  # and its own budget, not running them less often. `make test-proptest` fails
+  # if fewer tests run than the source declares, so this job cannot pass by
+  # testing nothing.
+  proptest:
+    name: Property Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.7'
+          cache: true
+
+      # Same reasoning as the Test job: these drive full sessions and hold many
+      # guarded buffers, so report the limit before running.
+      - name: Report locked-memory limit
+        run: |
+          echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+
+      # The target is only worth running if it still carries its own budget and
+      # still fails closed: this proves both before we trust its verdict below.
+      - name: Property-test target self-test
+        run: make test-proptest-selftest
+
+      - name: Property tests
+        shell: bash
+        run: set -o pipefail; make test-proptest 2>&1 | tee proptest.log
+
+      - name: Upload property test log
+        if: failure() && github.server_url == 'https://github.com'
+        uses: actions/upload-artifact@v4
+        with:
+          name: proptest-log
+          path: proptest.log
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -371,13 +415,14 @@ jobs:
     name: CI Gate
     runs-on: ubuntu-latest
     if: always()
-    needs: [test, build, security, trivy, lint, integration-test, examples-build, coverage, fips]
+    needs: [test, proptest, build, security, trivy, lint, integration-test, examples-build, coverage, fips]
     steps:
       - name: Fail closed on any non-success
         run: |
           check() { case "$2" in success) echo "OK   $1";; *) echo "FAIL $1 ($2)"; BAD=1;; esac; }
           BAD=0
           check test                  "${{ needs.test.result }}"
+          check proptest              "${{ needs.proptest.result }}"
           check build                 "${{ needs.build.result }}"
           check fips        "${{ needs.fips.result }}"
           check security              "${{ needs.security.result }}"
