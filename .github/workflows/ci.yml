@@ -308,8 +308,8 @@ jobs:
       # Both self-tests assert Makefile contracts and need no analyser, so they
       # run here rather than in Security Scan. Without a CI gate a self-test only
       # protects the developer who remembers to run it.
-      - name: Analyser and lint-retry self-tests
-        run: make staticcheck-selftest lint-retry-selftest
+      - name: Tool-pin and lint-retry self-tests
+        run: make staticcheck-selftest lint-pin-selftest lint-retry-selftest
 
       # Latest action major: devops.md §9. The linter itself is pinned.
       #

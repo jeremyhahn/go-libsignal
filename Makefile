@@ -29,7 +29,14 @@ GOBUILD := go build
 # honnef.co/go/tools v0.8.0-rc.1 whose nilness pass panics ("unhandled builtin
 # recover", crashes on sentry-go) — red gate with zero findings. Unpin when
 # golangci-lint ships a non-rc staticcheck that passes on main. Keep this in
-# lockstep with the version the Lint job pins in .github/workflows/ci.yml.
+# lockstep with the version the Lint job pins in .github/workflows/ci.yml —
+# lint-pin-selftest asserts they agree, because CI runs the action rather than
+# `make lint` and a drifted pin makes the two disagree about what a finding is.
+#
+# The pin is installed to $(GOLANGCI_LINT_BIN), NOT the shared $(GOBIN): the
+# whole point of pinning away from v2.13.x is undone if a neighbouring lane can
+# install over the binary this repo verified. It happened — the shared
+# golangci-lint drifted to v2.13.1 for part of 2026-08-21.
 GOLANGCI_LINT_VERSION := v2.12.2
 
 # PINNED for REPRODUCIBILITY, not to dodge a bad release (devops.md §9).
@@ -100,12 +107,13 @@ TOOLS_BIN := $(CURDIR)/.tools/bin
 CI_WORKFLOW := .github/workflows/ci.yml
 STATICCHECK_BIN := $(TOOLS_BIN)/staticcheck
 STATICCHECK_LATEST_BIN := $(TOOLS_BIN)-latest/staticcheck
+GOLANGCI_LINT_BIN := $(TOOLS_BIN)/golangci-lint
 
 # The lint retry loop invokes $(LINT_CMD) rather than a bare `golangci-lint`,
 # so lint-retry-selftest can drive it with a stub by overriding this variable.
 # A stub planted on PATH would NOT work: the `export PATH` below prepends
 # $(GOBIN), the real linter wins, and the self-test passes against any recipe.
-LINT_CMD := golangci-lint run ./...
+LINT_CMD := $(GOLANGCI_LINT_BIN) run ./...
 LINT_RETRY_MAX := 5
 LINT_RETRY_DELAY := 10
 
@@ -133,7 +141,7 @@ TESTABLE_PACKAGES := pkg/accountkeys pkg/attest pkg/backup pkg/cipher pkg/device
 	interop-fixtures-check interop-fixtures-refresh \
 	interop-live-build interop-live interop-live-session interop-live-sealed \
 	interop-live-group interop-live-backup interop-docker \
-	vet lint _lint-retry lint-retry-selftest \
+	vet lint _lint-retry lint-retry-selftest lint-pin-selftest \
 	clean coverage coverage-gate-selftest _coverage-gate help \
 	coverage-loop-selftest _coverage-collect \
 	ci security gosec govulncheck staticcheck errcheck nilcheck \
@@ -284,40 +292,63 @@ test-proptest-selftest:
 		exit 1; \
 	fi; \
 	echo "PASS: property-test target self-test"
-# Self-test for the pinned-analyser property, in the shape of
+# Self-test for the pinned-TOOL property, in the shape of
 # coverage-gate-selftest. The concurrency Codex raised on #33 cannot be
 # reproduced by racing a real neighbour, so assert the two properties that make
 # the race impossible instead:
 #
-#   1. the recipe EXECUTES $(STATICCHECK_BIN) rather than a bare `staticcheck`
-#      that PATH would resolve;
-#   2. $(STATICCHECK_BIN) lives OUTSIDE $(GOBIN), so no other lane writes to the
-#      path that was verified.
+#   1. the recipe EXECUTES the pinned path rather than a bare tool name that
+#      PATH would resolve;
+#   2. that path lies OUTSIDE $(GOBIN), so no other lane writes to what was
+#      verified.
 #
-# Together those close the window: same path checked and run, in one shell, on a
-# directory nobody else touches.
+# Together those close the window: same path checked and run, on a directory
+# nobody else touches.
 #
-# An earlier draft of this target tried to prove (1) behaviourally, by planting a
-# hostile `staticcheck` on PATH and checking the target ignored it. That check
-# PASSED against a deliberately broken recipe -- the `export PATH` above prepends
+# An earlier draft tried to prove (1) behaviourally, by planting a hostile
+# `staticcheck` on PATH and checking the target ignored it. That check PASSED
+# against a deliberately broken recipe -- the `export PATH` above prepends
 # $(GOBIN) for every recipe, so the planted binary never won and the check could
 # not fail for the reason it claimed. It is gone rather than left looking
 # reassuring. lint-retry-selftest avoids the same trap by naming its stub through
 # $(LINT_CMD) instead of planting it on PATH.
-staticcheck-selftest:
-	@failures=0; \
-	recipe=$$($(MAKE) -n staticcheck 2>/dev/null); \
-	case "$$recipe" in \
-		*"$(STATICCHECK_BIN) ./..."*) echo "ok:  recipe executes the pinned $(STATICCHECK_BIN)";; \
-		*) echo "BAD: recipe does not execute $(STATICCHECK_BIN)"; failures=$$((failures + 1));; \
+#
+#   3. the recipe INSTALLS into that directory rather than the shared one.
+#      Measured: without this, reverting `GOBIN=$(TOOLS_BIN) go install` to a
+#      bare `go install` passed every other check. It fails closed at runtime
+#      (the pinned path stays empty, so the version check exits 1), but it
+#      still writes this repo's pin over whatever the neighbouring lanes are
+#      using -- the second half of the property, and the half a self-test that
+#      only reads paths cannot see.
+#
+# $(call assert_pinned,<label>,<target>,<pinned-bin>,<expected-invocation>,<expected-install>).
+# Both pinned tools assert through this, so the property is defined once; a
+# third pinned tool gets it by adding two lines, not by copying thirty.
+define assert_pinned
+	case "$$($(MAKE) -n $(2) 2>/dev/null)" in \
+		*"$(4)"*) echo "ok:  $(1) recipe executes the pinned $(3)";; \
+		*) echo "BAD: $(1) recipe does not execute $(4)"; failures=$$((failures + 1));; \
 	esac; \
-	case "$(STATICCHECK_BIN)" in \
+	case "$(3)" in \
 		$(GOBIN)/*) \
-			echo "BAD: $(STATICCHECK_BIN) is inside the shared $(GOBIN);"; \
+			echo "BAD: $(3) is inside the shared $(GOBIN);"; \
 			echo "     another lane can replace it between the check and the run"; \
 			failures=$$((failures + 1));; \
-		*) echo "ok:  pinned analyser lives outside the shared $(GOBIN)";; \
+		*) echo "ok:  $(1) pin lives outside the shared $(GOBIN)";; \
 	esac; \
+	case "$$($(MAKE) -n $(2) 2>/dev/null)" in \
+		*"$(5)"*) echo "ok:  $(1) installs into the pinned directory, not $(GOBIN)";; \
+		*) \
+			echo "BAD: $(1) recipe does not install with $(5);"; \
+			echo "     a bare 'go install' writes this repo's pin into the shared"; \
+			echo "     $(GOBIN), changing what every other lane runs"; \
+			failures=$$((failures + 1));; \
+	esac;
+endef
+
+staticcheck-selftest:
+	@failures=0; \
+	$(call assert_pinned,staticcheck,staticcheck,$(STATICCHECK_BIN),$(STATICCHECK_BIN) ./...,GOBIN=$(TOOLS_BIN) go install honnef.co/go/tools) \
 	case "$$(grep -A2 'Run staticcheck' $(CI_WORKFLOW) | grep 'make staticcheck')" in \
 		*"make staticcheck-latest"*) echo "ok:  CI's Security Scan runs staticcheck-latest, not the pin";; \
 		*) \
@@ -338,6 +369,37 @@ staticcheck-selftest:
 		exit 1; \
 	fi; \
 	echo "PASS: pinned-analyser self-test"
+
+# The same two properties for golangci-lint. It carried the defect longest: the
+# version check ran against whatever PATH resolved and installed into the shared
+# $(GOBIN), so the pin was only as good as the last neighbour to install there.
+# Not hypothetical -- that binary drifted to v2.13.1 for part of 2026-08-21, and
+# v2.13.x is the release whose nilness pass panics on this tree.
+#
+# `make -n` runs recursive sub-makes, so asserting on `lint` sees the real
+# command line inside _lint-retry rather than the delegation to it.
+#
+# The expected invocation is spelled out from $(GOLANGCI_LINT_BIN) rather than
+# passed as $(LINT_CMD). Measured: with $(LINT_CMD) on both sides, reverting the
+# recipe to a bare PATH-resolved `golangci-lint run ./...` still PASSED -- the
+# expectation moved with the mutation, so the check compared LINT_CMD to itself.
+# $(LINT_CMD) is the thing under test here, not the yardstick.
+lint-pin-selftest:
+	@failures=0; \
+	$(call assert_pinned,golangci-lint,lint,$(GOLANGCI_LINT_BIN),$(GOLANGCI_LINT_BIN) run ./...,GOBIN=$(TOOLS_BIN) go install github.com/golangci) \
+	case "$$(grep -A3 'golangci-lint-action' $(CI_WORKFLOW) | grep 'version:')" in \
+		*"$(GOLANGCI_LINT_VERSION)"*) echo "ok:  CI's Lint job pins the same $(GOLANGCI_LINT_VERSION)";; \
+		*) \
+			echo "BAD: CI's golangci-lint-action does not pin $(GOLANGCI_LINT_VERSION)."; \
+			echo "     CI runs the action, not make lint, so a drifted pin here means"; \
+			echo "     local runs and the gate disagree about what a finding is."; \
+			failures=$$((failures + 1));; \
+	esac; \
+	if [ "$$failures" -ne 0 ]; then \
+		echo "FAIL: pinned-linter self-test: $$failures check(s) failed"; \
+		exit 1; \
+	fi; \
+	echo "PASS: pinned-linter self-test"
 
 test-interop:
 	GOWORK=off $(GOTEST) -race -v ./tests/interop/...
@@ -677,15 +739,16 @@ fmtcheck:
 # holding, or the install fails, the target says so instead of quietly linting
 # with the wrong analyser.
 lint:
-	@have=$$(golangci-lint version 2>/dev/null | sed -nE 's/.*has version ([0-9]+\.[0-9]+\.[0-9]+).*/v\1/p'); \
+	@mkdir -p $(TOOLS_BIN)
+	@have=$$($(GOLANGCI_LINT_BIN) version 2>/dev/null | sed -nE 's/.*has version ([0-9]+\.[0-9]+\.[0-9]+).*/v\1/p'); \
 	if [ "$$have" != "$(GOLANGCI_LINT_VERSION)" ]; then \
 		echo "golangci-lint $${have:-not installed}, want $(GOLANGCI_LINT_VERSION) -- installing"; \
-		go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
-		have=$$(golangci-lint version 2>/dev/null | sed -nE 's/.*has version ([0-9]+\.[0-9]+\.[0-9]+).*/v\1/p'); \
+		GOBIN=$(TOOLS_BIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
+		have=$$($(GOLANGCI_LINT_BIN) version 2>/dev/null | sed -nE 's/.*has version ([0-9]+\.[0-9]+\.[0-9]+).*/v\1/p'); \
 	fi; \
 	if [ "$$have" != "$(GOLANGCI_LINT_VERSION)" ]; then \
-		echo "FAIL: golangci-lint resolves to $${have:-nothing} after installing"; \
-		echo "      $(GOLANGCI_LINT_VERSION) into $(GOBIN). Linting with a version CI does"; \
+		echo "FAIL: $(GOLANGCI_LINT_BIN) resolves to $${have:-nothing} after"; \
+		echo "      installing $(GOLANGCI_LINT_VERSION). Linting with a version CI does"; \
 		echo "      not run tells you nothing, so this fails rather than proceeding."; \
 		exit 1; \
 	fi
@@ -992,6 +1055,7 @@ help:
 	@echo "    make vet                - Run go vet"
 	@echo "    make lint               - Run golangci-lint"
 	@echo "    make lint-retry-selftest - Verify lint retries contention, not findings"
+	@echo "    make lint-pin-selftest  - Verify the golangci-lint pin cannot be raced"
 	@echo ""
 	@echo "  Security:"
 	@echo "    make security           - Full devops.md §8 suite (gosec, govulncheck, staticcheck, go mod verify, trivy fs)"

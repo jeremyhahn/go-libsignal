@@ -90,6 +90,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The pinned `golangci-lint` is installed to and executed from the repo-local
+  `.tools/bin` instead of the shared `$(GOBIN)`. `make lint` verified the
+  version of whatever `PATH` resolved and installed into a directory every
+  other agent lane on this host also writes to, so the pin held only until the
+  next neighbour installed there — and this repo's install changed what those
+  neighbours ran. Not a hypothetical race: that shared binary drifted to
+  v2.13.1 for part of 2026-08-21, which is precisely the release whose nilness
+  pass panics on this tree and turns the gate red with zero findings. Same
+  defect, and now the same remedy, as the `staticcheck` pin. Measured after the
+  change: the repo-local linter is built with go1.26.7 while the shared one
+  keeps its earlier go1.26.6 build and its original mtime — separate binaries,
+  neither writing over the other.
+- `make lint-pin-selftest` asserts the three properties that make the race
+  impossible — the recipe executes the pinned path, that path lies outside
+  `$(GOBIN)`, and the install writes there rather than to `$(GOBIN)` — plus
+  that CI's `golangci-lint-action` pins the same version, since CI runs the
+  action rather than `make lint` and a drifted pin makes local runs and the
+  gate disagree about what counts as a finding. It shares its implementation
+  with `staticcheck-selftest` through one `assert_pinned` macro, so a third
+  pinned tool costs two lines rather than a copy. Both run in CI's Lint job.
 - `pkg/session`'s four `TestProptest_*` cases move behind a `proptest` build
   tag with their own `make test-proptest` target and their own CI job. They
   were 167s of that package's 213s — 79% of it — which left the 900s
