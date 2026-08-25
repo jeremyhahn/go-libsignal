@@ -866,7 +866,7 @@ gosec:
 	@which gosec > /dev/null 2>&1 || \
 		(echo "Installing gosec..." && \
 		go install github.com/securego/gosec/v2/cmd/gosec@latest)
-	gosec -fmt=text -severity=medium -exclude=$(GOSEC_EXCLUDE) ./...
+	gosec -concurrency 4 -fmt=text -severity=medium -exclude=$(GOSEC_EXCLUDE) ./...
 
 govulncheck:
 	@which govulncheck > /dev/null 2>&1 || \
