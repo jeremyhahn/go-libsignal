@@ -129,7 +129,7 @@ func GenerateSenderKeyID() uint32 {
 
 // GenerateKyberPreKey generates a Kyber-1024 pre-key, signs the public key with
 // the given identity signing key, and returns the resulting record. The secret
-// key is generated straight into memguard-protected memory and is owned by the
+// key is generated straight into locked memory and is owned by the
 // returned record from then on.
 func GenerateKyberPreKey(signingKey ecc.ECPrivateKeyable, id uint32, serializer record.KyberPreKeySerializer) (*record.KyberPreKey, error) {
 	kyberKEM := kem.NewGuardedKyber1024()

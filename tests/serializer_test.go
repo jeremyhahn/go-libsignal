@@ -64,7 +64,7 @@ func TestSerializing(t *testing.T) {
 
 	// Re-serialize the deserialized session and verify round-trip integrity.
 	// We cannot use pretty.Formatter here because it uses reflection which
-	// walks into memguard-protected pages and triggers SIGSEGV.
+	// walks into locked-memory-protected pages and triggers SIGSEGV.
 	reserializedSession, err := deserializedSession.Serialize()
 	if err != nil {
 		t.Fatalf("Failed to re-serialize deserialized session: %v", err)

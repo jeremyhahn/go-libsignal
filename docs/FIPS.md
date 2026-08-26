@@ -131,8 +131,7 @@ On top of that baseline the audit recognises:
   other legacy `x/crypto` ciphers and hashes; plus the pure-Go dependencies
   `github.com/gtank/ristretto255`, `filippo.io/edwards25519` and its `/field`,
   `github.com/cloudflare/circl/kem/kyber/kyber1024`, `github.com/flynn/noise`,
-  `x/crypto/argon2`, `bcrypt`, `scrypt`; and `github.com/awnumar/memguard`, whose
-  enclave encryption is non-approved (see "The protected-memory layer" below).
+  `x/crypto/argon2`, `bcrypt`, and `scrypt`.
 
   Each is named by **exact package, never by module tree**. CIRCL ships dozens
   of algorithms, so a `github.com/cloudflare/circl` prefix would let `pkg/kem` —
@@ -170,10 +169,9 @@ module path the per-import rules do not police.
 The pure-Go dependency rules matter most. Those are the **implementations the
 Go Cryptographic Module never sees** — they do their own field arithmetic, so
 `GODEBUG=fips140=only` cannot reject them however the tests are tagged.
-Ristretto255, edwards25519, Argon2id, Round-3 Kyber and memguard's enclave
-encryption are every bit as non-approved as X25519; before this audit they were
-simply invisible. Each of
-their 37 production call sites is now registered with the protocol that
+Ristretto255, edwards25519, Argon2id and Round-3 Kyber are every bit as
+non-approved as X25519; before this audit they were simply invisible. Each of
+their production call sites is now registered with the protocol that
 mandates it:
 
 | Primitive | Where | Mandated by |
@@ -259,65 +257,50 @@ repository's own source — field arithmetic and bit operations under a `pkg/...
 path, importing nothing denied — matches no rule and reports clean. Neither gate
 sees that shape; see "What the runtime gate cannot see" below.
 
-### The protected-memory layer — a registered exemption, and an open question
+### The protected-memory layer — resolved
 
-`github.com/awnumar/memguard`, which holds this library's key material in
-locked memory, is not primitive-free: it encrypts every `Enclave` at rest with
-NaCl secretbox (XSalsa20-Poly1305) and derives its rolling enclave key with
-BLAKE2b. Neither is approved, and neither is visible to the Go Cryptographic
-Module — both are pure Go, so `GODEBUG=fips140=only` cannot reject them however
-the tests are tagged.
+The protected-memory layer used to carry a non-approved primitive of its own.
+`github.com/awnumar/memguard` held this library's key material in locked memory,
+and it was not primitive-free: it encrypted every `Enclave` at rest with NaCl
+secretbox (XSalsa20-Poly1305) and derived its rolling enclave key with BLAKE2b,
+neither approved and neither visible to the Go Cryptographic Module. It reached
+a public path — `secret.Secret.Seal()` returned a `memguard.Enclave` — so a
+consumer could cause a non-approved operation on a secret-handling path. This
+document once recorded that as an open owner-level question.
 
-This was once permitted by a line of prose in the audit's
-`dependencyClassification` table. That was a weaker control than every other
-exemption here: nothing failed when its reach grew. It is now **denied by exact
-package** and inside a policed namespace, so:
+**It is resolved.** The layer now uses `github.com/jeremyhahn/go-enclave`, the
+portfolio locked-memory primitive, in place of memguard. go-enclave holds
+material in plaintext locked memory guarded by guard pages and a canary — it
+has no at-rest cipher, so there is no secretbox and no BLAKE2b. Its only
+cryptography is the FIPS-approved `crypto/rand` (SP 800-90A) for the canary and
+`crypto/subtle` for constant-time comparisons. The non-approved primitive is
+gone from the dependency graph, and with it the `Seal()` / `OpenEnclave()`
+at-rest-encryption surface that exposed it (dropped: no production caller
+depended on it, and the stack's at-rest sealing is being redesigned separately).
 
-- its one production import — `pkg/util/crypto/secret/secret.go`, the only file
-  in the module that imports it — is a **counted register entry** that fails
-  closed when it widens, on the same terms as X25519;
-- every package that can reach it appears in `reachRegister`, so the blast
-  radius is enumerated rather than assumed;
-- a memguard subpackage nobody enumerated fails closed as **unclassified**.
-
-`TestScanFile_FlagsASecretStorageDependency` and
-`TestMemguardIsPolicedNotClassified` pin both properties.
-
-**What that does not do is make the cryptography approved.** Unlike every other
-entry in the register, no external protocol mandates this primitive — X25519 is
-the DH function of X3DH and cannot be substituted without leaving the Signal
-Protocol, whereas memguard is a library that was *chosen*, and the reachable
-path is public API: `secret.Secret.Seal()` returns a `memguard.Enclave`, so a
-consumer of this library can cause a non-approved operation on a
-secret-handling path.
-
-Resolving that is an **owner-level decision**, because every available remedy is
-one:
-
-1. Replace the protected-memory layer with an implementation whose operations
-   are approved (module AES-GCM in place of secretbox). This changes the
-   mechanism that holds every key in the library.
-2. Withdraw the `Seal()` / `OpenEnclave()` API, removing at-rest encrypted
-   secret storage. This removes a public feature.
-3. Accept the exemption as it now stands — registered, counted, narrowly scoped,
-   one file, and disclosed here — on the basis that it protects go-libsignal's
-   own in-memory key storage and never reaches a protocol output or a stored
-   artefact.
-
-Until that ruling, option 3 is what the repository does, and this section is the
-disclosure. It is recorded as an open question rather than settled by this
-document.
+The audit reflects this directly: memguard is no longer a denied import, no
+longer classified, and no longer named in any package's reachability set.
+go-enclave is recorded in `dependencyClassification` as carrying only the two
+approved stdlib primitives above — a reviewed, module-level classification on
+the same footing as `memcall`'s, not a policed namespace. `go-enclave` is not
+in `policedNamespaces`, so `classify` does not police its subpackages; what the
+audit does enforce is `TestModuleDependenciesAreClassified`, under which a new
+cryptographic dependency added to `go.mod` fails closed until it too is
+classified or policed. What was option 1 of the former
+open question — replace the layer with one whose operations are approved — is
+what happened, and better than that framing anticipated: the replacement needs
+no cipher at all.
 
 ## What the runtime gate cannot see
 
 The Go Cryptographic Module only polices the standard library's `crypto/*`
 packages, plus `golang.org/x/crypto/chacha20poly1305`, which carries its own
 `fips140only` check. Pure-Go implementations that do their own arithmetic —
-Ristretto255, edwards25519, Argon2id, Round-3 Kyber, and memguard's enclave
-secretbox and BLAKE2b — are invisible to it, and none of them is FIPS-approved.
+Ristretto255, edwards25519, Argon2id, and Round-3 Kyber — are invisible to it,
+and none of them is FIPS-approved.
 
 **In production code the static audit covers exactly that gap** wherever the
-primitive arrives through a package, which is why its register lists all five.
+primitive arrives through a package, which is why its register lists all four.
 Three blind spots remain, and none should be read as absence:
 
 - **Test code using a pure-Go non-approved primitive.** The audit scans

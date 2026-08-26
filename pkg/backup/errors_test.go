@@ -190,7 +190,7 @@ func TestErrInvalidEntropyPool(t *testing.T) {
 }
 
 func TestErrSecuringSecret(t *testing.T) {
-	inner := errors.New("memguard error")
+	inner := errors.New("locked-memory allocation error")
 	err := &ErrSecuringSecret{Operation: "HMAC key", Err: inner}
 	if !strings.Contains(err.Error(), "HMAC key") {
 		t.Errorf("ErrSecuringSecret.Error() = %q, want to contain operation name", err.Error())

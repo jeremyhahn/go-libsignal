@@ -62,7 +62,7 @@ func (sk StateKind) String() string {
 }
 
 // OutputKey represents a derived output key with its associated epoch.
-// The Key field is wrapped in a memguard-backed Secret for protection
+// The Key field is wrapped in a locked-memory-backed Secret for protection
 // against swap and core dumps. Callers must copy bytes out before the
 // Secret is destroyed.
 type OutputKey struct {
@@ -100,12 +100,12 @@ type State struct {
 	ct1Decoder    *Decoder // ct1 chunks
 	ct2Decoder    *Decoder // ct2 || mac chunks
 
-	// Alice's KEM state (memguard-protected).
+	// Alice's KEM state (locked-memory-protected).
 	dk       *secret.Secret // decapsulation (secret) key
 	ekSeed   *secret.Secret // ek_seed (32 bytes)
 	ekVector *secret.Secret // ek_vector (noisy vector part)
 
-	// Bob's KEM state (memguard-protected).
+	// Bob's KEM state (locked-memory-protected).
 	bobEkSeed      *secret.Secret // received Alice's ek_seed (from header)
 	bobHek         *secret.Secret // received hek (from header)
 	bobEncapSecret *secret.Secret // opaque encapsSecret from Encaps1 (ek_seed || hek)
@@ -114,7 +114,7 @@ type State struct {
 	bobCt2         *secret.Secret // ct2 Bob generated
 	bobSS          *secret.Secret // shared secret from encapsulation
 
-	// Received ct1 data (stored by Alice, memguard-protected).
+	// Received ct1 data (stored by Alice, locked-memory-protected).
 	receivedCt1 *secret.Secret
 
 	// ct1Ack tracks whether Alice has acknowledged receiving ct1.

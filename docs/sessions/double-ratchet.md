@@ -25,7 +25,7 @@ HKDF(master_secret, salt=nil, info=KdfInfoPQXDH) -> [RootKey][ChainKey][InitialP
 - `KdfInfoPQXDH = "WhisperText_X25519_SHA-256_CRYSTALS-KYBER-1024"` (defined in `keys/root/RootKey.go`)
 - The `InitialPQRKey` (bytes 64-96) seeds the SPQR post-quantum ratchet
 
-The `session.DerivedSecrets` struct holds these three keys in memguard-protected memory. All key material is zeroized from the source after splitting.
+The `session.DerivedSecrets` struct holds these three keys in locked memory. All key material is zeroized from the source after splitting.
 
 For the per-message chain ratchet step (not the initial session), `CreateChain` uses `ChainDerivedSecretsSize = 64` bytes (2 x 32), producing only `RootKey + ChainKey`.
 
@@ -64,7 +64,7 @@ Each chain key ratchets forward to produce message keys and the next chain key:
 func (c *Key) NextKey() *Key
 ```
 
-Computes `HMAC-SHA256(chain_key, 0x02)` to produce the next chain key. The old chain key material is destroyed via memguard after derivation. The index increments by 1.
+Computes `HMAC-SHA256(chain_key, 0x02)` to produce the next chain key. The old chain key material is destroyed via go-enclave after derivation. The index increments by 1.
 
 ### Message Key Derivation
 
@@ -116,7 +116,7 @@ When fast-forwarding a chain to catch up to a received counter, each skipped mes
 
 ## Key Memory Protection
 
-All key material (`RootKey`, `chain.Key`, message key components) is stored in memguard-protected memory via the `secret.New()` function, which:
+All key material (`RootKey`, `chain.Key`, message key components) is stored in locked memory via the `secret.New()` function, which:
 
 - Allocates the key in a guarded memory region
 - Zeroizes the source slice after copying

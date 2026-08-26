@@ -42,7 +42,7 @@ The KDF info string is `"WhisperGroup"`, defined as `ratchet.KdfInfo`.
 
 `Next()` advances the chain: `HMAC-SHA256(chainKey, chainKeySeed)` produces the next chain key. The iteration counter increments by 1. If the counter reaches `math.MaxUint32`, `Next()` returns `ErrChainTooLong`, matching the Rust reference's `checked_add` behavior.
 
-Both `SenderChainKey` and `SenderMessageKey` store key material in memguard-backed `secret.Secret` and provide `Zeroize()` methods for explicit cleanup.
+Both `SenderChainKey` and `SenderMessageKey` store key material in locked-memory-backed `secret.Secret` and provide `Zeroize()` methods for explicit cleanup.
 
 ## Message keys
 

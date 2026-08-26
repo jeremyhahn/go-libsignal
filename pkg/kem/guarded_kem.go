@@ -14,7 +14,7 @@ var _ keyops.Decapsulator = (*GuardedSecretKey)(nil)
 var guardedKyber1024Scheme = kyber1024.Scheme()
 
 // GuardedKyber1024 implements Kyber-1024 KEM operations with key material
-// stored in memguard-protected memory. Generated secret keys and shared
+// stored in locked memory. Generated secret keys and shared
 // secrets are wrapped in GuardedSecretKey and GuardedSharedSecret types
 // that use mlock'd, guard-page protected memory.
 type GuardedKyber1024 struct{}
@@ -25,7 +25,7 @@ func NewGuardedKyber1024() *GuardedKyber1024 {
 }
 
 // Generate creates a new Kyber-1024 key pair with the secret key stored
-// in memguard-protected memory.
+// in locked memory.
 func (g *GuardedKyber1024) Generate() (kp *GuardedKeyPair, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -64,7 +64,7 @@ func (g *GuardedKyber1024) Generate() (kp *GuardedKeyPair, err error) {
 
 // Encapsulate generates a shared secret and ciphertext for the given public
 // key. The shared secret is returned in a GuardedSharedSecret backed by
-// memguard-protected memory.
+// locked memory.
 func (g *GuardedKyber1024) Encapsulate(publicKey *PublicKey) (ss *GuardedSharedSecret, ct *Ciphertext, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -100,7 +100,7 @@ func (g *GuardedKyber1024) Encapsulate(publicKey *PublicKey) (ss *GuardedSharedS
 
 // Decapsulate recovers the shared secret from the given ciphertext using the
 // guarded secret key. The shared secret is returned in a GuardedSharedSecret
-// backed by memguard-protected memory.
+// backed by locked memory.
 func (g *GuardedKyber1024) Decapsulate(secretKey *GuardedSecretKey, ciphertext *Ciphertext) (ss *GuardedSharedSecret, err error) {
 	defer func() {
 		if r := recover(); r != nil {

@@ -423,7 +423,7 @@ func (s *State) AddReceiverChain(senderRatchetKey ecc.ECPublicKeyable, chainKey 
 
 	// If our list of receiver chains is too big, delete the oldest entry. The
 	// evicted chain's guarded material is destroyed rather than dropped: the
-	// state was its only owner and memguard reclaims nothing on its own.
+	// state was its only owner and go-enclave reclaims nothing on its own.
 	if len(s.receiverChains) > maxReceiverChains {
 		i := 0
 		evicted := s.receiverChains[i]
@@ -551,7 +551,7 @@ func (s *State) RemoveMessageKeys(senderEphemeral ecc.ECPublicKeyable, counter u
 
 	// The caller gets an independent copy below, and the entry is no longer in
 	// the chain, so the original's guarded material has no owner left. Destroy
-	// it rather than dropping it — memguard reclaims nothing on its own, and a
+	// it rather than dropping it — go-enclave reclaims nothing on its own, and a
 	// peer can drive this path with any message that matches a stored key.
 	defer messageKey.Zeroize()
 
@@ -812,7 +812,7 @@ func (s *State) DiscardClone() {
 // state, and the clone is either committed here or discarded there. Committing
 // adopts the clone's chains, root key, pending key exchange and PQ ratchet
 // state, which leaves this state's previous ones with no owner at all — and
-// memguard reclaims nothing on its own, so leaving them behind costs a locked
+// go-enclave reclaims nothing on its own, so leaving them behind costs a locked
 // buffer per committed message for the life of the process. Only material the
 // commit actually replaced is released, so handing back a clone that still
 // shares an object with this state is safe.

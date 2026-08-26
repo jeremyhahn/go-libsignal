@@ -51,7 +51,7 @@ This prevents the same state from appearing in both the current and previous lis
 | Field | Type | Description |
 |-------|------|-------------|
 | `sessionVersion` | `int` | Protocol version (3 or 4). 0 is mapped to 2 on read. |
-| `rootKey` | `*root.Key` | Current root key (memguard-protected) |
+| `rootKey` | `*root.Key` | Current root key (locked-memory-protected) |
 | `senderChain` | `*Chain` | Our sending chain (ratchet key pair + chain key) |
 | `receiverChains` | `[]*Chain` | Receiver chains (up to `maxReceiverChains = 5`) |
 | `previousCounter` | `uint32` | Counter of the last message in the previous sender chain |
@@ -114,12 +114,12 @@ type Chain struct {
 ```
 
 - `senderRatchetKeyPair`: for sender chains, holds both public and private keys. For receiver chains, only the public key is stored.
-- `chainKey`: the current chain key (memguard-protected, advances with each message)
+- `chainKey`: the current chain key (locked-memory-protected, advances with each message)
 - `messageKeys`: stored skipped message keys
 
 `ChainStructure` is the serializable form, with key bytes for the ratchet key pair, a `chain.KeyStructure` for the chain key, and `message.KeysStructure` entries for stored message keys.
 
-`NewChainFromStructure()` reconstructs a `Chain` from the serialized form, converting private key bytes into a `GuardedECPrivateKey` for memguard protection.
+`NewChainFromStructure()` reconstructs a `Chain` from the serialized form, converting private key bytes into a `GuardedECPrivateKey` for locked-memory protection.
 
 ## Pre-Key Records
 
@@ -159,10 +159,10 @@ Signed pre-keys are long-lived and rotated periodically. The signature is verifi
 
 - `ID`: the key identifier
 - `PublicKey`: the Kyber public key bytes
-- `PrivateKey`: the Kyber secret key bytes (moved into memguard on load)
+- `PrivateKey`: the Kyber secret key bytes (moved into locked memory on load)
 - `Signature`: Ed25519 signature over the public key bytes
 
-`GuardedKeyPair()` returns a `kem.GuardedKeyPair` with the secret key in memguard-protected memory. The caller must call `Destroy()` on the guarded key pair after use.
+`GuardedKeyPair()` returns a `kem.GuardedKeyPair` with the secret key in locked memory. The caller must call `Destroy()` on the guarded key pair after use.
 
 ## Store Interfaces
 

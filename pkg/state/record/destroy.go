@@ -4,9 +4,9 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 )
 
-// Guarded key material is not reclaimed by the garbage collector: memguard
-// registers no finalizer and keeps every live buffer in a process-global list
-// until it is explicitly destroyed, so an abandoned buffer stays mlock'd for
+// Guarded key material is not reclaimed by the garbage collector: go-enclave
+// registers no finalizer, so a buffer must be explicitly destroyed or it stays
+// mlock'd for
 // the life of the process. A deserialization constructor that fails part-way
 // through has therefore stranded every guarded allocation it already made, and
 // a peer able to feed the store malformed persisted records can repeat that

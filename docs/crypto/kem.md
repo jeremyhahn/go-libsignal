@@ -1,6 +1,6 @@
 # Post-Quantum Key Encapsulation Mechanisms
 
-Package `kem/` provides lattice-based Key Encapsulation Mechanisms (KEMs) for post-quantum key exchange in the Signal Protocol. The package supports Kyber-1024 and Kyber-768 (round-3), with both plain and memguard-protected variants. Source files are in `/kem/`.
+Package `kem/` provides lattice-based Key Encapsulation Mechanisms (KEMs) for post-quantum key exchange in the Signal Protocol. The package supports Kyber-1024 and Kyber-768 (round-3), with both plain and locked-memory-protected variants. Source files are in `/kem/`.
 
 ## Algorithm Variants
 
@@ -84,7 +84,7 @@ Both `Encapsulate` and `Decapsulate` validate that the key types match the expec
 
 **File:** `guarded_kem.go`, `guarded_secret.go`
 
-For production use, secret keys and shared secrets should be stored in memguard-protected memory.
+For production use, secret keys and shared secrets should be stored in locked memory.
 
 ### GuardedSecretKey
 
@@ -129,7 +129,7 @@ func (g *GuardedKyber768) Encapsulate(publicKey *PublicKey) (*GuardedSharedSecre
 func (g *GuardedKyber768) Decapsulate(secretKey *GuardedSecretKey, ciphertext *Ciphertext) (*GuardedSharedSecret, error)
 ```
 
-All guarded constructors wrap memguard allocations with `recover()` to convert panics into `GuardedKeyAllocationError`.
+All guarded constructors return a `GuardedKeyAllocationError` on locked-memory allocation failure.
 
 ### GuardedKeyPair
 
@@ -151,7 +151,7 @@ Holds a `*PublicKey` and `*GuardedSecretKey`. The `Destroy()` method zeroizes on
 | `UnmarshalError` | Key deserialization failure |
 | `EncapsulationError` | Encapsulation failure |
 | `DecapsulationError` | Decapsulation failure |
-| `GuardedKeyAllocationError` | memguard allocation failure |
+| `GuardedKeyAllocationError` | locked-memory allocation failure |
 | `GuardedKeyDestroyedError` | Operation on destroyed guarded key |
 | `DeserializeError` | Ciphertext deserialization failure |
 

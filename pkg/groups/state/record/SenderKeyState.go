@@ -33,7 +33,7 @@ func NewSenderKeyStateFromBytes(serialized []byte, serializer SenderKeyStateSeri
 	// The structure decoded here is ours. Now that Deserialize returns guarded
 	// fields, releasing it is mandatory rather than tidy: NewSenderKeyStateFromStructure
 	// clones out of it and deliberately leaves the source intact for its owner,
-	// and memguard sets no finalizer -- so without this every successful load
+	// and go-enclave sets no finalizer -- so without this every successful load
 	// would strand a duplicate set of secrets mlock'd for the process lifetime.
 	defer stateStructure.Zeroize()
 
@@ -121,7 +121,7 @@ func NewSenderKeyStateFromStructure(structure *SenderKeyStateStructure,
 }
 
 // destroySenderKeyState releases every guarded buffer a partially built state
-// owns. memguard sets no finalizer, so a state abandoned mid-construction keeps
+// owns. go-enclave sets no finalizer, so a state abandoned mid-construction keeps
 // its buffers mlock'd for the life of the process unless they are destroyed
 // explicitly.
 func destroySenderKeyState(state *SenderKeyState) {

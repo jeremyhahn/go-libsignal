@@ -5,10 +5,10 @@ go 1.26.7
 require (
 	filippo.io/edwards25519 v1.2.0
 	github.com/Eyevinn/mp4ff v0.52.0
-	github.com/awnumar/memguard v0.23.0
 	github.com/cloudflare/circl v1.6.3
 	github.com/flynn/noise v1.1.0
 	github.com/gtank/ristretto255 v0.2.0
+	github.com/jeremyhahn/go-enclave v0.3.0-alpha
 	golang.org/x/crypto v0.52.0
 	golang.org/x/text v0.39.0
 	google.golang.org/protobuf v1.36.11

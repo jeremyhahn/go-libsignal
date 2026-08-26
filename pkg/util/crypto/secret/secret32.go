@@ -20,7 +20,7 @@ type Secret32 struct {
 func NewSecret32(data [32]byte) (*Secret32, error) {
 	s, err := New(data[:])
 	if err != nil {
-		// Zeroize on allocation failure since memguard didn't consume it.
+		// Zeroize on allocation failure since New did not consume it.
 		crypto.ZeroizeArray32(&data)
 		return nil, err
 	}
@@ -28,7 +28,8 @@ func NewSecret32(data [32]byte) (*Secret32, error) {
 }
 
 // NewSecret32FromSlice creates a Secret32 from a byte slice, validating that
-// the length is exactly 32 bytes. The source slice is zeroized by memguard.
+// the length is exactly 32 bytes. The source slice is zeroized as part of the
+// move into locked memory.
 //
 // Returns ErrNilInput if data is nil, or ErrSecretSizeMismatch if the length
 // is not 32.
@@ -73,15 +74,16 @@ func (s *Secret32) Array() [32]byte {
 	return out
 }
 
-// Ptr returns a pointer to the 32-byte array in guarded memory. The pointer
-// must not be retained beyond the lifetime of the Secret32.
+// Ptr returns a pointer to the 32-byte array in locked memory. The pointer
+// aliases the locked pages and must not be retained beyond the lifetime of the
+// Secret32.
 //
 // Panics if the secret has been destroyed.
 func (s *Secret32) Ptr() *[32]byte {
 	if s.inner.IsDestroyed() {
 		panic("secret: attempt to access destroyed secret")
 	}
-	return s.inner.buf.ByteArray32()
+	return (*[32]byte)(s.inner.Bytes())
 }
 
 // Destroy zeroizes and frees the guarded memory. This method is idempotent

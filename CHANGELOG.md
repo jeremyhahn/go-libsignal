@@ -9,8 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **The locked-memory backend is now `github.com/jeremyhahn/go-enclave`**, the
+  portfolio locked-memory primitive, replacing `github.com/awnumar/memguard`.
+  Reaching `RLIMIT_MEMLOCK` now returns a typed `ErrSecretAlloc` from the
+  failing allocation instead of memguard's process-wide `Purge`, which
+  destroyed every live locked buffer in the process on its way out — the core
+  harm behind the pre-auth memlock-exhaustion finding. go-enclave also has no
+  at-rest cipher, so memguard's non-approved NaCl secretbox / BLAKE2b enclave
+  encryption leaves the FIPS dependency graph entirely, and the static audit
+  reclassifies accordingly. `secret.Secret`'s public API is otherwise
+  unchanged, and `secret.New` / `NewRandom` produce frozen read-only secrets as
+  before.
+- The ML-KEM-768 decapsulation-key seed copy in `mlkembraid`'s `Decaps` is now
+  bounded by `defer sk.Zeroize()` rather than resident until the GC reclaims
+  the page. Whole-lifetime locked storage is unreachable there because
+  `crypto/mlkem.NewDecapsulationKey768` expands the seed on its own heap — the
+  FIPS-validated primitive the protected-memory mandate yields to — so bounding
+  the copy is the mitigation the boundary leaves. A mutation-verified source
+  assertion pins the defer.
 - The group-messaging (sender key) persisted structures now cross the storage
-  boundary in memguard-protected memory: the signing private key
+  boundary in locked memory: the signing private key
   (`SenderKeyStateStructure.SigningKeyPrivate`), the sender chain key
   (`SenderChainKeyStructure.ChainKey`), and each sender message key's IV,
   cipher key and seed. These were the same exposure as the 1:1 structures
@@ -20,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already guarded when a later step fails, so malformed state cannot strand
   mlock'd pages.
 - Persisted chain keys and message keys now cross the storage boundary in
-  memguard-protected memory. `chain.KeyStructure.Key` and the four secret
+  locked memory. `chain.KeyStructure.Key` and the four secret
   fields of `message.KeysStructure` (`CipherKey`, `MacKey`, `IV`,
   `SeedMaterial`) were the last families on the persisted-state path still
   held as plain `[]byte`; the 0.2.0-alpha conversion covered the fields the
@@ -44,11 +62,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** `secret.Secret.Seal`, `secret.OpenEnclave`, the exported
+  `secret.Enclave` type, and `secret.Secret.Freeze` / `Melt` are removed. They
+  were memguard-specific: `Seal` / `OpenEnclave` / `Enclave` provided at-rest
+  encryption go-enclave does not, and had no production callers; and secrets
+  from `New` / `NewRandom` are frozen read-only by construction, so a separate
+  `Freeze` / `Melt` toggle no longer applies. At-rest sealing is being
+  redesigned separately.
 - **Breaking:** `ratchet.NewSenderChainKeyFromStruct`,
   `ratchet.NewStructFromSenderChainKey`, `ratchet.NewSenderMessageKeyFromStruct`
   and `ratchet.NewStructFromSenderMessageKey` return `(T, error)` instead of
   `T`, and reject an absent sender chain key with the typed
-  `*ratchet.MissingKeyError` rather than panicking out of a `memguard`
+  `*ratchet.MissingKeyError` rather than panicking out of a locked-memory
   allocation on input an attacker can supply.
 - `ecc.GuardPrivateKey` replaces the unexported helper that was duplicated
   between the 1:1 and group record layers. It lives in `pkg/ecc` because both
@@ -57,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `message.NewKeysFromStruct` and `message.NewStructFromKeys` return
   `(T, error)` instead of `T`. Moving guarded material can fail, and these
   constructors previously had nowhere to say so — a structure carrying no
-  chain key panicked out of a `memguard` allocation on input an attacker
+  chain key panicked out of a locked-memory allocation on input an attacker
   could supply. They now return the typed `*chain.MissingKeyError` /
   `*message.MissingKeyError` and fail closed.
 - `parseIntelRootKey` and `parseAttestKey` build the DCAP public key with
@@ -76,17 +101,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `govulncheck` is clean against the go1.26.6 standard library, so unlike the
   go1.26.5 bump on 2026-08-14 nothing was failing. Unrelated to the Go 1.27
   wave, which is blocked on `cockroachdb/swiss`.
-
-### Security
-
-- `secret.Secret.Seal` encrypts the secret straight out of guarded memory. It
-  used to copy the plaintext into an ordinary `[]byte` and hand that to
-  `memguard.NewEnclave`, so the key sat on a swappable, core-dumpable heap page
-  until `NewEnclave` wiped it — the same defect fixed in `Secret.Clone`, on the
-  sibling method. Latent rather than live: `Seal` and `OpenEnclave` have no
-  production callers, so nothing was exposed; the point is that the next caller
-  would have inherited it silently. The FIPS exemption register drops from 7
-  memguard-enclave uses in that file to 6.
 
 ### Fixed
 

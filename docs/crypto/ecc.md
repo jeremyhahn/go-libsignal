@@ -1,6 +1,6 @@
 # Elliptic Curve Cryptography
 
-Package `ecc/` implements Curve25519 key operations, XEdDSA/VXEdDSA signature schemes, and memguard-protected key storage. Source files are in `/ecc/`.
+Package `ecc/` implements Curve25519 key operations, XEdDSA/VXEdDSA signature schemes, and locked-memory key storage. Source files are in `/ecc/`.
 
 ## Key Types
 
@@ -205,6 +205,6 @@ The `kdf.CalculateSharedSecret` function in `kdf/HKDF.go` provides the same oper
 | `ErrSignFailed` | XEdDSA sign produced nil (invalid scalar) |
 | `ErrGuardedKeyDestroyed` | Operation on a destroyed `GuardedECPrivateKey` |
 | `ErrInvalidKeyAgreement` | DH produced all-zero shared secret |
-| `ErrGuardedKeyAllocation` | memguard allocation failure (wraps panic) |
+| `ErrGuardedKeyAllocation` | locked-memory allocation failure |
 | `ErrInvalidVXEdDSASignatureLength` | VXEdDSA signature is not 96 bytes |
 | `ErrHashToPointFailed` | Elligator 2 hash-to-point failed |

@@ -16,4 +16,4 @@
 
 ## go-libsignal
 
-- [Jeremy Hahn](https://github.com/jeremyhahn) -- Post-quantum extensions, zero-knowledge credentials, memguard integration, modern feature parity with the [Rust libsignal](https://github.com/signalapp/libsignal) reference implementation
+- [Jeremy Hahn](https://github.com/jeremyhahn) -- Post-quantum extensions, zero-knowledge credentials, locked-memory integration, modern feature parity with the [Rust libsignal](https://github.com/signalapp/libsignal) reference implementation

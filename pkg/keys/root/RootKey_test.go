@@ -32,16 +32,16 @@ func TestNewKey(t *testing.T) {
 }
 
 func TestNewKey_EmptyBytes(t *testing.T) {
-	// memguard treats a zero-length buffer as immediately destroyed.
+	// go-enclave treats a zero-length buffer as immediately destroyed.
 	// An empty root key is not valid in practice, but we verify it
 	// does not panic during construction.
 	key := NewKey(kdf.DeriveSecrets, []byte{})
 	if key == nil {
 		t.Fatal("expected non-nil root key even for empty input")
 	}
-	// The guarded memory for an empty buffer is marked destroyed by memguard.
+	// The guarded memory for an empty buffer is marked destroyed by go-enclave.
 	if !key.key.IsDestroyed() {
-		t.Fatal("expected empty key to be in destroyed state per memguard semantics")
+		t.Fatal("expected empty key to be in destroyed state per the zero-length secret contract")
 	}
 }
 

@@ -56,7 +56,7 @@ func NewBackupKey(data [BackupKeyLength]byte) BackupKey {
 	copy(buf, data[:])
 	s, err := secretAlloc(buf)
 	if err != nil {
-		// secretAlloc only fails on nil input or memguard alloc failure.
+		// secretAlloc only fails on nil input or locked-memory alloc failure.
 		// A valid 32-byte slice should never trigger nil; alloc failure is fatal.
 		panic("accountkeys: failed to create BackupKey secret: " + err.Error())
 	}

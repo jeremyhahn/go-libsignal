@@ -53,7 +53,7 @@ Steps:
 3. Reject X3DH (version 3) messages: `ErrX3DHNoLongerSupported`.
 4. Require Kyber pre-key ID and ciphertext for v4+ messages: `ErrMissingPQPreKey`.
 5. Load the signed pre-key and optionally the one-time pre-key.
-6. Load the Kyber pre-key pair into memguard-protected memory.
+6. Load the Kyber pre-key pair into locked memory.
 7. Call `ratchet.CalculateReceiverSession(parameters)` to perform PQXDH DH agreement and Kyber decapsulation.
 8. Destroy the guarded Kyber key pair immediately after the calculation.
 9. Set up the session state with the derived keys.

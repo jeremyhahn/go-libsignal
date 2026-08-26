@@ -273,7 +273,7 @@ func (d *Cipher) Encrypt(plaintext []byte) (protocol.CiphertextMessage, error) {
 	}
 
 	nextChainKey := chainKey.NextKey()
-	// Old chain key material is automatically destroyed by NextKey() via memguard.
+	// Old chain key material is automatically destroyed by NextKey() via go-enclave.
 	sessionState.SetSenderChainKey(nextChainKey)
 
 	// Identity trust check is performed after chain key advancement but before
@@ -514,7 +514,7 @@ func (d *Cipher) DecryptWithState(sessionState *record.State, ciphertextMessage 
 	}
 
 	// The clone holds its own guarded buffers, and a failed decrypt throws it
-	// away. Release them rather than abandoning them: memguard reclaims
+	// away. Release them rather than abandoning them: go-enclave reclaims
 	// nothing on its own, so otherwise every message that fails MAC
 	// verification would cost the process locked memory it never gets back.
 	// The commit below moves those buffers into sessionState, which is why the

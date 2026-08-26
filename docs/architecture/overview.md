@@ -12,7 +12,7 @@ Low-level cryptographic operations and memory protection.
 
 | Package | Purpose |
 |---------|---------|
-| `util/crypto/secret` | memguard-backed secret storage (mlock, guard pages) |
+| `util/crypto/secret` | locked-memory-backed secret storage (mlock, guard pages) |
 | `util/crypto` | Zeroization with `runtime.KeepAlive` to prevent dead-store elimination |
 | `cipher` | AES-256-GCM-SIV (RFC 8452), AES-CBC, AES-CTR, HPKE |
 | `ecc` | Curve25519 key pairs, XEdDSA/VXEdDSA signing |
@@ -96,7 +96,7 @@ session.Cipher
         -> kdf (HKDF)
         -> ecc (Curve25519)
         -> kem (Kyber)
-           -> util/crypto/secret (memguard)
+           -> util/crypto/secret (go-enclave)
 
 sealed.SealedSenderEncrypt
   -> session.Cipher (inner encryption)
@@ -166,7 +166,7 @@ Key protocol constants (from the Rust reference):
 | Dependency | Used For |
 |------------|----------|
 | `filippo.io/edwards25519` | Edwards25519 point arithmetic |
-| `github.com/awnumar/memguard` | mlock'd memory, guard pages, encrypted at-rest enclaves |
+| `github.com/jeremyhahn/go-enclave` | mlock'd memory, guard pages, canary; zeroizes on destruction |
 | `github.com/cloudflare/circl` | Kyber-768/1024 KEM (round-3 kyber, not NIST ML-KEM) |
 | `github.com/flynn/noise` | Noise NK handshake for attestation channels |
 | `github.com/gtank/ristretto255` | Ristretto255 group for ZK credentials |

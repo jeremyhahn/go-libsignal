@@ -290,7 +290,7 @@ func (b *Builder) processV3(sessionRecord *record.Session,
 
 	// PQXDH: If the message contains a Kyber pre-key ID and ciphertext,
 	// load our Kyber pre-key pair and set the receiver parameters with
-	// the secret key in memguard-protected memory.
+	// the secret key in locked memory.
 	if message.KyberPreKeyID() != nil && message.KyberCiphertext() != nil && b.kyberPreKeyStore != nil {
 		kyberPreKeyRecord, kyberErr := b.kyberPreKeyStore.LoadKyberPreKey(message.KyberPreKeyID().Value)
 		if kyberErr != nil {

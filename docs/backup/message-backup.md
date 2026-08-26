@@ -32,7 +32,7 @@ AccountEntropyPool
 - **Legacy** (no forward secrecy token): uses DST `"20241007_SIGNAL_BACKUP_ENCRYPT_MESSAGE_BACKUP:"` with no salt.
 - **Modern** (with forward secrecy token): uses DST `"20250708_SIGNAL_BACKUP_ENCRYPT_MESSAGE_BACKUP:"` with the token as HKDF salt.
 
-All key material is stored in memguard-protected memory (`secret.Secret`). Callers must call `Zeroize()` on `BackupKey`, `BackupID`, and `MessageBackupKey` when finished.
+All key material is stored in locked memory (`secret.Secret`). Callers must call `Zeroize()` on `BackupKey`, `BackupID`, and `MessageBackupKey` when finished.
 
 ### Key Types
 

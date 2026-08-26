@@ -64,39 +64,6 @@ func TestNewEmpty_PositiveSizes(t *testing.T) {
 	}
 }
 
-// TestOpenEnclave_ValidRoundTrip verifies the success path of OpenEnclave.
-func TestOpenEnclave_ValidRoundTrip(t *testing.T) {
-	s, err := New([]byte{0x11, 0x22, 0x33})
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
-
-	enc := s.Seal()
-	if enc == nil {
-		t.Fatal("Seal() returned nil")
-	}
-
-	recovered, err := OpenEnclave(enc)
-	if err != nil {
-		t.Fatalf("OpenEnclave failed: %v", err)
-	}
-	defer recovered.Destroy()
-
-	if !recovered.EqualTo([]byte{0x11, 0x22, 0x33}) {
-		t.Error("recovered content does not match sealed content")
-	}
-}
-
-// TestOpenEnclave_ErrorPath covers the branch where e.Open() fails.
-// We can't easily cause Open to fail on a valid enclave, so we validate
-// the nil path returns ErrNilInput.
-func TestOpenEnclave_NilReturnsNilInput(t *testing.T) {
-	_, err := OpenEnclave(nil)
-	if !errors.Is(err, ErrNilInput) {
-		t.Errorf("OpenEnclave(nil) error = %v, want ErrNilInput", err)
-	}
-}
-
 // TestNewSecret32_ZeroArray creates a Secret32 from an all-zero array.
 func TestNewSecret32_ZeroArray(t *testing.T) {
 	var data [32]byte
@@ -191,4 +158,51 @@ func TestSecret32_EqualTo_Destroyed_ReturnsFalse(t *testing.T) {
 	if s.EqualTo(data) {
 		t.Error("EqualTo on destroyed Secret32 should return false")
 	}
+}
+
+// TestNewEmpty_NegativeSizeIsRejected pins that a negative size is invalid
+// input, not a zero-length secret: the zero special-case is exactly size 0, and
+// anything below it must surface an allocation error rather than reaching the
+// locked-memory allocator with a nonsense size.
+func TestNewEmpty_NegativeSizeIsRejected(t *testing.T) {
+	s, err := NewEmpty(-1)
+	if err == nil {
+		t.Fatal("NewEmpty(-1) should return an error")
+	}
+	if s != nil {
+		t.Error("NewEmpty(-1) should return a nil secret on error")
+	}
+	if !errors.Is(err, &Error{kind: errSecretAlloc}) {
+		t.Errorf("NewEmpty(-1) error = %v, want an allocation error", err)
+	}
+}
+
+// TestNewRandom_NegativeSizeIsRejected is the NewRandom counterpart.
+func TestNewRandom_NegativeSizeIsRejected(t *testing.T) {
+	s, err := NewRandom(-1)
+	if err == nil {
+		t.Fatal("NewRandom(-1) should return an error")
+	}
+	if s != nil {
+		t.Error("NewRandom(-1) should return a nil secret on error")
+	}
+	if !errors.Is(err, &Error{kind: errSecretAlloc}) {
+		t.Errorf("NewRandom(-1) error = %v, want an allocation error", err)
+	}
+}
+
+// TestSecret_Size_NilReceiver pins the nil-receiver contract that lets callers
+// hold an optional *Secret without a nil guard at every use.
+func TestSecret_Size_NilReceiver(t *testing.T) {
+	var s *Secret
+	if got := s.Size(); got != 0 {
+		t.Errorf("(*Secret)(nil).Size() = %d, want 0", got)
+	}
+}
+
+// TestSecret32_Destroy_NilReceiver pins that Destroy is safe on a nil Secret32,
+// so it can always be deferred.
+func TestSecret32_Destroy_NilReceiver(t *testing.T) {
+	var s *Secret32
+	s.Destroy() // must not panic
 }

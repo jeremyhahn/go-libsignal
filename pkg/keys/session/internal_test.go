@@ -8,8 +8,8 @@ import (
 )
 
 // errSimulatedAllocFailure is the sentinel error returned by the injected
-// allocator in tests that verify memguard allocation failure paths.
-var errSimulatedAllocFailure = errors.New("simulated memguard allocation failure")
+// allocator in tests that verify locked-memory allocation failure paths.
+var errSimulatedAllocFailure = errors.New("simulated locked-memory allocation failure")
 
 // failAfterN returns a secret allocator that succeeds for the first n calls
 // and then injects a failure, restoring the original allocator afterward.

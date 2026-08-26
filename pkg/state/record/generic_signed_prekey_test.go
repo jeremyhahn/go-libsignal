@@ -260,7 +260,7 @@ func TestGenericSignedPreKeySignedPreKeyConstructorTypedError(t *testing.T) {
 	s := newSerializer()
 
 	// Provide a valid-looking public key and an empty private key slice.
-	// NewGuardedECPrivateKey will fail on a zeroed key since memguard
+	// NewGuardedECPrivateKey will fail on a zeroed key since go-enclave
 	// rejects all-zero secrets.
 	structure := &record.SignedPreKeyStructure{
 		ID:         20,
@@ -272,7 +272,7 @@ func TestGenericSignedPreKeySignedPreKeyConstructorTypedError(t *testing.T) {
 
 	_, err := record.NewSignedPreKeyFromStruct(structure, s.SignedPreKeyRecord)
 	// If the implementation returns an error here we verify it is non-nil.
-	// If the underlying memguard does not reject an all-zero key, skip assertion
+	// If the underlying go-enclave does not reject an all-zero key, skip assertion
 	// to avoid test fragility — the compile-time assertions above already
 	// guarantee interface satisfaction.
 	if err != nil {

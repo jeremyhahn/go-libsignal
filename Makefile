@@ -68,7 +68,7 @@ COVERAGE_LOOP_SELFTEST_DIR := $(COVERAGE_DIR)/loop-selftest
 COVERAGE_MIN := 90
 
 # Per-package coverage minimums for packages with legitimately untestable branches.
-# These packages contain defensive OOM panic-recovery blocks wrapping memguard
+# These packages contain defensive OOM panic-recovery blocks wrapping locked-memory
 # allocations that cannot be triggered in unit tests without modifying OS mlock
 # limits (CLAUDE.md prohibits host modification). All other packages must meet
 # COVERAGE_MIN (90%).
@@ -80,7 +80,7 @@ COVERAGE_MIN := 90
 #                                    separately; the package-total including sub-pkgs
 #                                    is ≥90%
 #   pkg/tripleratchet         87%  — multiple coverage-exempt paths:
-#                                    (1) memguard OOM paths in takeSnapshot, Encrypt,
+#                                    (1) locked-memory OOM paths in takeSnapshot, Encrypt,
 #                                    decryptWithSnapshot, kdf.go splitHybridOutput;
 #                                    (2) dead code: uint32 overflow guard in
 #                                    receivePQKey loop, KDFHybridECOnly branch;
@@ -90,8 +90,9 @@ COVERAGE_MIN := 90
 #                                    fires in fully synchronized bidirectional sessions
 #                                    requiring a complete braid SCKA handshake, which
 #                                    is not achievable with a simple symmetric EC cipher
-#   pkg/util/crypto/secret    88%  — defer recover() OOM guards in New, NewRandom,
-#                                    NewEmpty, and OpenEnclave
+#   pkg/util/crypto/secret    88%  — untestable locked-memory allocation-failure
+#                                    branches in New, NewRandom, NewEmpty and Clone
+#                                    (reachable only when mlock fails)
 COVERAGE_MIN_groups_ratchet := 87
 COVERAGE_MIN_mlkembraid := 87
 COVERAGE_MIN_tripleratchet := 87

@@ -10,7 +10,7 @@ Source files: `accountkeys.go`, `backup_forward_secrecy.go`, `errors.go`
 
 ### Generation
 
-`GenerateAccountEntropyPool` uses cryptographically random bytes in memguard-protected memory with rejection sampling to avoid modulo bias. The alphabet has 36 characters; bytes < 252 (36 * 7) are accepted, others are rejected. The resulting pool string is copied out and the guarded buffer is destroyed.
+`GenerateAccountEntropyPool` uses cryptographically random bytes in locked memory with rejection sampling to avoid modulo bias. The alphabet has 36 characters; bytes < 252 (36 * 7) are accepted, others are rejected. The resulting pool string is copied out and the guarded buffer is destroyed.
 
 ### Validation
 

@@ -24,7 +24,7 @@ func mustGuard(t *testing.T, data []byte) secret.Secret {
 }
 
 // TestNewSenderKeyStateFromStructureReleasesOnFailure covers destroySenderKeyState,
-// the cleanup that runs when a state cannot be fully decoded. memguard sets no
+// the cleanup that runs when a state cannot be fully decoded. go-enclave sets no
 // finalizer, so a state abandoned mid-construction would keep its buffers
 // mlock'd for the life of the process.
 //

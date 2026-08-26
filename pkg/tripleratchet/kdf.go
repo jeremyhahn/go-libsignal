@@ -23,7 +23,7 @@ const (
 )
 
 // HybridKeys holds the output of KDFHybrid or KDFHybridECOnly.
-// All fields are memguard-backed Secrets and must be destroyed after use.
+// All fields are locked-memory-backed Secrets and must be destroyed after use.
 //
 // CipherKey: 32 bytes, AES-256 encryption key.
 // MacKey:    32 bytes, HMAC-SHA256 key.
@@ -112,7 +112,7 @@ func splitHybridOutput(output []byte) (*HybridKeys, error) {
 
 	// Wrap the raw output so it is zeroized when we finish splitting.
 	raw, err := secret.New(output)
-	if err != nil { // coverage-exempt: only reachable on memguard OOM
+	if err != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 		return nil, &ErrHybridKDFFailed{Cause: err}
 	}
 	defer raw.Destroy()
@@ -122,14 +122,14 @@ func splitHybridOutput(output []byte) (*HybridKeys, error) {
 	ckBytes := make([]byte, cipherKeySize)
 	copy(ckBytes, rawBytes[:cipherKeySize])
 	ck, err := secret.New(ckBytes)
-	if err != nil { // coverage-exempt: only reachable on memguard OOM
+	if err != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 		return nil, &ErrHybridKDFFailed{Cause: err}
 	}
 
 	mkBytes := make([]byte, macKeySize)
 	copy(mkBytes, rawBytes[cipherKeySize:cipherKeySize+macKeySize])
 	mk, err := secret.New(mkBytes)
-	if err != nil { // coverage-exempt: only reachable on memguard OOM
+	if err != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 		ck.Destroy()
 		return nil, &ErrHybridKDFFailed{Cause: err}
 	}
@@ -137,7 +137,7 @@ func splitHybridOutput(output []byte) (*HybridKeys, error) {
 	ivBytes := make([]byte, ivSize)
 	copy(ivBytes, rawBytes[cipherKeySize+macKeySize:])
 	iv, err := secret.New(ivBytes)
-	if err != nil { // coverage-exempt: only reachable on memguard OOM
+	if err != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 		ck.Destroy()
 		mk.Destroy()
 		return nil, &ErrHybridKDFFailed{Cause: err}

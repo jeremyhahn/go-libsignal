@@ -18,7 +18,7 @@ The `TripleRatchet` struct wraps:
 - `braidHandshakeComplete` (bool): set after the first epoch advancement
 - `skippedPQKeys` (`map[pqSkippedKeyID]*secret.Secret`): out-of-order PQ message keys
 
-All sensitive key material is stored in memguard-backed `secret.Secret` values.
+All sensitive key material is stored in locked-memory-backed `secret.Secret` values.
 
 ## ECCipher interface
 

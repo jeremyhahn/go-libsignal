@@ -459,7 +459,7 @@ Representative results on Intel Core Ultra 9 285K (Go 1.26.3, linux/amd64):
 ## Dependencies
 
 - **filippo.io/edwards25519** — Edwards25519 elliptic curve operations
-- **github.com/awnumar/memguard** — Memory-guarded key storage with mlock and guard pages
+- **github.com/jeremyhahn/go-enclave** — Locked-memory key storage with mlock, guard pages, and a canary
 - **github.com/cloudflare/circl** — Kyber-1024 KEM (post-quantum, pre-FIPS-203 wire format)
 - **github.com/flynn/noise** — Noise protocol framework (NK / NKhfs attestation handshakes)
 - **github.com/gtank/ristretto255** — Ristretto255 group operations for ZK credentials
@@ -474,7 +474,7 @@ This port targets wire-format compatibility with the Rust reference at [signalap
 
 - **ML-KEM Braid SCKA state machine** (`pkg/mlkembraid`). The Rust protocol crate does not contain a braid implementation; Go ships a complete 11-state machine with streaming `IncrementalKEM` (split `Encaps1`/`Encaps2`).
 - **Inline SPQR** (`pkg/spqr`). The Rust reference pulls SPQR from an external `spqr` crate; Go keeps the implementation in-tree and auditable.
-- **`memguard`-protected secret keys** (`pkg/kem`). Rust relies on `Zeroize` on drop; Go additionally mlocks long-lived key material behind guard pages.
+- **`go-enclave`-protected secret keys** (`pkg/kem`). Rust relies on `Zeroize` on drop; Go additionally mlocks long-lived key material behind guard pages.
 - **AES-GCM-SIV export** and streaming media validators (GIF in addition to Rust's MP4/WebP sanitizer).
 
 ### zkgroup credential version policy
@@ -540,7 +540,7 @@ github.com/jeremyhahn/go-libsignal/pkg/
 
 ## Security
 
-Vulnerability reports go to [SECURITY.md](SECURITY.md). go-libsignal is a security-critical cryptographic library; please disclose issues responsibly via GitHub Security Advisories rather than public issue trackers. The library enforces constant-time cryptographic operations throughout, mlocks long-lived key material with memguard guard pages, zeroizes intermediate secrets on return, and uses typed errors to avoid leaking implementation details through error strings.
+Vulnerability reports go to [SECURITY.md](SECURITY.md). go-libsignal is a security-critical cryptographic library; please disclose issues responsibly via GitHub Security Advisories rather than public issue trackers. The library enforces constant-time cryptographic operations throughout, mlocks long-lived key material behind go-enclave guard pages, zeroizes intermediate secrets on return, and uses typed errors to avoid leaking implementation details through error strings.
 
 ## License
 

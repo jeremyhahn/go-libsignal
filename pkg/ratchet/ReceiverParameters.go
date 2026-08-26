@@ -109,13 +109,13 @@ func (r *ReceiverParameters) SetTheirIdentityKey(theirIdentityKey *identity.Key)
 }
 
 // OurKyberPreKeyPair returns our Kyber pre-key pair with the secret key
-// stored in memguard-protected memory.
+// stored in locked memory.
 func (r *ReceiverParameters) OurKyberPreKeyPair() *kem.GuardedKeyPair {
 	return r.ourKyberPreKeyPair
 }
 
 // SetOurKyberPreKeyPair sets our Kyber pre-key pair. The GuardedKeyPair holds
-// the secret key in memguard-protected memory for zeroization on destruction.
+// the secret key in locked memory for zeroization on destruction.
 func (r *ReceiverParameters) SetOurKyberPreKeyPair(ourKyberPreKeyPair *kem.GuardedKeyPair) {
 	r.ourKyberPreKeyPair = ourKyberPreKeyPair
 }

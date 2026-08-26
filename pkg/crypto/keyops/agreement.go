@@ -3,8 +3,8 @@ package keyops
 import "github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 
 // KeyAgreement abstracts ECDH key agreement operations.
-// Software implementations perform X25519 Diffie-Hellman using memguard-
-// protected private keys. Hardware implementations delegate to the secure
+// Software implementations perform X25519 Diffie-Hellman using
+// locked-memory-protected private keys. Hardware implementations delegate to the secure
 // element without exposing raw key material.
 type KeyAgreement interface {
 	// Agreement performs X25519 Diffie-Hellman with the peer's public key.

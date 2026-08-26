@@ -2,13 +2,13 @@
 
 This document covers the major design patterns used throughout go-libsignal.
 
-## Guarded Keys with memguard
+## Guarded Keys with go-enclave
 
-Private key material is stored in mlock'd, guard-page-protected memory via the `github.com/awnumar/memguard` library. memguard prevents keys from being paged to swap, places guard pages around buffers to catch overflows, and zeroizes memory on destruction.
+Private key material is stored in mlock'd, guard-page-protected memory via the `github.com/jeremyhahn/go-enclave` library. go-enclave prevents keys from being paged to swap, places guard pages around buffers to catch overflows, adds a canary to detect tampering, and zeroizes memory on destruction. Material is held as plaintext in locked memory; there is no at-rest encryption in this layer.
 
 ### The secret Package
 
-`util/crypto/secret` wraps memguard's `LockedBuffer` in two types:
+`util/crypto/secret` wraps go-enclave's locked-memory buffer in two types:
 
 - `secret.Secret` -- variable-length guarded buffer for KEM secret keys and other non-32-byte secrets
 - `secret.Secret32` -- fixed 32-byte specialization for EC private keys, chain keys, root keys, shared secrets, and HMAC keys
@@ -19,8 +19,8 @@ Both types provide:
 - `Destroy()` -- zeroizes and frees the buffer (idempotent)
 - `Clone()` -- deep copy into new guarded memory
 - `EqualTo()` -- constant-time comparison
-- `Freeze()` / `Melt()` -- toggle read-only protection (write attempts segfault)
-- `Seal()` / `OpenEnclave()` -- encrypt at rest in a memguard Enclave
+
+`secret.New` and `secret.NewRandom` return frozen, read-only secrets (write attempts segfault); `secret.NewEmpty` returns a writable buffer for in-place fill.
 
 ### Move Semantics
 
@@ -64,7 +64,7 @@ The `ecc` and `kem` packages build on `secret.Secret32` and `secret.Secret`:
 
 ### Panic Recovery
 
-All guarded key constructors use `defer/recover` to catch memguard panics (e.g., mlock failures on systems with low `RLIMIT_MEMLOCK`) and convert them to typed errors:
+All guarded key constructors return a typed error on locked-memory allocation failure. `secret.New*` reports the failure directly; a `defer/recover` backstop additionally converts any unexpected panic into the same typed error:
 
 ```go
 func NewGuardedECPrivateKey(data [32]byte) (k *GuardedECPrivateKey, err error) {
@@ -81,7 +81,7 @@ func NewGuardedECPrivateKey(data [32]byte) (k *GuardedECPrivateKey, err error) {
 
 ## keyops Interfaces
 
-The `crypto/keyops` package defines interfaces for cryptographic operations, separating the operation (sign, agree, decapsulate) from the backing implementation (software memguard, HSM, secure enclave).
+The `crypto/keyops` package defines interfaces for cryptographic operations, separating the operation (sign, agree, decapsulate) from the backing implementation (software go-enclave, HSM, secure enclave).
 
 | Interface | Methods | Used By |
 |-----------|---------|---------|
@@ -92,7 +92,7 @@ The `crypto/keyops` package defines interfaces for cryptographic operations, sep
 | `keyops.Decapsulator` | `Decapsulate`, `Destroy` | KEM secret keys |
 | `keyops.Encapsulator` | `Encapsulate` | KEM public keys |
 
-Software implementations (`ecc.GuardedECPrivateKey`, `kem.GuardedSecretKey`) back these interfaces with memguard. Hardware implementations can implement the same interfaces, delegating to HSM or secure enclave APIs.
+Software implementations (`ecc.GuardedECPrivateKey`, `kem.GuardedSecretKey`) back these interfaces with go-enclave. Hardware implementations can implement the same interfaces, delegating to HSM or secure enclave APIs.
 
 ## Snapshot/Restore for Rollback
 
@@ -225,4 +225,4 @@ defer crypto.ZeroizeArray32(&secret)
 
 `crypto.Zeroize` uses `runtime.KeepAlive` to prevent the Go compiler from optimizing away the zero-writes as dead stores. Variants: `Zeroize([]byte)`, `ZeroizeArray32(*[32]byte)`, `ZeroizeArray64(*[64]byte)`.
 
-For heap-allocated secrets, `secret.Secret.Destroy()` delegates to memguard's `LockedBuffer.Destroy()`, which uses platform-specific secure zeroization (memset_s or explicit_bzero where available).
+For heap-allocated secrets, `secret.Secret.Destroy()` delegates to go-enclave, which zeroizes the locked pages before unmapping them.

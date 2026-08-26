@@ -14,7 +14,7 @@ import (
 )
 
 // Deserialize now returns structures carrying guarded material, so the byte
-// entry points own locked memory they did not own before. Nothing in memguard
+// entry points own locked memory they did not own before. Nothing in go-enclave
 // reports how many locked buffers a process holds, so these tests read the
 // kernel's own accounting — VmLck in /proc/self/status — which is exactly the
 // resource an abandoned buffer consumes. That measurement is Linux-only.
@@ -27,7 +27,7 @@ import (
 const loadAttempts = 32
 
 // growthToleranceKB absorbs page-granularity noise from allocations the Go
-// runtime and memguard make around the measurement. The leaks these tests
+// runtime and go-enclave make around the measurement. The leaks these tests
 // provoke are measured in megabytes.
 const growthToleranceKB = 128
 

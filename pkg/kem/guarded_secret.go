@@ -17,7 +17,7 @@ func (e *ErrGuardedKeyDestroyedType) Error() string {
 // destroyed GuardedSecretKey or GuardedSharedSecret.
 var ErrGuardedKeyDestroyed error = &ErrGuardedKeyDestroyedType{}
 
-// GuardedSecretKey holds a KEM secret key in memguard-protected memory.
+// GuardedSecretKey holds a KEM secret key in locked memory.
 // Unlike SecretKey which stores key material in a regular byte slice,
 // GuardedSecretKey uses mlock'd, guard-page protected memory that is
 // zeroized on destruction.
@@ -27,7 +27,7 @@ type GuardedSecretKey struct {
 }
 
 // NewGuardedSecretKey creates a GuardedSecretKey from the given key type and
-// raw key data. The source slice is zeroized by memguard as part of the move
+// raw key data. The source slice is zeroized by go-enclave as part of the move
 // into guarded memory.
 func NewGuardedSecretKey(keyType KeyType, data []byte) (k *GuardedSecretKey, err error) {
 	defer func() {
@@ -142,7 +142,7 @@ func (g *GuardedSecretKey) CloneSecret() (*secret.Secret, error) {
 	return cloned, nil
 }
 
-// GuardedSharedSecret holds a 32-byte KEM shared secret in memguard-protected
+// GuardedSharedSecret holds a 32-byte KEM shared secret in locked
 // memory. This is the output of encapsulation and decapsulation operations
 // when using guarded KEM types.
 type GuardedSharedSecret struct {
@@ -168,7 +168,7 @@ func NewGuardedSharedSecret(data [32]byte) (ss *GuardedSharedSecret, err error) 
 
 // NewGuardedSharedSecretFromSlice creates a GuardedSharedSecret from a byte
 // slice that must be exactly 32 bytes. The source slice is zeroized by
-// memguard.
+// go-enclave.
 func NewGuardedSharedSecretFromSlice(data []byte) (ss *GuardedSharedSecret, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -228,7 +228,7 @@ func (g *GuardedSharedSecret) Secret32() *secret.Secret32 {
 	return g.inner
 }
 
-// GuardedKeyPair holds a KEM public key and a memguard-protected secret key.
+// GuardedKeyPair holds a KEM public key and a locked-memory-protected secret key.
 type GuardedKeyPair struct {
 	Public *PublicKey
 	Secret *GuardedSecretKey

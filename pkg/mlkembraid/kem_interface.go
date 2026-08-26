@@ -309,6 +309,15 @@ func (k *MLKEM768IncrementalKEM) Decaps(dk []byte, ct1 []byte, ct2 []byte) ([]by
 	if skErr != nil {
 		return nil, &ErrKEMOperation{Op: "NewSecretKey", Err: skErr}
 	}
+	// kem.NewSecretKey holds the 64-byte ML-KEM-768 decapsulation-key seed in a
+	// plain heap buffer. Bound it to this call rather than leaving it resident
+	// until the GC happens to reclaim the page. Whole-lifetime locked-memory
+	// storage is not reachable here: crypto/mlkem.NewDecapsulationKey768 takes a
+	// []byte seed and expands it on its own heap, and that stdlib call is the
+	// FIPS-validated primitive the protected-memory mandate yields to
+	// (conventions/security-review.md, 2026-08-25). Bounding our copy is the
+	// mitigation that boundary leaves available.
+	defer sk.Zeroize()
 	ciphertext := kem.NewCiphertext(kem.KeyTypeMLKEM768, fullCT)
 
 	ss, err := k.inner.Decapsulate(sk, ciphertext)

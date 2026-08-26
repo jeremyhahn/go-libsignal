@@ -62,7 +62,11 @@ func (s *Secret) BytesOrNil() []byte {
 	if s == nil || s.IsDestroyed() {
 		return nil
 	}
-	return s.buf.Bytes()
+	b, err := s.enc.Open()
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 // IsZero reports whether the secret holds no material, which is what the
@@ -114,7 +118,7 @@ func (s *Secret) UnmarshalJSON(data []byte) error {
 	}
 	if len(raw) == 0 {
 		s.Destroy()
-		s.buf = nil
+		s.enc = nil
 		return nil
 	}
 	loaded, err := New(raw)
@@ -122,6 +126,6 @@ func (s *Secret) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	s.Destroy()
-	s.buf = loaded.buf
+	s.enc = loaded.enc
 	return nil
 }

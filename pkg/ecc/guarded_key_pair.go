@@ -11,7 +11,7 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
-// GuardedECKeyPair holds an EC public key and a memguard-protected private key.
+// GuardedECKeyPair holds an EC public key and a locked-memory-protected private key.
 // It provides the same interface as ECKeyPair but with the private key stored
 // in mlock'd, guard-page protected memory.
 //
@@ -67,7 +67,7 @@ func (g *GuardedECKeyPair) ZeroizePrivateKey() {
 }
 
 // GenerateGuardedKeyPair generates a random Curve25519 key pair with the
-// private key stored in memguard-protected memory.
+// private key stored in locked memory.
 //
 // Uses the same clamping logic as GenerateKeyPair:
 //

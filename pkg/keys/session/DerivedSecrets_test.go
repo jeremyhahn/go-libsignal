@@ -261,7 +261,7 @@ func TestNewDerivedSecrets_96Bytes_Zeroize(t *testing.T) {
 }
 
 // TestNewKeyPairWithPQR verifies the new constructor wraps InitialPQRKey in
-// memguard-protected memory and zeroizes the source bytes.
+// locked memory and zeroizes the source bytes.
 func TestNewKeyPairWithPQR(t *testing.T) {
 	mockRoot := &mockRootKey{data: []byte("root")}
 	mockChain := &mockChainKey{data: []byte("chain")}

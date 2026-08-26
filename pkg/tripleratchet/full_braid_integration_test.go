@@ -111,7 +111,7 @@ func newUnidirectionalPair(t *testing.T) (alice, bob *TripleRatchet, ss []byte) 
 // a full braid handshake. This is the whitebox path for testing advancePQEpoch.
 //
 // advancePQEpoch calls secret.New(epochSecret) which uses
-// memguard.NewBufferFromBytes — this destructively zeroes the input slice.
+// the locked-memory constructor — this destructively zeroes the input slice.
 // injectEpochAdvance therefore makes an independent copy so the caller's slice
 // is not clobbered. Callers that need to pass the same secret to multiple
 // TripleRatchet instances must call injectEpochAdvance separately for each.

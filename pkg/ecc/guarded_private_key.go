@@ -20,7 +20,7 @@ var (
 	_ keyops.PrivateKey   = (*GuardedECPrivateKey)(nil)
 )
 
-// GuardedECPrivateKey stores an EC private key in memguard-protected memory.
+// GuardedECPrivateKey stores an EC private key in locked memory.
 // It implements ECPrivateKeyable for backward compatibility, and also
 // implements keyops.Signer, keyops.VRFSigner, and keyops.KeyAgreement
 // for forward-looking key operations that avoid exposing raw key material.

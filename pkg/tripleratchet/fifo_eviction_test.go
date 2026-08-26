@@ -234,7 +234,7 @@ func TestFIFOEviction_OldestEvictedAtCapacity(t *testing.T) {
 // Destroy()d more than once when skipped keys are consumed (via normal decryption)
 // and then purged (via epoch advancement calling purgeOldSkippedKeys directly).
 //
-// memguard panics on a double-free of a protected allocation, so the absence of
+// go-enclave panics on a double-free of a protected allocation, so the absence of
 // a panic is the correctness proof.
 func TestFIFOEviction_NoDoubleFreOnConsumeAndPurge(t *testing.T) {
 	ss := fifoRandomSS(t)

@@ -40,7 +40,7 @@ func (k *KyberPreKeyStructure) Zeroize() {
 }
 
 // KyberPreKey stores a Kyber pre-key with its associated metadata. The secret
-// key lives in memguard-protected memory for the whole lifetime of the record,
+// key lives in locked memory for the whole lifetime of the record,
 // both when the record is generated and when it is read back from storage; the
 // serializable structure is built on demand and destroyed by the caller.
 type KyberPreKey struct {

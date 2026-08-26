@@ -155,7 +155,7 @@ func TestGuardedKyber1024DecapsulateWrongSecretKeyType(t *testing.T) {
 	}
 
 	// Copy data out of guarded memory before creating a new guarded key,
-	// because NewGuardedSecretKey zeroizes the source slice via memguard.
+	// because NewGuardedSecretKey zeroizes the source slice via go-enclave.
 	skData := kp.Secret.Data()
 	skCopy := make([]byte, len(skData))
 	copy(skCopy, skData)

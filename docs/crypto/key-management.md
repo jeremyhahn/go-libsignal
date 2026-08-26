@@ -1,6 +1,6 @@
 # Key Derivation and Memory Protection
 
-This document covers key derivation via HKDF, the zeroization strategy for sensitive material, memguard integration through the `secret` package, and the incremental MAC scheme for streaming integrity verification.
+This document covers key derivation via HKDF, the zeroization strategy for sensitive material, locked-memory integration (go-enclave) through the `secret` package, and the incremental MAC scheme for streaming integrity verification.
 
 ## HKDF Key Derivation
 
@@ -83,11 +83,11 @@ This pattern appears throughout the codebase for:
 
 ---
 
-## Memguard Integration (secret package)
+## Locked-Memory Integration (secret package)
 
 **File:** `util/crypto/secret/secret.go`, `util/crypto/secret/secret32.go`
 
-The `secret` package wraps `github.com/awnumar/memguard` to provide secure storage for cryptographic key material.
+The `secret` package wraps `github.com/jeremyhahn/go-enclave`, the portfolio locked-memory primitive, to provide secure storage for cryptographic key material.
 
 ### Memory Protections
 
@@ -101,12 +101,12 @@ Secrets stored via this package receive:
 ### Secret (variable-length)
 
 ```go
-func New(data []byte) (*Secret, error)          // move semantics: source slice is zeroized
-func NewRandom(size int) (*Secret, error)        // cryptographically random
-func NewEmpty(size int) (*Secret, error)          // zero-initialized
+func New(data []byte) (*Secret, error)          // move into a frozen (read-only) enclave; source slice is zeroized
+func NewRandom(size int) (*Secret, error)        // cryptographically random, returned frozen (read-only)
+func NewEmpty(size int) (*Secret, error)          // writable zero-initialized buffer, filled in place
 ```
 
-`New` is the primary constructor. It takes ownership of the input slice by passing it to `memguard.NewBufferFromBytes`, which copies the data into guarded memory and zeroizes the source. After calling `New(data)`, the original `data` slice contains all zeros.
+`New` is the primary constructor. It moves the input data into a frozen (read-only) locked enclave and zeroizes the source slice. After calling `New(data)`, the original `data` slice contains all zeros.
 
 If the source must survive, copy it first:
 
@@ -123,9 +123,6 @@ Methods:
 - `IsDestroyed() bool`
 - `Clone() (*Secret, error)` -- independent deep copy in new guarded memory
 - `EqualTo(other []byte) bool` -- constant-time comparison
-- `Freeze()` -- makes memory read-only (writes cause segfault)
-- `Melt()` -- makes frozen memory writable again
-- `Seal() *Enclave` -- encrypts into at-rest storage, destroys plaintext
 
 ### Secret32 (fixed 32 bytes)
 
@@ -139,15 +136,15 @@ func NewSecret32Random() (*Secret32, error)                 // random
 
 Methods beyond `Secret`:
 - `Array() [32]byte` -- returns a copy (caller must zeroize)
-- `Ptr() *[32]byte` -- returns a pointer into guarded memory via `ByteArray32()` (panics if destroyed)
+- `Ptr() *[32]byte` -- returns a pointer aliasing the locked memory (panics if destroyed)
 
-### Enclave (at-rest encryption)
+### At-Rest Encryption
 
-`Secret.Seal()` encrypts the secret into a `memguard.Enclave` and destroys the plaintext `LockedBuffer`. `OpenEnclave(e *Enclave)` decrypts it back into a `Secret`. This is useful for secrets that are stored but not actively used.
+This layer does not provide at-rest encryption. go-enclave holds key material as plaintext in locked memory; guard pages and a canary protect it, and the memory is zeroized on destruction.
 
-### Panic Recovery
+### Allocation Failure
 
-memguard's constructors call `os.Exit` on allocation failure rather than returning errors. The `secret` package wraps all memguard calls with `recover()` to convert panics into typed `Error` values for graceful error handling in library code.
+On allocation failure the constructors return a typed `secret.Error` (kind `ErrSecretAlloc`) rather than panicking or calling `os.Exit`. Callers handle it like any other error return.
 
 ### System Requirements
 
@@ -171,7 +168,7 @@ Or in `/etc/security/limits.conf`:
 | `errSecretDestroyed` | `ErrSecretDestroyed` | Attempt to use a destroyed secret |
 | `errNilInput` | `ErrNilInput` | nil data provided to constructor |
 | `errSecretSizeMismatch` | (dynamic) | Length mismatch for Secret32 |
-| `errSecretAlloc` | (dynamic) | memguard allocation failure |
+| `errSecretAlloc` | `ErrSecretAlloc` | locked-memory allocation failure |
 
 Errors use a `kind`-based matching via `Is()` for `errors.Is` compatibility.
 

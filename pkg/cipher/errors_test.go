@@ -41,10 +41,10 @@ func TestErrAESGCMSIVNonceSize_ErrorLarge(t *testing.T) {
 }
 
 func TestErrAESGCMSIVProtectKey_ErrorAndUnwrap(t *testing.T) {
-	inner := errors.New("memguard failure")
+	inner := errors.New("locked-memory failure")
 	err := &ErrAESGCMSIVProtectKey{Err: inner}
 	msg := err.Error()
-	if !strings.Contains(msg, "memguard failure") {
+	if !strings.Contains(msg, "locked-memory failure") {
 		t.Errorf("ErrAESGCMSIVProtectKey.Error() = %q, want to contain inner error", msg)
 	}
 	if !errors.Is(err, inner) {

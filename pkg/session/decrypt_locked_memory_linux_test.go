@@ -24,10 +24,10 @@ import (
 )
 
 // A decrypt runs on a clone of the session state so that a failure can be
-// rolled back, and that clone holds guarded buffers of its own. memguard
+// rolled back, and that clone holds guarded buffers of its own. go-enclave
 // reclaims nothing on its own, so a clone that is thrown away without being
 // released costs the process locked memory permanently — and a peer can force
-// that with any message that fails to decrypt. Nothing in memguard
+// that with any message that fails to decrypt. Nothing in go-enclave
 // reports how many locked buffers a process holds, so this test reads the
 // kernel's own accounting, VmLck in /proc/self/status, which is exactly the
 // resource being consumed. The measurement is Linux-only.

@@ -26,7 +26,7 @@ func NewSenderChainKey(iteration uint32, chainKey []byte) *SenderChainKey {
 	copy(cp, chainKey)
 	s, err := secret.New(cp)
 	if err != nil {
-		// coverage-exempt: defensive OOM panic-recovery for memguard.NewBufferFromBytes;
+		// coverage-exempt: defensive OOM guard for the locked-memory allocation;
 		// cannot be unit-tested without modifying the host (see CLAUDE.md).
 		panic("ratchet: failed to allocate guarded memory for chain key: " + err.Error())
 	}
@@ -118,7 +118,7 @@ func (k *SenderChainKey) Next() (*SenderChainKey, error) {
 	// which will zeroize it (that's fine, it's a throwaway buffer).
 	s, err := secret.New(derived)
 	if err != nil {
-		// coverage-exempt: defensive OOM panic-recovery for memguard.NewBufferFromBytes;
+		// coverage-exempt: defensive OOM guard for the locked-memory allocation;
 		// cannot be unit-tested without modifying the host (see CLAUDE.md).
 		panic("ratchet: failed to allocate guarded memory for next chain key: " + err.Error())
 	}

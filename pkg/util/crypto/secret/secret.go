@@ -1,76 +1,108 @@
 package secret
 
 import (
-	"fmt"
+	"crypto/rand"
+	"io"
 
-	"github.com/awnumar/memguard"
+	"github.com/jeremyhahn/go-enclave"
 )
 
-// Enclave is an encrypted at-rest container for secret material.
-// It wraps memguard.Enclave to keep the dependency encapsulated.
-type Enclave = memguard.Enclave
-
 // Secret holds sensitive key material in mlock'd, guard-page protected memory.
-// The underlying buffer is zeroized on destruction and protected from swap.
+// The underlying region is zeroized on destruction and protected from swap.
+//
+// The backing store is go-enclave's MemoryEnclave, the portfolio locked-memory
+// primitive: reaching RLIMIT_MEMLOCK returns a typed error from construction
+// rather than purging every live buffer in the process the way memguard did.
+//
+// A zero-length input holds no material: the returned Secret reports Size()==0
+// and IsDestroyed()==true, matching the zero Secret. Locked memory cannot be
+// allocated with zero length, and no live path constructs an empty secret —
+// the serialization helpers route empty input to the zero Secret before
+// reaching New.
 type Secret struct {
-	buf *memguard.LockedBuffer
+	enc *enclave.MemoryEnclave
 }
 
 // New creates a Secret from the given byte slice. The source slice is zeroized
-// by memguard as part of the move into guarded memory.
+// as part of the move into locked memory.
 //
 // Returns ErrNilInput if data is nil, or ErrSecretAlloc if the underlying
-// memguard allocation fails.
-func New(data []byte) (s *Secret, err error) {
+// locked-memory allocation fails. An empty (non-nil) slice yields a Secret that
+// holds no material; see the type doc.
+func New(data []byte) (*Secret, error) {
 	if data == nil {
 		return nil, &Error{kind: errNilInput}
 	}
-	// coverage-exempt: defensive OOM panic-recovery for memguard.NewBufferFromBytes;
-	// cannot be unit-tested without modifying the host (see CLAUDE.md).
-	defer func() {
-		if r := recover(); r != nil {
-			s = nil
-			err = newAllocError(fmt.Sprint(r))
-		}
-	}()
-	buf := memguard.NewBufferFromBytes(data)
-	return &Secret{buf: buf}, nil
+	if len(data) == 0 {
+		return &Secret{}, nil
+	}
+	enc, err := enclave.NewMemoryEnclave(data)
+	if err != nil {
+		return nil, newAllocError(err.Error())
+	}
+	return &Secret{enc: enc}, nil
 }
 
-// NewRandom creates a Secret filled with cryptographically random data.
+// NewRandom creates a Secret filled with cryptographically random data drawn
+// directly into locked memory, so the material never exists on the ordinary
+// heap. The returned secret is frozen read-only, matching the immutable random
+// buffer the previous memguard backend produced: random key material is filled
+// once and only read, so a stray write to it should fault rather than silently
+// corrupt the key.
 //
-// Returns ErrSecretAlloc if the underlying memguard allocation fails.
-func NewRandom(size int) (s *Secret, err error) {
-	// coverage-exempt: defensive OOM panic-recovery for memguard.NewBufferRandom;
-	// cannot be unit-tested without modifying the host (see CLAUDE.md).
-	defer func() {
-		if r := recover(); r != nil {
-			s = nil
-			err = newAllocError(fmt.Sprint(r))
+// A size of zero yields a Secret that holds no material. Returns ErrSecretAlloc
+// if the underlying locked-memory allocation or the random read fails.
+func NewRandom(size int) (*Secret, error) {
+	if size == 0 {
+		return &Secret{}, nil
+	}
+	// Draw the randomness into a writable locked region, then move it into a
+	// frozen enclave. go-enclave has no post-fill freeze, and the move keeps the
+	// material locked the whole way — it never lands on the ordinary heap.
+	scratch, err := enclave.NewMemoryEnclaveSized(size)
+	if err != nil {
+		return nil, newAllocError(err.Error())
+	}
+	defer scratch.Destroy()
+
+	var s *Secret
+	if err := scratch.WithBytes(func(b []byte) error {
+		if _, readErr := io.ReadFull(rand.Reader, b); readErr != nil {
+			return readErr
 		}
-	}()
-	buf := memguard.NewBufferRandom(size)
-	return &Secret{buf: buf}, nil
+		frozen, frozenErr := enclave.NewMemoryEnclave(b)
+		if frozenErr != nil {
+			return frozenErr
+		}
+		s = &Secret{enc: frozen}
+		return nil
+	}); err != nil {
+		return nil, newAllocError(err.Error())
+	}
+	return s, nil
 }
 
-// NewEmpty creates a Secret of the given size, initialized to zero.
+// NewEmpty creates a Secret of the given size, initialized to zero, whose
+// locked pages stay writable so the caller can fill them in place through
+// Bytes.
 //
-// Returns ErrSecretAlloc if the underlying memguard allocation fails.
-func NewEmpty(size int) (s *Secret, err error) {
-	// coverage-exempt: defensive OOM panic-recovery for memguard.NewBuffer;
-	// cannot be unit-tested without modifying the host (see CLAUDE.md).
-	defer func() {
-		if r := recover(); r != nil {
-			s = nil
-			err = newAllocError(fmt.Sprint(r))
-		}
-	}()
-	buf := memguard.NewBuffer(size)
-	return &Secret{buf: buf}, nil
+// A size of zero yields a Secret that holds no material. Returns ErrSecretAlloc
+// if the underlying locked-memory allocation fails.
+func NewEmpty(size int) (*Secret, error) {
+	if size == 0 {
+		return &Secret{}, nil
+	}
+	enc, err := enclave.NewMemoryEnclaveSized(size)
+	if err != nil {
+		return nil, newAllocError(err.Error())
+	}
+	return &Secret{enc: enc}, nil
 }
 
-// Bytes returns a view into the guarded memory. The returned slice must not
-// be retained beyond the lifetime of the Secret.
+// Bytes returns a view into the locked memory. The returned slice must not be
+// retained beyond the lifetime of the Secret, and a concurrent Destroy can
+// unmap the pages beneath it — the same contract the previous memguard-backed
+// view carried.
 //
 // Panics if the secret has been destroyed. Callers should check IsDestroyed
 // first in contexts where destruction is possible.
@@ -78,44 +110,45 @@ func (s *Secret) Bytes() []byte {
 	if s.IsDestroyed() {
 		panic("secret: attempt to access destroyed secret")
 	}
-	return s.buf.Bytes()
+	b, err := s.enc.Open()
+	if err != nil {
+		panic("secret: attempt to access destroyed secret")
+	}
+	return b
 }
 
 // Size returns the size of the secret in bytes.
-// Returns 0 if the secret has been destroyed.
+// Returns 0 if the secret has been destroyed or holds no material.
 func (s *Secret) Size() int {
-	if s.IsDestroyed() {
+	if s == nil {
 		return 0
 	}
-	return s.buf.Size()
+	return s.enc.Size()
 }
 
-// Destroy zeroizes and frees the guarded memory. This method is idempotent
+// Destroy zeroizes and frees the locked memory. This method is idempotent
 // and safe to call multiple times, including on a nil Secret.
 func (s *Secret) Destroy() {
 	if s == nil {
 		return
 	}
-	if s.buf != nil && s.buf.IsAlive() {
-		s.buf.Destroy()
-	}
+	s.enc.Destroy()
 }
 
-// IsDestroyed reports whether the secret has been destroyed. A nil Secret
-// holds no material and is reported as destroyed.
+// IsDestroyed reports whether the secret holds no live material. A nil Secret,
+// the zero Secret, and a destroyed Secret all report true.
 func (s *Secret) IsDestroyed() bool {
-	return s == nil || s.buf == nil || !s.buf.IsAlive()
+	return s == nil || !s.enc.IsAlive()
 }
 
-// Clone creates an independent deep copy of the secret in new guarded memory.
+// Clone creates an independent deep copy of the secret in new locked memory.
 //
-// The copy goes guarded buffer to guarded buffer. It must not stage the
-// plaintext in an ordinary `[]byte` on the way: this used to allocate a heap
-// slice, copy the key into it and hand that to New, which put every cloned key
-// on a swappable, core-dumpable page for the length of the call. Zeroizing
-// such a slice afterwards does not undo either exposure, which is why the
-// protected-memory rule is about where the material lives rather than how
-// briefly it lives there.
+// The copy goes locked region to locked region. It must not stage the
+// plaintext in an ordinary []byte on the way: doing so would put every cloned
+// key on a swappable, core-dumpable page for the length of the call, and
+// zeroizing such a slice afterwards undoes neither the swap nor the core dump.
+// That is why the protected-memory rule is about where the material lives
+// rather than how briefly it lives there.
 //
 // Returns ErrSecretDestroyed if the source has been destroyed, or
 // ErrSecretAlloc if the allocation fails.
@@ -123,14 +156,25 @@ func (s *Secret) Clone() (*Secret, error) {
 	if s.IsDestroyed() {
 		return nil, &Error{kind: errSecretDestroyed}
 	}
-	src := s.buf.Bytes()
-	cloned, err := NewEmpty(len(src))
+	var cloned *Secret
+	err := s.enc.WithBytes(func(src []byte) error {
+		dst, allocErr := NewEmpty(len(src))
+		if allocErr != nil {
+			return allocErr
+		}
+		copyErr := dst.enc.WithBytes(func(buf []byte) error {
+			copy(buf, src)
+			return nil
+		})
+		if copyErr != nil {
+			dst.Destroy()
+			return copyErr
+		}
+		cloned = dst
+		return nil
+	})
 	if err != nil {
-		return nil, err
-	}
-	if copy(cloned.buf.Bytes(), src) != len(src) {
-		cloned.Destroy()
-		return nil, newAllocError("clone destination is smaller than the source")
+		return nil, newAllocError(err.Error())
 	}
 	return cloned, nil
 }
@@ -141,56 +185,5 @@ func (s *Secret) EqualTo(other []byte) bool {
 	if s.IsDestroyed() {
 		return false
 	}
-	return s.buf.EqualTo(other)
-}
-
-// Freeze makes the guarded memory immutable (read-only). Any write attempt
-// to the memory after freezing will cause a segfault, providing defense
-// against accidental modification.
-func (s *Secret) Freeze() {
-	if !s.IsDestroyed() {
-		s.buf.Freeze()
-	}
-}
-
-// Melt makes previously frozen guarded memory mutable again.
-func (s *Secret) Melt() {
-	if !s.IsDestroyed() {
-		s.buf.Melt()
-	}
-}
-
-// Seal encrypts the secret into an Enclave for at-rest storage and destroys
-// the plaintext LockedBuffer. The returned Enclave can later be opened with
-// OpenEnclave to recover the secret.
-//
-// The encryption reads the locked buffer directly. It must not stage the
-// plaintext in an ordinary []byte first: this used to copy the key into a heap
-// slice and pass that to memguard.NewEnclave, which put it on a swappable,
-// core-dumpable page until NewEnclave wiped it. Wiping afterwards undoes
-// neither exposure. Clone carried the same defect; see the note there.
-//
-// Returns nil if the secret has already been destroyed. The explicit guard
-// covers a nil Secret and a nil buffer as well, which a bare call through
-// s.buf would not.
-func (s *Secret) Seal() *Enclave {
-	if s.IsDestroyed() {
-		return nil
-	}
-	return s.buf.Seal()
-}
-
-// OpenEnclave decrypts an Enclave and returns the secret in guarded memory.
-//
-// Returns ErrNilInput if the enclave is nil, or wraps any error from the
-// decryption operation.
-func OpenEnclave(e *Enclave) (*Secret, error) {
-	if e == nil {
-		return nil, &Error{kind: errNilInput}
-	}
-	buf, err := e.Open()
-	if err != nil {
-		return nil, newAllocError(err.Error())
-	}
-	return &Secret{buf: buf}, nil
+	return s.enc.EqualTo(other)
 }

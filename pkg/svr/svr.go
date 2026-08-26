@@ -95,7 +95,7 @@ func NewBackup4(secret Secret, maxTries uint32) (*Backup4, error) {
 	}
 
 	// Move this function's copy of the secret into guarded memory. Passing it
-	// as a slice lets memguard zeroize this frame's copy as it takes ownership,
+	// as a slice lets go-enclave zeroize this frame's copy as it takes ownership,
 	// rather than leaving a second plaintext copy behind in the constructor;
 	// the explicit Zeroize covers the allocation-failure path.
 	guardedSecret, sErr := cryptosecret.NewSecret32FromSlice(secret[:])

@@ -237,8 +237,8 @@ func TestUnmarshalJSONReleasesReplacedMaterial(t *testing.T) {
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
-			// A second handle on the same locked buffer, to observe its fate.
-			previous := &Secret{buf: s.buf}
+			// A second handle on the same locked enclave, to observe its fate.
+			previous := &Secret{enc: s.enc}
 
 			if err := s.UnmarshalJSON([]byte(input)); err != nil {
 				t.Fatalf("UnmarshalJSON: %v", err)

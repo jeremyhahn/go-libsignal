@@ -24,8 +24,8 @@ const IVLength = 16
 const KdfInfo string = "WhisperMessageKeys"
 
 // NewKeys returns a new message keys structure with the given cipherKey, mac, iv, and index.
-// Each key component is moved into memguard-protected memory and the source slices
-// are zeroized by memguard. Panics if memguard allocation fails (fatal condition).
+// Each key component is moved into locked memory and the source slices
+// are zeroized by go-enclave. Panics if locked-memory allocation fails (fatal condition).
 func NewKeys(cipherKey, macKey, iv []byte, index uint32) *Keys {
 	guardedCipher, err := secret.New(cipherKey)
 	if err != nil {
@@ -221,12 +221,12 @@ func (k *KeysStructure) Zeroize() {
 
 // Keys is a structure to hold all the keys for a single MessageKey, including the
 // cipherKey, mac, iv, and index of the chain key. MessageKeys are used to
-// encrypt individual messages. All key material is stored in memguard-protected memory.
+// encrypt individual messages. All key material is stored in locked memory.
 //
 // SeedMaterial optionally holds the 32-byte HMAC output (BaseMaterial) from which
 // the keys were derived. When present, it allows re-derivation with a different HKDF
 // salt (e.g., for SPQR post-quantum ratchet). This is used for skipped message keys
-// that may later need PQR-salted re-derivation. It is stored in memguard-protected
+// that may later need PQR-salted re-derivation. It is stored in locked
 // memory alongside the other key components.
 type Keys struct {
 	cipherKey    *secret.Secret
@@ -271,8 +271,8 @@ func (k *Keys) SeedMaterial() []byte {
 }
 
 // SetSeedMaterial stores the 32-byte HMAC base material for later re-derivation
-// in memguard-protected memory. Any previously stored seed material is destroyed
-// before the new value is stored. Panics if memguard allocation fails (fatal condition).
+// in locked memory. Any previously stored seed material is destroyed
+// before the new value is stored. Panics if locked-memory allocation fails (fatal condition).
 func (k *Keys) SetSeedMaterial(seed []byte) {
 	if k.seedMaterial != nil {
 		k.seedMaterial.Destroy()

@@ -79,7 +79,7 @@ type AccountEntropyPool string
 
 // GenerateAccountEntropyPool creates a new random entropy pool consisting of
 // 64 characters drawn uniformly from [0-9a-z] using cryptographically random
-// bytes stored in memguard-protected memory.
+// bytes stored in locked memory.
 func GenerateAccountEntropyPool() (AccountEntropyPool, error) {
 	// Generate random bytes in guarded memory for rejection sampling.
 	// We need at most ~EntropyPoolLength * 2 random bytes due to rejection,

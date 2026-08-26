@@ -46,7 +46,7 @@ const (
 )
 
 // aesGCMSIV implements the crypto/cipher.AEAD interface for AES-256-GCM-SIV.
-// The key is stored in memguard-protected memory and must be destroyed via
+// The key is stored in locked memory and must be destroyed via
 // Zeroize() when the cipher is no longer needed.
 type aesGCMSIV struct {
 	key *secret.Secret

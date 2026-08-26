@@ -49,16 +49,17 @@ Signal Protocol messages are deniable. The symmetric keys used for encryption ar
 
 Key material passes through three zones during its lifecycle, each with a different zeroization mechanism:
 
-### Zone 1: Guarded Heap Memory (memguard)
+### Zone 1: Guarded Heap Memory (go-enclave)
 
-Long-lived private keys and shared secrets are stored in `secret.Secret` or `secret.Secret32`, backed by memguard's `LockedBuffer`. Protections:
+Long-lived private keys and shared secrets are stored in `secret.Secret` or `secret.Secret32`, backed by the locked-memory buffer from `github.com/jeremyhahn/go-enclave`. Protections:
 
 - **mlock**: Memory is locked into RAM and cannot be paged to swap.
 - **Guard pages**: Read/write-protected pages surround the buffer. Overflows or underflows trigger a segfault.
-- **Canary values**: memguard places canary bytes at the buffer boundaries and checks them on access.
-- **Secure zeroization**: `Destroy()` uses platform-appropriate secure zeroization (not optimizable away by the compiler).
-- **Freeze/Melt**: Buffers can be made read-only (`Freeze`), causing any write attempt to segfault.
-- **Encrypted at-rest**: `Seal()` encrypts the buffer into a memguard `Enclave` and destroys the plaintext. `OpenEnclave()` decrypts it back.
+- **Canary values**: go-enclave places a canary ahead of the buffer and verifies it when the region is released; detected corruption panics after wiping and unmapping.
+- **Secure zeroization**: `Destroy()` overwrites the memory with zeros on destruction (not optimizable away by the compiler).
+- **Read-only**: secrets created via `New` and `NewRandom` are frozen read-only, so any write attempt segfaults; `NewEmpty` returns a writable buffer to be filled in place.
+
+There is no at-rest encryption in this layer: go-enclave holds material as plaintext in locked memory, protected by the guard pages and canary above.
 
 Packages that store keys in guarded memory: `keys/chain`, `keys/root`, `keys/message`, `keys/session`, `ratchet`, `session`, `state/record`, `spqr`, `tripleratchet`, `mlkembraid`, `sealed`, `groups/ratchet`, `accountkeys`, `backup`, `svr`, `cipher`, `ecc`, `kem`, `zkcredential`, `zkgroup`.
 
@@ -93,7 +94,7 @@ if allocErr != nil {
 ### Known Limitations
 
 - **circl HPKE**: The `cloudflare/circl` HPKE implementation holds private key material internally. There is no API to zeroize it without modifying the library.
-- **Go runtime copies**: The Go garbage collector may copy memory during compaction. mlock'd buffers (memguard) are excluded from GC management, but stack-local arrays may be copied by the runtime before defer-zeroization runs.
+- **Go runtime copies**: The Go garbage collector may copy memory during compaction. mlock'd buffers (go-enclave) are excluded from GC management, but stack-local arrays may be copied by the runtime before defer-zeroization runs.
 - **Serialized state**: When session state is serialized for storage (via `State.Serialize()`), the serialized bytes contain key material. The caller's store implementation is responsible for encrypting this data at rest.
 
 ## Side-Channel Protections
@@ -116,7 +117,7 @@ The library uses `crypto/subtle.ConstantTimeCompare` for all security-sensitive 
 | `keytrans/vrf.go` | VRF output verification |
 | `backup/frame.go` | Frame HMAC verification |
 | `accountkeys` | PIN hash comparison |
-| `secret.Secret.EqualTo` | Guarded secret comparison (delegates to memguard) |
+| `secret.Secret.EqualTo` | Guarded secret comparison (delegates to go-enclave) |
 
 ### Constant-Time Elligator
 

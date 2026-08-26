@@ -24,7 +24,7 @@ The implementation follows RFC 8452 Section 4 for AES-256:
 
 ### AEAD Interface
 
-`NewAESGCMSIV(key []byte)` returns a `crypto/cipher.AEAD` implementation. The key is stored in memguard-protected memory via `secret.New()`. Call the `Zeroize()` method on the returned value (type-assert to `*aesGCMSIV`) to destroy key material when the cipher is no longer needed.
+`NewAESGCMSIV(key []byte)` returns a `crypto/cipher.AEAD` implementation. The key is stored in locked memory via `secret.New()`. Call the `Zeroize()` method on the returned value (type-assert to `*aesGCMSIV`) to destroy key material when the cipher is no longer needed.
 
 ```go
 aead, err := cipher.NewAESGCMSIV(key)

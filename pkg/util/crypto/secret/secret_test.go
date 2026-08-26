@@ -2,7 +2,6 @@ package secret
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"errors"
 	"runtime"
 	"testing"
@@ -273,9 +272,9 @@ func TestSecret_IsDestroyed_BeforeAndAfter(t *testing.T) {
 }
 
 func TestSecret_IsDestroyed_NilBuf(t *testing.T) {
-	s := &Secret{buf: nil}
+	s := &Secret{enc: nil}
 	if !s.IsDestroyed() {
-		t.Error("IsDestroyed() should return true when buf is nil")
+		t.Error("IsDestroyed() should return true when enc is nil")
 	}
 }
 
@@ -429,193 +428,6 @@ func TestSecret_EqualTo_AfterDestroy(t *testing.T) {
 
 	if s.EqualTo([]byte("gone")) {
 		t.Error("EqualTo should return false after Destroy()")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Freeze / Melt tests
-// ---------------------------------------------------------------------------
-
-func TestSecret_Freeze_Melt_RoundTrip(t *testing.T) {
-	s, err := New([]byte{0xDE, 0xAD, 0xBE, 0xEF})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Destroy()
-
-	// Freeze, then verify reading still works.
-	s.Freeze()
-	if !s.EqualTo([]byte{0xDE, 0xAD, 0xBE, 0xEF}) {
-		t.Error("content should be readable after Freeze()")
-	}
-
-	// Melt, then verify mutation is possible.
-	s.Melt()
-	b := s.Bytes()
-	b[0] = 0xFF
-	if s.Bytes()[0] != 0xFF {
-		t.Error("mutation should succeed after Melt()")
-	}
-}
-
-func TestSecret_Freeze_NoOpAfterDestroy(t *testing.T) {
-	s, err := New([]byte{1, 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.Destroy()
-	// Should not panic on destroyed secret.
-	s.Freeze()
-	s.Melt()
-}
-
-// ---------------------------------------------------------------------------
-// Seal / OpenEnclave tests
-// ---------------------------------------------------------------------------
-
-func TestSecret_Seal_OpenEnclave_RoundTrip(t *testing.T) {
-	original := []byte("sealed secret data")
-	s, err := New(original)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	enclave := s.Seal()
-	if enclave == nil {
-		t.Fatal("Seal() returned nil enclave")
-	}
-	if !s.IsDestroyed() {
-		t.Error("secret should be destroyed after Seal()")
-	}
-
-	recovered, err := OpenEnclave(enclave)
-	if err != nil {
-		t.Fatalf("OpenEnclave() returned error: %v", err)
-	}
-	defer recovered.Destroy()
-
-	if !recovered.EqualTo([]byte("sealed secret data")) {
-		t.Error("recovered content does not match original")
-	}
-}
-
-func TestSecret_Seal_AfterDestroy(t *testing.T) {
-	s, err := New([]byte("will be destroyed"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.Destroy()
-
-	enclave := s.Seal()
-	if enclave != nil {
-		t.Error("Seal() should return nil for destroyed secret")
-	}
-}
-
-// TestSecret_Seal_DoesNotStageOnTheHeap is the counterpart to
-// TestSecret_Clone_DoesNotStageOnTheHeap, for the sibling method that carried
-// the same defect: Seal used to copy the plaintext into an ordinary []byte and
-// pass that to memguard.NewEnclave. The round-trip tests above cannot see it —
-// a staged seal is still a correct seal — so the property is measured.
-//
-// The threshold is 1.5x the payload rather than a fraction of it, and that
-// difference matters. Unlike Clone, whose destination is mmap'd and therefore
-// invisible to the heap, an Enclave stores its CIPHERTEXT in an ordinary
-// []byte by construction. One payload of heap growth is the unavoidable floor
-// here; a staged plaintext copy adds a second on top of it. Measured on this
-// tree at a 1 MiB payload: 1.01x sealing from guarded memory, 2.01x with the
-// staged copy restored.
-func TestSecret_Seal_DoesNotStageOnTheHeap(t *testing.T) {
-	const size = 1 << 20 // 1 MiB, large enough to dwarf incidental allocation
-
-	s, err := NewRandom(size)
-	if err != nil {
-		t.Fatalf("NewRandom: %v", err)
-	}
-	// A digest, not a copy. Retaining the plaintext to compare against would put
-	// a megabyte of it on the ordinary heap for the length of the test — the
-	// exact exposure this test exists to forbid, committed by the test itself.
-	// SHA-256 of a 1 MiB random value identifies it without being it.
-	expected := sha256.Sum256(s.Bytes())
-
-	var before, after runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&before)
-
-	enclave := s.Seal()
-
-	runtime.ReadMemStats(&after)
-
-	if enclave == nil {
-		t.Fatal("Seal returned nil for a live secret")
-	}
-	grew := after.TotalAlloc - before.TotalAlloc
-	if grew > size+size/2 {
-		t.Errorf("Seal allocated %d heap bytes (%.2fx) for a %d-byte secret; only the "+
-			"enclave's ciphertext should be on the heap, so the plaintext is being "+
-			"staged there as well", grew, float64(grew)/float64(size), size)
-	}
-
-	// The seal still has to be a correct one, and still has to consume the source.
-	if !s.IsDestroyed() {
-		t.Error("Seal must destroy the plaintext secret")
-	}
-	opened, err := OpenEnclave(enclave)
-	if err != nil {
-		t.Fatalf("OpenEnclave: %v", err)
-	}
-	defer opened.Destroy()
-	if sha256.Sum256(opened.Bytes()) != expected {
-		t.Error("sealed secret did not survive the enclave round trip")
-	}
-}
-
-func TestOpenEnclave_NilInput(t *testing.T) {
-	s, err := OpenEnclave(nil)
-	if s != nil {
-		t.Error("OpenEnclave(nil) should return nil secret")
-	}
-	if err == nil {
-		t.Fatal("OpenEnclave(nil) should return error")
-	}
-	if !errors.Is(err, ErrNilInput) {
-		t.Errorf("OpenEnclave(nil) error = %v, want ErrNilInput", err)
-	}
-}
-
-func TestSecret_Seal_OpenEnclave_MultipleTimes(t *testing.T) {
-	// Seal, open, seal again, open again to verify re-sealability.
-	s, err := New([]byte("resealable"))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	enc1 := s.Seal()
-	if enc1 == nil {
-		t.Fatal("first Seal() returned nil")
-	}
-
-	s2, err := OpenEnclave(enc1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !s2.EqualTo([]byte("resealable")) {
-		t.Error("first round-trip content mismatch")
-	}
-
-	enc2 := s2.Seal()
-	if enc2 == nil {
-		t.Fatal("second Seal() returned nil")
-	}
-
-	s3, err := OpenEnclave(enc2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s3.Destroy()
-
-	if !s3.EqualTo([]byte("resealable")) {
-		t.Error("second round-trip content mismatch")
 	}
 }
 

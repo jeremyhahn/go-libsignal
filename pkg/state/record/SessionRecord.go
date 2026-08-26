@@ -221,7 +221,7 @@ func (r *Session) PromoteState(promotedState *State) {
 	// Remove the last state if it has reached our maximum length. The evicted
 	// state owns guarded material — its root key, PQ ratchet state, chain keys,
 	// ratchet private keys and message keys — and the record was its only
-	// owner, so destroy it rather than dropping it: memguard reclaims nothing
+	// owner, so destroy it rather than dropping it: go-enclave reclaims nothing
 	// on its own, and a peer that establishes sessions can drive an eviction
 	// for each one.
 	if len(r.previousStates) > archivedStatesMaxLength {

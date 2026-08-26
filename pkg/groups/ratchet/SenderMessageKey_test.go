@@ -79,7 +79,7 @@ func TestNewSenderMessageKeyDifferentSeeds(t *testing.T) {
 
 func TestNewSenderMessageKeyFromStruct(t *testing.T) {
 	// Fill the plaintext first, then guard it once. Guarded memory cannot be
-	// written through BytesOrNil -- memguard makes the mapping read-only, so an
+	// written through BytesOrNil -- go-enclave makes the mapping read-only, so an
 	// in-place mutation faults rather than failing an assertion.
 	iv := make([]byte, 16)
 	for i := range iv {

@@ -77,9 +77,10 @@ fixtures (`make interop-wire-emit`):
 
 ### Locked-memory requirement (`RLIMIT_MEMLOCK`)
 
-`pkg/util/crypto/secret` uses `memguard`, which `mlock(2)`s every secret
-it holds. memguard surrounds each buffer with canary and guard pages, so
-a 32-byte message key costs roughly 16 KiB of locked pages, and the test
+`pkg/util/crypto/secret` uses `github.com/jeremyhahn/go-enclave`, which
+`mlock(2)`s every secret it holds. go-enclave surrounds each buffer with a
+canary and guard pages that are mapped `PROT_NONE` and never mlock'd, so a
+32-byte message key costs one locked page, and the test
 suite holds thousands of them at once: `TestGroupCipherDecryptTooFarInFuture`
 alone drives a sender chain 25,002 messages forward to exercise the
 `maxForwardJumps` limit.

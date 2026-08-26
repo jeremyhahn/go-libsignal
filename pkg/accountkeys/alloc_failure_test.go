@@ -1,6 +1,6 @@
 package accountkeys
 
-// alloc_failure_test.go contains tests that exercise memguard allocation
+// alloc_failure_test.go contains tests that exercise locked-memory allocation
 // failure paths by temporarily replacing the package-level secretAlloc,
 // secretRandAlloc, and secretEmptyAlloc variables with injected failures.
 // These tests run within the package (internal tests) to access unexported variables.
@@ -12,10 +12,10 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
-// errAllocFail is a sentinel error used to simulate memguard allocation failures.
+// errAllocFail is a sentinel error used to simulate locked-memory allocation failures.
 var errAllocFail = errors.New("simulated allocation failure")
 
-// failingAlloc returns an error immediately to simulate a memguard failure.
+// failingAlloc returns an error immediately to simulate a locked-memory failure.
 func failingAlloc(data []byte) (*secret.Secret, error) {
 	return nil, errAllocFail
 }

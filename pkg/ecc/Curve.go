@@ -105,7 +105,7 @@ func GenerateKeyPair() (*ECKeyPair, error) {
 
 	// Put data into our keypair struct
 	djbECPub := NewDjbECPublicKey(public)
-	// Use GuardedECPrivateKey for memguard-protected storage.
+	// Use GuardedECPrivateKey for locked-memory-protected storage.
 	// NewGuardedECPrivateKey zeroizes the source array (move semantics).
 	guardedPriv, gErr := NewGuardedECPrivateKey(private)
 	if gErr != nil {

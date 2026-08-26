@@ -43,11 +43,10 @@ func withFailingRand(fn func()) {
 //
 // The first seedSize-byte request is the Kyber key-pair seed and the second is
 // the nonce ecc.CalculateSignature draws, so this fails signing while letting
-// key generation succeed. Guarded key generation also draws randomness through
-// memguard to scramble its buffers; failing by request size rather than by a
-// byte budget keeps the injection stable regardless of how much memguard
-// consumes, and never leaves a caller with a short read (crypto/rand treats
-// that as fatal).
+// key generation succeed. Guarded key generation also draws randomness of its
+// own; failing by request size rather than by a byte budget keeps the injection
+// stable regardless of how much is consumed, and never leaves a caller with a
+// short read (crypto/rand treats that as fatal).
 type signingSeedFailReader struct {
 	inner    io.Reader
 	seedSize int
@@ -456,11 +455,11 @@ func TestGenerateSignedPreKey_RandFailure_KeyGen(t *testing.T) {
 //
 // GenerateSignedPreKey cannot be used to reach the signing failure path via
 // rand.Reader injection because ecc.GenerateKeyPair runs first and consumes
-// random bytes, and memguard's guard-page canary (inside GuardedECPrivateKey)
+// random bytes, and go-enclave's guard-page canary (inside GuardedECPrivateKey)
 // consumes an indeterminate number of additional bytes from the same reader
 // before CalculateSignature is reached. This makes it impossible to provide
 // exactly enough bytes for key generation but not for signing without relying
-// on memguard internals.
+// on go-enclave internals.
 //
 // Calling CalculateSignature directly with pre-generated keys and a failing
 // reader deterministically exercises the error path that GenerateSignedPreKey

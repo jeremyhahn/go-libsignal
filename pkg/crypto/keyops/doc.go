@@ -1,7 +1,7 @@
 // Package keyops defines operation-based interfaces for cryptographic key
 // operations used throughout the Signal Protocol. These interfaces abstract
 // over the underlying key storage and execution mechanism, enabling both
-// software-backed implementations (using memguard-protected memory) and
+// software-backed implementations (using locked memory) and
 // hardware-backed implementations (using HSM, TPM, or secure enclave APIs).
 //
 // The interfaces are organized by operation type:

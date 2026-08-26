@@ -53,9 +53,8 @@
 //
 // It also covers what the runtime gate structurally cannot: pure-Go
 // implementations that never reach the Go Cryptographic Module and so can never
-// trip it. Ristretto255, edwards25519, Argon2id, Round-3 Kyber and memguard's
-// enclave encryption are every bit as non-approved as X25519; they were simply
-// invisible. Here they are not.
+// trip it. Ristretto255, edwards25519, Argon2id and Round-3 Kyber are every bit
+// as non-approved as X25519; they were simply invisible. Here they are not.
 //
 // The audit is allowlist-based, not denylist-based. Inside the policed
 // namespaces -- stdlib crypto/..., golang.org/x/crypto/... and the module's
@@ -99,7 +98,6 @@ var policedNamespaces = []string{
 	"github.com/gtank/ristretto255",
 	"github.com/cloudflare/circl",
 	"github.com/flynn/noise",
-	"github.com/awnumar/memguard",
 }
 
 // approvedCrypto are the packages inside a policed namespace whose primitives
@@ -189,21 +187,6 @@ var deniedImports = map[string]string{
 	"golang.org/x/crypto/bcrypt":                      "bcrypt",
 	"golang.org/x/crypto/scrypt":                      "scrypt",
 	"golang.org/x/crypto/ed25519":                     "Ed25519 (use crypto/ed25519)",
-
-	// memguard holds this library's key material in locked memory, and is not
-	// primitive-free: it encrypts every Enclave at rest with NaCl secretbox
-	// (XSalsa20-Poly1305) and derives its rolling enclave key with BLAKE2b.
-	// Both are pure Go, so GODEBUG=fips140=only cannot reject them however the
-	// tests are tagged -- exactly the shape this audit exists to catch.
-	//
-	// It is denied by exact package rather than trusted by a line of prose in
-	// dependencyClassification, so its one production import is a counted
-	// register entry that fails closed when it widens, on the same terms as
-	// X25519. That makes the exemption narrow and visible; it does not make the
-	// cryptography approved. Whether this library may depend on a
-	// protected-memory layer that uses non-approved primitives at all is an
-	// owner-level decision, recorded in docs/FIPS.md.
-	"github.com/awnumar/memguard": "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption",
 }
 
 // deniedSelectors are individual functions of an otherwise-approved package.
@@ -322,14 +305,6 @@ var register = map[string]map[string]int{
 	"pkg/zkgroup/profile_key_credential_request_serialization.go": {"Ristretto255": 8},
 	"pkg/zkgroup/receipts.go":                                     {"Ristretto255": 57},
 	"pkg/zkgroup/zkgroup.go":                                      {"Ristretto255": 5},
-
-	// The protected-memory layer. memguard encrypts every Enclave at rest with
-	// NaCl secretbox and derives its rolling key with BLAKE2b; this is the only
-	// production file in the module that imports it, so the exemption is one
-	// counted entry behind one package. Unlike every other entry here, no
-	// external protocol mandates this primitive -- it is the library that was
-	// chosen, and replacing it is an owner-level decision (docs/FIPS.md).
-	"pkg/util/crypto/secret/secret.go": {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption": 6},
 }
 
 // reachRegister is the second half of the allowlist, and the one that survives
@@ -363,59 +338,55 @@ var register = map[string]map[string]int{
 var reachRegister = map[string][]string{
 	// The examples build the full protocol, so they reach what the protocol
 	// reaches. They are not shipped as library code.
-	"examples/group-messaging": {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
-	"examples/sealed-sender":   {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
-	"examples/simple-session":  {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
+	"examples/group-messaging": {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
+	"examples/sealed-sender":   {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
+	"examples/simple-session":  {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
 
 	// Argon2id and the protected-memory layer; the PIN hash does not touch the curve.
-	"pkg/accountkeys": {"Argon2id", "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption"},
+	"pkg/accountkeys": {"Argon2id"},
 
 	// The enclave transports: Noise_NK_25519_ChaChaPoly_SHA256 and its
 	// post-quantum hybrid.
 	"pkg/attest":              {"ChaCha20-Poly1305", "Noise Protocol Framework (25519 + ChaChaPoly patterns)", "X25519"},
-	"pkg/backup":              {"AES-GCM under a caller-supplied nonce", "Argon2id", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/cipher":              {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "X25519"},
+	"pkg/backup":              {"AES-GCM under a caller-supplied nonce", "Argon2id", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "X25519", "edwards25519 group and field arithmetic"},
+	"pkg/cipher":              {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "X25519"},
 	"pkg/crypto/elligator":    {"edwards25519 group and field arithmetic"},
-	"pkg/crypto/keyops":       {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption"},
-	"pkg/devicetransfer":      {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption"},
-	"pkg/ecc":                 {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/fingerprint":         {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/groups":              {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/groups/ratchet":      {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "X25519"},
-	"pkg/groups/state/record": {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/groups/state/store":  {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "X25519", "edwards25519 group and field arithmetic"},
+	"pkg/ecc":                 {"X25519", "edwards25519 group and field arithmetic"},
+	"pkg/fingerprint":         {"X25519", "edwards25519 group and field arithmetic"},
+	"pkg/groups":              {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
+	"pkg/groups/ratchet":      {"X25519"},
+	"pkg/groups/state/record": {"X25519", "edwards25519 group and field arithmetic"},
+	"pkg/groups/state/store":  {"X25519", "edwards25519 group and field arithmetic"},
 	"pkg/kdf":                 {"X25519"},
-	"pkg/kem":                 {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)"},
-	"pkg/keys/chain":          {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "X25519"},
-	"pkg/keys/identity":       {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/keys/message":        {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption"},
-	"pkg/keys/prekey":         {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/keys/root":           {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/keys/session":        {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "X25519", "edwards25519 group and field arithmetic"},
+	"pkg/kem":                 {"Round-3 Kyber-1024 (CIRCL)"},
+	"pkg/keys/chain":          {"X25519"},
+	"pkg/keys/identity":       {"X25519", "edwards25519 group and field arithmetic"},
+	"pkg/keys/prekey":         {"Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
+	"pkg/keys/root":           {"X25519", "edwards25519 group and field arithmetic"},
+	"pkg/keys/session":        {"X25519", "edwards25519 group and field arithmetic"},
 	"pkg/keytrans":            {"edwards25519 group and field arithmetic"},
-	"pkg/mlkembraid":          {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519"},
-	"pkg/net":                 {"AES-GCM under a caller-supplied nonce", "ChaCha20-Poly1305", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Noise Protocol Framework (25519 + ChaChaPoly patterns)", "Ristretto255", "X25519"},
+	"pkg/mlkembraid":          {"Round-3 Kyber-1024 (CIRCL)", "X25519"},
+	"pkg/net":                 {"AES-GCM under a caller-supplied nonce", "ChaCha20-Poly1305", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "Noise Protocol Framework (25519 + ChaChaPoly patterns)", "Ristretto255", "X25519"},
 	"pkg/poksho":              {"Ristretto255"},
-	"pkg/protocol":            {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/ratchet":             {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/sealed":              {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/serialize":           {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/sesame":              {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/session":             {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/sessionmanagement":   {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/spqr":                {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519"},
-	"pkg/state/record":        {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/state/store":         {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
-	"pkg/svr":                 {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Ristretto255", "X25519"},
-	"pkg/tripleratchet":       {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519"},
+	"pkg/protocol":            {"X25519", "edwards25519 group and field arithmetic"},
+	"pkg/ratchet":             {"Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
+	"pkg/sealed":              {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
+	"pkg/serialize":           {"Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
+	"pkg/sesame":              {"Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
+	"pkg/session":             {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
+	"pkg/sessionmanagement":   {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
+	"pkg/spqr":                {"Round-3 Kyber-1024 (CIRCL)", "X25519"},
+	"pkg/state/record":        {"Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
+	"pkg/state/store":         {"Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
+	"pkg/svr":                 {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "Ristretto255", "X25519"},
+	"pkg/tripleratchet":       {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "Round-3 Kyber-1024 (CIRCL)", "X25519"},
 	"pkg/usernames":           {"Ristretto255"},
-	"pkg/util/crypto/secret":  {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption"},
-	"pkg/util/keyhelper":      {"NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
+	"pkg/util/keyhelper":      {"Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
 	"pkg/zkcredential":        {"Ristretto255"},
-	"pkg/zkgroup":             {"AES-GCM under a caller-supplied nonce", "Argon2id", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Ristretto255", "X25519", "edwards25519 group and field arithmetic"},
+	"pkg/zkgroup":             {"AES-GCM under a caller-supplied nonce", "Argon2id", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "Ristretto255", "X25519", "edwards25519 group and field arithmetic"},
 
 	// The integration suite drives the protocol end to end.
-	"tests": {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
+	"tests": {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
 }
 
 // dependencyClassification records what every module in go.mod is, so a new
@@ -434,11 +405,16 @@ var dependencyClassification = map[string]string{
 	"github.com/kr/pretty":            "test output formatting, indirect; no cryptography",
 	"github.com/rogpeppe/go-internal": "test tooling, indirect; no cryptography",
 
-	// memcall is memguard's syscall layer. memguard itself is absent from this
-	// table deliberately: it carries non-approved cryptography, so it is inside
-	// policedNamespaces and denied by exact package instead, which makes its one
-	// production import a counted register entry rather than a line of prose.
+	// memcall is the syscall layer under go-enclave (formerly under memguard,
+	// which this module replaced): mlock/mprotect wrappers, no cryptography.
 	"github.com/awnumar/memcall": "mlock/mprotect syscall wrappers; no cryptography",
+
+	// go-enclave is the portfolio locked-memory primitive (mlock + guard pages
+	// + canary) that replaced memguard. Unlike memguard it holds material in
+	// plaintext locked memory with no at-rest cipher, so it carries no
+	// non-approved cryptography; its only crypto is the FIPS-approved crypto/rand
+	// (SP 800-90A) for the canary and crypto/subtle for constant-time compares.
+	"github.com/jeremyhahn/go-enclave": "the portfolio locked-memory primitive (mlock, guard pages, canary); only FIPS-approved crypto/rand and crypto/subtle",
 }
 
 // skipDirs are trees the audit does not own: generated protobuf code, the
@@ -1335,80 +1311,6 @@ func TestModulePath_ReadsTheModuleDirective(t *testing.T) {
 	if got := modulePath("go 1.26.6\n\nrequire golang.org/x/crypto v0.52.0\n"); got != "" {
 		t.Errorf("modulePath = %q for a file with no module directive, want the empty "+
 			"string so the gate fails rather than guessing", got)
-	}
-}
-
-// TestScanFile_FlagsASecretStorageDependency is the regression for the shape a
-// module-level classification used to absorb: a dependency whose job is holding
-// secrets, which carries non-approved cryptography of its own. memguard encrypts
-// every Enclave at rest with NaCl secretbox and derives with BLAKE2b, and because
-// both are pure Go, GODEBUG=fips140=only cannot reject them however the tests are
-// tagged. A line of prose saying so is not an exemption; the audit has to fail
-// until the import is a counted register entry.
-func TestScanFile_FlagsASecretStorageDependency(t *testing.T) {
-	src := []byte(`package secret
-
-import "github.com/awnumar/memguard"
-
-type Enclave = memguard.Enclave
-
-func Seal(b []byte) *memguard.Enclave { return memguard.NewEnclave(b) }
-`)
-	findings, err := scanFile("pkg/util/crypto/secret/secret.go", src)
-	if err != nil {
-		t.Fatalf("scanFile: %v", err)
-	}
-
-	const primitive = "NaCl secretbox (XSalsa20-Poly1305) and BLAKE2b, memguard enclave encryption"
-	found := map[string]map[string]int{"pkg/util/crypto/secret/secret.go": {}}
-	for _, f := range findings {
-		found[f.File][f.Primitive]++
-	}
-	if got := found["pkg/util/crypto/secret/secret.go"][primitive]; got != 4 {
-		t.Fatalf("occurrences = %d, want 4 (the import and three qualified references); the "+
-			"secret-storage dependency must be counted like any other denied package, got %v",
-			got, findings)
-	}
-
-	// An empty register must reject it outright, not wave it through because the
-	// module is classified somewhere else.
-	if msgs := registerViolations(found, map[string]map[string]int{}); len(msgs) == 0 {
-		t.Error("a file importing a secret-storage dependency that uses non-approved " +
-			"cryptography must fail the audit when it is not registered")
-	}
-	// And a register entry short of the real count must still reject it, so the
-	// exemption cannot widen quietly.
-	if msgs := registerViolations(found, map[string]map[string]int{
-		"pkg/util/crypto/secret/secret.go": {primitive: 2},
-	}); len(msgs) == 0 {
-		t.Error("an under-counted register entry must fail, so the memguard exemption " +
-			"cannot widen without a diff")
-	}
-}
-
-// TestMemguardIsPolicedNotClassified pins the classification itself. memguard was
-// once permitted by a line of prose in dependencyClassification, which is a
-// weaker control than every other exemption in this file: nothing failed when its
-// reach grew. It must stay denied by exact package and inside a policed
-// namespace, so a memguard subpackage nobody enumerated fails closed too.
-func TestMemguardIsPolicedNotClassified(t *testing.T) {
-	const module = "github.com/awnumar/memguard"
-
-	if _, denied := deniedImports[module]; !denied {
-		t.Error("memguard must be a denied import: it encrypts its enclave at rest with " +
-			"NaCl secretbox and derives with BLAKE2b, neither approved")
-	}
-	if _, classified := dependencyClassification[module]; classified {
-		t.Error("memguard must not be in dependencyClassification; a module-level line of " +
-			"prose is not an exemption, and policed modules are classified per package")
-	}
-	if !policed(module) {
-		t.Error("memguard must be inside a policed namespace so an unenumerated subpackage " +
-			"fails closed as unclassified")
-	}
-	if primitive, denied := classify(module + "/core"); denied || primitive != unclassified {
-		t.Errorf("classify(memguard/core) = (%q, %v), want unclassified so a subpackage "+
-			"nobody enumerated fails closed", primitive, denied)
 	}
 }
 

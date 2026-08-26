@@ -185,7 +185,7 @@ func newTripleRatchet(ecCipher ECCipher, sharedSecret []byte, kemImpl mlkembraid
 	}
 
 	rk, cks, ckr, err := spqr.KdfSckaInit(sharedSecret)
-	if err != nil { // coverage-exempt: KdfSckaInit only fails on empty sharedSecret (checked above) or memguard OOM
+	if err != nil { // coverage-exempt: KdfSckaInit only fails on empty sharedSecret (checked above) or locked-memory allocation failure
 		return nil, &ErrSPQRFailed{Op: "KdfSckaInit", Cause: err}
 	}
 
@@ -195,7 +195,7 @@ func newTripleRatchet(ecCipher ECCipher, sharedSecret []byte, kemImpl mlkembraid
 	} else {
 		braid, err = mlkembraid.InitAlice(sharedSecret, kemImpl, chunkSize)
 	}
-	if err != nil { // coverage-exempt: braid init only fails on empty sharedSecret (checked above), nil KEM (checked above), or memguard OOM
+	if err != nil { // coverage-exempt: braid init only fails on empty sharedSecret (checked above), nil KEM (checked above), or locked-memory allocation failure
 		rk.Destroy()
 		cks.Destroy()
 		ckr.Destroy()
@@ -241,7 +241,7 @@ func (tr *TripleRatchet) Encrypt(plaintext []byte) ([]byte, error) {
 		return nil, &ErrECRatchetFailed{Op: "SendKey", Cause: err}
 	}
 	ecMK, err := secret.New(ecMKBytes)
-	if err != nil { // coverage-exempt: only reachable on memguard OOM
+	if err != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 		return nil, &ErrECRatchetFailed{Op: "SendKey", Cause: err}
 	}
 	defer ecMK.Destroy()
@@ -258,15 +258,15 @@ func (tr *TripleRatchet) Encrypt(plaintext []byte) ([]byte, error) {
 	// handlers (braid.Receive in Decrypt). This block is a defensive forward-
 	// compatibility guard in case the braid protocol is extended with Send-side
 	// OutputKey emission.
-	// Copy the key bytes out of the memguard-protected region before calling
+	// Copy the key bytes out of the locked-memory-protected region before calling
 	// advancePQEpoch, because secret.New inside that function calls
-	// memguard.NewBufferFromBytes which destructively zeroes the source slice.
-	// Zeroing a memguard-protected page via a raw pointer causes a segfault.
+	// the locked-memory constructor, which destructively zeroes the source slice.
+	// Zeroing a locked-memory-protected page via a raw pointer causes a segfault.
 	if outputKey != nil { // coverage-exempt: braid.Send never produces OutputKey in current protocol
 		epochSecretBytes := make([]byte, len(outputKey.Key.Bytes()))
 		copy(epochSecretBytes, outputKey.Key.Bytes())
 		outputKey.Key.Destroy()
-		if epochErr := tr.advancePQEpoch(epochSecretBytes); epochErr != nil { // coverage-exempt: only reachable on memguard OOM
+		if epochErr := tr.advancePQEpoch(epochSecretBytes); epochErr != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 			return nil, epochErr
 		}
 	}
@@ -290,7 +290,7 @@ func (tr *TripleRatchet) Encrypt(plaintext []byte) ([]byte, error) {
 
 	// Step 5: derive hybrid keys.
 	hkeys, hkdfErr := KDFHybrid(ecMK, pqMK)
-	if hkdfErr != nil { // coverage-exempt: KDFHybrid only fails on nil/destroyed key or memguard OOM; both keys are freshly created above
+	if hkdfErr != nil { // coverage-exempt: KDFHybrid only fails on nil/destroyed key or locked-memory allocation failure; both keys are freshly created above
 		return nil, hkdfErr
 	}
 	defer hkeys.Zeroize()
@@ -382,7 +382,7 @@ func (tr *TripleRatchet) decryptWithSnapshot(
 		return nil, &ErrECRatchetFailed{Op: "ReceiveKey", Cause: ecErr}
 	}
 	ecMK, err := secret.New(ecMKBytes)
-	if err != nil { // coverage-exempt: only reachable on memguard OOM
+	if err != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 		return nil, &ErrECRatchetFailed{Op: "ReceiveKey", Cause: err}
 	}
 	defer ecMK.Destroy()
@@ -403,15 +403,15 @@ func (tr *TripleRatchet) decryptWithSnapshot(
 	}
 
 	// Step 3: advance PQ epoch if the Braid produced an OutputKey.
-	// Copy the key bytes out of the memguard-protected region before calling
+	// Copy the key bytes out of the locked-memory-protected region before calling
 	// advancePQEpoch, because secret.New inside that function calls
-	// memguard.NewBufferFromBytes which destructively zeroes the source slice.
-	// Zeroing a memguard-protected page via a raw pointer causes a segfault.
+	// the locked-memory constructor, which destructively zeroes the source slice.
+	// Zeroing a locked-memory-protected page via a raw pointer causes a segfault.
 	if outputKey != nil { // coverage-exempt: reachable only in a synchronized bidirectional TripleRatchet session after the full ML-KEM Braid SCKA handshake completes; requires both parties to exchange braid messages in both directions, which is not achievable in unit tests using a simple symmetric EC cipher without a full session-layer implementation
 		epochSecretBytes := make([]byte, len(outputKey.Key.Bytes()))
 		copy(epochSecretBytes, outputKey.Key.Bytes())
 		outputKey.Key.Destroy()
-		if epochErr := tr.advancePQEpoch(epochSecretBytes); epochErr != nil { // coverage-exempt: only reachable on memguard OOM
+		if epochErr := tr.advancePQEpoch(epochSecretBytes); epochErr != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 			return nil, epochErr
 		}
 	}
@@ -435,7 +435,7 @@ func (tr *TripleRatchet) decryptWithSnapshot(
 	} else { // coverage-exempt: PQCounter==0 at pqEpoch==0 never occurs in normal flow
 		hkeys, err = KDFHybridECOnly(ecMK)
 	}
-	if err != nil { // coverage-exempt: KDFHybrid only fails on nil/destroyed key or memguard OOM; KDFHybridECOnly branch is dead code (PQCounter==0 never occurs)
+	if err != nil { // coverage-exempt: KDFHybrid only fails on nil/destroyed key or locked-memory allocation failure; KDFHybridECOnly branch is dead code (PQCounter==0 never occurs)
 		return nil, err
 	}
 	defer hkeys.Zeroize()
@@ -466,7 +466,7 @@ func (tr *TripleRatchet) decryptWithSnapshot(
 // Resets counters, marks handshake complete, and purges old skipped keys.
 func (tr *TripleRatchet) advancePQEpoch(epochSecret []byte) error {
 	epochSec, err := secret.New(epochSecret)
-	if err != nil { // coverage-exempt: only reachable on memguard OOM
+	if err != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 		return &ErrSPQRFailed{Op: "advancePQEpoch", Cause: err}
 	}
 	defer epochSec.Destroy()
@@ -707,18 +707,18 @@ func (tr *TripleRatchet) takeSnapshot() (*decryptSnapshot, error) {
 	}
 
 	rkClone, err := tr.rootKey.Clone()
-	if err != nil { // coverage-exempt: only reachable on memguard OOM
+	if err != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 		return nil, &ErrSPQRFailed{Op: "takeSnapshot(rootKey)", Cause: err}
 	}
 
 	scClone, err := tr.sendChain.Clone()
-	if err != nil { // coverage-exempt: only reachable on memguard OOM
+	if err != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 		rkClone.Destroy()
 		return nil, &ErrSPQRFailed{Op: "takeSnapshot(sendChain)", Cause: err}
 	}
 
 	rcClone, err := tr.recvChain.Clone()
-	if err != nil { // coverage-exempt: only reachable on memguard OOM
+	if err != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 		rkClone.Destroy()
 		scClone.Destroy()
 		return nil, &ErrSPQRFailed{Op: "takeSnapshot(recvChain)", Cause: err}
@@ -728,7 +728,7 @@ func (tr *TripleRatchet) takeSnapshot() (*decryptSnapshot, error) {
 	skippedCopy := make(map[pqSkippedKeyID]*secret.Secret, len(tr.skippedPQKeys))
 	for k, v := range tr.skippedPQKeys {
 		clone, cloneErr := v.Clone()
-		if cloneErr != nil { // coverage-exempt: only reachable on memguard OOM; cleanup loop and return are unreachable in normal operation
+		if cloneErr != nil { // coverage-exempt: only reachable on locked-memory allocation failure; cleanup loop and return are unreachable in normal operation
 			rkClone.Destroy()
 			scClone.Destroy()
 			rcClone.Destroy()

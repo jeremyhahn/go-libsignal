@@ -29,8 +29,8 @@ const KdfInfo string = "WhisperRatchet"
 const KdfInfoPQXDH string = "WhisperText_X25519_SHA-256_CRYSTALS-KYBER-1024"
 
 // NewKey returns a new RootKey given the key derivation function and bytes.
-// The key material is moved into memguard-protected memory and the source
-// slice is zeroized by memguard. Panics if the memguard allocation fails
+// The key material is moved into locked memory and the source
+// slice is zeroized by go-enclave. Panics if the locked-memory allocation fails
 // (fatal condition).
 func NewKey(kdf kdf.HKDF, key []byte) *Key {
 	guardedKey, err := secret.New(key)
@@ -44,7 +44,7 @@ func NewKey(kdf kdf.HKDF, key []byte) *Key {
 }
 
 // Key is a structure for RootKeys, which are used to derive a new set of chain and root
-// keys for every round trip of messages. The key material is stored in memguard-protected memory.
+// keys for every round trip of messages. The key material is stored in locked memory.
 type Key struct {
 	kdf kdf.HKDF
 	key *secret.Secret
@@ -81,7 +81,7 @@ func (k *Key) CreateChain(theirRatchetKey ecc.ECPublicKeyable, ourRatchetKey *ec
 
 	// Copy bytes out of guarded memory before passing to constructors,
 	// since NewKey/chain.NewKey will move data into new guarded memory
-	// and zeroize the source (which cannot be done on memguard views).
+	// and zeroize the source (which cannot be done on locked-memory views).
 	rootKeyBytes := make([]byte, 32)
 	copy(rootKeyBytes, derivedSecrets.RootKey())
 	chainKeyBytes := make([]byte, 32)

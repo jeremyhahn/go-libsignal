@@ -15,8 +15,8 @@ var messageKeySeed = []byte{0x01}
 var chainKeySeed = []byte{0x02}
 
 // NewKey returns a new chain key with the given kdf, key, and index.
-// The key material is moved into memguard-protected memory and the source
-// slice is zeroized by memguard. Panics if the memguard allocation fails
+// The key material is moved into locked memory and the source
+// slice is zeroized by go-enclave. Panics if the locked-memory allocation fails
 // (fatal condition).
 func NewKey(kdf kdf.HKDF, key []byte, index uint32) *Key {
 	guardedKey, err := secret.New(key)
@@ -85,7 +85,7 @@ func (k *KeyStructure) Zeroize() {
 
 // Key is used for generating message keys. This key "ratchets" every time a
 // message key is generated. Every time the chain key ratchets forward, its index
-// increases by one. The key material is stored in memguard-protected memory.
+// increases by one. The key material is stored in locked memory.
 type Key struct {
 	kdf   kdf.HKDF
 	key   *secret.Secret
@@ -104,7 +104,7 @@ func (c *Key) Key() []byte {
 }
 
 // SetKey replaces the ChainKey's key material. The old key is destroyed and the
-// new key is moved into guarded memory. The source slice is zeroized by memguard.
+// new key is moved into guarded memory. The source slice is zeroized by go-enclave.
 func (c *Key) SetKey(key []byte) {
 	if c.key != nil {
 		c.key.Destroy()
@@ -127,7 +127,7 @@ func (c *Key) SetIndex(index uint32) {
 }
 
 // NextKey uses the key derivation function to generate a new ChainKey.
-// The old chain key material is destroyed via memguard per Signal spec
+// The old chain key material is destroyed via go-enclave per Signal spec
 // Section 8.1 to ensure deleted keys are not recoverable.
 func (c *Key) NextKey() *Key {
 	nextKey := c.BaseMaterial(chainKeySeed)

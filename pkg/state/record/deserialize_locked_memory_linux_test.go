@@ -17,7 +17,7 @@ import (
 // The deserialization constructors move key material into guarded memory as
 // they decode, so a record that is malformed only after a well formed,
 // secret-bearing component used to strand every buffer allocated before the
-// failure. Nothing in memguard reports how many locked buffers a process
+// failure. Nothing in go-enclave reports how many locked buffers a process
 // holds, so these tests read the kernel's own accounting — VmLck in
 // /proc/self/status — which is exactly the resource an abandoned buffer
 // consumes. That measurement is Linux-only; the cleanup itself is covered
@@ -30,7 +30,7 @@ import (
 const failedAttempts = 32
 
 // growthToleranceKB absorbs page-granularity noise from allocations the Go
-// runtime and memguard make around the measurement. A leak of the size these
+// runtime and go-enclave make around the measurement. A leak of the size these
 // tests provoke is measured in megabytes.
 const growthToleranceKB = 128
 

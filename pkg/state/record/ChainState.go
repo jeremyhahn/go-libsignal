@@ -142,7 +142,7 @@ func (c *Chain) ChainKey() *chain.Key {
 // SetChainKey will set the chain state's chain key. The key being replaced is
 // destroyed rather than abandoned: callers ratchet forward from a copy —
 // State.SenderChainKey and State.ReceiverChainKey both hand out copies — so
-// the chain's own key is the last reference, and memguard reclaims nothing on
+// the chain's own key is the last reference, and go-enclave reclaims nothing on
 // its own. Without this, every message sent or accepted would cost the process
 // a locked page it never gets back.
 func (c *Chain) SetChainKey(key *chain.Key) {

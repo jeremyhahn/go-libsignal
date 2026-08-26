@@ -58,7 +58,7 @@ func newSizeMismatchError(expected, got int) *Error {
 	return &Error{kind: errSecretSizeMismatch, expected: expected, got: got}
 }
 
-// newAllocError creates an error indicating a memguard allocation failure.
+// newAllocError creates an error indicating a locked-memory allocation failure.
 func newAllocError(cause string) *Error {
 	return &Error{kind: errSecretAlloc, cause: cause}
 }

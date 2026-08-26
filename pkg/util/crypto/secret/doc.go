@@ -1,9 +1,10 @@
-// Package secret provides secure key material storage backed by memguard.
+// Package secret provides secure key material storage backed by go-enclave,
+// the portfolio locked-memory primitive.
 //
 // All secret values are stored in mlock'd memory pages that are protected from
 // swap, core dumps, and other forms of unintended disclosure. The underlying
-// memguard library uses guard pages and canary values to detect buffer overflows,
-// and zeroizes memory on destruction.
+// go-enclave MemoryEnclave uses guard pages and a canary to detect buffer
+// overflows, and zeroizes memory on destruction.
 //
 // The package provides two primary types:
 //
@@ -12,14 +13,10 @@
 //     cryptographic key sizes (EC private keys, chain keys, root keys, shared
 //     secrets, HMAC keys).
 //
-// Secrets can be sealed into an Enclave for encrypted at-rest storage when
-// they are not actively in use. This provides an additional layer of protection
-// beyond mlock.
-//
 // # System requirements
 //
-// The memguard library requires the ability to call mlock(2) to prevent memory
-// pages from being swapped to disk. On Linux, the default mlock limit is often
+// Locked memory requires the ability to call mlock(2) to prevent memory pages
+// from being swapped to disk. On Linux, the default mlock limit is often
 // 64 KiB per process. If your application manages many secrets concurrently,
 // you may need to raise this limit:
 //
@@ -30,9 +27,12 @@
 //   - hard  memlock  unlimited
 //   - soft  memlock  unlimited
 //
-// # Panic recovery
+// # Allocation failure
 //
-// memguard constructors call os.Exit on allocation failure rather than returning
-// errors. This package wraps all memguard allocations with recover() to convert
-// panics into typed errors, enabling graceful error handling in library code.
+// Unlike memguard — which called os.Exit on allocation failure and purged every
+// live locked buffer in the process when it reached RLIMIT_MEMLOCK — go-enclave
+// maps its own memory and returns a typed error from construction. Reaching the
+// ceiling fails exactly the allocation that reached it; every other secret in
+// the process is untouched. The constructors surface that failure as
+// ErrSecretAlloc, so library code handles it gracefully.
 package secret
