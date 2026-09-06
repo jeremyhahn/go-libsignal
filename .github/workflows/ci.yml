@@ -20,6 +20,49 @@ on:
     branches: [master, main, develop]
   workflow_dispatch: {}
 
+# Cancel a CI run the moment a newer push makes it irrelevant. Portfolio-wide,
+# 73% of CI runs were superseded and still ran to completion; the queue they
+# built was the biggest constraint on landing work.
+#
+# CORRECTION to commit b9605e1 ("ci: drop concurrency from workflows"), whose
+# message reads as a blanket finding that Gitea 1.27.1 cancels any job carrying
+# a concurrency group "even when that group is unoccupied". It does not, and
+# that commit was never about this file: it touched only task-worker.yml (since
+# decommissioned, sdlc.md §8), at JOB level, with cancel-in-progress: FALSE and
+# a group of `task-worker-${{ github.repository }}` — a key with no ref
+# component, so every task worker in the repo shared ONE group. The group was
+# saturated by sibling workers, not unoccupied, and Gitea cannot QUEUE: a job
+# that cannot enter an occupied group is cancelled outright. The observation was
+# real; the conclusion drawn from it was not, and it says nothing about a
+# ref-keyed group with cancel-in-progress: true.
+#
+# Measured on live Gitea 1.27.1: with the block below, the OLDER run is
+# cancelled and the NEWEST survives.
+#
+# Three properties this block depends on, each of them load-bearing:
+#
+#  - WORKFLOW level, not job level. A per-job group is what produced the
+#    misreading above.
+#  - The group leads with `github.workflow`, so the `CI` group structurally
+#    cannot reach the separate `Code Review` workflow that also gates merges
+#    here. A cancelled run does write `failure` to its context, but the
+#    required contexts are (pull_request)-suffixed and a cancellation only ever
+#    lands on a SUPERSEDED sha.
+#  - The literal `true`. cancel-in-progress does NOT evaluate expressions on
+#    1.27.1 — any non-empty value is truthy — so an expression here would read
+#    as an unconditional true while looking conditional.
+#
+# Adopting this is also why `POST /actions/runs/<id>/cancel` being absent from
+# this Gitea's REST surface (verified against the live swagger.v1.json) is not
+# a gap to work around: `concurrency:` is the only mechanism there is.
+#
+# Expect exactly one boundary case: Gitea groups a run by the workflow file OF
+# THAT RUN, so a run started before this landed belongs to no group and cannot
+# be superseded by the first push after it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
