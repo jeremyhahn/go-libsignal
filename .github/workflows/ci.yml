@@ -1,4 +1,4 @@
-# ci-template: v1 (customized)
+# ci-template: v1.15 (customized)
 # Reconciled against software/templates/github-actions/ci.yml in the
 # automatethethings repo (devops.md §1/§8/§9). Divergence outside the
 # repo-specific blocks below is a defect.
@@ -7,17 +7,22 @@
 # `set -o pipefail`. The default step shell is `bash -e` WITHOUT pipefail, so a
 # pipeline exits with tee's status and the step passes however the target
 # failed. That silently made the whole Security job vacuous.
+#
+# v1.15 (#51, automatethethings#209): every job starts at once (template
+# v1.14: no staged `needs`; CI Gate needs them all and fails closed), and
+# push/pull_request run on main only. Not adopted here: the template's Go
+# 1.27.1 -- this repo's jobs stay on go.mod's 1.26.7 until that bump lands.
 
 name: CI
 
 on:
   push:
-    # master is this repository's only long-lived branch. Listing only
-    # main/develop meant CI never fired on a single push: every job here was
-    # dark until 2026-08-14.
-    branches: [master, main, develop]
+    # main is the only trunk (trunk-based; the server has no master or
+    # develop). automerge.yml's merge trains are PRs from merge-train/* and
+    # get CI from pull_request (template v1.15).
+    branches: [main]
   pull_request:
-    branches: [master, main, develop]
+    branches: [main]
   workflow_dispatch: {}
 
 # Cancel a CI run the moment a newer push makes it irrelevant. Portfolio-wide,
@@ -73,7 +78,8 @@ jobs:
   fips:
     name: FIPS
     runs-on: ubuntu-latest
-    needs: [build]
+    # No `needs` (template v1.14): every job starts at once; CI Gate fails
+    # closed on any of them.
     timeout-minutes: 30
     env:
       GOFIPS140: latest
@@ -373,7 +379,7 @@ jobs:
   integration-test:
     name: Integration Test
     runs-on: ubuntu-latest
-    needs: [test]
+    # No `needs` (template v1.14): starts with the test job, not after it.
     steps:
       - uses: actions/checkout@v6
 
@@ -396,7 +402,7 @@ jobs:
   examples-build:
     name: Examples Build
     runs-on: ubuntu-latest
-    needs: [test]
+    # No `needs` (template v1.14): starts with the test job, not after it.
     steps:
       - uses: actions/checkout@v6
 
@@ -413,7 +419,7 @@ jobs:
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
-    needs: test
+    # No `needs` (template v1.14): starts with the test job, not after it.
     steps:
       - uses: actions/checkout@v6
 
