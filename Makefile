@@ -25,27 +25,24 @@ GOTEST := go test -timeout=$(GOTEST_TIMEOUT)
 GOVET := go vet
 GOBUILD := go build
 
-# PINNED (devops.md §9, documented): v2.13.0 (2026-08-19) ships
-# honnef.co/go/tools v0.8.0-rc.1 whose nilness pass panics ("unhandled builtin
-# recover", crashes on sentry-go) — red gate with zero findings. Unpin when
-# golangci-lint ships a non-rc staticcheck that passes on main. Keep this in
+# PINNED to the upstream latest (devops.md §9; owner ruling 2026-10-07: never
+# pin below latest), in step with the shared CI runner image. Keep this in
 # lockstep with the version the Lint job pins in .github/workflows/ci.yml —
 # lint-pin-selftest asserts they agree, because CI runs the action rather than
 # `make lint` and a drifted pin makes the two disagree about what a finding is.
 #
 # The pin is installed to $(GOLANGCI_LINT_BIN), NOT the shared $(GOBIN): the
-# whole point of pinning away from v2.13.x is undone if a neighbouring lane can
-# install over the binary this repo verified. It happened — the shared
-# golangci-lint drifted to v2.13.1 for part of 2026-08-21.
-GOLANGCI_LINT_VERSION := v2.12.2
+# whole point of pinning is undone if a neighbouring lane can install over the
+# binary this repo verified. It happened — the shared golangci-lint drifted
+# for part of 2026-08-21.
+GOLANGCI_LINT_VERSION := v2.14.0
 
-# PINNED for REPRODUCIBILITY, not to dodge a bad release (devops.md §9).
-# v0.8.1 is the latest and is clean on this tree -- unlike the golangci-lint pin
-# above, which exists because v2.13.x is broken. The reason to pin at all is
+# PINNED for REPRODUCIBILITY, to the upstream latest (devops.md §9). v0.8.1 is
+# the latest. The reason to pin at all is
 # that $(GOBIN) is shared across every agent lane on this host: `which
 # staticcheck` answers perfectly well for whatever version a neighbour last
 # installed, so a presence test runs an analyser nobody chose. That is not
-# hypothetical -- the shared golangci-lint drifted to v2.13.1 for part of
+# hypothetical -- the shared golangci-lint drifted for part of
 # 2026-08-21 by exactly that route.
 #
 # CI's Security Scan job deliberately installs @latest instead, on a clean

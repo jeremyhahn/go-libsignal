@@ -51,7 +51,7 @@ or to the documented standalone-crate equivalent:
 
 ### Toolchain
 
-- **Go 1.26.2 exactly** — `go.mod` and `toolchain` directives are
+- **Go 1.27.1 exactly** — `go.mod` and `toolchain` directives are
   pinned; do not upgrade without a coordinated bump of `RUST_REV`.
 - **`GOWORK=off` is mandatory** for every `go` command. The parent
   workspace at `/mnt/vm-host-1/go.work` pins a different toolchain

@@ -1,7 +1,7 @@
 # go-libsignal
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/jeremyhahn/go-libsignal.svg)](https://pkg.go.dev/github.com/jeremyhahn/go-libsignal)
-[![Go Version](https://img.shields.io/badge/go-1.26.3-blue.svg)](https://go.dev/dl/)
+[![Go Version](https://img.shields.io/badge/go-1.27.1-blue.svg)](https://go.dev/dl/)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0.html)
 [![CI](https://github.com/jeremyhahn/go-libsignal/actions/workflows/ci.yml/badge.svg)](https://github.com/jeremyhahn/go-libsignal/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/badge/coverage-92.1%25-brightgreen.svg)](https://github.com/jeremyhahn/go-libsignal)
@@ -26,7 +26,7 @@ A pure-Go implementation of the Signal Protocol, byte-for-byte compatible with R
 go get github.com/jeremyhahn/go-libsignal@v0.1.0
 ```
 
-**Go 1.26.3 is required.** The module pins `go 1.26.3` in `go.mod`; the standard-library `crypto/mlkem` package used for ML-KEM-1024 first appeared in that toolchain.
+**Go 1.27.1 is required.** The module pins `go 1.27.1` in `go.mod`; the standard-library `crypto/mlkem` package used for ML-KEM-1024 first appeared in that toolchain.
 
 > **In-tree development only:** If your workspace has a parent `go.work`, set `GOWORK=off` before running `go` commands — the parent workspace requires Go 1.26.3 and will conflict with this module's pin. Downstream consumers importing `go-libsignal` as a dependency do not need `GOWORK=off`.
 

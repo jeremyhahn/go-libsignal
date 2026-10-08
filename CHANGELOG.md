@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **CI tool pins moved to the upstream latest** (#53, owner ruling 2026-10-07:
+  never pin below latest): golangci-lint v2.12.2 → v2.14.0 (Makefile and the
+  CI Lint job), Go 1.26.x → 1.27.1 (`go.mod`, workflows, devcontainer, interop
+  Dockerfile). staticcheck stays at v0.8.1 (2026.2.1), already the latest.
+
 ### Security
 
 - **The locked-memory backend is now `github.com/jeremyhahn/go-enclave`**, the

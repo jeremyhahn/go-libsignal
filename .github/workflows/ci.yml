@@ -10,8 +10,7 @@
 #
 # v1.15 (#51, automatethethings#209): every job starts at once (template
 # v1.14: no staged `needs`; CI Gate needs them all and fails closed), and
-# push/pull_request run on main only. Not adopted here: the template's Go
-# 1.27.1 -- this repo's jobs stay on go.mod's 1.26.7 until that bump lands.
+# push/pull_request run on main only. Go is 1.27.1, matching go.mod (#53).
 
 name: CI
 
@@ -126,7 +125,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.7'
+          go-version: '1.27.1'
           cache: true
 
       - name: Conformance fixture manifest
@@ -185,7 +184,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.7'
+          go-version: '1.27.1'
           cache: true
 
       # Same reasoning as the Test job: these drive full sessions and hold many
@@ -218,7 +217,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.7'
+          go-version: '1.27.1'
           cache: true
 
       - name: Build all packages
@@ -232,7 +231,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.7'
+          go-version: '1.27.1'
           cache: true
 
       - name: Verify module integrity
@@ -343,7 +342,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.7'
+          go-version: '1.27.1'
           cache: true
 
       # gofmt and vet are part of the template's Lint job and of `make ci`;
@@ -362,19 +361,12 @@ jobs:
 
       # Latest action major: devops.md §9. The linter itself is pinned.
       #
-      # PINNED (devops.md §9, documented): v2.13.0 (2026-08-19) ships
-      # honnef.co/go/tools v0.8.0-rc.1 whose nilness pass panics ("unhandled
-      # builtin recover", crashes on sentry-go) — red gate with zero findings.
-      # Unpin when golangci-lint ships a non-rc staticcheck that passes on main.
-      #
-      # v2.12.2 bundles an older staticcheck that does not know the Go 1.26
-      # ecdsa deprecations, so this job alone would not have caught them. The
-      # Security Scan job installs staticcheck@latest directly and does; that
-      # is the gate that keeps new SA findings visible while this pin holds.
+      # PINNED to the upstream latest (owner ruling 2026-10-07: never pin below
+      # latest), in step with the shared CI runner image and the Makefile.
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: v2.14.0
 
   integration-test:
     name: Integration Test
@@ -385,7 +377,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.7'
+          go-version: '1.27.1'
           cache: true
 
       - name: Integration Test
@@ -408,7 +400,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.7'
+          go-version: '1.27.1'
           cache: true
 
       - name: Build examples
@@ -425,7 +417,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.26.7'
+          go-version: '1.27.1'
           cache: true
 
       # The gate is only worth running if it still fails closed: this proves it
