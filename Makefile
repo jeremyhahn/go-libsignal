@@ -102,6 +102,15 @@ GOBIN := $(shell go env GOPATH)/bin
 # repo the thing that changes other lanes' tools. A repo-local directory removes
 # both: nothing else writes to it, and the check and the run name the same path.
 TOOLS_BIN := $(CURDIR)/.tools/bin
+
+# The pinned analysers (gosec, staticcheck) are built from ONE committed tool
+# module, so they share one golang.org/x/tools. Each tool's own release is built
+# against an x/tools whose export-data reader can lag the Go toolchain ("export
+# data version 5 is greater than maximum supported version 4" under Go 1.27.2);
+# the module raises x/tools for both at once. It is separate from the main module
+# so none of it enters the package graph, and is not a releasable submodule (not
+# in SUBMODULE_TAGS).
+TOOLS_MODULE := tools
 CI_WORKFLOW := .github/workflows/ci.yml
 STATICCHECK_BIN := $(TOOLS_BIN)/staticcheck
 STATICCHECK_LATEST_BIN := $(TOOLS_BIN)-latest/staticcheck
@@ -346,7 +355,7 @@ endef
 
 staticcheck-selftest:
 	@failures=0; \
-	$(call assert_pinned,staticcheck,staticcheck,$(STATICCHECK_BIN),$(STATICCHECK_BIN) ./...,GOBIN=$(TOOLS_BIN) go install honnef.co/go/tools) \
+	$(call assert_pinned,staticcheck,staticcheck,$(STATICCHECK_BIN),$(STATICCHECK_BIN) ./...,cd $(TOOLS_MODULE) && GOBIN=$(TOOLS_BIN) go install honnef.co/go/tools/cmd/staticcheck) \
 	case "$$(grep -A2 'Run staticcheck' $(CI_WORKFLOW) | grep 'make staticcheck')" in \
 		*"make staticcheck-latest"*) echo "ok:  CI's Security Scan runs staticcheck-latest, not the pin";; \
 		*) \
@@ -860,11 +869,35 @@ lint-retry-selftest:
 #         side effect of a CI fix.
 GOSEC_EXCLUDE := G115
 
+# gosec is built from the committed tool module in $(GOSEC_MODULE), never taken
+# from PATH or `go install ...@latest`. Stock gosec v2.29.0 is built against
+# x/tools v0.49.0, whose export-data reader fails every package under Go 1.27.2;
+# the tool module ($(TOOLS_MODULE), see above) raises x/tools to v0.51.0. A source
+# build carries no version stamp, so the pin is verified from the build info
+# embedded in the binary.
+GOSEC_VERSION := v2.29.0
+GOSEC_XTOOLS_VERSION := v0.51.0
+GOSEC_MODULE := $(TOOLS_MODULE)
+GOSEC_BIN := $(TOOLS_BIN)/gosec
+GOSEC_PINNED = ( [ -x $(GOSEC_BIN) ] && \
+	go version -m $(GOSEC_BIN) > $(TOOLS_BIN)/.gosec-buildinfo 2>/dev/null && \
+	grep -qE '^[[:space:]]+mod[[:space:]]+github.com/securego/gosec/v2[[:space:]]+$(GOSEC_VERSION)[[:space:]]' $(TOOLS_BIN)/.gosec-buildinfo && \
+	grep -qE '^[[:space:]]+dep[[:space:]]+golang.org/x/tools[[:space:]]+$(GOSEC_XTOOLS_VERSION)[[:space:]]' $(TOOLS_BIN)/.gosec-buildinfo )
+
 gosec:
-	@which gosec > /dev/null 2>&1 || \
-		(echo "Installing gosec..." && \
-		go install github.com/securego/gosec/v2/cmd/gosec@latest)
-	gosec -concurrency 4 -fmt=text -severity=medium -exclude=$(GOSEC_EXCLUDE) ./...
+	@mkdir -p $(TOOLS_BIN)
+	@if ! $(GOSEC_PINNED); then \
+		echo "gosec $(GOSEC_VERSION) built against x/tools $(GOSEC_XTOOLS_VERSION) not at $(GOSEC_BIN) -- installing"; \
+		(cd $(GOSEC_MODULE) && GOBIN=$(TOOLS_BIN) go install tool) || true; \
+	fi
+	@if ! $(GOSEC_PINNED); then \
+		echo "FAIL: $(GOSEC_BIN) is not gosec $(GOSEC_VERSION) built against"; \
+		echo "      x/tools $(GOSEC_XTOOLS_VERSION), and installing it from $(GOSEC_MODULE) did not"; \
+		echo "      produce that build. Scanning with another gosec tells you nothing"; \
+		echo "      about what CI runs under this Go, so this fails rather than proceeding."; \
+		exit 1; \
+	fi
+	$(GOSEC_BIN) -concurrency 4 -fmt=text -severity=medium -exclude=$(GOSEC_EXCLUDE) ./...
 
 govulncheck:
 	@which govulncheck > /dev/null 2>&1 || \
@@ -899,9 +932,20 @@ govulncheck:
 # It installs into its own directory rather than $(GOBIN) for the same reason
 # the pinned one does: this repo should not decide which staticcheck other lanes
 # get. On a clean CI runner that costs one download.
+#
+# staticcheck@latest alone is built against the x/tools it was released with,
+# which lags the Go toolchain. So it is built from a throwaway module that takes
+# BOTH staticcheck@latest and x/tools@latest: discovery means the latest analyser
+# on the latest export-data reader. This needs the network; the pinned target
+# builds from the committed $(TOOLS_MODULE) and works offline.
 staticcheck-latest:
 	@mkdir -p $(dir $(STATICCHECK_LATEST_BIN))
-	@GOBIN=$(dir $(STATICCHECK_LATEST_BIN)) go install honnef.co/go/tools/cmd/staticcheck@latest; \
+	@dir=$$(mktemp -d) && \
+	( cd "$$dir" && go mod init staticcheck-latest && \
+	  go get honnef.co/go/tools/cmd/staticcheck@latest golang.org/x/tools@latest && \
+	  GOBIN=$(dir $(STATICCHECK_LATEST_BIN)) go install honnef.co/go/tools/cmd/staticcheck ) \
+	  || echo "staticcheck@latest build failed (go output above)"; \
+	rm -rf "$$dir"; \
 	have=$$($(STATICCHECK_LATEST_BIN) -version 2>/dev/null | sed -nE 's/.*\(([0-9]+\.[0-9]+\.[0-9]+)\).*/v\1/p'); \
 	if [ -z "$$have" ]; then \
 		echo "FAIL: staticcheck@latest did not install to $(STATICCHECK_LATEST_BIN)"; \
@@ -920,7 +964,7 @@ staticcheck:
 	@have=$$($(STATICCHECK_BIN) -version 2>/dev/null | sed -nE 's/.*\(([0-9]+\.[0-9]+\.[0-9]+)\).*/v\1/p'); \
 	if [ "$$have" != "$(STATICCHECK_VERSION)" ]; then \
 		echo "staticcheck $${have:-not installed}, want $(STATICCHECK_VERSION) -- installing"; \
-		GOBIN=$(TOOLS_BIN) go install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION); \
+		(cd $(TOOLS_MODULE) && GOBIN=$(TOOLS_BIN) go install honnef.co/go/tools/cmd/staticcheck) || true; \
 		have=$$($(STATICCHECK_BIN) -version 2>/dev/null | sed -nE 's/.*\(([0-9]+\.[0-9]+\.[0-9]+)\).*/v\1/p'); \
 	fi; \
 	if [ "$$have" != "$(STATICCHECK_VERSION)" ]; then \
@@ -1057,9 +1101,10 @@ help:
 	@echo ""
 	@echo "  Security:"
 	@echo "    make security           - Full devops.md §8 suite (gosec, govulncheck, staticcheck, go mod verify, trivy fs)"
-	@echo "    make gosec              - Run gosec (common Go security issues)"
+	@echo "    make gosec              - Run pinned gosec (common Go security issues; built from tools/)"
 	@echo "    make govulncheck        - Run govulncheck (known dependency vulnerabilities)"
-	@echo "    make staticcheck        - Run staticcheck (advanced static analysis)"
+	@echo "    make staticcheck        - Run pinned staticcheck (advanced static analysis; built from tools/)"
+	@echo "    make staticcheck-latest - Run staticcheck@latest on x/tools@latest (discovery; needs network)"
 	@echo "    make modverify          - Verify module integrity against go.sum"
 	@echo "    make trivy              - Filesystem CVE/secret scan (CRITICAL/HIGH gate)"
 	@echo "    make trivy-image        - Scan the interop harness image (see Makefile note)"
