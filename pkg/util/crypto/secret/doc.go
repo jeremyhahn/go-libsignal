@@ -35,4 +35,13 @@
 // ceiling fails exactly the allocation that reached it; every other secret in
 // the process is untouched. The constructors surface that failure as
 // ErrSecretAlloc, so library code handles it gracefully.
+//
+// # Locked-memory budget
+//
+// RLIMIT_MEMLOCK is shared by the whole process, so one path that allocates
+// without bound can starve every other. SetAllocator installs a go-enclave
+// Allocator that caps the locked memory this package holds; once installed,
+// every constructor admits its allocation against the budget and Destroy
+// returns it. It must be called before the first allocation, and is unset — no
+// budget beyond the kernel's — by default.
 package secret

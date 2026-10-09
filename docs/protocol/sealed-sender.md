@@ -1,5 +1,8 @@
 # Sealed Sender Protocol
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Package `sealed` implements Signal's Sealed Sender protocol, which hides the sender's identity from the server during message delivery. The server routes messages to recipients without learning who sent them.
 
 Two protocol versions exist: v1 (single-recipient, version byte `0x11`) and v2 (multi-recipient, version bytes `0x22`/`0x23`). Both versions encrypt an `UnidentifiedSenderMessageContent` (USMC) that carries the sender's certificate and the inner Signal Protocol message.

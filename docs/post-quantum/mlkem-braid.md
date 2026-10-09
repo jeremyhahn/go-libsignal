@@ -1,5 +1,8 @@
 # ML-KEM Braid SCKA Protocol
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 The ML-KEM Braid is a Sparse Continuous Key Agreement (SCKA) protocol that provides post-quantum key agreement using ML-KEM-768. It exchanges KEM key material incrementally across multiple messages, producing shared output keys that SPQR uses to advance its epoch. The protocol targets bandwidth-constrained channels where a full KEM exchange cannot fit in a single message.
 
 Source: `mlkembraid/` package.

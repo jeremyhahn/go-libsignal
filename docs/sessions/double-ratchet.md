@@ -1,5 +1,8 @@
 # Double Ratchet Implementation
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 The `ratchet/`, `keys/`, and `session/` packages implement the Double Ratchet algorithm.
 
 Source files: `ratchet/Ratchet.go`, `keys/root/RootKey.go`, `keys/chain/ChainKey.go`, `keys/message/MessageKey.go`, `keys/session/DerivedSecrets.go`, `session/SessionCipher.go`

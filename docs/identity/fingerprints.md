@@ -1,5 +1,8 @@
 # Safety Number Fingerprints
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Package `fingerprint` implements the Signal Protocol's safety number verification system. Safety numbers let two users verify that they are communicating directly, without a man-in-the-middle, by comparing a shared numeric code or scanning a QR code.
 
 ## Overview

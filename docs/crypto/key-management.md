@@ -1,5 +1,8 @@
 # Key Derivation and Memory Protection
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 This document covers key derivation via HKDF, the zeroization strategy for sensitive material, locked-memory integration (go-enclave) through the `secret` package, and the incremental MAC scheme for streaming integrity verification.
 
 ## HKDF Key Derivation

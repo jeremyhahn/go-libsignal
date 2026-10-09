@@ -1,5 +1,8 @@
 # Usernames
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Package `usernames` implements Signal's username system: nickname validation, discriminator generation, cryptographic hashing via Ristretto255, zero-knowledge proofs of username knowledge, and encrypted username links.
 
 ## Username Format

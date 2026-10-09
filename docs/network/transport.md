@@ -1,5 +1,8 @@
 # Network Transport
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Package: `net/`
 
 Source files: `auth.go`, `certs.go`, `enclave.go`, `svrb.go`, `errors.go`

@@ -1,5 +1,8 @@
 # Bumping the Pinned Rust libsignal Commit
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Bumping `RUST_REV` is the most security-sensitive maintainer operation in the repo — every
 byte-level test depends on `RUST_REV`. Follow this checklist exactly. Do not skip or reorder
 steps; each gate protects the one after it.

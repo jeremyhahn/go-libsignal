@@ -1,5 +1,8 @@
 # Post-Quantum Key Encapsulation Mechanisms
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Package `kem/` provides lattice-based Key Encapsulation Mechanisms (KEMs) for post-quantum key exchange in the Signal Protocol. The package supports Kyber-1024 and Kyber-768 (round-3), with both plain and locked-memory-protected variants. Source files are in `/kem/`.
 
 ## Algorithm Variants

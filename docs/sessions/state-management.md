@@ -1,5 +1,8 @@
 # Session State Management
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 The `state/record/` and `state/store/` packages handle session records, session states, chain states, and pre-key record types.
 
 Source files: `state/record/SessionRecord.go`, `state/record/SessionState.go`, `state/record/ChainState.go`, `state/record/PreKeyRecord.go`, `state/record/SignedPreKeyRecord.go`, `state/record/KyberPreKeyRecord.go`, `state/store/*.go`

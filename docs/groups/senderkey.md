@@ -1,5 +1,8 @@
 # SenderKey Group Messaging
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 SenderKey is Signal's group messaging protocol. Each group member maintains a sender key that encrypts messages to the group. Unlike 1:1 sessions, SenderKey sessions are unidirectional: a sender key can be used either for sending or receiving, but not both. Sessions are constructed per `(groupId, senderId, deviceId)` tuple.
 
 ## Package layout

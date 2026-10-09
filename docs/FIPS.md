@@ -1,5 +1,8 @@
 # FIPS 140-3 posture
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 This document records what the repository's FIPS gate checks, what it cannot
 check, and every exemption it carries. It is the register that the CI job
 (`.github/workflows/ci.yml`, job `fips`) and `make fips` point at.

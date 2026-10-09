@@ -1,5 +1,8 @@
 # Design Patterns
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 This document covers the major design patterns used throughout go-libsignal.
 
 ## Guarded Keys with go-enclave

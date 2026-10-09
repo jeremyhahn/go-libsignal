@@ -1,5 +1,8 @@
 # ZK Credentials (Chase-Perrin-Zaverucha)
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Package `zkcredential` implements the anonymous credential scheme from "The Signal Private Group System and Anonymous Credentials Supporting Efficient Verifiable Encryption" by Chase, Perrin, and Zaverucha. All operations use the Ristretto255 group over Curve25519.
 
 ## Credential System

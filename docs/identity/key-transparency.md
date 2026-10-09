@@ -1,5 +1,8 @@
 # Key Transparency
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Package `keytrans` implements client-side verification for Signal's key transparency system. It provides VRF proof verification, Merkle tree operations, an implicit binary search tree for log lookups, and a monitoring protocol to detect server misbehavior.
 
 ## Architecture

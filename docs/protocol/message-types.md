@@ -1,5 +1,8 @@
 # Protocol Message Types
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 The `protocol/` package defines the message types used in the Signal Protocol wire format.
 
 Source files: `protocol/CiphertextMessage.go`, `protocol/SignalMessage.go`, `protocol/PreKeySignalMessage.go`, `protocol/SenderKeyMessage.go`, `protocol/SenderKeyDistributionMessage.go`, `protocol/DecryptionErrorMessage.go`, `protocol/PlaintextContent.go`, `protocol/ServiceId.go`, `protocol/errors.go`

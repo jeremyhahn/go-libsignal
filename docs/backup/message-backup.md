@@ -1,5 +1,8 @@
 # Message Backup
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Package: `backup/`
 
 Source files: `backup.go`, `key.go`, `frame.go`, `parse.go`, `purpose.go`, `export.go`, `forward_secrecy.go`, `scramble.go`, `errors.go`

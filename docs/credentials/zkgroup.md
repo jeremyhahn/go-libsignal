@@ -1,5 +1,8 @@
 # ZK Groups
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Package `zkgroup` provides the higher-level API for Signal's Private Group System. It wraps the `zkcredential` package with application-specific credential types for authentication, profile keys, receipts, group send endorsements, backups, and call links.
 
 All types in zkgroup are serialized with a leading reserved byte (0x00) via `Serialize`/`Deserialize`. Timestamps should be day-aligned (multiples of `SecondsPerDay` = 86400) to avoid fingerprinting.

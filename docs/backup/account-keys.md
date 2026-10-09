@@ -1,5 +1,8 @@
 # Account Keys
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Package: `accountkeys/`
 
 Source files: `accountkeys.go`, `backup_forward_secrecy.go`, `errors.go`

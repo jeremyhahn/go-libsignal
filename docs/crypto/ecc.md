@@ -1,5 +1,8 @@
 # Elliptic Curve Cryptography
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Package `ecc/` implements Curve25519 key operations, XEdDSA/VXEdDSA signature schemes, and locked-memory key storage. Source files are in `/ecc/`.
 
 ## Key Types

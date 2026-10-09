@@ -6,7 +6,9 @@
 # ==============================================================================
 
 MODULE := github.com/jeremyhahn/go-libsignal
-VERSION := $(shell cat VERSION 2>/dev/null || echo "0.0.0")
+# Not VERSION: release-alpha takes the release tag as VERSION=vX.Y.Z-alpha, and
+# a Makefile definition would shadow it (make/release-alpha.mk, v2.3.6 (b)).
+BUILD_VERSION := $(shell cat VERSION 2>/dev/null || echo "0.0.0")
 # Every test target carries an explicit -timeout. Go's default is 600s per test
 # binary, and pkg/session alone measured 178.7s on an idle CI runner -- only
 # 3.4x headroom on a host measured varying 2.9x-8.7x between runs. On
@@ -87,13 +89,16 @@ COVERAGE_MIN := 90
 #                                    fires in fully synchronized bidirectional sessions
 #                                    requiring a complete braid SCKA handshake, which
 #                                    is not achievable with a simple symmetric EC cipher
-#   pkg/util/crypto/secret    88%  — untestable locked-memory allocation-failure
-#                                    branches in New, NewRandom, NewEmpty and Clone
-#                                    (reachable only when mlock fails)
+#   pkg/util/crypto/secret    95%  — raised from 88% by #41: a tiny SetAllocator budget
+#                                    now drives the allocation-failure branches of New,
+#                                    NewRandom, NewEmpty and Clone deterministically.
+#                                    Still uncovered: Clone's copy into a fresh enclave
+#                                    (cannot fail) and the CAS-lost branch of allocator()
+#                                    (hit only when SetAllocator wins a race)
 COVERAGE_MIN_groups_ratchet := 87
 COVERAGE_MIN_mlkembraid := 87
 COVERAGE_MIN_tripleratchet := 87
-COVERAGE_MIN_util_crypto_secret := 88
+COVERAGE_MIN_util_crypto_secret := 95
 GOBIN := $(shell go env GOPATH)/bin
 
 # Analysers this repo pins live HERE, not in $(GOBIN). $(GOBIN) is shared across
@@ -182,7 +187,7 @@ TESTABLE_PACKAGES := pkg/accountkeys pkg/attest pkg/backup pkg/cipher pkg/device
 all: vet test build
 
 build:
-	@echo "Building go-libsignal v$(VERSION)"
+	@echo "Building go-libsignal v$(BUILD_VERSION)"
 	$(GOBUILD) ./...
 
 # ==============================================================================
@@ -1161,28 +1166,32 @@ help:
 	@echo "  Examples:"
 	@echo "    make examples-build     - Compile all runnable examples under examples/"
 	@echo ""
+	@echo "  Release:"
+	@echo "    make release-alpha VERSION=vX.Y.Z-alpha - Cut and push a signed alpha tag from main to dev"
+	@echo "    make test-release-alpha - Run the release-alpha template regression test"
+	@echo ""
 	@echo "  Maintenance:"
 	@echo "    make clean              - Clean coverage files and test cache"
 	@echo "    make help               - Show this help"
 
-SUBMODULE_TAGS := 
+# ---- release-alpha (handbook software/templates/make, vendored unchanged) ----
+# One module, so LOCKSTEP_MODULES stays empty. Cut with
+# `make release-alpha VERSION=vX.Y.Z-alpha` from main; pushes to dev only.
+AGENT_GIT ?= agent-git.sh
+REPO_NAME ?= go-libsignal
+RELEASE_REMOTE ?= dev
+include make/release-alpha.mk
+
+# Runs the template's regression test against a throwaway bare remote.
+test-release-alpha:
+	bash make/testdata/release-alpha-tests.sh
 
 # ---- dependency-resolution.md targets (2026-08-13 cutover) ----
-# SUBMODULE_TAGS lists nested modules tagged in lockstep with the root
-# (release-versioning.md P2). deps-latest runs before compiling in a
-# consumer repo; release-alpha publishes this repo's next -alpha tag to dev.
+# deps-latest runs before compiling in a consumer repo.
 # deps-latest picks the highest tag INCLUDING -alpha prereleases — bare
 # 'go get @latest' ignores prereleases and would downgrade to legacy v0.0.0.
 
-.PHONY: release-alpha deps-latest
-
-release-alpha:
-	@V=$$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v0.0.0-alpha); \
-	NEXT=$$(echo $$V | awk -F'[.-]' '{printf "v%s.%s.%d-alpha", substr($$1,2), $$2, $$3+1}'); \
-	echo $${NEXT#v} > VERSION && git add VERSION && git commit -q -m "chore(release): $$NEXT" || true; \
-	git tag $$NEXT; \
-	for s in $(SUBMODULE_TAGS); do git tag "$$s/$$NEXT"; done; \
-	git push dev HEAD --tags && echo "Tagged $$NEXT"
+.PHONY: release-alpha test-release-alpha deps-latest
 
 deps-latest:
 	@GOWORK=off sh -c ' \

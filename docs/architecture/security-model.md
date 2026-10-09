@@ -1,5 +1,8 @@
 # Security Model
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 This document describes the security properties, threat model, key management, and side-channel protections in go-libsignal.
 
 ## Security Properties

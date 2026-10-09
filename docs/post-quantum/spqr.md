@@ -1,5 +1,8 @@
 # Sparse Post-Quantum Ratchet (SPQR)
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 SPQR adds epoch-based post-quantum key derivation on top of the EC Double Ratchet. Each epoch corresponds to a completed round of the ML-KEM Braid SCKA protocol. Within each epoch, a symmetric chain key ratchet derives per-message keys. The SPQR output is used as HKDF salt for message key derivation, augmenting the EC key with post-quantum material.
 
 Source: `spqr/` package.

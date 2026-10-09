@@ -1,5 +1,8 @@
 # Session Cipher and Builder
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 The `session.Cipher` and `session.Builder` types provide the encrypt/decrypt API and PQXDH key agreement for session establishment.
 
 Source files: `session/SessionCipher.go`, `session/Session.go`, `session/errors.go`

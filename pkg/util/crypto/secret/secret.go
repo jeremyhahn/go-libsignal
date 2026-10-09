@@ -36,9 +36,9 @@ func New(data []byte) (*Secret, error) {
 	if len(data) == 0 {
 		return &Secret{}, nil
 	}
-	enc, err := enclave.NewMemoryEnclave(data)
+	enc, err := newLocked(data)
 	if err != nil {
-		return nil, newAllocError(err.Error())
+		return nil, newAllocError(err)
 	}
 	return &Secret{enc: enc}, nil
 }
@@ -51,7 +51,9 @@ func New(data []byte) (*Secret, error) {
 // corrupt the key.
 //
 // A size of zero yields a Secret that holds no material. Returns ErrSecretAlloc
-// if the underlying locked-memory allocation or the random read fails.
+// if the underlying locked-memory allocation or the random read fails. Under a
+// budget (see SetAllocator) the call briefly holds two reservations, the
+// scratch region and the frozen one, and needs room for both.
 func NewRandom(size int) (*Secret, error) {
 	if size == 0 {
 		return &Secret{}, nil
@@ -59,9 +61,9 @@ func NewRandom(size int) (*Secret, error) {
 	// Draw the randomness into a writable locked region, then move it into a
 	// frozen enclave. go-enclave has no post-fill freeze, and the move keeps the
 	// material locked the whole way — it never lands on the ordinary heap.
-	scratch, err := enclave.NewMemoryEnclaveSized(size)
+	scratch, err := newLockedSized(size)
 	if err != nil {
-		return nil, newAllocError(err.Error())
+		return nil, newAllocError(err)
 	}
 	defer scratch.Destroy()
 
@@ -70,14 +72,14 @@ func NewRandom(size int) (*Secret, error) {
 		if _, readErr := io.ReadFull(rand.Reader, b); readErr != nil {
 			return readErr
 		}
-		frozen, frozenErr := enclave.NewMemoryEnclave(b)
+		frozen, frozenErr := newLocked(b)
 		if frozenErr != nil {
 			return frozenErr
 		}
 		s = &Secret{enc: frozen}
 		return nil
 	}); err != nil {
-		return nil, newAllocError(err.Error())
+		return nil, newAllocError(err)
 	}
 	return s, nil
 }
@@ -92,9 +94,9 @@ func NewEmpty(size int) (*Secret, error) {
 	if size == 0 {
 		return &Secret{}, nil
 	}
-	enc, err := enclave.NewMemoryEnclaveSized(size)
+	enc, err := newLockedSized(size)
 	if err != nil {
-		return nil, newAllocError(err.Error())
+		return nil, newAllocError(err)
 	}
 	return &Secret{enc: enc}, nil
 }
@@ -156,13 +158,13 @@ func (s *Secret) Clone() (*Secret, error) {
 	if s.IsDestroyed() {
 		return nil, &Error{kind: errSecretDestroyed}
 	}
-	var cloned *Secret
+	var cloned *enclave.MemoryEnclave
 	err := s.enc.WithBytes(func(src []byte) error {
-		dst, allocErr := NewEmpty(len(src))
+		dst, allocErr := newLockedSized(len(src))
 		if allocErr != nil {
 			return allocErr
 		}
-		copyErr := dst.enc.WithBytes(func(buf []byte) error {
+		copyErr := dst.WithBytes(func(buf []byte) error {
 			copy(buf, src)
 			return nil
 		})
@@ -174,9 +176,9 @@ func (s *Secret) Clone() (*Secret, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, newAllocError(err.Error())
+		return nil, newAllocError(err)
 	}
-	return cloned, nil
+	return &Secret{enc: cloned}, nil
 }
 
 // EqualTo performs a constant-time comparison of the secret against the given

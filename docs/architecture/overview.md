@@ -1,5 +1,8 @@
 # Architecture Overview
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 go-libsignal is a Go port of Signal's Rust `libsignal` reference implementation. It covers X3DH/PQXDH key exchange, Double Ratchet messaging, SenderKey group messaging, Sealed Sender anonymity, post-quantum ratcheting (SPQR/ML-KEM Braid), zero-knowledge credentials, and secure value recovery.
 
 ## Layered Architecture

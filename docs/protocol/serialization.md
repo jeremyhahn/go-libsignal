@@ -1,5 +1,8 @@
 # Serialization Framework
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 The `serialize/` package provides serialization and deserialization for all Signal Protocol objects. The `proto/` package defines the protobuf schemas.
 
 Source files: `serialize/Serializer.go`, `serialize/ProtobufSerializer.go`, `serialize/JSONSerializer.go`, `serialize/errors.go`

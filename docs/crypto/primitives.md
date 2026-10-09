@@ -1,5 +1,8 @@
 # Cipher Primitives
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Package `cipher/` implements the symmetric encryption primitives used throughout the Signal Protocol. All implementations are pure Go. Source files are in `/cipher/`.
 
 ## AES-256-GCM-SIV (RFC 8452)

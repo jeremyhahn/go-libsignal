@@ -1,5 +1,8 @@
 # Secure Value Recovery (SVR) v4
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Package: `svr/`
 
 Source files: `svr.go`, `backup.go`, `restore.go`, `query.go`, `remove.go`, `crypto.go`, `errors.go`

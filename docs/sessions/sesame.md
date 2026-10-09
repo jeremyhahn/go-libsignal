@@ -1,5 +1,8 @@
 # Sesame Multi-Device Session Management
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 The `sesame` package implements the Sesame session management algorithm for the Signal Protocol. It coordinates session lifecycle across multiple users and devices, handling session creation, expiration, device list reconciliation, and routing of encrypt/decrypt operations.
 
 ## Data Model

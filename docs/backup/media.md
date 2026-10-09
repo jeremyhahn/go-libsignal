@@ -1,5 +1,8 @@
 # Media Sanitization
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 The `media` package provides media type detection, structural validation, and metadata stripping for media files in the Signal protocol. The implementation is intentionally minimal: JPEG and PNG files have metadata stripped, while MP4, WebP, and GIF files are structurally validated and returned unmodified.
 
 ## Supported Formats

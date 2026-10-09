@@ -1,5 +1,8 @@
 # Attestation
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Package: `attest/`
 
 Source files: `sgx_session.go`, `enclave.go`, `dcap.go`, `dcap_evidence.go`, `dcap_endorsements.go`, `cds2.go`, `svr2.go`, `hsm_enclave.go`, `client_connection.go`, `errors.go`

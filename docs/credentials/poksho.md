@@ -1,5 +1,8 @@
 # Poksho: Proof of Knowledge using SHO
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 Package `poksho` implements Schnorr-style zero-knowledge proofs over Ristretto255 and the Stateful Hash Object (SHO) abstraction that underlies them. It is the cryptographic foundation for Signal's `zkcredential`, `zkgroup`, and `usernames` packages.
 
 ## Stateful Hash Object (SHO)

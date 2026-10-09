@@ -5,6 +5,8 @@ import (
 	"errors"
 	"runtime"
 	"testing"
+
+	"github.com/jeremyhahn/go-enclave"
 )
 
 // ---------------------------------------------------------------------------
@@ -29,8 +31,8 @@ func TestError_ErrorMessages(t *testing.T) {
 		},
 		{
 			name:     "alloc with cause",
-			err:      newAllocError("out of memory"),
-			contains: "allocation failed: out of memory",
+			err:      newAllocError(enclave.ErrLockedMemoryUnavailable),
+			contains: "allocation failed: enclave: could not allocate locked memory",
 		},
 		{
 			name:     "alloc without cause",
@@ -41,6 +43,21 @@ func TestError_ErrorMessages(t *testing.T) {
 			name:     "nil input",
 			err:      &Error{kind: errNilInput},
 			contains: "nil input",
+		},
+		{
+			name:     "invalid budget",
+			err:      &Error{kind: errInvalidBudget},
+			contains: "budget must be positive",
+		},
+		{
+			name:     "allocator already set",
+			err:      &Error{kind: errAllocatorAlreadySet},
+			contains: "SetAllocator already called",
+		},
+		{
+			name:     "allocator after allocation",
+			err:      &Error{kind: errAllocatorAfterAllocation},
+			contains: "after the first allocation",
 		},
 		{
 			name:     "unknown kind",
@@ -93,8 +110,8 @@ func TestError_Is_SizeMismatchKind(t *testing.T) {
 }
 
 func TestError_Is_AllocKind(t *testing.T) {
-	a := newAllocError("reason A")
-	b := newAllocError("reason B")
+	a := newAllocError(enclave.ErrLockedMemoryUnavailable)
+	b := newAllocError(enclave.ErrBudgetExhausted)
 	if !errors.Is(a, b) {
 		t.Error("alloc errors should match by kind regardless of cause")
 	}
@@ -812,11 +829,11 @@ func TestNewSizeMismatchError(t *testing.T) {
 }
 
 func TestNewAllocError(t *testing.T) {
-	err := newAllocError("test cause")
+	err := newAllocError(enclave.ErrBudgetExhausted)
 	if err.kind != errSecretAlloc {
 		t.Errorf("kind = %d, want errSecretAlloc", err.kind)
 	}
-	if err.cause != "test cause" {
-		t.Errorf("cause = %q, want %q", err.cause, "test cause")
+	if !errors.Is(err, enclave.ErrBudgetExhausted) {
+		t.Errorf("errors.Is(%v, enclave.ErrBudgetExhausted) = false, want the cause unwrapped", err)
 	}
 }

@@ -1,5 +1,8 @@
 # Triple Ratchet
 
+> **Status: REFERENCE** · Last verified: 2026-10-09
+> As-built description of go-libsignal code owned by this repository.
+
 The Triple Ratchet combines the EC Double Ratchet with the Sparse Post-Quantum Ratchet (SPQR) to provide hybrid EC+PQ forward secrecy. Each message is encrypted using keys derived from both the EC ratchet and the PQ ratchet via `KDFHybrid`. The PQ chain epoch advances when the ML-KEM Braid SCKA produces an output key.
 
 Source: `tripleratchet/` package.
