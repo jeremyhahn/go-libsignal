@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`make lint` runs actionlint, and the trivy targets fail closed** (#58).
+  `make lint` (and the CI Lint job, through `make actionlint`) validates the
+  workflows with actionlint v1.7.12, pinned like golangci-lint. `make trivy`
+  and `make trivy-image` now exit non-zero with an install hint when trivy is
+  missing, instead of printing a skip and passing, so `make security` can no
+  longer pass vacuously.
 - **CI tool pins moved to the upstream latest** (#53, owner ruling 2026-10-07:
   never pin below latest): golangci-lint v2.12.2 → v2.14.0 (Makefile and the
   CI Lint job), Go 1.26.x → 1.27.1 (`go.mod`, workflows, devcontainer, interop

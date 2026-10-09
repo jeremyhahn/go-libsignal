@@ -359,6 +359,11 @@ jobs:
       - name: Tool-pin and lint-retry self-tests
         run: make staticcheck-selftest lint-pin-selftest lint-retry-selftest
 
+      # `make lint`'s workflow check. golangci-lint runs through its action
+      # below, so actionlint is called on its own here; same pinned version.
+      - name: actionlint
+        run: make actionlint
+
       # Latest action major: devops.md §9. The linter itself is pinned.
       #
       # PINNED to the upstream latest (owner ruling 2026-10-07: never pin below

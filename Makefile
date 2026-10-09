@@ -116,6 +116,13 @@ STATICCHECK_BIN := $(TOOLS_BIN)/staticcheck
 STATICCHECK_LATEST_BIN := $(TOOLS_BIN)-latest/staticcheck
 GOLANGCI_LINT_BIN := $(TOOLS_BIN)/golangci-lint
 
+# actionlint validates the workflows (devops.md §4, the `make lint` row).
+# PINNED to the upstream latest (devops.md §9), the version the software
+# factory worker image bakes. It picks up .github/actionlint.yaml on its own
+# when the repo adds one (self-hosted runner labels).
+ACTIONLINT_VERSION := v1.7.12
+ACTIONLINT_BIN := $(TOOLS_BIN)/actionlint
+
 # The lint retry loop invokes $(LINT_CMD) rather than a bare `golangci-lint`,
 # so lint-retry-selftest can drive it with a stub by overriding this variable.
 # A stub planted on PATH would NOT work: the `export PATH` below prepends
@@ -148,7 +155,7 @@ TESTABLE_PACKAGES := pkg/accountkeys pkg/attest pkg/backup pkg/cipher pkg/device
 	interop-fixtures-check interop-fixtures-refresh \
 	interop-live-build interop-live interop-live-session interop-live-sealed \
 	interop-live-group interop-live-backup interop-docker \
-	vet lint _lint-retry lint-retry-selftest lint-pin-selftest \
+	vet lint actionlint _lint-retry lint-retry-selftest lint-pin-selftest \
 	clean coverage coverage-gate-selftest _coverage-gate help \
 	coverage-loop-selftest _coverage-collect \
 	ci security gosec govulncheck staticcheck errcheck nilcheck \
@@ -760,6 +767,33 @@ lint:
 		exit 1; \
 	fi
 	@$(MAKE) --no-print-directory _lint-retry
+	@$(MAKE) --no-print-directory actionlint
+
+# Same version discipline as golangci-lint above: the pinned version or
+# nothing. The repo-local copy is preferred; an actionlint already on PATH at
+# exactly the pinned version is accepted too, so a host without network access
+# (the worker image bakes the pin) still lints. Anything else installs the pin,
+# then fails closed if the install did not produce it.
+actionlint:
+	@bin=$(ACTIONLINT_BIN); \
+	have=$$($$bin -version 2>/dev/null | head -n 1); \
+	if [ "$$have" != "$(ACTIONLINT_VERSION)" ]; then \
+		bin=$$(command -v actionlint); \
+		have=$$([ -n "$$bin" ] && $$bin -version 2>/dev/null | head -n 1); \
+	fi; \
+	if [ "$$have" != "$(ACTIONLINT_VERSION)" ]; then \
+		echo "actionlint $${have:-not installed}, want $(ACTIONLINT_VERSION) -- installing"; \
+		mkdir -p $(TOOLS_BIN); \
+		GOBIN=$(TOOLS_BIN) go install github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION); \
+		bin=$(ACTIONLINT_BIN); \
+		have=$$($$bin -version 2>/dev/null | head -n 1); \
+	fi; \
+	if [ "$$have" != "$(ACTIONLINT_VERSION)" ]; then \
+		echo "FAIL: no actionlint $(ACTIONLINT_VERSION) after installing it; the workflows"; \
+		echo "      were not validated, so this fails rather than passing."; \
+		exit 1; \
+	fi; \
+	$$bin && echo "actionlint: workflows clean"
 
 # golangci-lint takes a global lock, and $(GOBIN) is shared across every agent
 # lane on this host. A concurrent run exits 3 with "parallel golangci-lint is
@@ -995,10 +1029,14 @@ modverify:
 # bench/ are skipped: none of them ship to a consumer of the library, and
 # tests/interop/rust carries the upstream Rust reference crate purely to diff
 # wire bytes against.
+#
+# A missing trivy FAILS: a gate that passes because its scanner is absent is
+# worse than no gate (devops.md §8). CI installs the CLI before calling this.
+TRIVY_INSTALL_HINT := install trivy: https://trivy.dev/latest/getting-started/installation/
 trivy:
 	@command -v trivy >/dev/null 2>&1 || { \
-		echo "trivy not installed - skipping filesystem scan (see https://trivy.dev/latest/getting-started/installation/)"; \
-		exit 0; \
+		echo "FAIL: trivy not installed, so the filesystem scan cannot run ($(TRIVY_INSTALL_HINT))"; \
+		exit 1; \
 	}; \
 	trivy fs --scanners vuln,secret --severity CRITICAL,HIGH --exit-code 1 --skip-dirs tests,examples,bench .
 
@@ -1030,8 +1068,8 @@ trivy:
 #
 # The Go module tree is gated unconditionally by `make trivy` and govulncheck.
 trivy-image:
-	@command -v docker >/dev/null 2>&1 || { echo "docker not installed - skipping image scan"; exit 0; }; \
-	command -v trivy >/dev/null 2>&1 || { echo "trivy not installed - skipping image scan"; exit 0; }; \
+	@command -v docker >/dev/null 2>&1 || { echo "FAIL: docker not installed, so the image cannot be built and scanned"; exit 1; }; \
+	command -v trivy >/dev/null 2>&1 || { echo "FAIL: trivy not installed, so the image scan cannot run ($(TRIVY_INSTALL_HINT))"; exit 1; }; \
 	docker build -f tests/interop/Dockerfile -t libsignal-interop:security . && \
 	trivy image --scanners vuln,secret --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 \
 		--skip-dirs usr/local/go --skip-dirs go/pkg/mod libsignal-interop:security
@@ -1095,7 +1133,8 @@ help:
 	@echo ""
 	@echo "  Quality:"
 	@echo "    make vet                - Run go vet"
-	@echo "    make lint               - Run golangci-lint"
+	@echo "    make lint               - Run golangci-lint and actionlint"
+	@echo "    make actionlint         - Validate the GitHub/Gitea workflows (pinned actionlint)"
 	@echo "    make lint-retry-selftest - Verify lint retries contention, not findings"
 	@echo "    make lint-pin-selftest  - Verify the golangci-lint pin cannot be raced"
 	@echo ""
