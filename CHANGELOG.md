@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Bumped `golang.org/x/net` to v0.60.0 in the `tools/` module (indirect, via
+  gosec and staticcheck) to fix HIGH CVE-2026-78669.
+
 ## [0.3.0-alpha] - 2026-10-09
 
 ### Added
