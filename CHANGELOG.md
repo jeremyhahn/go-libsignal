@@ -7,8 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-alpha] - 2026-10-09
+
+### Added
+
+- **`secret.SetAllocator(maxBytes)` bounds the locked memory the `secret`
+  package holds** (#41). `RLIMIT_MEMLOCK` is shared by the whole process, so
+  one path that allocates without bound can starve every other. `SetAllocator`
+  installs a go-enclave `Allocator` that every `Secret` and `Secret32`
+  constructor then admits against, and `Destroy` returns a secret's
+  reservation. The budget is in locked bytes and every secret costs at least
+  one whole page. It must be called before the package's first locked
+  allocation and takes effect once per process; without it the package stays
+  unbudgeted, limited only by `RLIMIT_MEMLOCK`. It fails closed, leaving the
+  package as it was, with the typed `secret.ErrInvalidBudget` for a
+  non-positive budget, `secret.ErrAllocatorAfterAllocation` if a secret was
+  already allocated unbudgeted, and `secret.ErrAllocatorAlreadySet` on any call
+  after the first valid one. An allocation the budget refuses returns
+  `ErrSecretAlloc`, and `secret.Error` now has an `Unwrap` so
+  `errors.Is(err, enclave.ErrBudgetExhausted)` (or
+  `enclave.ErrLockedMemoryUnavailable` for a kernel refusal) matches.
+  `NewRandom` briefly holds two reservations, the scratch region and the frozen
+  one, and needs room for both. The `pkg/util/crypto/secret` coverage floor
+  rises from 88% to 95%, since a tiny budget now drives the
+  allocation-failure branches deterministically.
+- **`make release-alpha VERSION=vX.Y.Z-alpha`** cuts a signed alpha tag from
+  `main` and pushes it to `dev` only (#39). It is the release-alpha template
+  v2.4.0, vendored unchanged under `make/` (`release-alpha.mk`,
+  `release-common.mk`, `release.mk`, `release-candidate.mk`), with
+  `make test-release-alpha` running the template's regression test
+  (`make/testdata/release-alpha-tests.sh`) against a throwaway bare remote. The
+  recipe refuses to run until `CHANGELOG.md` has a heading for the version. It
+  replaces the previous inline `release-alpha` target, which bumped `VERSION`
+  and tagged without a guard.
+- **`tools/`, a separate Go module that pins gosec and staticcheck** (#59, #64).
+  Both are built from one committed module, so they share one
+  `golang.org/x/tools` (v0.51.0). Each tool's own release is built against an
+  x/tools whose export-data reader lags the toolchain — gosec v2.29.0 on
+  x/tools v0.49.0 fails every package under Go 1.27.2 with "export data
+  version 5 is greater than maximum supported version 4". `make gosec` now
+  installs gosec v2.29.0 to the repo-local `.tools/bin` and verifies the
+  version and the x/tools version from the build info embedded in the binary,
+  failing rather than scanning with another build. `make staticcheck`
+  (v0.8.1) builds from the same module. The module is separate from the root
+  module, so none of it enters the package graph, and it is not a releasable
+  submodule. `make staticcheck-latest`, the CI discovery gate, now builds the
+  latest staticcheck against the latest x/tools in a throwaway module.
+- **`docs/README.md`, the documentation status banners and
+  `.serena/project.yml`** (#56). `docs/README.md` indexes the documents under
+  `docs/`; each document now opens with a `Status: REFERENCE` banner and its
+  last-verified date; `.serena/project.yml` is the project's Serena
+  configuration (Go, UTF-8).
+
 ### Changed
 
+- **Go is now 1.27.2** (#59, #60, #64) in `go.mod`, every CI workflow and the
+  interop test image. The #53 entry below records 1.27.1, which was current
+  when it landed; `go.mod` carried 1.27.1 until #59 moved it to 1.27.2, the
+  portfolio toolchain wave. #60 is the portfolio-wide tracking commit for the
+  same adoption and carries no file changes of its own.
+- `make build` reads the tree's version into `BUILD_VERSION` instead of
+  `VERSION`. A Makefile definition of `VERSION` shadows the
+  `VERSION=vX.Y.Z-alpha` that `make release-alpha` takes on the command line.
+- `golang.org/x/crypto` v0.52.0 → v0.55.0 (CVE-2026-56854, #47);
+  `golang.org/x/text` v0.39.0 → v0.41.0 and `golang.org/x/sys` v0.45.0 →
+  v0.47.0 ride along.
+- CI workflow churn since 0.2.0-alpha (ci-template v1.15 parallel jobs, the
+  review and automerge workflows and their later removal, the decommissioned
+  task-worker workflow) is configuration only and changes nothing in the
+  module.
 - **`make lint` runs actionlint, and the trivy targets fail closed** (#58).
   `make lint` (and the CI Lint job, through `make actionlint`) validates the
   workflows with actionlint v1.7.12, pinned like golangci-lint. `make trivy`
@@ -18,7 +85,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI tool pins moved to the upstream latest** (#53, owner ruling 2026-10-07:
   never pin below latest): golangci-lint v2.12.2 → v2.14.0 (Makefile and the
   CI Lint job), Go 1.26.x → 1.27.1 (`go.mod`, workflows, devcontainer, interop
-  Dockerfile). staticcheck stays at v0.8.1 (2026.2.1), already the latest.
+  Dockerfile; superseded by 1.27.2, see the first Changed entry above). staticcheck stays at v0.8.1 (2026.2.1), already the latest.
 
 ### Security
 
