@@ -238,6 +238,8 @@ jobs:
         run: go mod verify
 
       - name: Install security tools
+        # ci-template v1.16: github.com only; Gitea jobs use the runner image's baked, pinned tool.
+        if: github.server_url == 'https://github.com'
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
           go install golang.org/x/vuln/cmd/govulncheck@latest
