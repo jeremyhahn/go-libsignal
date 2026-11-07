@@ -303,7 +303,7 @@ jobs:
 
       - name: Upload Trivy SARIF
         if: github.server_url == 'https://github.com'
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
           category: trivy-fs
