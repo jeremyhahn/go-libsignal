@@ -41,7 +41,7 @@ jobs:
       # SHA-pinned workflow in this repo; devops.md §9 wants latest majors here
       # regardless.
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
