@@ -88,7 +88,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: 'go.mod'
+          go-version: '1.27.3'
 
       # This job runs the same memguard-heavy tests as `test` below, so it
       # needs the same RLIMIT_MEMLOCK, raised the same way in the test step.
