@@ -98,6 +98,7 @@ jobs:
       - name: Report locked-memory limit
         run: |
           echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
 
       # Repo-specific: the two steps below run `make fips-build` / `make
       # fips-test` rather than the template's bare `go build` / `go test`, so a
@@ -121,6 +122,14 @@ jobs:
             sudo prlimit --pid $$ --memlock=4294967296:4294967296
           fi
           echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          # mlock also fails with ENOMEM when the process runs out of
+          # mappings: every guarded buffer is its own mapping plus guard
+          # pages. The old self-hosted runners had 1048576.
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+          if [ "$(sysctl -n vm.max_map_count)" -lt 1048576 ]; then
+            sudo sysctl -w vm.max_map_count=1048576
+          fi
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
           make fips-test
 
   test:
@@ -159,6 +168,7 @@ jobs:
       - name: Report locked-memory limit
         run: |
           echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
 
       - name: Test
         shell: bash
@@ -168,6 +178,14 @@ jobs:
             sudo prlimit --pid $$ --memlock=4294967296:4294967296
           fi
           echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          # mlock also fails with ENOMEM when the process runs out of
+          # mappings: every guarded buffer is its own mapping plus guard
+          # pages. The old self-hosted runners had 1048576.
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+          if [ "$(sysctl -n vm.max_map_count)" -lt 1048576 ]; then
+            sudo sysctl -w vm.max_map_count=1048576
+          fi
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
           make test 2>&1 | tee test.log
 
       # upload-artifact v4+ refuses to run against any server that is not
@@ -209,6 +227,7 @@ jobs:
       - name: Report locked-memory limit
         run: |
           echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
 
       # The target is only worth running if it still carries its own budget and
       # still fails closed: this proves both before we trust its verdict below.
@@ -223,6 +242,14 @@ jobs:
             sudo prlimit --pid $$ --memlock=4294967296:4294967296
           fi
           echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          # mlock also fails with ENOMEM when the process runs out of
+          # mappings: every guarded buffer is its own mapping plus guard
+          # pages. The old self-hosted runners had 1048576.
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+          if [ "$(sysctl -n vm.max_map_count)" -lt 1048576 ]; then
+            sudo sysctl -w vm.max_map_count=1048576
+          fi
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
           make test-proptest 2>&1 | tee proptest.log
 
       - name: Upload property test log
@@ -415,6 +442,7 @@ jobs:
       - name: Report locked-memory limit
         run: |
           echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
 
       - name: Integration Test
         shell: bash
@@ -424,6 +452,14 @@ jobs:
             sudo prlimit --pid $$ --memlock=4294967296:4294967296
           fi
           echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          # mlock also fails with ENOMEM when the process runs out of
+          # mappings: every guarded buffer is its own mapping plus guard
+          # pages. The old self-hosted runners had 1048576.
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+          if [ "$(sysctl -n vm.max_map_count)" -lt 1048576 ]; then
+            sudo sysctl -w vm.max_map_count=1048576
+          fi
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
           make integration-test 2>&1 | tee integration-test.log
 
       - name: Upload integration test log
@@ -479,6 +515,7 @@ jobs:
       - name: Report locked-memory limit
         run: |
           echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
 
       - name: Coverage
         shell: bash
@@ -488,6 +525,14 @@ jobs:
             sudo prlimit --pid $$ --memlock=4294967296:4294967296
           fi
           echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          # mlock also fails with ENOMEM when the process runs out of
+          # mappings: every guarded buffer is its own mapping plus guard
+          # pages. The old self-hosted runners had 1048576.
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+          if [ "$(sysctl -n vm.max_map_count)" -lt 1048576 ]; then
+            sudo sysctl -w vm.max_map_count=1048576
+          fi
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
           make coverage 2>&1 | tee coverage.log
 
       - name: Upload coverage
