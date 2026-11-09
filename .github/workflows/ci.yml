@@ -88,15 +88,17 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: 'go.mod'
+          go-version: '1.27.3'
 
       # This job runs the same memguard-heavy tests as `test` below, so it
-      # needs the same RLIMIT_MEMLOCK. Report it here too: exhaustion surfaces
-      # as "memcall could not acquire lock", which is easy to misread as a
-      # FIPS finding. See the note on the `test` job for the measurements.
+      # needs the same RLIMIT_MEMLOCK, raised the same way in the test step.
+      # Report it here too: exhaustion surfaces as "memcall could not acquire
+      # lock", which is easy to misread as a FIPS finding. See the note on the
+      # `test` job for the measurements.
       - name: Report locked-memory limit
         run: |
           echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
 
       # Repo-specific: the two steps below run `make fips-build` / `make
       # fips-test` rather than the template's bare `go build` / `go test`, so a
@@ -114,7 +116,21 @@ jobs:
         run: make fips-build
 
       - name: Unit tests (FIPS mode)
-        run: make fips-test
+        shell: bash
+        run: |
+          if [ "$(ulimit -l)" != unlimited ] && [ "$(ulimit -l)" -lt 4194304 ]; then
+            sudo prlimit --pid $$ --memlock=4294967296:4294967296
+          fi
+          echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          # mlock also fails with ENOMEM when the process runs out of
+          # mappings: every guarded buffer is its own mapping plus guard
+          # pages. The old self-hosted runners had 1048576.
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+          if [ "$(sysctl -n vm.max_map_count)" -lt 1048576 ]; then
+            sudo sysctl -w vm.max_map_count=1048576
+          fi
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+          make fips-test
 
   test:
     name: Test
@@ -125,7 +141,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.3'
           cache: true
 
       - name: Conformance fixture manifest
@@ -139,20 +155,38 @@ jobs:
       # memguard mlock()s every secret, and the suite holds thousands at once
       # (TestGroupCipherDecryptTooFarInFuture drives a chain 25,002 messages
       # forward). That needs RLIMIT_MEMLOCK >= 2 GiB; see the locked-memory
-      # section of CONTRIBUTING.md for the measurements. Docker defaults it to
-      # 8 MiB soft AND hard, and the hard limit cannot be raised from inside the
-      # container without CAP_SYS_RESOURCE — so the runner has to grant it. The
-      # company's Gitea runners pass --ulimit memlock=4294967296 (4 GiB, granted
-      # 2026-08-14). Report the limit before running, so exhaustion reads as a
-      # provisioning problem rather than a mysterious allocation failure deep in
-      # a test — that is exactly how it was diagnosed.
+      # section of CONTRIBUTING.md for the measurements. The old self-hosted
+      # runners granted it with --ulimit memlock=4294967296 (4 GiB, 2026-08-14).
+      # `ubuntu-latest` is now the GitHub-hosted VM, which starts at 8 MiB soft
+      # AND hard but has passwordless sudo, so the job raises it itself: `sudo
+      # prlimit` on the step's own shell, in the same step as `make`, because
+      # make and the test binaries inherit that shell's limit (Company Agent
+      # m2286 (2)). A runner that already grants 4 GiB skips the raise. The
+      # limit is reported before and after the raise, so exhaustion reads as a
+      # provisioning problem rather than a mysterious allocation failure deep
+      # in a test — that is exactly how it was diagnosed.
       - name: Report locked-memory limit
         run: |
           echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
 
       - name: Test
         shell: bash
-        run: set -o pipefail; make test 2>&1 | tee test.log
+        run: |
+          set -o pipefail
+          if [ "$(ulimit -l)" != unlimited ] && [ "$(ulimit -l)" -lt 4194304 ]; then
+            sudo prlimit --pid $$ --memlock=4294967296:4294967296
+          fi
+          echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          # mlock also fails with ENOMEM when the process runs out of
+          # mappings: every guarded buffer is its own mapping plus guard
+          # pages. The old self-hosted runners had 1048576.
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+          if [ "$(sysctl -n vm.max_map_count)" -lt 1048576 ]; then
+            sudo sysctl -w vm.max_map_count=1048576
+          fi
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+          make test 2>&1 | tee test.log
 
       # upload-artifact v4+ refuses to run against any server that is not
       # github.com -- it detects one and reports "not currently supported on
@@ -184,14 +218,16 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.3'
           cache: true
 
       # Same reasoning as the Test job: these drive full sessions and hold many
-      # guarded buffers, so report the limit before running.
+      # guarded buffers, so the test step raises the limit to 4 GiB and the
+      # limit is reported before and after the raise.
       - name: Report locked-memory limit
         run: |
           echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
 
       # The target is only worth running if it still carries its own budget and
       # still fails closed: this proves both before we trust its verdict below.
@@ -200,7 +236,21 @@ jobs:
 
       - name: Property tests
         shell: bash
-        run: set -o pipefail; make test-proptest 2>&1 | tee proptest.log
+        run: |
+          set -o pipefail
+          if [ "$(ulimit -l)" != unlimited ] && [ "$(ulimit -l)" -lt 4194304 ]; then
+            sudo prlimit --pid $$ --memlock=4294967296:4294967296
+          fi
+          echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          # mlock also fails with ENOMEM when the process runs out of
+          # mappings: every guarded buffer is its own mapping plus guard
+          # pages. The old self-hosted runners had 1048576.
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+          if [ "$(sysctl -n vm.max_map_count)" -lt 1048576 ]; then
+            sudo sysctl -w vm.max_map_count=1048576
+          fi
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+          make test-proptest 2>&1 | tee proptest.log
 
       - name: Upload property test log
         if: failure() && github.server_url == 'https://github.com'
@@ -217,7 +267,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.3'
           cache: true
 
       - name: Build all packages
@@ -231,7 +281,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.3'
           cache: true
 
       - name: Verify module integrity
@@ -344,7 +394,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.3'
           cache: true
 
       # gofmt and vet are part of the template's Lint job and of `make ci`;
@@ -384,12 +434,33 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.3'
           cache: true
+
+      # memguard-heavy like the Test job (TestGroupSessionBuilder panics at
+      # the hosted VM's 8 MiB), so it raises RLIMIT_MEMLOCK the same way.
+      - name: Report locked-memory limit
+        run: |
+          echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
 
       - name: Integration Test
         shell: bash
-        run: set -o pipefail; make integration-test 2>&1 | tee integration-test.log
+        run: |
+          set -o pipefail
+          if [ "$(ulimit -l)" != unlimited ] && [ "$(ulimit -l)" -lt 4194304 ]; then
+            sudo prlimit --pid $$ --memlock=4294967296:4294967296
+          fi
+          echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          # mlock also fails with ENOMEM when the process runs out of
+          # mappings: every guarded buffer is its own mapping plus guard
+          # pages. The old self-hosted runners had 1048576.
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+          if [ "$(sysctl -n vm.max_map_count)" -lt 1048576 ]; then
+            sudo sysctl -w vm.max_map_count=1048576
+          fi
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+          make integration-test 2>&1 | tee integration-test.log
 
       - name: Upload integration test log
         if: failure() && github.server_url == 'https://github.com'
@@ -407,7 +478,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.3'
           cache: true
 
       - name: Build examples
@@ -424,7 +495,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version: '1.27.2'
+          go-version: '1.27.3'
           cache: true
 
       # The gate is only worth running if it still fails closed: this proves it
@@ -439,9 +510,30 @@ jobs:
       - name: Coverage loop self-test
         run: make coverage-loop-selftest
 
+      # Coverage runs the memguard-heavy suites too (pkg/groups fails at the
+      # hosted VM's 8 MiB), so it raises RLIMIT_MEMLOCK like the Test job.
+      - name: Report locked-memory limit
+        run: |
+          echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+
       - name: Coverage
         shell: bash
-        run: set -o pipefail; make coverage 2>&1 | tee coverage.log
+        run: |
+          set -o pipefail
+          if [ "$(ulimit -l)" != unlimited ] && [ "$(ulimit -l)" -lt 4194304 ]; then
+            sudo prlimit --pid $$ --memlock=4294967296:4294967296
+          fi
+          echo "RLIMIT_MEMLOCK soft: $(ulimit -S -l) KB, hard: $(ulimit -H -l) KB"
+          # mlock also fails with ENOMEM when the process runs out of
+          # mappings: every guarded buffer is its own mapping plus guard
+          # pages. The old self-hosted runners had 1048576.
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+          if [ "$(sysctl -n vm.max_map_count)" -lt 1048576 ]; then
+            sudo sysctl -w vm.max_map_count=1048576
+          fi
+          echo "vm.max_map_count: $(sysctl -n vm.max_map_count)"
+          make coverage 2>&1 | tee coverage.log
 
       - name: Upload coverage
         if: always() && github.server_url == 'https://github.com'

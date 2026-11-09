@@ -282,8 +282,8 @@ upstream_must_contain = [
   "02fc58a4f2c9bd736238abfc28890c8b2363d084bee430692f05ee559bd37dea3378949e72b271fe0d815b6d908035106cd670b45892df40780c62c37fae106c41",
   "03fc58a4f2c9bd736238abfc28890c8b2363d084bee430692f05ee559bd37dea3378949e72b271fe0d815b6d908035106cd670b45892df40780c62c37fae106c41",
 ]
-sha256 = "620abe9d20b800ddc8069f3270e9e2e8fa20b428281192c2624640343fd9e9a4"
-size = 11039
+sha256 = "21016f35e5611006e589e9fd8582bbd85f932e2b7a8138b903fe55d7656d6dce"
+size = 11037
 purpose = "Hand-extracted Go-source replicas of the V1 (rejected), V4 (auth), and V1/V2/V3/V4 (profile-key) presentation byte vectors from rust/zkgroup/tests/integration_tests.rs. The drift detector greps the Rust source for each presentation's leading-prefix bytes; if any presentation literal disappears upstream, the gate fails."
 
 [[fixture]]

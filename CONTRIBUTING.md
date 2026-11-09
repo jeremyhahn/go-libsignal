@@ -106,8 +106,10 @@ limit reached? [Err: cannot allocate memory]
 Container runtimes are the usual culprit: Docker defaults `memlock` to
 8 MiB, hard limit included, and `RLIMIT_MEMLOCK` cannot be raised past
 its hard limit without `CAP_SYS_RESOURCE`. Run containers with an
-explicit budget, e.g. `--ulimit memlock=4294967296:4294967296`. CI
-runners need it on the **job container**, not just the host.
+explicit budget, e.g. `--ulimit memlock=4294967296:4294967296`. The
+GitHub-hosted VM starts at 8 MiB, and the CI jobs raise it to 4 GiB with
+`sudo prlimit` before the tests (Company Agent m2286 (2)). Local runs
+still need the limit raised by hand.
 
 Prefer a bounded figure to `-1:-1`. Locked pages are unswappable, so an
 unlimited job can pin all of a shared runner's RAM. The company's Gitea
