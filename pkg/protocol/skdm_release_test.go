@@ -5,6 +5,8 @@ package protocol
 import (
 	"bytes"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // TestSenderKeyDistributionMessage_ReleaseWipesSeed checks that the message
@@ -23,8 +25,8 @@ func TestSenderKeyDistributionMessage_ReleaseWipesSeed(t *testing.T) {
 	if msg.chainKey.IsDestroyed() {
 		t.Fatal("the seed is not held guarded")
 	}
-	if got := msg.ChainKey(); !bytes.Equal(got, want) {
-		t.Fatalf("ChainKey = %x, want %x", got, want)
+	if !secrettest.Matches(t, msg.chainKey, want) {
+		t.Fatal("the guarded seed does not match the input chain key")
 	}
 	out, err := msg.Serialize()
 	if err != nil {
@@ -35,16 +37,19 @@ func TestSenderKeyDistributionMessage_ReleaseWipesSeed(t *testing.T) {
 		t.Fatalf("parse: %v", err)
 	}
 	defer parsed.Release()
-	if got := parsed.ChainKey(); !bytes.Equal(got, want) {
-		t.Fatalf("round-tripped chain key = %x, want %x", got, want)
+	if !secrettest.Matches(t, parsed.chainKey, want) {
+		t.Fatal("the round-tripped seed does not match the input chain key")
 	}
 
 	msg.Release()
 	if !msg.chainKey.IsDestroyed() {
 		t.Fatal("Release left the seed alive")
 	}
-	if got := msg.ChainKey(); got != nil {
-		t.Fatalf("ChainKey after Release = %x, want nil", got)
+	if !secrettest.Empty(msg.chainKey) {
+		t.Fatal("the seed still lends material after Release")
+	}
+	if msg.ChainKey() != nil {
+		t.Fatal("ChainKey after Release: want nil")
 	}
 	if _, err := msg.Serialize(); err == nil {
 		t.Fatal("Serialize after Release: want an error")
