@@ -80,7 +80,7 @@ func NewOPRFBackup4(serverIDs []uint64, password []byte, maxTries uint32) (*OPRF
 	if err := withInput(inputSecret, func(inputPtr *[64]byte) error {
 		ap := authPt(inputPtr, kOprf)
 		commitments = authCommitments(serverIDs, inputPtr, ap)
-		kAuth = authSecret(inputPtr, ap)
+		kAuth = authSecretAlloc(inputPtr, ap)
 		return nil
 	}); err != nil {
 		kAuth.Destroy()
@@ -139,6 +139,10 @@ func NewOPRFBackup4(serverIDs []uint64, password []byte, maxTries uint32) (*OPRF
 // versionRandAlloc allocates the random backup version; tests replace it
 // to exercise the version allocation failure.
 var versionRandAlloc = secret.NewRandom
+
+// authSecretAlloc builds the master authorization secret; tests wrap it to
+// check that kAuth is destroyed on the failure paths.
+var authSecretAlloc = authSecret
 
 // FinalizeBackup4 processes server responses to backup requests. It verifies
 // that all servers returned OK status and returns the minimum tries remaining.
