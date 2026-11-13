@@ -120,9 +120,9 @@ s, err := secret.New(k)  // k is now zeroed; original is untouched
 ```
 
 Methods:
-- `Bytes() []byte` -- returns a view into guarded memory (panics if destroyed)
-- `Size() int` -- returns 0 if destroyed
-- `Destroy()` -- idempotent, zeroizes and frees
+- `WithBytes(fn func([]byte) error) error` -- lends `fn` a view of the guarded memory (see [Borrowing Secret Material](#borrowing-secret-material))
+- `Size() int` -- returns 0 if destroyed or empty
+- `Destroy()` -- idempotent and nil-safe, zeroizes and frees; panics if the enclave reports that the release failed
 - `IsDestroyed() bool`
 - `Clone() (*Secret, error)` -- independent deep copy in new guarded memory
 - `EqualTo(other []byte) bool` -- constant-time comparison
@@ -132,14 +132,37 @@ Methods:
 Optimized for the most common key size in the Signal Protocol: EC private keys, chain keys, root keys, shared secrets, and HMAC keys.
 
 ```go
-func NewSecret32(data [32]byte) (*Secret32, error)         // zeroizes source array
-func NewSecret32FromSlice(data []byte) (*Secret32, error)   // validates len == 32
+func NewSecret32(data [32]byte) (*Secret32, error)         // takes data by value; the caller zeroizes its own array
+func NewSecret32FromSlice(data []byte) (*Secret32, error)   // validates len == 32; source slice is zeroized
 func NewSecret32Random() (*Secret32, error)                 // random
 ```
 
-Methods beyond `Secret`:
-- `Array() [32]byte` -- returns a copy (caller must zeroize)
-- `Ptr() *[32]byte` -- returns a pointer aliasing the locked memory (panics if destroyed)
+Methods:
+- `WithBytes(fn func([]byte) error) error` -- lends `fn` a 32-byte view of the guarded memory
+- `WithArray(fn func(*[32]byte) error) error` -- lends `fn` the same memory as a `*[32]byte`, for APIs that take a fixed-size array
+- `Destroy()`, `IsDestroyed() bool`, `Clone() (*Secret32, error)`, `EqualTo(other [32]byte) bool` -- as for `Secret`
+
+### Borrowing Secret Material
+
+Neither type returns its plaintext. Key material is reached only through a borrow, which calls a callback with a view of the locked memory:
+
+```go
+err := s.WithBytes(func(b []byte) error {
+    return useKey(b) // b is valid only inside this callback
+})
+
+err = k.WithArray(func(a *[32]byte) error {
+    return useArrayKey(a)
+})
+```
+
+The callback contract:
+
+- **Lifetime**: the slice or array pointer is valid only while the callback runs. It aliases the locked memory, so it is not a copy.
+- **No escape**: the callback must not retain the view or any sub-slice of it. It must not store it, return it, send it on a channel, or capture it in a closure that outlives the call. A value that must outlive the callback is copied inside it, and the caller wipes that copy (`crypto.Zeroize`) when done.
+- **No re-entry**: the callback must not call a method on the same secret, which would deadlock against the enclave's borrow lock.
+- **Errors**: `WithBytes` and `WithArray` return the callback's error unchanged. If the enclave fails the borrow, its error is passed back to the caller instead. A destroyed secret does not call the callback and returns `ErrSecretDestroyed`. A nil callback returns `ErrNilInput`.
+- **Empty secrets**: a nil `*Secret`, or one that holds no material, calls the callback with a nil slice. A nil `*Secret32` returns `ErrSecretDestroyed`.
 
 ### At-Rest Encryption
 

@@ -97,7 +97,7 @@ Wraps a `secret.Secret` (variable-length mlock'd buffer). Created via:
 - `NewGuardedSecretKeyFromSecret(keyType KeyType, s *secret.Secret)` -- takes ownership of existing Secret
 
 Methods:
-- `Data() []byte` -- returns a view into guarded memory (must not be retained)
+- `Data() []byte` -- returns a heap copy made inside the enclave borrow; the caller zeroizes it (panics if destroyed)
 - `Destroy()` -- zeroizes and frees guarded memory (idempotent)
 - `IsDestroyed() bool`
 - `Clone() (*GuardedSecretKey, error)` -- deep copy into new guarded memory
@@ -110,13 +110,13 @@ The `Decapsulate` method on `GuardedSecretKey` deserializes the ciphertext (extr
 
 Wraps a `secret.Secret32` (32-byte mlock'd buffer). Created via:
 
-- `NewGuardedSharedSecret(data [32]byte)` -- source array is zeroized
+- `NewGuardedSharedSecret(data [32]byte)` -- takes data by value; the caller zeroizes its own array
 - `NewGuardedSharedSecretFromSlice(data []byte)` -- must be exactly 32 bytes, source is zeroized
 - `NewGuardedSharedSecretFromSecret32(s *secret.Secret32)` -- takes ownership
 
 Methods:
-- `Bytes() []byte` -- view into guarded memory
-- `Array() [32]byte` -- copy (caller must zeroize)
+- `Bytes() []byte` -- heap copy made inside the enclave borrow; the caller zeroizes it (panics if destroyed)
+- `Array() [32]byte` -- copy as a fixed array; the caller zeroizes it (panics if destroyed)
 - `Destroy()` -- idempotent
 - `Secret32() *secret.Secret32` -- access underlying Secret32
 

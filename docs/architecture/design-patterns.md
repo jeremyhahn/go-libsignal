@@ -18,10 +18,12 @@ Private key material is stored in mlock'd, guard-page-protected memory via the `
 
 Both types provide:
 
-- `Bytes()` -- returns a view into guarded memory (must not outlive the Secret)
+- `WithBytes(fn func([]byte) error) error` -- lends `fn` a view of the guarded memory; `Secret32` also has `WithArray(fn func(*[32]byte) error) error` for APIs that take a `*[32]byte`
 - `Destroy()` -- zeroizes and frees the buffer (idempotent)
 - `Clone()` -- deep copy into new guarded memory
 - `EqualTo()` -- constant-time comparison
+
+Neither type returns its plaintext. The borrowed view is valid only while the callback runs. It must not escape or be retained: a value that must outlive the callback is copied inside it and wiped by the caller. The callback must not call back into the same secret. `WithBytes` and `WithArray` return the callback's error, or the enclave's error if the borrow fails; a destroyed secret returns `ErrSecretDestroyed` without calling the callback. See [Key Management](../crypto/key-management.md#borrowing-secret-material) for the full contract.
 
 `secret.New` and `secret.NewRandom` return frozen, read-only secrets (write attempts segfault); `secret.NewEmpty` returns a writable buffer for in-place fill.
 
