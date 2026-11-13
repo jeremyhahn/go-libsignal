@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/kdf"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
@@ -54,14 +55,10 @@ func KdfSckaInit(sharedSecret []byte) (rk, cks, ckr *secret.Secret, err error) {
 		return nil, nil, nil, err
 	}
 
-	// Wrap the intermediate output in a Secret so it is zeroized after splitting.
-	outputSecret, err := secret.New(output)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	defer outputSecret.Destroy()
-
-	outputBytes := outputSecret.Bytes()
+	// Wipe the intermediate output once it has been split (each half is
+	// copied before secret.New, which zeroizes its source).
+	defer crypto.Zeroize(output)
+	outputBytes := output
 
 	// Copy each key segment before passing to secret.New (which zeroizes the source).
 	rkBytes := make([]byte, keyLen)
@@ -107,19 +104,20 @@ func KdfSckaRK(rk *secret.Secret, sckaOutput []byte) (newRK, newCKs, newCKr *sec
 		}
 	}
 
-	output, err := kdf.DeriveSecrets(sckaOutput, rk.Bytes(), []byte(ChainAddEpochInfo), kdfOutputLen)
+	var output []byte
+	err = rk.WithBytes(func(rkBytes []byte) error {
+		var dErr error
+		output, dErr = kdf.DeriveSecrets(sckaOutput, rkBytes, []byte(ChainAddEpochInfo), kdfOutputLen)
+		return dErr
+	})
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	// Wrap the intermediate output in a Secret so it is zeroized after splitting.
-	outputSecret, err := secret.New(output)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	defer outputSecret.Destroy()
-
-	outputBytes := outputSecret.Bytes()
+	// Wipe the intermediate output once it has been split (each half is
+	// copied before secret.New, which zeroizes its source).
+	defer crypto.Zeroize(output)
+	outputBytes := output
 
 	rkBytes := make([]byte, keyLen)
 	copy(rkBytes, outputBytes[:keyLen])
@@ -171,19 +169,20 @@ func KdfSckaCK(ck *secret.Secret, ctr uint32) (mk, nextCK *secret.Secret, err er
 	binary.BigEndian.PutUint32(ctrBytes, ctr)
 	info := slices.Concat(ctrBytes, []byte(ChainNextInfo))
 
-	output, err := kdf.DeriveSecrets(ck.Bytes(), zeroSalt(), info, sckaCKOutputLen)
+	var output []byte
+	err = ck.WithBytes(func(ckBytes []byte) error {
+		var dErr error
+		output, dErr = kdf.DeriveSecrets(ckBytes, zeroSalt(), info, sckaCKOutputLen)
+		return dErr
+	})
 	if err != nil {
 		return nil, nil, err
 	}
 
-	// Wrap the intermediate output in a Secret so it is zeroized after splitting.
-	outputSecret, err := secret.New(output)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer outputSecret.Destroy()
-
-	outputBytes := outputSecret.Bytes()
+	// Wipe the intermediate output once it has been split (each half is
+	// copied before secret.New, which zeroizes its source).
+	defer crypto.Zeroize(output)
+	outputBytes := output
 
 	// Split: nextCK(first 32) || mk(last 32), matching Rust reference.
 	nextCKBytes := make([]byte, keyLen)

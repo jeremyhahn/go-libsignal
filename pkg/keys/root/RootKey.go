@@ -50,10 +50,20 @@ type Key struct {
 	key *secret.Secret
 }
 
-// Bytes returns the RootKey bytes as a view into guarded memory.
-// The returned slice must not be retained beyond the lifetime of this Key.
+// Bytes returns a copy of the RootKey bytes, made inside a WithBytes borrow
+// of the guarded memory, or nil if the key is destroyed. The caller should
+// wipe the copy after use.
 func (k *Key) Bytes() []byte {
-	return k.key.Bytes()
+	var out []byte
+	if err := k.key.WithBytes(func(b []byte) error {
+		if b != nil {
+			out = append([]byte(nil), b...)
+		}
+		return nil
+	}); err != nil {
+		return nil
+	}
+	return out
 }
 
 // CreateChain creates a new RootKey and ChainKey from the recipient's ratchet key and our private key.
@@ -70,7 +80,12 @@ func (k *Key) CreateChain(theirRatchetKey ecc.ECPublicKeyable, ourRatchetKey *ec
 	defer crypto.ZeroizeArray32(&sharedSecret)
 	defer crypto.ZeroizeArray32(&ourPrivateKey)
 	copy(keyMaterial, sharedSecret[:])
-	derivedSecretBytes, err := kdf.DeriveSecrets(keyMaterial, k.key.Bytes(), []byte(KdfInfo), ChainDerivedSecretsSize)
+	var derivedSecretBytes []byte
+	err := k.key.WithBytes(func(rootKey []byte) error {
+		var dErr error
+		derivedSecretBytes, dErr = kdf.DeriveSecrets(keyMaterial, rootKey, []byte(KdfInfo), ChainDerivedSecretsSize)
+		return dErr
+	})
 	crypto.Zeroize(keyMaterial)
 	if err != nil {
 		return nil, err

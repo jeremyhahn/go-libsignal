@@ -401,7 +401,12 @@ func (s *SPQR) advanceEpoch(outputKey *secret.Secret) error {
 		return &ErrEpochOverflow{}
 	}
 
-	newRK, newCKs, newCKr, err := KdfSckaRK(s.rootKey, outputKey.Bytes())
+	var newRK, newCKs, newCKr *secret.Secret
+	err := outputKey.WithBytes(func(ok []byte) error {
+		var kErr error
+		newRK, newCKs, newCKr, kErr = KdfSckaRK(s.rootKey, ok)
+		return kErr
+	})
 	if err != nil {
 		return err
 	}
