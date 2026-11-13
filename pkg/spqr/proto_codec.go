@@ -111,7 +111,12 @@ func MarshalStateProto(s *SPQR) ([]byte, error) {
 	if s.IsDisabled() {
 		return []byte{}, nil
 	}
-	pb, err := spqrToProto(s)
+	// The inner V1 message carries heap copies of the braid secrets (and
+	// temporaries built from them); the tracker wipes them once marshaled,
+	// or on a conversion failure.
+	o := &braidCopies{}
+	defer o.wipe()
+	pb, err := spqrToProto(s, o)
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +153,7 @@ func UnmarshalStateProto(data []byte) (*SPQR, error) {
 
 // ─────────────────────────── marshal (Go → proto) ────────────────────────────
 
-func spqrToProto(s *SPQR) (*pqratchetpb.PqRatchetState, error) {
+func spqrToProto(s *SPQR, o *braidCopies) (*pqratchetpb.PqRatchetState, error) {
 	pb := &pqratchetpb.PqRatchetState{}
 
 	// ── version negotiation ──
@@ -183,7 +188,7 @@ func spqrToProto(s *SPQR) (*pqratchetpb.PqRatchetState, error) {
 			wipeChainProto(chain)
 			return nil, &ErrProtoMissingField{Name: "braid.state"}
 		}
-		v1pb, err := mlkembraidStateToProto(braidState)
+		v1pb, err := mlkembraidStateToProto(braidState, o)
 		if err != nil {
 			wipeChainProto(chain)
 			return nil, err
@@ -293,6 +298,31 @@ func wipeChainProto(c *pqratchetpb.Chain) {
 	}
 }
 
+// braidCopies records the heap buffers the braid marshal helpers own: the
+// copies the mlkembraid Proto* accessors return and the temporaries built
+// from them. Only recorded buffers are wiped; fields that alias live state
+// are never recorded.
+type braidCopies struct{ bufs [][]byte }
+
+// keep records b as owned and returns it. It is nil-safe on both sides.
+func (o *braidCopies) keep(b []byte) []byte {
+	if o != nil && len(b) > 0 {
+		o.bufs = append(o.bufs, b)
+	}
+	return b
+}
+
+// wipe zeroizes every recorded buffer.
+func (o *braidCopies) wipe() {
+	if o == nil {
+		return
+	}
+	for _, b := range o.bufs {
+		crypto.Zeroize(b)
+	}
+	o.bufs = nil
+}
+
 // skippedRecvKeysForEpoch collects all live (non-destroyed) skipped recv keys
 // for a given epoch from the global skipped-key map, sorted by counter in
 // ascending order. Destroyed secrets are silently excluded.
@@ -398,9 +428,9 @@ func insertionSortEpochs(epochs []uint64) {
 }
 
 // mlkembraidStateToProto converts a mlkembraid.State to pqratchetpb.V1State.
-func mlkembraidStateToProto(s *mlkembraid.State) (*pqratchetpb.V1State, error) {
+func mlkembraidStateToProto(s *mlkembraid.State, o *braidCopies) (*pqratchetpb.V1State, error) {
 	pb := &pqratchetpb.V1State{}
-	if err := stateKindToInnerState(s, pb); err != nil {
+	if err := stateKindToInnerState(s, pb, o); err != nil {
 		return nil, err
 	}
 	return pb, nil
@@ -412,17 +442,17 @@ func protoEpoch(goEpoch uint64) uint64 {
 }
 
 // authToProto converts the mlkembraid Authenticator to the proto message.
-func authToProto(a *mlkembraid.Authenticator) (*pqratchetpb.Authenticator, error) {
+func authToProto(a *mlkembraid.Authenticator, o *braidCopies) (*pqratchetpb.Authenticator, error) {
 	if a == nil {
 		return nil, &ErrProtoMissingField{Name: "auth"}
 	}
-	rk := a.ProtoAuthRootKey()
+	rk := o.keep(a.ProtoAuthRootKey())
 	if rk == nil {
 		return nil, &ErrProtoMissingField{Name: "auth.root_key"}
 	}
 	return &pqratchetpb.Authenticator{
 		RootKey: rk,
-		MacKey:  a.ProtoAuthMacKey(),
+		MacKey:  o.keep(a.ProtoAuthMacKey()),
 	}, nil
 }
 
@@ -462,9 +492,9 @@ func decoderToProto(dec *mlkembraid.Decoder) (*pqratchetpb.PolynomialDecoder, er
 // stateKindToInnerState dispatches on State.Kind() to populate the V1State
 // oneof field. Using a setter pattern avoids naming the unexported proto oneof
 // interface type, which protoc-gen-go generates as package-private.
-func stateKindToInnerState(s *mlkembraid.State, pb *pqratchetpb.V1State) error {
+func stateKindToInnerState(s *mlkembraid.State, pb *pqratchetpb.V1State, o *braidCopies) error {
 	ep := protoEpoch(s.ProtoEpoch())
-	auth, err := authToProto(s.ProtoAuth())
+	auth, err := authToProto(s.ProtoAuth(), o)
 	if err != nil {
 		return err
 	}
@@ -477,61 +507,61 @@ func stateKindToInnerState(s *mlkembraid.State, pb *pqratchetpb.V1State) error {
 		}
 		pb.InnerState = v
 	case mlkembraid.StateKeysSampled:
-		v, e := marshalKeysSampled(s, ep, auth)
+		v, e := marshalKeysSampled(s, ep, auth, o)
 		if e != nil {
 			return e
 		}
 		pb.InnerState = v
 	case mlkembraid.StateHeaderSent:
-		v, e := marshalHeaderSent(s, ep, auth)
+		v, e := marshalHeaderSent(s, ep, auth, o)
 		if e != nil {
 			return e
 		}
 		pb.InnerState = v
 	case mlkembraid.StateCt1Received:
-		v, e := marshalCt1Received(s, ep, auth)
+		v, e := marshalCt1Received(s, ep, auth, o)
 		if e != nil {
 			return e
 		}
 		pb.InnerState = v
 	case mlkembraid.StateEkSentCt1Received:
-		v, e := marshalEkSentCt1Received(s, ep, auth)
+		v, e := marshalEkSentCt1Received(s, ep, auth, o)
 		if e != nil {
 			return e
 		}
 		pb.InnerState = v
 	case mlkembraid.StateNoHeaderReceived:
-		v, e := marshalNoHeaderReceived(s, ep, auth)
+		v, e := marshalNoHeaderReceived(s, ep, auth, o)
 		if e != nil {
 			return e
 		}
 		pb.InnerState = v
 	case mlkembraid.StateHeaderReceived:
-		v, e := marshalHeaderReceived(s, ep, auth)
+		v, e := marshalHeaderReceived(s, ep, auth, o)
 		if e != nil {
 			return e
 		}
 		pb.InnerState = v
 	case mlkembraid.StateCt1Sampled:
-		v, e := marshalCt1Sampled(s, ep, auth)
+		v, e := marshalCt1Sampled(s, ep, auth, o)
 		if e != nil {
 			return e
 		}
 		pb.InnerState = v
 	case mlkembraid.StateEkReceivedCt1Sampled:
-		v, e := marshalEkReceivedCt1Sampled(s, ep, auth)
+		v, e := marshalEkReceivedCt1Sampled(s, ep, auth, o)
 		if e != nil {
 			return e
 		}
 		pb.InnerState = v
 	case mlkembraid.StateCt1Acknowledged:
-		v, e := marshalCt1Acknowledged(s, ep, auth)
+		v, e := marshalCt1Acknowledged(s, ep, auth, o)
 		if e != nil {
 			return e
 		}
 		pb.InnerState = v
 	case mlkembraid.StateCt2Sampled:
-		v, e := marshalCt2Sampled(s, ep, auth)
+		v, e := marshalCt2Sampled(s, ep, auth, o)
 		if e != nil {
 			return e
 		}
@@ -557,16 +587,16 @@ func marshalKeysUnsampled(ep uint64, auth *pqratchetpb.Authenticator) (*pqratche
 // marshalKeysSampled builds the proto for StateKeysSampled.
 // Unchunked: Rust HeaderSent { epoch, auth, ek = ekSeed||ekVector, dk }
 // Chunked:   adds sending_hdr (headerEncoder)
-func marshalKeysSampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator) (*pqratchetpb.V1State_KeysSampled, error) {
-	ekSeed := s.ProtoEKSeed()
-	ekVec := s.ProtoEKVector()
+func marshalKeysSampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_KeysSampled, error) {
+	ekSeed := o.keep(s.ProtoEKSeed())
+	ekVec := o.keep(s.ProtoEKVector())
 	if ekSeed == nil {
 		return nil, &ErrProtoMissingField{Name: "KeysSampled.ekSeed"}
 	}
 	if ekVec == nil {
 		return nil, &ErrProtoMissingField{Name: "KeysSampled.ekVector"}
 	}
-	dk := s.ProtoDK()
+	dk := o.keep(s.ProtoDK())
 	if dk == nil {
 		return nil, &ErrProtoMissingField{Name: "KeysSampled.dk"}
 	}
@@ -579,7 +609,7 @@ func marshalKeysSampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authen
 		return nil, err
 	}
 
-	ek := make([]byte, len(ekSeed)+len(ekVec))
+	ek := o.keep(make([]byte, len(ekSeed)+len(ekVec)))
 	copy(ek, ekSeed)
 	copy(ek[len(ekSeed):], ekVec)
 
@@ -599,8 +629,8 @@ func marshalKeysSampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authen
 // marshalHeaderSent builds the proto for StateHeaderSent.
 // Unchunked: Rust EkSent { epoch, auth, dk }
 // Chunked:   adds sending_ek + receiving_ct1 (optional — nil when no ct1 chunks received yet)
-func marshalHeaderSent(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator) (*pqratchetpb.V1State_HeaderSent, error) {
-	dk := s.ProtoDK()
+func marshalHeaderSent(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_HeaderSent, error) {
+	dk := o.keep(s.ProtoDK())
 	if dk == nil {
 		return nil, &ErrProtoMissingField{Name: "HeaderSent.dk"}
 	}
@@ -638,12 +668,12 @@ func marshalHeaderSent(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authent
 // marshalCt1Received builds the proto for StateCt1Received.
 // Unchunked: Rust EkSentCt1Received { epoch, auth, dk, ct1 }
 // Chunked:   adds sending_ek
-func marshalCt1Received(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator) (*pqratchetpb.V1State_Ct1Received, error) {
-	dk := s.ProtoDK()
+func marshalCt1Received(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_Ct1Received, error) {
+	dk := o.keep(s.ProtoDK())
 	if dk == nil {
 		return nil, &ErrProtoMissingField{Name: "Ct1Received.dk"}
 	}
-	ct1 := s.ProtoReceivedCt1()
+	ct1 := o.keep(s.ProtoReceivedCt1())
 	if ct1 == nil {
 		return nil, &ErrProtoMissingField{Name: "Ct1Received.receivedCt1"}
 	}
@@ -672,12 +702,12 @@ func marshalCt1Received(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authen
 // marshalEkSentCt1Received builds the proto for StateEkSentCt1Received.
 // Unchunked: Rust EkSentCt1Received { epoch, auth, dk, ct1 }
 // Chunked:   adds receiving_ct2
-func marshalEkSentCt1Received(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator) (*pqratchetpb.V1State_EkSentCt1Received, error) {
-	dk := s.ProtoDK()
+func marshalEkSentCt1Received(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_EkSentCt1Received, error) {
+	dk := o.keep(s.ProtoDK())
 	if dk == nil {
 		return nil, &ErrProtoMissingField{Name: "EkSentCt1Received.dk"}
 	}
-	ct1 := s.ProtoReceivedCt1()
+	ct1 := o.keep(s.ProtoReceivedCt1())
 	if ct1 == nil {
 		return nil, &ErrProtoMissingField{Name: "EkSentCt1Received.receivedCt1"}
 	}
@@ -706,7 +736,7 @@ func marshalEkSentCt1Received(s *mlkembraid.State, ep uint64, auth *pqratchetpb.
 // marshalNoHeaderReceived builds the proto for StateNoHeaderReceived.
 // Unchunked: Rust NoHeaderReceived { epoch, auth }
 // Chunked:   adds receiving_hdr
-func marshalNoHeaderReceived(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator) (*pqratchetpb.V1State_NoHeaderReceived, error) {
+func marshalNoHeaderReceived(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_NoHeaderReceived, error) {
 	hdrDec := s.ProtoHeaderDecoder()
 	if hdrDec == nil {
 		return nil, &ErrProtoMissingField{Name: "NoHeaderReceived.headerDecoder"}
@@ -730,9 +760,9 @@ func marshalNoHeaderReceived(s *mlkembraid.State, ep uint64, auth *pqratchetpb.A
 // marshalHeaderReceived builds the proto for StateHeaderReceived.
 // Unchunked: Rust HeaderReceived { epoch, auth, hdr = bobEkSeed||bobHek }
 // Chunked:   adds receiving_ek (optional — nil when no Ek chunks received yet)
-func marshalHeaderReceived(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator) (*pqratchetpb.V1State_HeaderReceived, error) {
-	ekSeed := s.ProtoBobEKSeed()
-	hek := s.ProtoBobHek()
+func marshalHeaderReceived(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_HeaderReceived, error) {
+	ekSeed := o.keep(s.ProtoBobEKSeed())
+	hek := o.keep(s.ProtoBobHek())
 	if ekSeed == nil {
 		return nil, &ErrProtoMissingField{Name: "HeaderReceived.bobEkSeed"}
 	}
@@ -751,7 +781,7 @@ func marshalHeaderReceived(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Aut
 		}
 	}
 
-	hdr := make([]byte, len(ekSeed)+len(hek))
+	hdr := o.keep(make([]byte, len(ekSeed)+len(hek)))
 	copy(hdr, ekSeed)
 	copy(hdr[len(ekSeed):], hek)
 
@@ -775,23 +805,23 @@ func marshalHeaderReceived(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Aut
 // After Go bobCompleteEncapsulation, bobEkSeed, bobHek, bobEncapSecret are
 // destroyed. When nil, zero bytes are emitted to keep the proto structurally
 // valid. See the package comment for the documented semantic gap.
-func marshalCt1Sampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator) (*pqratchetpb.V1State_Ct1Sampled, error) {
-	ekSeed := s.ProtoBobEKSeed()
-	hek := s.ProtoBobHek()
-	es := s.ProtoBobEncapSecret()
-	ct1 := s.ProtoBobCt1()
+func marshalCt1Sampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_Ct1Sampled, error) {
+	ekSeed := o.keep(s.ProtoBobEKSeed())
+	hek := o.keep(s.ProtoBobHek())
+	es := o.keep(s.ProtoBobEncapSecret())
+	ct1 := o.keep(s.ProtoBobCt1())
 
 	if ct1 == nil {
 		return nil, &ErrProtoMissingField{Name: "Ct1Sampled.bobCt1"}
 	}
 
-	hdr := make([]byte, mlkembraid.HeaderSize)
+	hdr := o.keep(make([]byte, mlkembraid.HeaderSize))
 	if ekSeed != nil && hek != nil {
 		copy(hdr, ekSeed)
 		copy(hdr[mlkembraid.EKSeedSize:], hek)
 	}
 
-	esBytes := make([]byte, mlkembraid.MLKEM768EncapStateSize)
+	esBytes := o.keep(make([]byte, mlkembraid.MLKEM768EncapStateSize))
 	if es != nil {
 		copy(esBytes, es)
 	}
@@ -831,21 +861,21 @@ func marshalCt1Sampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authent
 // marshalEkReceivedCt1Sampled builds the proto for StateEkReceivedCt1Sampled.
 // Unchunked: Rust Ct1SentEkReceived { epoch, auth, es, ek, ct1 }
 // Chunked:   adds sending_ct1
-func marshalEkReceivedCt1Sampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator) (*pqratchetpb.V1State_EkReceivedCt1Sampled, error) {
-	es := s.ProtoBobEncapSecret()
-	ek := s.ProtoBobEKVector()
-	ct1 := s.ProtoBobCt1()
+func marshalEkReceivedCt1Sampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_EkReceivedCt1Sampled, error) {
+	es := o.keep(s.ProtoBobEncapSecret())
+	ek := o.keep(s.ProtoBobEKVector())
+	ct1 := o.keep(s.ProtoBobCt1())
 
 	if ct1 == nil {
 		return nil, &ErrProtoMissingField{Name: "EkReceivedCt1Sampled.bobCt1"}
 	}
 
-	esBytes := make([]byte, mlkembraid.MLKEM768EncapStateSize)
+	esBytes := o.keep(make([]byte, mlkembraid.MLKEM768EncapStateSize))
 	if es != nil {
 		copy(esBytes, es)
 	}
 
-	ekBytes := make([]byte, mlkembraid.MLKEM768EKSize)
+	ekBytes := o.keep(make([]byte, mlkembraid.MLKEM768EKSize))
 	if ek != nil {
 		copy(ekBytes, ek)
 	}
@@ -876,23 +906,23 @@ func marshalEkReceivedCt1Sampled(s *mlkembraid.State, ep uint64, auth *pqratchet
 // marshalCt1Acknowledged builds the proto for StateCt1Acknowledged.
 // Unchunked: Rust Ct1Sent { epoch, auth, hdr, es, ct1 }
 // Chunked:   adds receiving_ek
-func marshalCt1Acknowledged(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator) (*pqratchetpb.V1State_Ct1Acknowledged, error) {
-	ekSeed := s.ProtoBobEKSeed()
-	hek := s.ProtoBobHek()
-	es := s.ProtoBobEncapSecret()
-	ct1 := s.ProtoBobCt1()
+func marshalCt1Acknowledged(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_Ct1Acknowledged, error) {
+	ekSeed := o.keep(s.ProtoBobEKSeed())
+	hek := o.keep(s.ProtoBobHek())
+	es := o.keep(s.ProtoBobEncapSecret())
+	ct1 := o.keep(s.ProtoBobCt1())
 
 	if ct1 == nil {
 		return nil, &ErrProtoMissingField{Name: "Ct1Acknowledged.bobCt1"}
 	}
 
-	hdr := make([]byte, mlkembraid.HeaderSize)
+	hdr := o.keep(make([]byte, mlkembraid.HeaderSize))
 	if ekSeed != nil && hek != nil {
 		copy(hdr, ekSeed)
 		copy(hdr[mlkembraid.EKSeedSize:], hek)
 	}
 
-	esBytes := make([]byte, mlkembraid.MLKEM768EncapStateSize)
+	esBytes := o.keep(make([]byte, mlkembraid.MLKEM768EncapStateSize))
 	if es != nil {
 		copy(esBytes, es)
 	}
@@ -923,7 +953,7 @@ func marshalCt1Acknowledged(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Au
 // marshalCt2Sampled builds the proto for StateCt2Sampled.
 // Unchunked: Rust Ct2Sent { epoch, auth }
 // Chunked:   adds sending_ct2
-func marshalCt2Sampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator) (*pqratchetpb.V1State_Ct2Sampled, error) {
+func marshalCt2Sampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_Ct2Sampled, error) {
 	ct2Enc := s.ProtoCt2Encoder()
 	if ct2Enc == nil {
 		return nil, &ErrProtoMissingField{Name: "Ct2Sampled.ct2Encoder"}
