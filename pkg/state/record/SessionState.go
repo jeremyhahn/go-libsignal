@@ -939,7 +939,9 @@ func (s *State) structure() (_ *StateStructure, err error) {
 
 	// Move the root key and the PQ ratchet state into guarded memory.
 	if s.rootKey != nil {
-		if structure.RootKey, err = secret.NewValue(copyBytes(s.rootKey.Bytes())); err != nil {
+		// Bytes hands out an owned copy; NewValue moves it into guarded
+		// memory and wipes it, so no second copy is left behind.
+		if structure.RootKey, err = secret.NewValue(s.rootKey.Bytes()); err != nil {
 			return nil, err
 		}
 	}
@@ -956,11 +958,3 @@ func (s *State) structure() (_ *StateStructure, err error) {
 
 // copyBytes returns an independent copy of the given slice.
 // This is used to safely extract bytes from guarded memory for serialization.
-func copyBytes(src []byte) []byte {
-	if src == nil {
-		return nil
-	}
-	dst := make([]byte, len(src))
-	copy(dst, src)
-	return dst
-}
