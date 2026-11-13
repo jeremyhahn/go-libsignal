@@ -26,6 +26,7 @@ import (
 
 	"github.com/jeremyhahn/go-libsignal/pkg/mlkembraid"
 	"github.com/jeremyhahn/go-libsignal/pkg/proto/pqratchetpb"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 	"google.golang.org/protobuf/proto"
 )
@@ -114,6 +115,10 @@ func MarshalStateProto(s *SPQR) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The chain carries heap copies of the root and epoch keys; wipe them
+	// once marshaled, whether or not Marshal succeeds. AuthKey aliases
+	// s.authKey and is left alone.
+	defer wipeChainProto(pb.Chain)
 	return proto.Marshal(pb)
 }
 
@@ -175,10 +180,12 @@ func spqrToProto(s *SPQR) (*pqratchetpb.PqRatchetState, error) {
 	if s.braid != nil {
 		braidState := s.braid.State()
 		if braidState == nil {
+			wipeChainProto(chain)
 			return nil, &ErrProtoMissingField{Name: "braid.state"}
 		}
 		v1pb, err := mlkembraidStateToProto(braidState)
 		if err != nil {
+			wipeChainProto(chain)
 			return nil, err
 		}
 		pb.Inner = &pqratchetpb.PqRatchetState_V1{V1: v1pb}
@@ -260,6 +267,30 @@ func spqrChainToProto(s *SPQR) (*pqratchetpb.Chain, error) {
 	pb.Links = links
 
 	return pb, nil
+}
+
+// wipeChainProto zeroizes the secret copies spqrChainToProto made: the
+// next root and each link's send and receive keys, plus the receive
+// direction's skipped-key buffer. All of them are owned copies; nothing
+// in a Chain message aliases live state. It is nil-safe.
+func wipeChainProto(c *pqratchetpb.Chain) {
+	if c == nil {
+		return
+	}
+	crypto.Zeroize(c.NextRoot)
+	for _, link := range c.Links {
+		if link == nil {
+			continue
+		}
+		if link.Send != nil {
+			crypto.Zeroize(link.Send.Next)
+			crypto.Zeroize(link.Send.Prev)
+		}
+		if link.Recv != nil {
+			crypto.Zeroize(link.Recv.Next)
+			crypto.Zeroize(link.Recv.Prev)
+		}
+	}
 }
 
 // skippedRecvKeysForEpoch collects all live (non-destroyed) skipped recv keys
