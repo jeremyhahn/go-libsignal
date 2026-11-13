@@ -1,6 +1,6 @@
 module github.com/jeremyhahn/go-libsignal
 
-go 1.27.3
+go 1.27.4
 
 require (
 	filippo.io/edwards25519 v1.2.0
@@ -16,7 +16,6 @@ require (
 )
 
 require (
-	github.com/awnumar/memcall v0.5.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	golang.org/x/sys v0.49.0 // indirect

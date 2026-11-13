@@ -1,6 +1,6 @@
 module github.com/jeremyhahn/go-libsignal/tools
 
-go 1.27.1
+go 1.27.4
 
 tool (
 	github.com/securego/gosec/v2/cmd/gosec
