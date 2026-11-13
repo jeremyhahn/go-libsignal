@@ -102,7 +102,7 @@ func NewStateFromStructure(structure *StateStructure, serializer StateSerializer
 	// Clone the PQ ratchet state guarded-to-guarded, so the serialized SPQR
 	// state — which carries live ratchet secrets — never lands on the Go heap.
 	// The structure keeps its own copy; the caller Zeroizes it.
-	if len(structure.PqRatchetState.BytesOrNil()) > 0 {
+	if secretLen(&structure.PqRatchetState) > 0 {
 		pqRatchetState, pqErr := structure.PqRatchetState.Clone()
 		if pqErr != nil {
 			return nil, pqErr
@@ -118,7 +118,7 @@ func NewStateFromStructure(structure *StateStructure, serializer StateSerializer
 	state.previousCounter = structure.PreviousCounter
 	state.remoteIdentityPublic = identity.NewKey(remoteIdentityPublic)
 	state.remoteRegistrationID = structure.RemoteRegistrationID
-	state.rootKey = root.NewKey(kdf.DeriveSecrets, copyBytes(structure.RootKey.BytesOrNil()))
+	state.rootKey = root.NewKey(kdf.DeriveSecrets, copySecret(&structure.RootKey))
 	state.senderBaseKey = senderBaseKey
 	state.serializer = serializer
 	state.sessionVersion = structure.SessionVersion
@@ -283,12 +283,11 @@ func (s *State) SessionWithSelf() bool {
 	return true
 }
 
-// PqRatchetState returns a view into the guarded memory holding the serialized
-// SPQR ratchet state, or nil if not set. The state carries live ratchet
-// secrets, so the returned slice must not be retained: it is invalidated by the
-// next SetPqRatchetState or CopyFrom on this state.
+// PqRatchetState returns a heap copy of the serialized SPQR ratchet state,
+// read inside a WithBytes borrow, or nil if not set. The state carries live
+// ratchet secrets, so the caller should wipe the copy after use.
 func (s *State) PqRatchetState() []byte {
-	return s.pqRatchetState.BytesOrNil()
+	return copySecret(s.pqRatchetState)
 }
 
 // SetPqRatchetState moves the given serialized SPQR ratchet state into guarded

@@ -2,7 +2,6 @@ package record
 
 import (
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
-	"github.com/jeremyhahn/go-libsignal/pkg/util/bytehelper"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/optional"
 )
@@ -49,7 +48,7 @@ func NewPreKeyFromStruct(structure *PreKeyStructure, serializer PreKeySerializer
 	if err != nil {
 		return nil, err
 	}
-	privateKey, gErr := ecc.NewGuardedECPrivateKey(bytehelper.SliceToArray(structure.PrivateKey.BytesOrNil()))
+	privateKey, gErr := guardedPrivateKey(&structure.PrivateKey)
 	if gErr != nil {
 		return nil, gErr
 	}
