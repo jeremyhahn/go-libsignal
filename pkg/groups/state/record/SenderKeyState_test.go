@@ -323,7 +323,7 @@ func TestSenderKeyStateStructure(t *testing.T) {
 	if !restored.HasSenderMessageKey(1) {
 		t.Error("Restored state should have message key at iteration 1")
 	}
-	if !bytes.Equal(restored.SenderChainKey().Seed(), chainKey) {
+	if !bytes.Equal(mustCopy(restored.SenderChainKey().Seed()), chainKey) {
 		t.Error("Restored chain key seed should match original")
 	}
 }

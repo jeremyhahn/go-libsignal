@@ -135,8 +135,8 @@ func TestSenderReceiverSessionAgreement(t *testing.T) {
 	}
 
 	// Both should produce the same root key.
-	senderRootBytes := senderKeys.RootKey.Bytes()
-	receiverRootBytes := receiverKeys.RootKey.Bytes()
+	senderRootBytes := mustCopy(senderKeys.RootKey.Bytes())
+	receiverRootBytes := mustCopy(receiverKeys.RootKey.Bytes())
 
 	if len(senderRootBytes) != len(receiverRootBytes) {
 		t.Fatal("root key lengths should match")
@@ -229,8 +229,8 @@ func TestCalculateSymmetricSessionBothDirections(t *testing.T) {
 	}
 
 	// Both sessions should produce the same root key.
-	aliceRoot := aliceSession.RootKey.Bytes()
-	bobRoot := bobSession.RootKey.Bytes()
+	aliceRoot := mustCopy(aliceSession.RootKey.Bytes())
+	bobRoot := mustCopy(bobSession.RootKey.Bytes())
 	if len(aliceRoot) != len(bobRoot) {
 		t.Fatal("root key lengths should match for symmetric session")
 	}

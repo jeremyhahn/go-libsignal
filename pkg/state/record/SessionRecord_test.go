@@ -354,7 +354,7 @@ func TestNewReceiverChainPair(t *testing.T) {
 func TestNewChain(t *testing.T) {
 	kp := genKP(t)
 	ck := makeChainKey(t)
-	mk := message.NewKeys([]byte("cipher"), []byte("mac"), []byte("iv"), 0)
+	mk := message.NewKeys(fixedKey("cipher", 32), fixedKey("mac", 32), fixedKey("iv", 16), 0)
 	ch := record.NewChain(kp, ck, []*message.Keys{mk})
 
 	if ch.SenderRatchetKey() != kp {
@@ -961,7 +961,7 @@ func TestStateRootKey(t *testing.T) {
 	if got == nil {
 		t.Fatal("root key should not be nil after set")
 	}
-	if !bytes.Equal(got.(*root.Key).Bytes(), rk.Bytes()) {
+	if !bytes.Equal(mustCopy(got.(*root.Key).Bytes()), mustCopy(rk.Bytes())) {
 		t.Fatal("root key bytes mismatch")
 	}
 }
@@ -1066,7 +1066,7 @@ func TestStateMessageKeysOperations(t *testing.T) {
 		t.Fatal("should not have message keys initially")
 	}
 
-	mk := message.NewKeys([]byte("cipher"), []byte("mac"), []byte("iv00"), 0)
+	mk := message.NewKeys(fixedKey("cipher", 32), fixedKey("mac", 32), fixedKey("iv00", 16), 0)
 	if err := state.SetMessageKeys(kp.PublicKey(), mk); err != nil {
 		t.Fatal(err)
 	}
@@ -1075,7 +1075,7 @@ func TestStateMessageKeysOperations(t *testing.T) {
 		t.Fatal("should have message keys after set")
 	}
 
-	removed := state.RemoveMessageKeys(kp.PublicKey(), 0)
+	removed := mustKeys(state.RemoveMessageKeys(kp.PublicKey(), 0))
 	if removed == nil {
 		t.Fatal("removed message keys should not be nil")
 	}

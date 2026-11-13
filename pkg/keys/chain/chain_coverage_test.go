@@ -23,21 +23,21 @@ func TestMessageKeysWithSeed(t *testing.T) {
 	}
 
 	// Verify the derived key fields are present and correctly sized.
-	if len(keys.CipherKey()) != 32 {
-		t.Fatalf("expected 32-byte cipher key, got %d", len(keys.CipherKey()))
+	if len(mustCopy(keys.CipherKey())) != 32 {
+		t.Fatalf("expected 32-byte cipher key, got %d", len(mustCopy(keys.CipherKey())))
 	}
-	if len(keys.MacKey()) != 32 {
-		t.Fatalf("expected 32-byte mac key, got %d", len(keys.MacKey()))
+	if len(mustCopy(keys.MacKey())) != 32 {
+		t.Fatalf("expected 32-byte mac key, got %d", len(mustCopy(keys.MacKey())))
 	}
-	if len(keys.Iv()) != 16 {
-		t.Fatalf("expected 16-byte IV, got %d", len(keys.Iv()))
+	if len(mustCopy(keys.Iv())) != 16 {
+		t.Fatalf("expected 16-byte IV, got %d", len(mustCopy(keys.Iv())))
 	}
 	if keys.Index() != 3 {
 		t.Fatalf("expected index 3, got %d", keys.Index())
 	}
 
 	// Verify the seed material is attached and non-empty.
-	seedMat := keys.SeedMaterial()
+	seedMat := mustCopy(keys.SeedMaterial())
 	if len(seedMat) == 0 {
 		t.Fatal("expected non-empty seed material")
 	}
@@ -63,7 +63,7 @@ func TestMessageKeysWithSeed_SeedIsBaseMaterial(t *testing.T) {
 		t.Fatalf("MessageKeysWithSeed failed: %v", err)
 	}
 
-	if !bytes.Equal(msgKeys.SeedMaterial(), expectedSeed) {
+	if !bytes.Equal(mustCopy(msgKeys.SeedMaterial()), expectedSeed) {
 		t.Fatal("seed material does not match BaseMaterial(messageKeySeed)")
 	}
 }
@@ -89,13 +89,13 @@ func TestMessageKeysWithSeed_ConsistentWithMessageKeys(t *testing.T) {
 
 	// Both should produce the same cipher key, mac key, and IV since they use
 	// the same input key material with a nil salt.
-	if !bytes.Equal(keysWithSeed.CipherKey(), keysPlain.CipherKey()) {
+	if !bytes.Equal(mustCopy(keysWithSeed.CipherKey()), mustCopy(keysPlain.CipherKey())) {
 		t.Error("CipherKey mismatch between MessageKeysWithSeed and MessageKeys")
 	}
-	if !bytes.Equal(keysWithSeed.MacKey(), keysPlain.MacKey()) {
+	if !bytes.Equal(mustCopy(keysWithSeed.MacKey()), mustCopy(keysPlain.MacKey())) {
 		t.Error("MacKey mismatch between MessageKeysWithSeed and MessageKeys")
 	}
-	if !bytes.Equal(keysWithSeed.Iv(), keysPlain.Iv()) {
+	if !bytes.Equal(mustCopy(keysWithSeed.Iv()), mustCopy(keysPlain.Iv())) {
 		t.Error("IV mismatch between MessageKeysWithSeed and MessageKeys")
 	}
 }
@@ -120,14 +120,14 @@ func TestDeriveMessageKeysFromSeed(t *testing.T) {
 	if keys == nil {
 		t.Fatal("expected non-nil message keys")
 	}
-	if len(keys.CipherKey()) != 32 {
-		t.Fatalf("expected 32-byte cipher key, got %d", len(keys.CipherKey()))
+	if len(mustCopy(keys.CipherKey())) != 32 {
+		t.Fatalf("expected 32-byte cipher key, got %d", len(mustCopy(keys.CipherKey())))
 	}
-	if len(keys.MacKey()) != 32 {
-		t.Fatalf("expected 32-byte mac key, got %d", len(keys.MacKey()))
+	if len(mustCopy(keys.MacKey())) != 32 {
+		t.Fatalf("expected 32-byte mac key, got %d", len(mustCopy(keys.MacKey())))
 	}
-	if len(keys.Iv()) != 16 {
-		t.Fatalf("expected 16-byte IV, got %d", len(keys.Iv()))
+	if len(mustCopy(keys.Iv())) != 16 {
+		t.Fatalf("expected 16-byte IV, got %d", len(mustCopy(keys.Iv())))
 	}
 	if keys.Index() != 10 {
 		t.Fatalf("expected index 10, got %d", keys.Index())
@@ -149,8 +149,8 @@ func TestDeriveMessageKeysFromSeed_NilSalt(t *testing.T) {
 	if keys == nil {
 		t.Fatal("expected non-nil keys")
 	}
-	if len(keys.CipherKey()) != 32 {
-		t.Fatalf("expected 32-byte cipher key, got %d", len(keys.CipherKey()))
+	if len(mustCopy(keys.CipherKey())) != 32 {
+		t.Fatalf("expected 32-byte cipher key, got %d", len(mustCopy(keys.CipherKey())))
 	}
 }
 
@@ -179,7 +179,7 @@ func TestDeriveMessageKeysFromSeed_DifferentSaltsProduceDifferentKeys(t *testing
 		t.Fatalf("DeriveMessageKeysFromSeed (salt2) failed: %v", err)
 	}
 
-	if bytes.Equal(keys1.CipherKey(), keys2.CipherKey()) {
+	if bytes.Equal(mustCopy(keys1.CipherKey()), mustCopy(keys2.CipherKey())) {
 		t.Error("different PQR salts should produce different cipher keys")
 	}
 }
@@ -239,7 +239,7 @@ func TestMessageKeysWithSalt_WithPQRSalt(t *testing.T) {
 	}
 
 	// The PQR salt should change the derived keys.
-	if bytes.Equal(keysNoSalt.CipherKey(), keysWithSalt.CipherKey()) {
+	if bytes.Equal(mustCopy(keysNoSalt.CipherKey()), mustCopy(keysWithSalt.CipherKey())) {
 		t.Error("PQR salt should alter derived cipher key")
 	}
 }

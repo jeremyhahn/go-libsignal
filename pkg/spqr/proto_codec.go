@@ -246,18 +246,22 @@ type skippedRecvRecord struct {
 // KeyHistory.data layout (chain.rs:91-96). This allows full round-trip fidelity
 // of the skipped-key map across serialize/deserialize cycles.
 func spqrChainToProto(s *SPQR) (*pqratchetpb.Chain, error) {
-	if s.rootKey == nil || s.rootKey.IsDestroyed() {
-		return nil, nil
-	}
-	if len(s.chains) == 0 {
+	// No root key or no chains means no chain yet. A root key that is set
+	// but destroyed is not "no chain": copySecret fails on it below, so the
+	// state is never written without its chain.
+	if s.rootKey == nil || len(s.chains) == 0 {
 		return nil, nil
 	}
 
+	nextRoot, err := copySecret(s.rootKey, "root key", keyLen)
+	if err != nil {
+		return nil, err
+	}
 	pb := &pqratchetpb.Chain{
 		Direction:    directionToProto(s.direction),
 		CurrentEpoch: s.epoch,
 		SendEpoch:    s.sendEpoch,
-		NextRoot:     copySecret(s.rootKey),
+		NextRoot:     nextRoot,
 		Params: &pqratchetpb.ChainParams{
 			MaxJump:    chainParamMaxJump(s.maxJump),
 			MaxOooKeys: chainParamMaxOOO(maxSkippedKeys),
@@ -269,7 +273,12 @@ func spqrChainToProto(s *SPQR) (*pqratchetpb.Chain, error) {
 	for _, ep := range epochs {
 		chain := s.chains[ep]
 		skipped := skippedRecvKeysForEpoch(s.skippedKeys, ep)
-		send := chainSendDirToProto(chain)
+		send, err := chainSendDirToProto(chain)
+		if err != nil {
+			pb.Links = links
+			wipeChainProto(pb)
+			return nil, err
+		}
 		recv, err := chainRecvDirToProto(chain, skipped)
 		if err != nil {
 			links = append(links, &pqratchetpb.Chain_Epoch{Send: send})
@@ -326,6 +335,15 @@ func (o *braidCopies) keep(b []byte) []byte {
 	return b
 }
 
+// take records a copied field like keep, passing on the copy's error so a
+// failed borrow fails the marshal instead of reading as an absent field.
+func (o *braidCopies) take(b []byte, err error) ([]byte, error) {
+	if err != nil {
+		return nil, err
+	}
+	return o.keep(b), nil
+}
+
 // wipe zeroizes every recorded buffer.
 func (o *braidCopies) wipe() {
 	if o == nil {
@@ -361,16 +379,19 @@ func skippedRecvKeysForEpoch(skipped map[SkippedKeyID]*secret.Secret, epoch uint
 }
 
 // chainSendDirToProto converts an EpochChain send direction to proto.
-func chainSendDirToProto(chain *EpochChain) *pqratchetpb.Chain_Epoch_EpochDirection {
+func chainSendDirToProto(chain *EpochChain) (*pqratchetpb.Chain_Epoch_EpochDirection, error) {
 	var next []byte
-	if chain.sendKey != nil && !chain.sendKey.IsDestroyed() {
-		next = copySecret(chain.sendKey)
+	if chain.sendKey != nil {
+		var err error
+		if next, err = copySecret(chain.sendKey, "send chain key", keyLen); err != nil {
+			return nil, err
+		}
 	}
 	return &pqratchetpb.Chain_Epoch_EpochDirection{
 		Ctr:  chain.sendCounter,
 		Next: next,
 		Prev: nil,
-	}
+	}, nil
 }
 
 // chainRecvDirToProto converts an EpochChain recv direction to proto,
@@ -383,8 +404,11 @@ func chainSendDirToProto(chain *EpochChain) *pqratchetpb.Chain_Epoch_EpochDirect
 // KEY_SIZE = 36 bytes per record (4-byte BE index + 32-byte key).
 func chainRecvDirToProto(chain *EpochChain, skipped []skippedRecvRecord) (*pqratchetpb.Chain_Epoch_EpochDirection, error) {
 	var next []byte
-	if chain.recvKey != nil && !chain.recvKey.IsDestroyed() {
-		next = copySecret(chain.recvKey)
+	if chain.recvKey != nil {
+		var err error
+		if next, err = copySecret(chain.recvKey, "recv chain key", keyLen); err != nil {
+			return nil, err
+		}
 	}
 
 	const recSize = 4 + keyLen // 36 bytes per KeyHistory record
@@ -469,13 +493,20 @@ func authToProto(a *mlkembraid.Authenticator, o *braidCopies) (*pqratchetpb.Auth
 	if a == nil {
 		return nil, &ErrProtoMissingField{Name: "auth"}
 	}
-	rk := o.keep(a.ProtoAuthRootKey())
+	rk, err := o.take(a.ProtoAuthRootKey())
+	if err != nil {
+		return nil, err
+	}
 	if rk == nil {
 		return nil, &ErrProtoMissingField{Name: "auth.root_key"}
 	}
+	mk, err := o.take(a.ProtoAuthMacKey())
+	if err != nil {
+		return nil, err
+	}
 	return &pqratchetpb.Authenticator{
 		RootKey: rk,
-		MacKey:  o.keep(a.ProtoAuthMacKey()),
+		MacKey:  mk,
 	}, nil
 }
 
@@ -611,15 +642,24 @@ func marshalKeysUnsampled(ep uint64, auth *pqratchetpb.Authenticator) (*pqratche
 // Unchunked: Rust HeaderSent { epoch, auth, ek = ekSeed||ekVector, dk }
 // Chunked:   adds sending_hdr (headerEncoder)
 func marshalKeysSampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_KeysSampled, error) {
-	ekSeed := o.keep(s.ProtoEKSeed())
-	ekVec := o.keep(s.ProtoEKVector())
+	ekSeed, err := o.take(s.ProtoEKSeed())
+	if err != nil {
+		return nil, err
+	}
+	ekVec, err := o.take(s.ProtoEKVector())
+	if err != nil {
+		return nil, err
+	}
 	if ekSeed == nil {
 		return nil, &ErrProtoMissingField{Name: "KeysSampled.ekSeed"}
 	}
 	if ekVec == nil {
 		return nil, &ErrProtoMissingField{Name: "KeysSampled.ekVector"}
 	}
-	dk := o.keep(s.ProtoDK())
+	dk, err := o.take(s.ProtoDK())
+	if err != nil {
+		return nil, err
+	}
 	if dk == nil {
 		return nil, &ErrProtoMissingField{Name: "KeysSampled.dk"}
 	}
@@ -653,7 +693,10 @@ func marshalKeysSampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authen
 // Unchunked: Rust EkSent { epoch, auth, dk }
 // Chunked:   adds sending_ek + receiving_ct1 (optional — nil when no ct1 chunks received yet)
 func marshalHeaderSent(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_HeaderSent, error) {
-	dk := o.keep(s.ProtoDK())
+	dk, err := o.take(s.ProtoDK())
+	if err != nil {
+		return nil, err
+	}
 	if dk == nil {
 		return nil, &ErrProtoMissingField{Name: "HeaderSent.dk"}
 	}
@@ -692,11 +735,17 @@ func marshalHeaderSent(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authent
 // Unchunked: Rust EkSentCt1Received { epoch, auth, dk, ct1 }
 // Chunked:   adds sending_ek
 func marshalCt1Received(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_Ct1Received, error) {
-	dk := o.keep(s.ProtoDK())
+	dk, err := o.take(s.ProtoDK())
+	if err != nil {
+		return nil, err
+	}
 	if dk == nil {
 		return nil, &ErrProtoMissingField{Name: "Ct1Received.dk"}
 	}
-	ct1 := o.keep(s.ProtoReceivedCt1())
+	ct1, err := o.take(s.ProtoReceivedCt1())
+	if err != nil {
+		return nil, err
+	}
 	if ct1 == nil {
 		return nil, &ErrProtoMissingField{Name: "Ct1Received.receivedCt1"}
 	}
@@ -726,11 +775,17 @@ func marshalCt1Received(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authen
 // Unchunked: Rust EkSentCt1Received { epoch, auth, dk, ct1 }
 // Chunked:   adds receiving_ct2
 func marshalEkSentCt1Received(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_EkSentCt1Received, error) {
-	dk := o.keep(s.ProtoDK())
+	dk, err := o.take(s.ProtoDK())
+	if err != nil {
+		return nil, err
+	}
 	if dk == nil {
 		return nil, &ErrProtoMissingField{Name: "EkSentCt1Received.dk"}
 	}
-	ct1 := o.keep(s.ProtoReceivedCt1())
+	ct1, err := o.take(s.ProtoReceivedCt1())
+	if err != nil {
+		return nil, err
+	}
 	if ct1 == nil {
 		return nil, &ErrProtoMissingField{Name: "EkSentCt1Received.receivedCt1"}
 	}
@@ -784,8 +839,14 @@ func marshalNoHeaderReceived(s *mlkembraid.State, ep uint64, auth *pqratchetpb.A
 // Unchunked: Rust HeaderReceived { epoch, auth, hdr = bobEkSeed||bobHek }
 // Chunked:   adds receiving_ek (optional — nil when no Ek chunks received yet)
 func marshalHeaderReceived(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_HeaderReceived, error) {
-	ekSeed := o.keep(s.ProtoBobEKSeed())
-	hek := o.keep(s.ProtoBobHek())
+	ekSeed, err := o.take(s.ProtoBobEKSeed())
+	if err != nil {
+		return nil, err
+	}
+	hek, err := o.take(s.ProtoBobHek())
+	if err != nil {
+		return nil, err
+	}
 	if ekSeed == nil {
 		return nil, &ErrProtoMissingField{Name: "HeaderReceived.bobEkSeed"}
 	}
@@ -829,10 +890,22 @@ func marshalHeaderReceived(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Aut
 // destroyed. When nil, zero bytes are emitted to keep the proto structurally
 // valid. See the package comment for the documented semantic gap.
 func marshalCt1Sampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_Ct1Sampled, error) {
-	ekSeed := o.keep(s.ProtoBobEKSeed())
-	hek := o.keep(s.ProtoBobHek())
-	es := o.keep(s.ProtoBobEncapSecret())
-	ct1 := o.keep(s.ProtoBobCt1())
+	ekSeed, err := o.take(s.ProtoBobEKSeed())
+	if err != nil {
+		return nil, err
+	}
+	hek, err := o.take(s.ProtoBobHek())
+	if err != nil {
+		return nil, err
+	}
+	es, err := o.take(s.ProtoBobEncapSecret())
+	if err != nil {
+		return nil, err
+	}
+	ct1, err := o.take(s.ProtoBobCt1())
+	if err != nil {
+		return nil, err
+	}
 
 	if ct1 == nil {
 		return nil, &ErrProtoMissingField{Name: "Ct1Sampled.bobCt1"}
@@ -885,9 +958,18 @@ func marshalCt1Sampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authent
 // Unchunked: Rust Ct1SentEkReceived { epoch, auth, es, ek, ct1 }
 // Chunked:   adds sending_ct1
 func marshalEkReceivedCt1Sampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_EkReceivedCt1Sampled, error) {
-	es := o.keep(s.ProtoBobEncapSecret())
-	ek := o.keep(s.ProtoBobEKVector())
-	ct1 := o.keep(s.ProtoBobCt1())
+	es, err := o.take(s.ProtoBobEncapSecret())
+	if err != nil {
+		return nil, err
+	}
+	ek, err := o.take(s.ProtoBobEKVector())
+	if err != nil {
+		return nil, err
+	}
+	ct1, err := o.take(s.ProtoBobCt1())
+	if err != nil {
+		return nil, err
+	}
 
 	if ct1 == nil {
 		return nil, &ErrProtoMissingField{Name: "EkReceivedCt1Sampled.bobCt1"}
@@ -930,10 +1012,22 @@ func marshalEkReceivedCt1Sampled(s *mlkembraid.State, ep uint64, auth *pqratchet
 // Unchunked: Rust Ct1Sent { epoch, auth, hdr, es, ct1 }
 // Chunked:   adds receiving_ek
 func marshalCt1Acknowledged(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_Ct1Acknowledged, error) {
-	ekSeed := o.keep(s.ProtoBobEKSeed())
-	hek := o.keep(s.ProtoBobHek())
-	es := o.keep(s.ProtoBobEncapSecret())
-	ct1 := o.keep(s.ProtoBobCt1())
+	ekSeed, err := o.take(s.ProtoBobEKSeed())
+	if err != nil {
+		return nil, err
+	}
+	hek, err := o.take(s.ProtoBobHek())
+	if err != nil {
+		return nil, err
+	}
+	es, err := o.take(s.ProtoBobEncapSecret())
+	if err != nil {
+		return nil, err
+	}
+	ct1, err := o.take(s.ProtoBobCt1())
+	if err != nil {
+		return nil, err
+	}
 
 	if ct1 == nil {
 		return nil, &ErrProtoMissingField{Name: "Ct1Acknowledged.bobCt1"}

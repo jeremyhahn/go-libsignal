@@ -1,6 +1,8 @@
 package session
 
 import (
+	"fmt"
+
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
@@ -65,41 +67,66 @@ type DerivedSecrets struct {
 	pqrKey   *secret.Secret
 }
 
+// derivedKeyLength is the length of each derived key.
+const derivedKeyLength = 32
+
+// KeyLengthError indicates that a derived key was missing, or held the
+// wrong number of bytes, when it was copied out of guarded memory. A
+// missing, short or long key is refused rather than used.
+type KeyLengthError struct {
+	Field string
+	Got   int
+	Want  int
+}
+
+func (e *KeyLengthError) Error() string {
+	return fmt.Sprintf("session: %s is %d bytes, want %d", e.Field, e.Got, e.Want)
+}
+
 // RootKey returns a copy of the RootKey bytes, made inside a WithBytes
-// borrow of the guarded memory. The caller should wipe it after use.
-func (d *DerivedSecrets) RootKey() []byte {
-	return copySecret(d.rootKey)
+// borrow of the guarded memory. A missing, destroyed or wrong-length key is
+// an error. The caller should wipe it after use.
+func (d *DerivedSecrets) RootKey() ([]byte, error) {
+	return copySecret(d.rootKey, "root key")
 }
 
 // ChainKey returns a copy of the ChainKey bytes, made inside a WithBytes
-// borrow of the guarded memory. The caller should wipe it after use.
-func (d *DerivedSecrets) ChainKey() []byte {
-	return copySecret(d.chainKey)
+// borrow of the guarded memory. A missing, destroyed or wrong-length key is
+// an error. The caller should wipe it after use.
+func (d *DerivedSecrets) ChainKey() ([]byte, error) {
+	return copySecret(d.chainKey, "chain key")
 }
 
 // InitialPQRKey returns a copy of the InitialPQRKey bytes, made inside a
-// WithBytes borrow, or nil if no PQR key was derived (e.g., for legacy
-// 64-byte derivations). The caller should wipe it after use.
-func (d *DerivedSecrets) InitialPQRKey() []byte {
+// WithBytes borrow, or nil, nil if no PQR key was derived (e.g., for legacy
+// 64-byte derivations). A destroyed or wrong-length key is an error, so it
+// is never mistaken for a session without PQR. The caller should wipe it
+// after use.
+func (d *DerivedSecrets) InitialPQRKey() ([]byte, error) {
 	if d.pqrKey == nil {
-		return nil
+		return nil, nil
 	}
-	return copySecret(d.pqrKey)
+	return copySecret(d.pqrKey, "initial PQR key")
 }
 
-// copySecret copies the material of s out inside a WithBytes borrow. A nil,
-// empty or destroyed secret yields nil.
-func copySecret(s *secret.Secret) []byte {
+// copySecret copies the material of s out inside a WithBytes borrow. The
+// material must be exactly derivedKeyLength bytes; a nil, destroyed or
+// wrong-length secret is an error, never a nil or short copy.
+func copySecret(s *secret.Secret, field string) ([]byte, error) {
+	if s == nil {
+		return nil, &KeyLengthError{Field: field, Want: derivedKeyLength}
+	}
 	var out []byte
 	if err := s.WithBytes(func(b []byte) error {
-		if b != nil {
-			out = append([]byte(nil), b...)
+		if len(b) != derivedKeyLength {
+			return &KeyLengthError{Field: field, Got: len(b), Want: derivedKeyLength}
 		}
+		out = append(make([]byte, 0, derivedKeyLength), b...)
 		return nil
 	}); err != nil {
-		return nil
+		return nil, err
 	}
-	return out
+	return out, nil
 }
 
 // Zeroize destroys the guarded memory holding the derived secrets.

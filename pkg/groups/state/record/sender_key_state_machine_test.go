@@ -39,7 +39,8 @@ import (
 // deterministic 4-byte big-endian seed from an integer.
 // Rust source: rust/protocol/src/sender_keys.rs:375-381
 func chainKeyFromSeed(i uint32) []byte {
-	b := make([]byte, 4)
+	// A sender chain key is 32 bytes; the index tags the first four.
+	b := make([]byte, 32)
 	binary.BigEndian.PutUint32(b, i)
 	return b
 }
@@ -82,7 +83,7 @@ func assertChainKey(t *testing.T, record *SenderKey, keyID uint32, expectedChain
 	if err != nil {
 		t.Fatalf("GetSenderKeyStateByID(%d): %v", keyID, err)
 	}
-	got := state.SenderChainKey().Seed()
+	got := mustCopy(state.SenderChainKey().Seed())
 	// Compare the meaningful prefix: the input chain key may be shorter than the
 	// guarded seed buffer. The first len(expectedChainKey) bytes must match.
 	if len(got) < len(expectedChainKey) || !bytes.Equal(got[:len(expectedChainKey)], expectedChainKey) {
@@ -142,19 +143,19 @@ func TestRust_AddSecondState(t *testing.T) {
 //	INITIAL_SEED_KEY:  [u8; 4] = [1, 2, 3, 4]
 func TestRust_SenderChainKeyIteration(t *testing.T) {
 	const initialIteration = uint32(0)
-	initialSeedKey := []byte{1, 2, 3, 4}
+	initialSeedKey := chainKeyFromSeed(0x01020304)
 
 	key := ratchet.NewSenderChainKey(initialIteration, initialSeedKey)
 
 	seen := make(map[string]bool)
-	seen[string(key.Seed())] = true
+	seen[string(mustCopy(key.Seed()))] = true
 
 	for i := uint32(1); i < 10; i++ {
 		next, err := key.Next()
 		if err != nil {
 			t.Fatalf("Next() at iteration %d: %v", i, err)
 		}
-		seed := next.Seed()
+		seed := mustCopy(next.Seed())
 		seedStr := string(seed)
 		if seen[seedStr] {
 			t.Errorf("duplicate seed at iteration %d", i)
@@ -177,7 +178,7 @@ func TestRust_SenderChainKeyIteration(t *testing.T) {
 //	SenderChainKey::new(u32::MAX, INITIAL_SEED_KEY.to_vec())
 //	assert_matches!(sender_chain_key.next(), Err(SignalProtocolError::InvalidState { .. }))
 func TestRust_SenderChainKeyIterationOverflow(t *testing.T) {
-	initialSeedKey := []byte{1, 2, 3, 4}
+	initialSeedKey := chainKeyFromSeed(0x01020304)
 
 	key := ratchet.NewSenderChainKey(^uint32(0), initialSeedKey) // u32::MAX
 

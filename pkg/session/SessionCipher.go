@@ -17,6 +17,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/state/store"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/bytehelper"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
 const maxFutureMessages = 25000
@@ -186,7 +187,12 @@ func (d *Cipher) Encrypt(plaintext []byte) (protocol.CiphertextMessage, error) {
 		messageKeys *message.Keys
 		pqrMsg      []byte
 	)
-	if pqrState := sessionState.PqRatchetState(); len(pqrState) > 0 {
+	// A destroyed PQR state fails the send; it is never treated as absent.
+	pqrState, stateErr := sessionState.PqRatchetState()
+	if stateErr != nil {
+		return nil, stateErr
+	}
+	if len(pqrState) > 0 {
 		// PqRatchetState returns an owned copy; wipe it on return.
 		defer crypto.Zeroize(pqrState)
 		newState, msg, pqrKey, pqrErr := spqr.Send(pqrState)
@@ -220,7 +226,10 @@ func (d *Cipher) Encrypt(plaintext []byte) (protocol.CiphertextMessage, error) {
 	}
 
 	// MacKey returns an owned copy; wipe it once the message is built.
-	macKey := messageKeys.MacKey()
+	macKey, err := messageKeys.MacKey()
+	if err != nil {
+		return nil, err
+	}
 	defer crypto.Zeroize(macKey)
 
 	var ciphertextMessage protocol.CiphertextMessage
@@ -454,6 +463,13 @@ func (d *Cipher) decryptWithRecordAndType(sessionRecord *record.Session, ciphert
 			return nil, nil, err
 		}
 
+		// A destroyed local secret is a local failure, not a message that
+		// another session might decrypt; surface it rather than reporting
+		// "no valid sessions".
+		if errors.Is(err, secret.ErrSecretDestroyed) {
+			return nil, nil, err
+		}
+
 		// M2: PreKey message short-circuit. A PreKey message creates a fresh
 		// session, so previous sessions are irrelevant. Return immediately.
 		if messageType == protocol.PREKEY_TYPE {
@@ -475,6 +491,9 @@ func (d *Cipher) decryptWithRecordAndType(sessionRecord *record.Session, ciphert
 				}
 				// M3: Address mismatch short-circuit in previous states.
 				if errors.Is(err, protocol.ErrAddressMismatch) {
+					return nil, nil, err
+				}
+				if errors.Is(err, secret.ErrSecretDestroyed) {
 					return nil, nil, err
 				}
 				continue
@@ -580,7 +599,10 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 	// TrySkippedMessageKeys: check for stored skipped message keys before
 	// performing a potentially expensive DH ratchet step.
 	if sessionState.HasReceiverChain(theirEphemeral) && sessionState.HasMessageKeys(theirEphemeral, counter) {
-		skippedKeys := sessionState.RemoveMessageKeys(theirEphemeral, counter)
+		skippedKeys, removeErr := sessionState.RemoveMessageKeys(theirEphemeral, counter)
+		if removeErr != nil {
+			return nil, nil, removeErr
+		}
 
 		// The keys are no longer part of the clone, so discarding the clone no
 		// longer covers them. Release them on every exit that does not hand
@@ -600,11 +622,20 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 		//
 		// SPQR: If the stored key has seed material and the message carries PQR
 		// data, re-derive the message keys with the PQR salt from the SPQR ratchet.
-		if seed := skippedKeys.SeedMaterial(); len(seed) > 0 {
+		// A destroyed seed is an error, not a key without one.
+		seed, seedErr := skippedKeys.SeedMaterial()
+		if seedErr != nil {
+			return nil, nil, seedErr
+		}
+		if len(seed) > 0 {
 			// SeedMaterial returns an owned copy; wipe it on return.
 			defer crypto.Zeroize(seed)
 			if pqrData := ciphertextMessage.PqRatchetKey(); len(pqrData) > 0 {
-				if pqrState := sessionState.PqRatchetState(); len(pqrState) > 0 {
+				pqrState, stateErr := sessionState.PqRatchetState()
+				if stateErr != nil {
+					return nil, nil, stateErr
+				}
+				if len(pqrState) > 0 {
 					// PqRatchetState returns an owned copy; wipe it on return.
 					defer crypto.Zeroize(pqrState)
 					newState, pqrKey, pqrErr := spqr.Recv(pqrState, pqrData)
@@ -635,7 +666,10 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 		// rust/protocol/src/session_management.rs:242 and
 		// rust/protocol/src/triple_ratchet.rs TripleRatchet::decrypt.
 		// MacKey returns an owned copy; wipe it when decrypt returns.
-		skippedMacKey := skippedKeys.MacKey()
+		skippedMacKey, macErr := skippedKeys.MacKey()
+		if macErr != nil {
+			return nil, nil, macErr
+		}
 		defer crypto.Zeroize(skippedMacKey)
 		if d.localAddress != nil && d.remoteAddress != nil {
 			err := ciphertextMessage.VerifyMacWithAddresses(messageVersion,
@@ -677,7 +711,11 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 	// carries PQR data and the session has active SPQR state.
 	var pqrSalt []byte
 	if pqrData := ciphertextMessage.PqRatchetKey(); len(pqrData) > 0 {
-		if pqrState := sessionState.PqRatchetState(); len(pqrState) > 0 {
+		pqrState, stateErr := sessionState.PqRatchetState()
+		if stateErr != nil {
+			return nil, nil, stateErr
+		}
+		if len(pqrState) > 0 {
 			// PqRatchetState returns an owned copy; wipe it on return.
 			defer crypto.Zeroize(pqrState)
 			newState, pqrKey, pqrErr := spqr.Recv(pqrState, pqrData)
@@ -720,7 +758,10 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 	// known, enforcing address binding. Mirrors Rust
 	// rust/protocol/src/session_management.rs:242.
 	// MacKey returns an owned copy; wipe it when decrypt returns.
-	macKey := messageKeys.MacKey()
+	macKey, macErr := messageKeys.MacKey()
+	if macErr != nil {
+		return nil, nil, macErr
+	}
 	defer crypto.Zeroize(macKey)
 	if d.localAddress != nil && d.remoteAddress != nil {
 		err := ciphertextMessage.VerifyMacWithAddresses(messageVersion,
@@ -754,11 +795,19 @@ func getOrCreateMessageKeys(sessionState *record.State, theirEphemeral ecc.ECPub
 
 	if chainKey.Index() > counter {
 		if sessionState.HasMessageKeys(theirEphemeral, counter) {
-			storedKeys := sessionState.RemoveMessageKeys(theirEphemeral, counter)
+			storedKeys, removeErr := sessionState.RemoveMessageKeys(theirEphemeral, counter)
+			if removeErr != nil {
+				return nil, removeErr
+			}
 			// SPQR: Re-derive with PQR salt if the stored key has seed material.
 			// SeedMaterial returns an owned copy; wipe it on return, also
-			// when there is no PQR salt and the seed goes unused.
-			seed := storedKeys.SeedMaterial()
+			// when there is no PQR salt and the seed goes unused. A destroyed
+			// seed is an error, so the PQR re-derivation is never skipped.
+			seed, seedErr := storedKeys.SeedMaterial()
+			if seedErr != nil {
+				storedKeys.Zeroize()
+				return nil, seedErr
+			}
 			defer crypto.Zeroize(seed)
 			if len(seed) > 0 && len(pqrSalt) > 0 {
 				seedCopy := make([]byte, len(seed))
@@ -905,7 +954,10 @@ func getOrCreateChainKey(sessionState *record.State, theirEphemeral ecc.ECPublic
 // the plaintext bytes.
 func decrypt(keys *message.Keys, body []byte) ([]byte, error) {
 	// The accessors return owned copies; wipe them after use.
-	iv, cipherKey := keys.Iv(), keys.CipherKey()
+	iv, cipherKey, err := ivAndCipherKey(keys)
+	if err != nil {
+		return nil, err
+	}
 	defer crypto.Zeroize(iv)
 	defer crypto.Zeroize(cipherKey)
 	return cipher.Decrypt(iv, cipherKey, bytehelper.CopySlice(body))
@@ -915,10 +967,27 @@ func decrypt(keys *message.Keys, body []byte) ([]byte, error) {
 // and return ciphertext bytes.
 func encrypt(messageKeys *message.Keys, plaintext []byte) ([]byte, error) {
 	// The accessors return owned copies; wipe them after use.
-	iv, cipherKey := messageKeys.Iv(), messageKeys.CipherKey()
+	iv, cipherKey, err := ivAndCipherKey(messageKeys)
+	if err != nil {
+		return nil, err
+	}
 	defer crypto.Zeroize(iv)
 	defer crypto.Zeroize(cipherKey)
 	return cipher.Encrypt(iv, cipherKey, plaintext)
+}
+
+// ivAndCipherKey copies the IV and cipher key out of keys. A missing,
+// destroyed or wrong-length component is an error, never a nil key; a copy
+// already made is wiped.
+func ivAndCipherKey(keys *message.Keys) (iv, cipherKey []byte, err error) {
+	if iv, err = keys.Iv(); err != nil {
+		return nil, nil, err
+	}
+	if cipherKey, err = keys.CipherKey(); err != nil {
+		crypto.Zeroize(iv)
+		return nil, nil, err
+	}
+	return iv, cipherKey, nil
 }
 
 // isSpqrDuplicateErr returns true if the error indicates a duplicate/already-consumed

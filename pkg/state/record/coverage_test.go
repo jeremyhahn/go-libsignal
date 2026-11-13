@@ -37,8 +37,8 @@ func TestStateTotalSkippedMessageKeys(t *testing.T) {
 	ck1 := makeChainKey(t)
 	state.AddReceiverChain(kp1.PublicKey(), ck1)
 
-	mk1 := message.NewKeys([]byte("c1"), []byte("m1"), []byte("i1"), 0)
-	mk2 := message.NewKeys([]byte("c2"), []byte("m2"), []byte("i2"), 1)
+	mk1 := message.NewKeys(fixedKey("c1", 32), fixedKey("m1", 32), fixedKey("i1", 16), 0)
+	mk2 := message.NewKeys(fixedKey("c2", 32), fixedKey("m2", 32), fixedKey("i2", 16), 1)
 	if err := state.SetMessageKeys(kp1.PublicKey(), mk1); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestStateTotalSkippedMessageKeys(t *testing.T) {
 	ck2 := makeChainKey(t)
 	state.AddReceiverChain(kp2.PublicKey(), ck2)
 
-	mk3 := message.NewKeys([]byte("c3"), []byte("m3"), []byte("i3"), 0)
+	mk3 := message.NewKeys(fixedKey("c3", 32), fixedKey("m3", 32), fixedKey("i3", 16), 0)
 	if err := state.SetMessageKeys(kp2.PublicKey(), mk3); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestStateTotalSkippedMessageKeysAfterRemoval(t *testing.T) {
 	ck := makeChainKey(t)
 	state.AddReceiverChain(kp.PublicKey(), ck)
 
-	mk := message.NewKeys([]byte("c"), []byte("m"), []byte("i"), 5)
+	mk := message.NewKeys(fixedKey("c", 32), fixedKey("m", 32), fixedKey("i", 16), 5)
 	if err := state.SetMessageKeys(kp.PublicKey(), mk); err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestSetMessageKeysExceedsMax(t *testing.T) {
 
 	// Add more than maxMessageKeys (2000) to trigger the pop branch.
 	for i := uint32(0); i <= 2001; i++ {
-		mk := message.NewKeys([]byte("c"), []byte("m"), []byte("i"), i)
+		mk := message.NewKeys(fixedKey("c", 32), fixedKey("m", 32), fixedKey("i", 16), i)
 		if err := state.SetMessageKeys(kp.PublicKey(), mk); err != nil {
 			t.Fatal(err)
 		}
@@ -251,7 +251,7 @@ func TestSessionSerializeWithMultipleReceiverChains(t *testing.T) {
 func TestChainStructureWithPrivateKey(t *testing.T) {
 	kp := genKP(t)
 	ck := makeChainKey(t)
-	mk := message.NewKeys([]byte("c1"), []byte("m1"), []byte("i1"), 0)
+	mk := message.NewKeys(fixedKey("c1", 32), fixedKey("m1", 32), fixedKey("i1", 16), 0)
 	ch := record.NewChain(kp, ck, []*message.Keys{mk})
 
 	// Serialize the state that contains this chain, triggering structure().
@@ -425,7 +425,7 @@ func TestHasMessageKeysNoMatch(t *testing.T) {
 	ck := makeChainKey(t)
 	state.AddReceiverChain(kp.PublicKey(), ck)
 
-	mk := message.NewKeys([]byte("c"), []byte("m"), []byte("i"), 5)
+	mk := message.NewKeys(fixedKey("c", 32), fixedKey("m", 32), fixedKey("i", 16), 5)
 	if err := state.SetMessageKeys(kp.PublicKey(), mk); err != nil {
 		t.Fatal(err)
 	}
@@ -451,9 +451,9 @@ func TestRemoveMessageKeysReturnsCorrectKey(t *testing.T) {
 	ck := makeChainKey(t)
 	state.AddReceiverChain(kp.PublicKey(), ck)
 
-	mk1 := message.NewKeys([]byte("c1"), []byte("m1"), []byte("i1"), 10)
-	mk2 := message.NewKeys([]byte("c2"), []byte("m2"), []byte("i2"), 20)
-	mk3 := message.NewKeys([]byte("c3"), []byte("m3"), []byte("i3"), 30)
+	mk1 := message.NewKeys(fixedKey("c1", 32), fixedKey("m1", 32), fixedKey("i1", 16), 10)
+	mk2 := message.NewKeys(fixedKey("c2", 32), fixedKey("m2", 32), fixedKey("i2", 16), 20)
+	mk3 := message.NewKeys(fixedKey("c3", 32), fixedKey("m3", 32), fixedKey("i3", 16), 30)
 	if err := state.SetMessageKeys(kp.PublicKey(), mk1); err != nil {
 		t.Fatal(err)
 	}
@@ -465,7 +465,7 @@ func TestRemoveMessageKeysReturnsCorrectKey(t *testing.T) {
 	}
 
 	// Remove the middle key.
-	removed := state.RemoveMessageKeys(kp.PublicKey(), 20)
+	removed := mustKeys(state.RemoveMessageKeys(kp.PublicKey(), 20))
 	if removed == nil {
 		t.Fatal("removed key should not be nil")
 	}
@@ -497,8 +497,8 @@ func TestRemoveMessageKeysReturnsNilWhenCounterNotFound(t *testing.T) {
 	state.AddReceiverChain(kp.PublicKey(), ck)
 
 	// Add message keys with specific counters.
-	mk1 := message.NewKeys([]byte("c1"), []byte("m1"), []byte("i1"), 10)
-	mk2 := message.NewKeys([]byte("c2"), []byte("m2"), []byte("i2"), 20)
+	mk1 := message.NewKeys(fixedKey("c1", 32), fixedKey("m1", 32), fixedKey("i1", 16), 10)
+	mk2 := message.NewKeys(fixedKey("c2", 32), fixedKey("m2", 32), fixedKey("i2", 16), 20)
 	if err := state.SetMessageKeys(kp.PublicKey(), mk1); err != nil {
 		t.Fatal(err)
 	}
@@ -507,7 +507,7 @@ func TestRemoveMessageKeysReturnsNilWhenCounterNotFound(t *testing.T) {
 	}
 
 	// Attempt to remove a key with a counter that does not exist.
-	removed := state.RemoveMessageKeys(kp.PublicKey(), 99)
+	removed := mustKeys(state.RemoveMessageKeys(kp.PublicKey(), 99))
 	if removed != nil {
 		t.Fatalf("expected nil for non-existent counter, got key with index %d", removed.Index())
 	}
@@ -532,14 +532,14 @@ func TestRemoveMessageKeysNilChain(t *testing.T) {
 	ck := makeChainKey(t)
 	state.AddReceiverChain(kp1.PublicKey(), ck)
 
-	mk := message.NewKeys([]byte("c"), []byte("m"), []byte("i"), 5)
+	mk := message.NewKeys(fixedKey("c", 32), fixedKey("m", 32), fixedKey("i", 16), 5)
 	if err := state.SetMessageKeys(kp1.PublicKey(), mk); err != nil {
 		t.Fatal(err)
 	}
 
 	// Query with a different key that has no chain.
 	kp2 := genKP(t)
-	removed := state.RemoveMessageKeys(kp2.PublicKey(), 5)
+	removed := mustKeys(state.RemoveMessageKeys(kp2.PublicKey(), 5))
 	if removed != nil {
 		t.Fatal("expected nil when querying a non-existent receiver chain")
 	}
@@ -555,8 +555,8 @@ func TestRemoveMessageKeysFirstElementMatch(t *testing.T) {
 	ck := makeChainKey(t)
 	state.AddReceiverChain(kp.PublicKey(), ck)
 
-	mk1 := message.NewKeys([]byte("c1"), []byte("m1"), []byte("i1"), 0)
-	mk2 := message.NewKeys([]byte("c2"), []byte("m2"), []byte("i2"), 1)
+	mk1 := message.NewKeys(fixedKey("c1", 32), fixedKey("m1", 32), fixedKey("i1", 16), 0)
+	mk2 := message.NewKeys(fixedKey("c2", 32), fixedKey("m2", 32), fixedKey("i2", 16), 1)
 	if err := state.SetMessageKeys(kp.PublicKey(), mk1); err != nil {
 		t.Fatal(err)
 	}
@@ -565,7 +565,7 @@ func TestRemoveMessageKeysFirstElementMatch(t *testing.T) {
 	}
 
 	// Remove the first key (counter 0).
-	removed := state.RemoveMessageKeys(kp.PublicKey(), 0)
+	removed := mustKeys(state.RemoveMessageKeys(kp.PublicKey(), 0))
 	if removed == nil {
 		t.Fatal("expected non-nil key for counter 0")
 	}
@@ -716,7 +716,7 @@ func TestStateSerializeFullRoundTrip(t *testing.T) {
 	ck := makeChainKey(t)
 	state.AddReceiverChain(kp.PublicKey(), ck)
 
-	mk := message.NewKeys([]byte("cipher-key"), []byte("mac-key"), []byte("iv"), 0)
+	mk := message.NewKeys(fixedKey("cipher-key", 32), fixedKey("mac-key", 32), fixedKey("iv", 16), 0)
 	if err := state.SetMessageKeys(kp.PublicKey(), mk); err != nil {
 		t.Fatal(err)
 	}

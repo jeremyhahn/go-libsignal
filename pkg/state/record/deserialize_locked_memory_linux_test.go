@@ -211,10 +211,10 @@ func TestNewSessionFromStructureKeepsGuardedMemoryOnSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSessionFromStructure: %v", err)
 	}
-	if got := session.SessionState().RootKey().Bytes(); !bytes.Equal(got, bytes.Repeat([]byte{0x04}, 32)) {
+	if got := mustCopy(session.SessionState().RootKey().Bytes()); !bytes.Equal(got, bytes.Repeat([]byte{0x04}, 32)) {
 		t.Errorf("root key of the live session is %x, want the deserialized material", got)
 	}
-	if got := session.PreviousSessionStates()[0].RootKey().Bytes(); !bytes.Equal(got, bytes.Repeat([]byte{0x04}, 32)) {
+	if got := mustCopy(session.PreviousSessionStates()[0].RootKey().Bytes()); !bytes.Equal(got, bytes.Repeat([]byte{0x04}, 32)) {
 		t.Errorf("root key of the previous state is %x, want the deserialized material", got)
 	}
 }
@@ -241,7 +241,7 @@ func TestDiscardCloneReleasesTheCloneOnly(t *testing.T) {
 
 	// The source keeps its own guarded material: a discard must never reach
 	// through to the state that was cloned.
-	if got := state.RootKey().Bytes(); !bytes.Equal(got, bytes.Repeat([]byte{0x04}, 32)) {
+	if got := mustCopy(state.RootKey().Bytes()); !bytes.Equal(got, bytes.Repeat([]byte{0x04}, 32)) {
 		t.Errorf("root key of the cloned state is %x, want the material it was built with", got)
 	}
 	if _, err := state.Serialize(); err != nil {

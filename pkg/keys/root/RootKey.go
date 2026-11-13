@@ -53,25 +53,30 @@ type Key struct {
 }
 
 // Bytes returns a copy of the RootKey bytes, made inside a WithBytes borrow
-// of the guarded memory, or nil if the key is destroyed. The caller should
-// wipe the copy after use.
-func (k *Key) Bytes() []byte {
+// of the guarded memory. A destroyed, missing or wrong-length key is an
+// error, never a nil copy, so it cannot be persisted as an absent root key.
+// The caller should wipe the copy after use.
+func (k *Key) Bytes() ([]byte, error) {
 	var out []byte
 	if err := k.key.WithBytes(func(b []byte) error {
-		if b != nil {
-			out = append([]byte(nil), b...)
+		if len(b) != rootKeyLength {
+			return &session.KeyLengthError{Field: "root key", Got: len(b), Want: rootKeyLength}
 		}
+		out = append(make([]byte, 0, rootKeyLength), b...)
 		return nil
 	}); err != nil {
-		return nil
+		return nil, err
 	}
-	return out
+	return out, nil
 }
 
 // ErrEmptyRootKey is returned when a root key has no key material.
 // Using it as the HKDF salt would derive the next root and chain keys
 // from the DH output alone.
 var ErrEmptyRootKey = errors.New("root: root key is empty")
+
+// rootKeyLength is the length of a root key.
+const rootKeyLength = 32
 
 // CreateChain creates a new RootKey and ChainKey from the recipient's ratchet key and our private key.
 func (k *Key) CreateChain(theirRatchetKey ecc.ECPublicKeyable, ourRatchetKey *ecc.ECKeyPair) (*session.KeyPair, error) {
@@ -108,19 +113,19 @@ func (k *Key) CreateChain(theirRatchetKey ecc.ECPublicKeyable, ourRatchetKey *ec
 	// Copy bytes out of guarded memory before passing to constructors,
 	// since NewKey/chain.NewKey will move data into new guarded memory
 	// and zeroize the source (which cannot be done on locked-memory views).
-	rootKeyBytes := make([]byte, 32)
-	// The accessor returns an owned copy; wipe it once copied.
-	if src := derivedSecrets.RootKey(); src != nil {
-		copy(rootKeyBytes, src)
-		crypto.Zeroize(src)
+	// The accessors return owned 32-byte copies; a failed copy is an error,
+	// never a zero key.
+	rootKeyBytes, err := derivedSecrets.RootKey()
+	if err != nil {
+		derivedSecrets.Zeroize()
+		return nil, err
 	}
-	chainKeyBytes := make([]byte, 32)
-	// The accessor returns an owned copy; wipe it once copied.
-	if src := derivedSecrets.ChainKey(); src != nil {
-		copy(chainKeyBytes, src)
-		crypto.Zeroize(src)
-	}
+	chainKeyBytes, err := derivedSecrets.ChainKey()
 	derivedSecrets.Zeroize()
+	if err != nil {
+		crypto.Zeroize(rootKeyBytes)
+		return nil, err
+	}
 
 	// Create new root and chain key structures from the derived secrets.
 	rootKey := NewKey(k.kdf, rootKeyBytes)

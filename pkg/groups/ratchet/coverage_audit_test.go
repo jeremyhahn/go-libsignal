@@ -3,6 +3,7 @@ package ratchet
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
@@ -98,6 +99,8 @@ func TestSenderMessageKeyStructure_Zeroize_PartialFields(t *testing.T) {
 // NewSenderChainKey and verifies the panic path is NOT triggered by valid input.
 // The error branch of secret.New is an OOM path that cannot be forced in tests.
 func TestNewSenderChainKey_MultipleLengths(t *testing.T) {
+	// Only a 32-byte chain key is usable; Seed reports any other length
+	// instead of handing out a key the chain would ratchet from.
 	lengths := []int{16, 20, 32, 48, 64}
 	for _, n := range lengths {
 		key := make([]byte, n)
@@ -108,8 +111,16 @@ func TestNewSenderChainKey_MultipleLengths(t *testing.T) {
 		if ck.Iteration() != uint32(n) {
 			t.Errorf("length %d: Iteration() = %d, want %d", n, ck.Iteration(), uint32(n))
 		}
-		if !bytes.Equal(ck.Seed(), key) {
-			t.Errorf("length %d: Seed does not match input", n)
+		seed, err := ck.Seed()
+		if n == senderSeedLength {
+			if err != nil || !bytes.Equal(seed, key) {
+				t.Errorf("length %d: Seed() = %v, %v; want the input", n, seed, err)
+			}
+			continue
+		}
+		var lengthErr *KeyLengthError
+		if !errors.As(err, &lengthErr) || seed != nil {
+			t.Errorf("length %d: Seed() = %v, %v; want nil, KeyLengthError", n, seed, err)
 		}
 	}
 }
@@ -131,11 +142,11 @@ func TestNewSenderMessageKey_IterationPreserved(t *testing.T) {
 		if key.Iteration() != it {
 			t.Errorf("iteration %d: Iteration() = %d, want %d", it, key.Iteration(), it)
 		}
-		if len(key.Iv()) != 16 {
-			t.Errorf("iteration %d: IV length = %d, want 16", it, len(key.Iv()))
+		if len(mustCopy(key.Iv())) != 16 {
+			t.Errorf("iteration %d: IV length = %d, want 16", it, len(mustCopy(key.Iv())))
 		}
-		if len(key.CipherKey()) != 32 {
-			t.Errorf("iteration %d: CipherKey length = %d, want 32", it, len(key.CipherKey()))
+		if len(mustCopy(key.CipherKey())) != 32 {
+			t.Errorf("iteration %d: CipherKey length = %d, want 32", it, len(mustCopy(key.CipherKey())))
 		}
 		key.Zeroize()
 	}
@@ -150,7 +161,7 @@ func TestSenderChainKey_ChainProgression(t *testing.T) {
 	}
 
 	key := NewSenderChainKey(0, initial)
-	prevSeed := key.Seed()
+	prevSeed := mustCopy(key.Seed())
 
 	for i := 0; i < 5; i++ {
 		next, err := key.Next()
@@ -160,11 +171,11 @@ func TestSenderChainKey_ChainProgression(t *testing.T) {
 		if next.Iteration() != key.Iteration()+1 {
 			t.Errorf("step %d: iteration = %d, want %d", i, next.Iteration(), key.Iteration()+1)
 		}
-		if bytes.Equal(next.Seed(), prevSeed) {
+		if bytes.Equal(mustCopy(next.Seed()), prevSeed) {
 			t.Errorf("step %d: seed must differ from previous", i)
 		}
-		prevSeed = make([]byte, len(next.Seed()))
-		copy(prevSeed, next.Seed())
+		prevSeed = make([]byte, len(mustCopy(next.Seed())))
+		copy(prevSeed, mustCopy(next.Seed()))
 		key = next
 	}
 }
@@ -185,7 +196,7 @@ func TestSenderMessageKey_SeedIsPreservedAfterConstruction(t *testing.T) {
 		t.Fatalf("NewSenderMessageKey failed: %v", err)
 	}
 
-	if !bytes.Equal(key.Seed(), seedSnapshot) {
+	if !bytes.Equal(mustCopy(key.Seed()), seedSnapshot) {
 		t.Error("Seed() must equal the original seed bytes")
 	}
 }
@@ -218,7 +229,7 @@ func TestSenderMessageKeyStructure_RoundTripWithZeroize(t *testing.T) {
 	structure.Zeroize()
 
 	// The original key's IV must still be accessible (independent memory).
-	if sha256.Sum256(key.Iv()) != ivDigest {
+	if sha256.Sum256(mustCopy(key.Iv())) != ivDigest {
 		t.Error("zeroizing the structure must not affect the original key's IV")
 	}
 

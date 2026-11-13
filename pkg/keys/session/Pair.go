@@ -12,7 +12,7 @@ import (
 // RootKeyable is an interface for all root key implementations that are part of
 // a session keypair.
 type RootKeyable interface {
-	Bytes() []byte
+	Bytes() ([]byte, error)
 	CreateChain(theirRatchetKey ecc.ECPublicKeyable, ourRatchetKey *ecc.ECKeyPair) (*KeyPair, error)
 }
 
@@ -79,4 +79,15 @@ func (kp *KeyPair) Zeroize() {
 	if kp.InitialPQRKey != nil {
 		kp.InitialPQRKey.Destroy()
 	}
+}
+
+// CopyInitialPQRKey returns a copy of the InitialPQRKey, made inside a
+// WithBytes borrow, or nil, nil when no PQR key was derived. A destroyed or
+// wrong-length key is an error, so it is never mistaken for a session
+// without PQR. The caller should wipe the copy after use.
+func (kp *KeyPair) CopyInitialPQRKey() ([]byte, error) {
+	if kp.InitialPQRKey == nil {
+		return nil, nil
+	}
+	return copySecret(kp.InitialPQRKey, "initial PQR key")
 }

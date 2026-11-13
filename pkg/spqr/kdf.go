@@ -2,6 +2,7 @@ package spqr
 
 import (
 	"encoding/binary"
+	"fmt"
 	"slices"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/kdf"
@@ -81,6 +82,9 @@ func KdfSckaRK(rk *secret.Secret, sckaOutput []byte) (newRK, newCKs, newCKr *sec
 
 	var output []byte
 	err = rk.WithBytes(func(rkBytes []byte) error {
+		if len(rkBytes) != keyLen {
+			return &ErrInvalidInput{Field: "rk", Reason: fmt.Sprintf("want %d bytes, got %d", keyLen, len(rkBytes))}
+		}
 		var dErr error
 		output, dErr = kdf.DeriveSecrets(sckaOutput, rkBytes, []byte(ChainAddEpochInfo), kdfOutputLen)
 		return dErr
@@ -122,6 +126,9 @@ func KdfSckaCK(ck *secret.Secret, ctr uint32) (mk, nextCK *secret.Secret, err er
 
 	var output []byte
 	err = ck.WithBytes(func(ckBytes []byte) error {
+		if len(ckBytes) != keyLen {
+			return &ErrInvalidInput{Field: "ck", Reason: fmt.Sprintf("want %d bytes, got %d", keyLen, len(ckBytes))}
+		}
 		var dErr error
 		output, dErr = kdf.DeriveSecrets(ckBytes, zeroSalt(), info, sckaCKOutputLen)
 		return dErr

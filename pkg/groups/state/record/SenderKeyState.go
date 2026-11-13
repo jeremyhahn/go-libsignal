@@ -81,13 +81,26 @@ func NewSenderKeyStateFromStructure(structure *SenderKeyStateStructure,
 	if err != nil {
 		return nil, err
 	}
-	var signingKeyPrivate *ecc.GuardedECPrivateKey
+	// A receiving state has no signing private key; it stays nil, as in
+	// NewSenderKeyStateFromPublicKey, rather than becoming a zero-padded key.
+	// A destroyed or wrong-length key is an error.
+	var signingKeyPrivate ecc.ECPrivateKeyable
 	gErr := structure.SigningKeyPrivate.WithBytes(func(b []byte) error {
+		switch len(b) {
+		case 0:
+			return nil
+		case 32:
+		default:
+			return &ratchet.KeyLengthError{Field: "signing private key", Got: len(b), Want: 32}
+		}
 		// SliceToArray copies the view into an array, which
 		// NewGuardedECPrivateKey wipes after moving it into guarded memory.
-		var kErr error
-		signingKeyPrivate, kErr = ecc.NewGuardedECPrivateKey(bytehelper.SliceToArray(b))
-		return kErr
+		guarded, kErr := ecc.NewGuardedECPrivateKey(bytehelper.SliceToArray(b))
+		if kErr != nil {
+			return kErr
+		}
+		signingKeyPrivate = guarded
+		return nil
 	})
 	if gErr != nil {
 		return nil, gErr

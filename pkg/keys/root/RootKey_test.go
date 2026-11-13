@@ -26,7 +26,7 @@ func TestNewKey(t *testing.T) {
 	if key == nil {
 		t.Fatal("expected non-nil root key")
 	}
-	if !bytes.Equal(key.Bytes(), expected) {
+	if !bytes.Equal(mustCopy(key.Bytes()), expected) {
 		t.Fatal("Bytes mismatch")
 	}
 }
@@ -62,13 +62,13 @@ func TestConstants(t *testing.T) {
 
 func TestNewKey_BytesReturnsIndependentCopy(t *testing.T) {
 	key := NewKey(kdf.DeriveSecrets, []byte("some-key"))
-	b1 := key.Bytes()
-	b2 := key.Bytes()
+	b1 := mustCopy(key.Bytes())
+	b2 := mustCopy(key.Bytes())
 	if &b1[0] == &b2[0] {
 		t.Fatal("Bytes should return a fresh copy, not the locked view")
 	}
 	b1[0] ^= 0xFF
-	if b3 := key.Bytes(); b3[0] != b2[0] {
+	if b3 := mustCopy(key.Bytes()); b3[0] != b2[0] {
 		t.Fatal("mutating a copy from Bytes changed the key")
 	}
 }
@@ -103,8 +103,8 @@ func TestCreateChain(t *testing.T) {
 	if sessionKP.ChainKey == nil {
 		t.Fatal("expected non-nil chain key in session pair")
 	}
-	if len(sessionKP.RootKey.Bytes()) != 32 {
-		t.Fatalf("expected 32-byte root key, got %d", len(sessionKP.RootKey.Bytes()))
+	if len(mustCopy(sessionKP.RootKey.Bytes())) != 32 {
+		t.Fatalf("expected 32-byte root key, got %d", len(mustCopy(sessionKP.RootKey.Bytes())))
 	}
 	if len(sessionKP.ChainKey.Key()) != 32 {
 		t.Fatalf("expected 32-byte chain key, got %d", len(sessionKP.ChainKey.Key()))
@@ -137,7 +137,7 @@ func TestCreateChain_DifferentRootKeysProduceDifferentChains(t *testing.T) {
 		t.Fatalf("CreateChain 2 failed: %v", err)
 	}
 
-	if bytes.Equal(session1.RootKey.Bytes(), session2.RootKey.Bytes()) {
+	if bytes.Equal(mustCopy(session1.RootKey.Bytes()), mustCopy(session2.RootKey.Bytes())) {
 		t.Fatal("different root keys should produce different session root keys")
 	}
 }
@@ -147,7 +147,7 @@ func TestKey_Zeroize(t *testing.T) {
 
 	// Verify the key is non-zero initially.
 	hasNonZero := false
-	for _, b := range key.Bytes() {
+	for _, b := range mustCopy(key.Bytes()) {
 		if b != 0 {
 			hasNonZero = true
 			break
@@ -199,8 +199,8 @@ func TestCreateChain_Deterministic(t *testing.T) {
 	// Re-create the key pair since PrivateKey gets zeroed after first use.
 	// Actually we need the same private key. Let me use a different approach.
 	// Just verify the first call succeeded with valid data.
-	if len(session1.RootKey.Bytes()) != 32 {
-		t.Fatalf("expected 32-byte root key, got %d", len(session1.RootKey.Bytes()))
+	if len(mustCopy(session1.RootKey.Bytes())) != 32 {
+		t.Fatalf("expected 32-byte root key, got %d", len(mustCopy(session1.RootKey.Bytes())))
 	}
 
 	_ = root2 // prevent unused variable
@@ -228,7 +228,7 @@ func TestCreateChain_ZeroizesIntermediateValues(t *testing.T) {
 	}
 
 	// Verify the returned keys are populated and non-zero.
-	rootBytes := sessionKP.RootKey.Bytes()
+	rootBytes := mustCopy(sessionKP.RootKey.Bytes())
 	chainBytes := sessionKP.ChainKey.Key()
 
 	hasNonZeroRoot := false

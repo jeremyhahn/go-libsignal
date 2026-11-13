@@ -111,14 +111,14 @@ func TestKey_MessageKeys(t *testing.T) {
 	if msgKeys == nil {
 		t.Fatal("expected non-nil message keys")
 	}
-	if len(msgKeys.CipherKey()) != 32 {
-		t.Fatalf("expected 32-byte cipher key, got %d", len(msgKeys.CipherKey()))
+	if len(mustCopy(msgKeys.CipherKey())) != 32 {
+		t.Fatalf("expected 32-byte cipher key, got %d", len(mustCopy(msgKeys.CipherKey())))
 	}
-	if len(msgKeys.MacKey()) != 32 {
-		t.Fatalf("expected 32-byte mac key, got %d", len(msgKeys.MacKey()))
+	if len(mustCopy(msgKeys.MacKey())) != 32 {
+		t.Fatalf("expected 32-byte mac key, got %d", len(mustCopy(msgKeys.MacKey())))
 	}
-	if len(msgKeys.Iv()) != 16 {
-		t.Fatalf("expected 16-byte IV, got %d", len(msgKeys.Iv()))
+	if len(mustCopy(msgKeys.Iv())) != 16 {
+		t.Fatalf("expected 16-byte IV, got %d", len(mustCopy(msgKeys.Iv())))
 	}
 	if msgKeys.Index() != 5 {
 		t.Fatalf("expected message key index 5, got %d", msgKeys.Index())
@@ -280,14 +280,14 @@ func TestKey_MessageKeys_ZeroizesIntermediateMaterial(t *testing.T) {
 	}
 
 	// The message keys themselves should be non-zero (functional).
-	if len(msgKeys.CipherKey()) != 32 {
-		t.Fatalf("expected 32-byte cipher key, got %d", len(msgKeys.CipherKey()))
+	if len(mustCopy(msgKeys.CipherKey())) != 32 {
+		t.Fatalf("expected 32-byte cipher key, got %d", len(mustCopy(msgKeys.CipherKey())))
 	}
-	if len(msgKeys.MacKey()) != 32 {
-		t.Fatalf("expected 32-byte mac key, got %d", len(msgKeys.MacKey()))
+	if len(mustCopy(msgKeys.MacKey())) != 32 {
+		t.Fatalf("expected 32-byte mac key, got %d", len(mustCopy(msgKeys.MacKey())))
 	}
-	if len(msgKeys.Iv()) != 16 {
-		t.Fatalf("expected 16-byte IV, got %d", len(msgKeys.Iv()))
+	if len(mustCopy(msgKeys.Iv())) != 16 {
+		t.Fatalf("expected 16-byte IV, got %d", len(mustCopy(msgKeys.Iv())))
 	}
 }
 

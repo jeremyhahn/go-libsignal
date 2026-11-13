@@ -431,7 +431,10 @@ func (s *ProtobufStateSerializer) Serialize(state *record.StateStructure) ([]byt
 	o := newOwnedCopies()
 	defer o.wipe()
 
-	pb := stateStructureToProto(state, o)
+	pb, err := stateStructureToProto(state, o)
+	if err != nil {
+		return nil, err
+	}
 	serialized, err := marshalRecord(pb)
 	if err != nil {
 		return nil, err
@@ -470,7 +473,10 @@ func (s *ProtobufSessionSerializer) Serialize(session *record.SessionStructure) 
 	// as opaque bytes in the RecordStructure.
 	previousSessions := make([][]byte, len(session.PreviousStates))
 	for i, prevState := range session.PreviousStates {
-		prevPb := stateStructureToProto(prevState, o)
+		prevPb, err := stateStructureToProto(prevState, o)
+		if err != nil {
+			return nil, err
+		}
 		prevBytes, err := marshalRecord(prevPb)
 		if err != nil {
 			return nil, err
@@ -479,8 +485,12 @@ func (s *ProtobufSessionSerializer) Serialize(session *record.SessionStructure) 
 		previousSessions[i] = o.keep(prevBytes)
 	}
 
+	current, err := stateStructureToProto(session.SessionState, o)
+	if err != nil {
+		return nil, err
+	}
 	pb := &storagepb.RecordStructure{
-		CurrentSession:   stateStructureToProto(session.SessionState, o),
+		CurrentSession:   current,
 		PreviousSessions: previousSessions,
 	}
 
@@ -560,10 +570,14 @@ func (s *ProtobufPreKeyRecordSerializer) Serialize(preKey *record.PreKeyStructur
 	o := newOwnedCopies()
 	defer o.wipe()
 
+	privateKey, err := o.copyOut(&preKey.PrivateKey)
+	if err != nil {
+		return nil, err
+	}
 	pb := &storagepb.PreKeyRecordStructure{
 		Id:         preKey.ID,
 		PublicKey:  preKey.PublicKey,
-		PrivateKey: o.copyOut(&preKey.PrivateKey),
+		PrivateKey: privateKey,
 	}
 	serialized, err := marshalRecord(pb)
 	if err != nil {
@@ -608,10 +622,14 @@ func (s *ProtobufSignedPreKeyRecordSerializer) Serialize(signedPreKey *record.Si
 	o := newOwnedCopies()
 	defer o.wipe()
 
+	privateKey, err := o.copyOut(&signedPreKey.PrivateKey)
+	if err != nil {
+		return nil, err
+	}
 	pb := &storagepb.SignedPreKeyRecordStructure{
 		Id:         signedPreKey.ID,
 		PublicKey:  signedPreKey.PublicKey,
-		PrivateKey: o.copyOut(&signedPreKey.PrivateKey),
+		PrivateKey: privateKey,
 		Signature:  signedPreKey.Signature,
 		Timestamp:  uint64(signedPreKey.Timestamp),
 	}
@@ -660,7 +678,10 @@ func (s *ProtobufSenderKeyStateSerializer) Serialize(state *groupRecord.SenderKe
 	o := newOwnedCopies()
 	defer o.wipe()
 
-	pb := senderKeyStateStructureToProto(state, o)
+	pb, err := senderKeyStateStructureToProto(state, o)
+	if err != nil {
+		return nil, err
+	}
 	serialized, err := marshalRecord(pb)
 	if err != nil {
 		return nil, err
@@ -697,7 +718,10 @@ func (s *ProtobufSenderKeyRecordSerializer) Serialize(senderKey *groupRecord.Sen
 
 	states := make([]*storagepb.SenderKeyStateStructure, len(senderKey.SenderKeyStates))
 	for i, state := range senderKey.SenderKeyStates {
-		states[i] = senderKeyStateStructureToProto(state, o)
+		var err error
+		if states[i], err = senderKeyStateStructureToProto(state, o); err != nil {
+			return nil, err
+		}
 	}
 
 	pb := &storagepb.SenderKeyRecordStructure{
@@ -761,16 +785,20 @@ func (s *ProtobufSenderKeyRecordSerializer) Deserialize(serialized []byte) (*gro
 // =============================================================================
 
 // stateStructureToProto converts a Go StateStructure to a protobuf SessionStructure.
-func stateStructureToProto(state *record.StateStructure, o *ownedCopies) *storagepb.SessionStructure {
+func stateStructureToProto(state *record.StateStructure, o *ownedCopies) (*storagepb.SessionStructure, error) {
 	if state == nil {
-		return nil
+		return nil, nil
 	}
 
+	rootKey, err := o.copyOut(&state.RootKey)
+	if err != nil {
+		return nil, err
+	}
 	pb := &storagepb.SessionStructure{
 		SessionVersion:       uint32(state.SessionVersion),
 		LocalIdentityPublic:  state.LocalIdentityPublic,
 		RemoteIdentityPublic: state.RemoteIdentityPublic,
-		RootKey:              o.copyOut(&state.RootKey),
+		RootKey:              rootKey,
 		PreviousCounter:      state.PreviousCounter,
 		RemoteRegistrationId: state.RemoteRegistrationID,
 		LocalRegistrationId:  state.LocalRegistrationID,
@@ -779,14 +807,18 @@ func stateStructureToProto(state *record.StateStructure, o *ownedCopies) *storag
 
 	// Convert sender chain.
 	if state.SenderChain != nil {
-		pb.SenderChain = chainStructureToProto(state.SenderChain, o)
+		if pb.SenderChain, err = chainStructureToProto(state.SenderChain, o); err != nil {
+			return nil, err
+		}
 	}
 
 	// Convert receiver chains.
 	if state.ReceiverChains != nil {
 		pb.ReceiverChains = make([]*storagepb.SessionStructure_Chain, len(state.ReceiverChains))
 		for i, rc := range state.ReceiverChains {
-			pb.ReceiverChains[i] = chainStructureToProto(rc, o)
+			if pb.ReceiverChains[i], err = chainStructureToProto(rc, o); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -812,12 +844,17 @@ func stateStructureToProto(state *record.StateStructure, o *ownedCopies) *storag
 		}
 	}
 
-	// Convert PQ ratchet state.
-	if pqRatchetState := o.copyOut(&state.PqRatchetState); len(pqRatchetState) > 0 {
+	// Convert PQ ratchet state. Absent state is omitted; destroyed state is
+	// an error, so the record never loses its PQ ratchet silently.
+	pqRatchetState, err := o.copyOut(&state.PqRatchetState)
+	if err != nil {
+		return nil, err
+	}
+	if len(pqRatchetState) > 0 {
 		pb.PqRatchetState = pqRatchetState
 	}
 
-	return pb
+	return pb, nil
 }
 
 // protoToStateStructure converts a protobuf SessionStructure to a Go StateStructure.
@@ -906,21 +943,29 @@ func protoToStateStructure(pb *storagepb.SessionStructure) (_ *record.StateStruc
 }
 
 // chainStructureToProto converts a Go ChainStructure to a protobuf Chain.
-func chainStructureToProto(cs *record.ChainStructure, o *ownedCopies) *storagepb.SessionStructure_Chain {
+func chainStructureToProto(cs *record.ChainStructure, o *ownedCopies) (*storagepb.SessionStructure_Chain, error) {
 	if cs == nil {
-		return nil
+		return nil, nil
 	}
 
+	senderRatchetKeyPrivate, err := o.copyOut(&cs.SenderRatchetKeyPrivate)
+	if err != nil {
+		return nil, err
+	}
 	pbChain := &storagepb.SessionStructure_Chain{
 		SenderRatchetKey:        cs.SenderRatchetKeyPublic,
-		SenderRatchetKeyPrivate: o.copyOut(&cs.SenderRatchetKeyPrivate),
+		SenderRatchetKeyPrivate: senderRatchetKeyPrivate,
 	}
 
 	// Convert chain key.
 	if cs.ChainKey != nil {
+		key, err := o.copyOut(&cs.ChainKey.Key)
+		if err != nil {
+			return nil, err
+		}
 		pbChain.ChainKey = &storagepb.SessionStructure_Chain_ChainKey{
 			Index: cs.ChainKey.Index,
-			Key:   o.copyOut(&cs.ChainKey.Key),
+			Key:   key,
 		}
 	}
 
@@ -928,17 +973,24 @@ func chainStructureToProto(cs *record.ChainStructure, o *ownedCopies) *storagepb
 	if cs.MessageKeys != nil {
 		pbChain.MessageKeys = make([]*storagepb.SessionStructure_Chain_MessageKey, len(cs.MessageKeys))
 		for i, mk := range cs.MessageKeys {
-			pbChain.MessageKeys[i] = &storagepb.SessionStructure_Chain_MessageKey{
-				Index:     mk.Index,
-				CipherKey: o.copyOut(&mk.CipherKey),
-				MacKey:    o.copyOut(&mk.MacKey),
-				Iv:        o.copyOut(&mk.IV),
-				Seed:      o.copyOut(&mk.SeedMaterial),
+			pbKey := &storagepb.SessionStructure_Chain_MessageKey{Index: mk.Index}
+			if pbKey.CipherKey, err = o.copyOut(&mk.CipherKey); err != nil {
+				return nil, err
 			}
+			if pbKey.MacKey, err = o.copyOut(&mk.MacKey); err != nil {
+				return nil, err
+			}
+			if pbKey.Iv, err = o.copyOut(&mk.IV); err != nil {
+				return nil, err
+			}
+			if pbKey.Seed, err = o.copyOut(&mk.SeedMaterial); err != nil {
+				return nil, err
+			}
+			pbChain.MessageKeys[i] = pbKey
 		}
 	}
 
-	return pbChain
+	return pbChain, nil
 }
 
 // protoToChainStructure converts a protobuf Chain to a Go ChainStructure.
@@ -1015,25 +1067,33 @@ func protoToChainStructure(pbChain *storagepb.SessionStructure_Chain) (_ *record
 // =============================================================================
 
 // senderKeyStateStructureToProto converts a Go SenderKeyStateStructure to its protobuf equivalent.
-func senderKeyStateStructureToProto(state *groupRecord.SenderKeyStateStructure, o *ownedCopies) *storagepb.SenderKeyStateStructure {
+func senderKeyStateStructureToProto(state *groupRecord.SenderKeyStateStructure, o *ownedCopies) (*storagepb.SenderKeyStateStructure, error) {
 	if state == nil {
-		return nil
+		return nil, nil
 	}
 
+	signingPrivate, err := o.copyOut(&state.SigningKeyPrivate)
+	if err != nil {
+		return nil, err
+	}
 	pb := &storagepb.SenderKeyStateStructure{
 		ChainId:        state.KeyID,
 		MessageVersion: state.MessageVersion,
 		SenderSigningKey: &storagepb.SenderKeyStateStructure_SenderSigningKey{
 			Public:  state.SigningKeyPublic,
-			Private: o.copyOut(&state.SigningKeyPrivate),
+			Private: signingPrivate,
 		},
 	}
 
 	// Convert sender chain key.
 	if state.SenderChainKey != nil {
+		seed, err := o.copyOut(&state.SenderChainKey.ChainKey)
+		if err != nil {
+			return nil, err
+		}
 		pb.SenderChainKey = &storagepb.SenderKeyStateStructure_SenderChainKey{
 			Iteration: state.SenderChainKey.Iteration,
-			Seed:      o.copyOut(&state.SenderChainKey.ChainKey),
+			Seed:      seed,
 		}
 	}
 
@@ -1041,14 +1101,18 @@ func senderKeyStateStructureToProto(state *groupRecord.SenderKeyStateStructure, 
 	if state.Keys != nil {
 		pb.SenderMessageKeys = make([]*storagepb.SenderKeyStateStructure_SenderMessageKey, len(state.Keys))
 		for i, key := range state.Keys {
+			seed, err := o.copyOut(&key.Seed)
+			if err != nil {
+				return nil, err
+			}
 			pb.SenderMessageKeys[i] = &storagepb.SenderKeyStateStructure_SenderMessageKey{
 				Iteration: key.Iteration,
-				Seed:      o.copyOut(&key.Seed),
+				Seed:      seed,
 			}
 		}
 	}
 
-	return pb
+	return pb, nil
 }
 
 // protoToSenderKeyStateStructure converts a protobuf SenderKeyStateStructure to a Go SenderKeyStateStructure.

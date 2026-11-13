@@ -1213,7 +1213,7 @@ func TestDecryptWithStateVersionMismatch(t *testing.T) {
 		2, // wrong version
 		chainKey.Index(),
 		0,
-		messageKeys.MacKey(),
+		mustCopy(messageKeys.MacKey()),
 		bobState.SenderRatchetKey(),
 		[]byte("fake cipher"),
 		bobState.LocalIdentityKey(),
@@ -3055,7 +3055,7 @@ func TestDecryptWithStateMacVerificationError(t *testing.T) {
 		bobState.Version(),
 		signalMsg.Counter(),
 		signalMsg.Counter(),
-		fakeKeys.MacKey(), // wrong MAC key for Alice's message
+		mustCopy(fakeKeys.MacKey()), // wrong MAC key for Alice's message
 		signalMsg.SenderRatchetKey(),
 		signalMsg.Body(),
 		bobState.LocalIdentityKey(),
@@ -3410,7 +3410,7 @@ func TestDecryptTooFarIntoFuture(t *testing.T) {
 		bobState.Version(),
 		26000, // counter far into future
 		0,
-		messageKeys.MacKey(),
+		mustCopy(messageKeys.MacKey()),
 		signalMsg.SenderRatchetKey(),
 		signalMsg.Body(),
 		bobState.LocalIdentityKey(),

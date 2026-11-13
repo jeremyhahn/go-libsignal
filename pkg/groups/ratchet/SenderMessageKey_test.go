@@ -2,6 +2,7 @@ package ratchet
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
@@ -20,13 +21,13 @@ func TestNewSenderMessageKey(t *testing.T) {
 	if key.Iteration() != 5 {
 		t.Errorf("Iteration() = %d, want 5", key.Iteration())
 	}
-	if len(key.Iv()) != 16 {
-		t.Errorf("IV length = %d, want 16", len(key.Iv()))
+	if len(mustCopy(key.Iv())) != 16 {
+		t.Errorf("IV length = %d, want 16", len(mustCopy(key.Iv())))
 	}
-	if len(key.CipherKey()) != 32 {
-		t.Errorf("CipherKey length = %d, want 32", len(key.CipherKey()))
+	if len(mustCopy(key.CipherKey())) != 32 {
+		t.Errorf("CipherKey length = %d, want 32", len(mustCopy(key.CipherKey())))
 	}
-	if !bytes.Equal(key.Seed(), seed) {
+	if !bytes.Equal(mustCopy(key.Seed()), seed) {
 		t.Error("Seed() does not match input seed")
 	}
 }
@@ -46,10 +47,10 @@ func TestNewSenderMessageKeyDeterministic(t *testing.T) {
 		t.Fatalf("second NewSenderMessageKey() error: %v", err)
 	}
 
-	if !bytes.Equal(key1.Iv(), key2.Iv()) {
+	if !bytes.Equal(mustCopy(key1.Iv()), mustCopy(key2.Iv())) {
 		t.Error("Same seed should produce same IV")
 	}
-	if !bytes.Equal(key1.CipherKey(), key2.CipherKey()) {
+	if !bytes.Equal(mustCopy(key1.CipherKey()), mustCopy(key2.CipherKey())) {
 		t.Error("Same seed should produce same CipherKey")
 	}
 }
@@ -71,10 +72,10 @@ func TestNewSenderMessageKeyDifferentSeeds(t *testing.T) {
 		t.Fatalf("second NewSenderMessageKey() error: %v", err)
 	}
 
-	if bytes.Equal(key1.Iv(), key2.Iv()) {
+	if bytes.Equal(mustCopy(key1.Iv()), mustCopy(key2.Iv())) {
 		t.Error("Different seeds should produce different IVs")
 	}
-	if bytes.Equal(key1.CipherKey(), key2.CipherKey()) {
+	if bytes.Equal(mustCopy(key1.CipherKey()), mustCopy(key2.CipherKey())) {
 		t.Error("Different seeds should produce different CipherKeys")
 	}
 }
@@ -114,13 +115,13 @@ func TestNewSenderMessageKeyFromStruct(t *testing.T) {
 	if key.Iteration() != 42 {
 		t.Errorf("Iteration() = %d, want 42", key.Iteration())
 	}
-	if !secrettest.Matches(t, &structure.IV, key.Iv()) {
+	if !secrettest.Matches(t, &structure.IV, mustCopy(key.Iv())) {
 		t.Error("IV does not match")
 	}
-	if !secrettest.Matches(t, &structure.CipherKey, key.CipherKey()) {
+	if !secrettest.Matches(t, &structure.CipherKey, mustCopy(key.CipherKey())) {
 		t.Error("CipherKey does not match")
 	}
-	if !secrettest.Matches(t, &structure.Seed, key.Seed()) {
+	if !secrettest.Matches(t, &structure.Seed, mustCopy(key.Seed())) {
 		t.Error("Seed does not match")
 	}
 }
@@ -140,8 +141,11 @@ func TestNewSenderMessageKeyFromStructEmpty(t *testing.T) {
 	if key.Iteration() != 0 {
 		t.Errorf("Iteration() = %d, want 0", key.Iteration())
 	}
-	if key.Iv() != nil {
-		t.Error("Expected nil IV")
+	// An absent IV is reported, never handed out as a nil key.
+	iv, err := key.Iv()
+	var missing *MissingKeyError
+	if !errors.As(err, &missing) || iv != nil {
+		t.Errorf("Iv() = %v, %v; want nil, MissingKeyError", iv, err)
 	}
 }
 
@@ -166,13 +170,13 @@ func TestNewStructFromSenderMessageKey(t *testing.T) {
 	if structure.Iteration != 10 {
 		t.Errorf("Structure.Iteration = %d, want 10", structure.Iteration)
 	}
-	if !secrettest.Matches(t, &structure.IV, key.Iv()) {
+	if !secrettest.Matches(t, &structure.IV, mustCopy(key.Iv())) {
 		t.Error("Structure.IV.BytesOrNil() does not match key IV")
 	}
-	if !secrettest.Matches(t, &structure.CipherKey, key.CipherKey()) {
+	if !secrettest.Matches(t, &structure.CipherKey, mustCopy(key.CipherKey())) {
 		t.Error("Structure.CipherKey.BytesOrNil() does not match key CipherKey")
 	}
-	if !secrettest.Matches(t, &structure.Seed, key.Seed()) {
+	if !secrettest.Matches(t, &structure.Seed, mustCopy(key.Seed())) {
 		t.Error("Structure.Seed.BytesOrNil() does not match key Seed")
 	}
 }
@@ -202,13 +206,13 @@ func TestSenderMessageKeyRoundTrip(t *testing.T) {
 	if original.Iteration() != restored.Iteration() {
 		t.Errorf("Iteration mismatch: %d vs %d", original.Iteration(), restored.Iteration())
 	}
-	if !bytes.Equal(original.Iv(), restored.Iv()) {
+	if !bytes.Equal(mustCopy(original.Iv()), mustCopy(restored.Iv())) {
 		t.Error("IV mismatch after round trip")
 	}
-	if !bytes.Equal(original.CipherKey(), restored.CipherKey()) {
+	if !bytes.Equal(mustCopy(original.CipherKey()), mustCopy(restored.CipherKey())) {
 		t.Error("CipherKey mismatch after round trip")
 	}
-	if !bytes.Equal(original.Seed(), restored.Seed()) {
+	if !bytes.Equal(mustCopy(original.Seed()), mustCopy(restored.Seed())) {
 		t.Error("Seed mismatch after round trip")
 	}
 }
@@ -225,13 +229,13 @@ func TestSenderMessageKeyAccessors(t *testing.T) {
 	}
 
 	// Verify all accessors return non-nil values
-	if key.Iv() == nil {
+	if mustCopy(key.Iv()) == nil {
 		t.Error("Iv() should not be nil")
 	}
-	if key.CipherKey() == nil {
+	if mustCopy(key.CipherKey()) == nil {
 		t.Error("CipherKey() should not be nil")
 	}
-	if key.Seed() == nil {
+	if mustCopy(key.Seed()) == nil {
 		t.Error("Seed() should not be nil")
 	}
 	if key.Iteration() != 100 {
@@ -250,7 +254,7 @@ func TestSenderMessageKeyZeroize(t *testing.T) {
 	}
 
 	// Verify fields are populated before Zeroize.
-	if key.Iv() == nil || key.CipherKey() == nil || key.Seed() == nil {
+	if mustCopy(key.Iv()) == nil || mustCopy(key.CipherKey()) == nil || mustCopy(key.Seed()) == nil {
 		t.Fatal("key fields should be non-nil before Zeroize")
 	}
 
@@ -285,17 +289,20 @@ func TestSenderMessageKeyZeroizeNilFields(t *testing.T) {
 }
 
 func TestSenderMessageKeyNilFieldAccessors(t *testing.T) {
-	// Verify nil-guard paths in CipherKey() and Seed() accessors.
+	// A nil field is reported as MissingKeyError, never handed out as a
+	// nil key the cipher would then use.
 	key := &SenderMessageKey{iteration: 5}
 
-	if key.Iv() != nil {
-		t.Error("Iv() should return nil when iv is nil")
-	}
-	if key.CipherKey() != nil {
-		t.Error("CipherKey() should return nil when cipherKey is nil")
-	}
-	if key.Seed() != nil {
-		t.Error("Seed() should return nil when seed is nil")
+	for name, get := range map[string]func() ([]byte, error){
+		"Iv":        key.Iv,
+		"CipherKey": key.CipherKey,
+		"Seed":      key.Seed,
+	} {
+		b, err := get()
+		var missing *MissingKeyError
+		if !errors.As(err, &missing) || b != nil {
+			t.Errorf("%s() = %v, %v; want nil, MissingKeyError", name, b, err)
+		}
 	}
 }
 
@@ -316,14 +323,15 @@ func TestNewSenderMessageKeyFromStructPartialFields(t *testing.T) {
 	if key.Iteration() != 7 {
 		t.Errorf("Iteration() = %d, want 7", key.Iteration())
 	}
-	if key.Iv() == nil {
+	if mustCopy(key.Iv()) == nil {
 		t.Error("Iv() should not be nil when IV was provided")
 	}
-	if key.CipherKey() != nil {
-		t.Error("CipherKey() should be nil when CipherKey was not provided")
+	var missing *MissingKeyError
+	if b, err := key.CipherKey(); !errors.As(err, &missing) || b != nil {
+		t.Errorf("CipherKey() = %v, %v; want nil, MissingKeyError", b, err)
 	}
-	if key.Seed() != nil {
-		t.Error("Seed() should be nil when Seed was not provided")
+	if b, err := key.Seed(); !errors.As(err, &missing) || b != nil {
+		t.Errorf("Seed() = %v, %v; want nil, MissingKeyError", b, err)
 	}
 }
 

@@ -370,8 +370,8 @@ func TestProtobufStateSerializer_DeserializeInvalid(t *testing.T) {
 }
 
 func TestProtobufStateSerializer_NilState(t *testing.T) {
-	result := stateStructureToProto(nil, nil)
-	if result != nil {
+	result, err := stateStructureToProto(nil, nil)
+	if result != nil || err != nil {
 		t.Fatal("expected nil for nil state")
 	}
 
@@ -385,8 +385,8 @@ func TestProtobufStateSerializer_NilState(t *testing.T) {
 }
 
 func TestProtobufChainStructureHelpers_Nil(t *testing.T) {
-	result := chainStructureToProto(nil, nil)
-	if result != nil {
+	result, err := chainStructureToProto(nil, nil)
+	if result != nil || err != nil {
 		t.Fatal("expected nil for nil chain")
 	}
 
@@ -561,8 +561,8 @@ func TestProtobufSenderKeyStateSerializer_DeserializeInvalid(t *testing.T) {
 }
 
 func TestProtobufSenderKeyStateSerializer_NilHelpers(t *testing.T) {
-	result := senderKeyStateStructureToProto(nil, nil)
-	if result != nil {
+	result, err := senderKeyStateStructureToProto(nil, nil)
+	if result != nil || err != nil {
 		t.Fatal("expected nil for nil state")
 	}
 

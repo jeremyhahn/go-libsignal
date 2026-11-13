@@ -118,10 +118,10 @@ func TestSessionSerializeIsRepeatable(t *testing.T) {
 		t.Fatalf("NewSessionFromBytes: %v", err)
 	}
 	restoredState := restored.SessionState()
-	if !bytes.Equal(restoredState.RootKey().Bytes(), state.RootKey().Bytes()) {
+	if !bytes.Equal(mustCopy(restoredState.RootKey().Bytes()), mustCopy(state.RootKey().Bytes())) {
 		t.Error("root key did not survive the round trip")
 	}
-	if !bytes.Equal(restoredState.PqRatchetState(), []byte{0x01, 0x02, 0x03}) {
+	if !bytes.Equal(mustCopy(restoredState.PqRatchetState()), []byte{0x01, 0x02, 0x03}) {
 		t.Error("PQ ratchet state did not survive the round trip")
 	}
 	if restoredState.SenderRatchetKeyPair().PrivateKey() == nil {
@@ -208,8 +208,8 @@ func TestStatePqRatchetStateStaysGuarded(t *testing.T) {
 	}
 	structure.Zeroize()
 
-	if !bytes.Equal(state.PqRatchetState(), want) {
-		t.Fatalf("PqRatchetState() = %x, want %x", state.PqRatchetState(), want)
+	if !bytes.Equal(mustCopy(state.PqRatchetState()), want) {
+		t.Fatalf("PqRatchetState() = %x, want %x", mustCopy(state.PqRatchetState()), want)
 	}
 }
 
@@ -236,7 +236,7 @@ func TestCopyFromAdoptsClonedPqRatchetState(t *testing.T) {
 
 	state.CopyFrom(working)
 
-	if got := state.PqRatchetState(); !bytes.Equal(got, []byte{0x02, 0x03}) {
+	if got := mustCopy(state.PqRatchetState()); !bytes.Equal(got, []byte{0x02, 0x03}) {
 		t.Fatalf("PqRatchetState() = %x, want %x", got, []byte{0x02, 0x03})
 	}
 }

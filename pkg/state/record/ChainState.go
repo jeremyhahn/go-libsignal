@@ -1,6 +1,8 @@
 package record
 
 import (
+	"fmt"
+
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/kdf"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/chain"
@@ -62,12 +64,22 @@ func NewChainFromStructure(structure *ChainStructure) (*Chain, error) {
 		return nil, err
 	}
 	var senderRatchetKeyPrivate ecc.ECPrivateKeyable
-	if secretLen(&structure.SenderRatchetKeyPrivate) == 32 {
+	// A receiver chain has no private key (length 0). A destroyed or
+	// wrong-length key is an error, not a missing key.
+	privLen, lenErr := secretLen(&structure.SenderRatchetKeyPrivate)
+	if lenErr != nil {
+		return nil, lenErr
+	}
+	switch privLen {
+	case 0:
+	case 32:
 		guardedKey, gErr := guardedPrivateKey(&structure.SenderRatchetKeyPrivate)
 		if gErr != nil {
 			return nil, gErr
 		}
 		senderRatchetKeyPrivate = guardedKey
+	default:
+		return nil, fmt.Errorf("record: sender ratchet private key is %d bytes, want 32", privLen)
 	}
 	chainState.senderRatchetKeyPair = ecc.NewECKeyPair(senderRatchetKeyPublic, senderRatchetKeyPrivate)
 

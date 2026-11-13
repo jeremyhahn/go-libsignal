@@ -190,7 +190,7 @@ func TestPqRatchetStateGetSet(t *testing.T) {
 	state := record.NewState(s.State)
 
 	// Initially nil.
-	if state.PqRatchetState() != nil {
+	if mustCopy(state.PqRatchetState()) != nil {
 		t.Fatal("PqRatchetState() should be nil on a new state")
 	}
 
@@ -202,7 +202,7 @@ func TestPqRatchetStateGetSet(t *testing.T) {
 		t.Fatalf("SetPqRatchetState: %v", err)
 	}
 
-	got := state.PqRatchetState()
+	got := mustCopy(state.PqRatchetState())
 	if string(got) != want {
 		t.Fatalf("PqRatchetState() = %q, want %q", got, want)
 	}
@@ -225,7 +225,7 @@ func TestPqRatchetStateSetNil(t *testing.T) {
 		t.Fatalf("SetPqRatchetState(nil): %v", err)
 	}
 
-	if state.PqRatchetState() != nil {
+	if mustCopy(state.PqRatchetState()) != nil {
 		t.Fatal("PqRatchetState() should be nil after setting nil")
 	}
 }
@@ -476,7 +476,7 @@ func TestSetRootKeyRejectsForeignImplementation(t *testing.T) {
 	if err := state.SetRootKey(makeRootKey(t)); err != nil {
 		t.Fatalf("SetRootKey with a *root.Key: %v", err)
 	}
-	if !bytes.Equal(state.RootKey().Bytes(), make([]byte, 32)) {
+	if !bytes.Equal(mustCopy(state.RootKey().Bytes()), make([]byte, 32)) {
 		t.Error("the root key set after the rejection was not stored")
 	}
 }
@@ -485,7 +485,7 @@ func TestSetRootKeyRejectsForeignImplementation(t *testing.T) {
 // package, used to exercise the type guard in SetRootKey.
 type foreignRootKey struct{}
 
-func (foreignRootKey) Bytes() []byte { return make([]byte, 32) }
+func (foreignRootKey) Bytes() ([]byte, error) { return make([]byte, 32), nil }
 
 func (foreignRootKey) CreateChain(theirRatchetKey ecc.ECPublicKeyable, ourRatchetKey *ecc.ECKeyPair) (*session.KeyPair, error) {
 	return nil, errors.New("not implemented")

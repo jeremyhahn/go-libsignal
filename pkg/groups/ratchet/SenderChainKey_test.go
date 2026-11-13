@@ -37,8 +37,8 @@ func TestNewSenderChainKey(t *testing.T) {
 			if key.Iteration() != tt.iteration {
 				t.Errorf("Iteration() = %d, want %d", key.Iteration(), tt.iteration)
 			}
-			if !bytes.Equal(key.Seed(), tt.chainKey) {
-				t.Errorf("Seed() = %v, want %v", key.Seed(), tt.chainKey)
+			if !bytes.Equal(mustCopy(key.Seed()), tt.chainKey) {
+				t.Errorf("Seed() = %v, want %v", mustCopy(key.Seed()), tt.chainKey)
 			}
 		})
 	}
@@ -58,7 +58,7 @@ func TestSenderChainKeyNext(t *testing.T) {
 	if next.Iteration() != 1 {
 		t.Errorf("Next().Iteration() = %d, want 1", next.Iteration())
 	}
-	if bytes.Equal(next.Seed(), key.Seed()) {
+	if bytes.Equal(mustCopy(next.Seed()), mustCopy(key.Seed())) {
 		t.Error("Next().Seed() should differ from original seed")
 	}
 }
@@ -82,7 +82,7 @@ func TestSenderChainKeyNextChain(t *testing.T) {
 		t.Fatalf("Next() error: %v", err)
 	}
 
-	if !bytes.Equal(next1.Seed(), next2.Seed()) {
+	if !bytes.Equal(mustCopy(next1.Seed()), mustCopy(next2.Seed())) {
 		t.Error("Deterministic chain: same seed should produce identical next keys")
 	}
 }
@@ -124,10 +124,10 @@ func TestSenderChainKeySenderMessageKeyDeterministic(t *testing.T) {
 		t.Fatalf("SenderMessageKey() error: %v", err)
 	}
 
-	if !bytes.Equal(mk1.Iv(), mk2.Iv()) {
+	if !bytes.Equal(mustCopy(mk1.Iv()), mustCopy(mk2.Iv())) {
 		t.Error("Same chain key should produce same IV")
 	}
-	if !bytes.Equal(mk1.CipherKey(), mk2.CipherKey()) {
+	if !bytes.Equal(mustCopy(mk1.CipherKey()), mustCopy(mk2.CipherKey())) {
 		t.Error("Same chain key should produce same cipher key")
 	}
 }
@@ -148,7 +148,7 @@ func TestNewSenderChainKeyFromStruct(t *testing.T) {
 	if key.Iteration() != 10 {
 		t.Errorf("Iteration() = %d, want 10", key.Iteration())
 	}
-	if !secrettest.Matches(t, &structure.ChainKey, key.Seed()) {
+	if !secrettest.Matches(t, &structure.ChainKey, mustCopy(key.Seed())) {
 		t.Error("Seed does not match structure ChainKey")
 	}
 }
@@ -210,7 +210,7 @@ func TestSenderChainKeyRoundTrip(t *testing.T) {
 	if original.Iteration() != restored.Iteration() {
 		t.Errorf("Iteration mismatch: %d vs %d", original.Iteration(), restored.Iteration())
 	}
-	if !bytes.Equal(original.Seed(), restored.Seed()) {
+	if !bytes.Equal(mustCopy(original.Seed()), mustCopy(restored.Seed())) {
 		t.Error("Seed mismatch after round trip")
 	}
 }
@@ -223,7 +223,7 @@ func TestSenderChainKeyZeroize(t *testing.T) {
 	key := NewSenderChainKey(0, chainKey)
 
 	// Verify key material is accessible before Zeroize.
-	if len(key.Seed()) != 32 {
+	if len(mustCopy(key.Seed())) != 32 {
 		t.Fatal("expected 32-byte seed before Zeroize")
 	}
 
@@ -293,7 +293,7 @@ func TestSenderChainKeyDoesNotMutateInput(t *testing.T) {
 	// Mutate the original to verify the chain key holds an independent copy.
 	original[0] = 0xFF
 
-	if !bytes.Equal(key.Seed(), snapshot) {
+	if !bytes.Equal(mustCopy(key.Seed()), snapshot) {
 		t.Fatal("NewSenderChainKey should copy the input, not reference it")
 	}
 }

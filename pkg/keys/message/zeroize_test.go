@@ -74,11 +74,11 @@ func TestKeysZeroizeNilFields(t *testing.T) {
 // TestNewKeysFromStruct_WithSeedMaterialZeroize verifies the branch where
 // SeedMaterial is non-empty, triggering the guarded seed allocation.
 func TestNewKeysFromStruct_WithSeedMaterialZeroize(t *testing.T) {
-	expectedSeed := []byte{0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04}
+	expectedSeed := fixedKey("\xDE\xAD\xBE\xEF\x01\x02\x03\x04", SeedMaterialLength)
 	structure := &KeysStructure{
-		CipherKey:    mustGuard(t, []byte{0xAA, 0xBB}),
-		MacKey:       mustGuard(t, []byte{0xCC, 0xDD}),
-		IV:           mustGuard(t, []byte{0xEE, 0xFF}),
+		CipherKey:    mustGuard(t, fixedKey("\xAA\xBB", CipherKeyLength)),
+		MacKey:       mustGuard(t, fixedKey("\xCC\xDD", MacKeyLength)),
+		IV:           mustGuard(t, fixedKey("\xEE\xFF", IVLength)),
 		Index:        7,
 		SeedMaterial: mustGuard(t, expectedSeed),
 	}
@@ -91,7 +91,7 @@ func TestNewKeysFromStruct_WithSeedMaterialZeroize(t *testing.T) {
 	}
 
 	// Verify seed material was stored.
-	seedMat := keys.SeedMaterial()
+	seedMat := mustCopy(keys.SeedMaterial())
 	if seedMat == nil {
 		t.Fatal("SeedMaterial() should not be nil when structure contains seed")
 	}
@@ -115,7 +115,7 @@ func TestNewKeysFromStruct_EmptySeedMaterial(t *testing.T) {
 	keys := mustKeysFromStruct(t, structure)
 
 	// SeedMaterial should be nil since the structure had none.
-	if keys.SeedMaterial() != nil {
+	if mustCopy(keys.SeedMaterial()) != nil {
 		t.Error("SeedMaterial() should be nil when structure had no seed material")
 	}
 }
@@ -126,15 +126,15 @@ func TestSetSeedMaterial_NilInput(t *testing.T) {
 	keys := NewKeys([]byte{1}, []byte{2}, []byte{3}, 0)
 
 	// First set real seed material.
-	keys.SetSeedMaterial([]byte{0xAA, 0xBB})
-	if keys.SeedMaterial() == nil {
+	keys.SetSeedMaterial(fixedKey("\xAA\xBB", SeedMaterialLength))
+	if mustCopy(keys.SeedMaterial()) == nil {
 		t.Fatal("SeedMaterial should be non-nil after setting valid seed")
 	}
 
 	// Now set nil - this should destroy the existing seed and not allocate a new one.
 	keys.SetSeedMaterial(nil)
 
-	if keys.SeedMaterial() != nil {
+	if mustCopy(keys.SeedMaterial()) != nil {
 		t.Error("SeedMaterial() should be nil after SetSeedMaterial(nil)")
 	}
 }

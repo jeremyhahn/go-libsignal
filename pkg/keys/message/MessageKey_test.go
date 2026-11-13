@@ -28,13 +28,13 @@ func TestNewKeys(t *testing.T) {
 	if keys == nil {
 		t.Fatal("expected non-nil Keys")
 	}
-	if !bytes.Equal(keys.CipherKey(), expectedCipher) {
+	if !bytes.Equal(mustCopy(keys.CipherKey()), expectedCipher) {
 		t.Fatal("CipherKey mismatch")
 	}
-	if !bytes.Equal(keys.MacKey(), expectedMac) {
+	if !bytes.Equal(mustCopy(keys.MacKey()), expectedMac) {
 		t.Fatal("MacKey mismatch")
 	}
-	if !bytes.Equal(keys.Iv(), expectedIV) {
+	if !bytes.Equal(mustCopy(keys.Iv()), expectedIV) {
 		t.Fatal("Iv mismatch")
 	}
 	if keys.Index() != index {
@@ -50,9 +50,9 @@ func TestNewKeys_ZeroIndex(t *testing.T) {
 }
 
 func TestNewKeysFromStruct(t *testing.T) {
-	expectedCipher := []byte("cipher")
-	expectedMac := []byte("mac")
-	expectedIV := []byte("iv")
+	expectedCipher := fixedKey("cipher", 32)
+	expectedMac := fixedKey("mac", 32)
+	expectedIV := fixedKey("iv", 16)
 
 	structure := &KeysStructure{
 		CipherKey: mustGuard(t, expectedCipher),
@@ -63,13 +63,13 @@ func TestNewKeysFromStruct(t *testing.T) {
 	defer structure.Zeroize()
 
 	keys := mustKeysFromStruct(t, structure)
-	if !bytes.Equal(keys.CipherKey(), expectedCipher) {
+	if !bytes.Equal(mustCopy(keys.CipherKey()), expectedCipher) {
 		t.Fatal("CipherKey mismatch")
 	}
-	if !bytes.Equal(keys.MacKey(), expectedMac) {
+	if !bytes.Equal(mustCopy(keys.MacKey()), expectedMac) {
 		t.Fatal("MacKey mismatch")
 	}
-	if !bytes.Equal(keys.Iv(), expectedIV) {
+	if !bytes.Equal(mustCopy(keys.Iv()), expectedIV) {
 		t.Fatal("IV mismatch")
 	}
 	if keys.Index() != 99 {
@@ -87,9 +87,9 @@ func TestNewKeysFromStruct(t *testing.T) {
 func TestNewKeysFromStruct_MissingComponent(t *testing.T) {
 	full := func(t *testing.T) *KeysStructure {
 		return &KeysStructure{
-			CipherKey: mustGuard(t, []byte("cipher")),
-			MacKey:    mustGuard(t, []byte("mac")),
-			IV:        mustGuard(t, []byte("iv")),
+			CipherKey: mustGuard(t, fixedKey("cipher", 32)),
+			MacKey:    mustGuard(t, fixedKey("mac", 32)),
+			IV:        mustGuard(t, fixedKey("iv", 16)),
 			Index:     1,
 		}
 	}
@@ -167,17 +167,17 @@ func TestNewStructFromKeys_DestroyedKeys(t *testing.T) {
 }
 
 func TestNewKeysFromStruct_RoundTrip(t *testing.T) {
-	original := NewKeys([]byte("cipher32"), []byte("mac32key"), []byte("iv16"), 100)
+	original := NewKeys(fixedKey("cipher32", 32), fixedKey("mac32key", 32), fixedKey("iv16", 16), 100)
 	structure := mustStructFromKeys(t, original)
 	reconstructed := mustKeysFromStruct(t, structure)
 
-	if !bytes.Equal(reconstructed.CipherKey(), original.CipherKey()) {
+	if !bytes.Equal(mustCopy(reconstructed.CipherKey()), mustCopy(original.CipherKey())) {
 		t.Fatal("round-trip CipherKey mismatch")
 	}
-	if !bytes.Equal(reconstructed.MacKey(), original.MacKey()) {
+	if !bytes.Equal(mustCopy(reconstructed.MacKey()), mustCopy(original.MacKey())) {
 		t.Fatal("round-trip MacKey mismatch")
 	}
-	if !bytes.Equal(reconstructed.Iv(), original.Iv()) {
+	if !bytes.Equal(mustCopy(reconstructed.Iv()), mustCopy(original.Iv())) {
 		t.Fatal("round-trip IV mismatch")
 	}
 	if reconstructed.Index() != original.Index() {
@@ -204,10 +204,10 @@ func TestConstants(t *testing.T) {
 }
 
 func TestKeys_Zeroize(t *testing.T) {
-	keys := NewKeys([]byte("cipher-key"), []byte("mac-key"), []byte("iv-data"), 0)
+	keys := NewKeys(fixedKey("cipher-key", 32), fixedKey("mac-key", 32), fixedKey("iv-data", 16), 0)
 
 	// Verify keys are non-zero initially.
-	if len(keys.CipherKey()) == 0 {
+	if len(mustCopy(keys.CipherKey())) == 0 {
 		t.Fatal("cipher key should be non-empty before Zeroize")
 	}
 
@@ -225,10 +225,10 @@ func TestKeys_Zeroize(t *testing.T) {
 }
 
 func TestKeys_Zeroize_DestroySeedMaterial(t *testing.T) {
-	keys := NewKeys([]byte("cipher-key"), []byte("mac-key"), []byte("iv-data"), 0)
+	keys := NewKeys(fixedKey("cipher-key", 32), fixedKey("mac-key", 32), fixedKey("iv-data", 16), 0)
 	keys.SetSeedMaterial([]byte("seed-material-32-bytes-long-xxxx"))
 
-	if keys.SeedMaterial() == nil {
+	if mustCopy(keys.SeedMaterial()) == nil {
 		t.Fatal("seed material should be set before Zeroize")
 	}
 
@@ -237,9 +237,10 @@ func TestKeys_Zeroize_DestroySeedMaterial(t *testing.T) {
 	if !keys.seedMaterial.IsDestroyed() {
 		t.Fatal("Zeroize should destroy seed material guarded memory")
 	}
-	// SeedMaterial() returns nil after destruction.
-	if keys.SeedMaterial() != nil {
-		t.Fatal("SeedMaterial() should return nil after Zeroize")
+	// A destroyed seed is an error, not an absent one: a nil copy here would
+	// let a caller skip the PQR re-derivation.
+	if seed, err := keys.SeedMaterial(); !errors.Is(err, secret.ErrSecretDestroyed) || seed != nil {
+		t.Fatalf("SeedMaterial() after Zeroize = %v, %v; want nil, ErrSecretDestroyed", seed, err)
 	}
 }
 
@@ -264,7 +265,7 @@ func TestNewKeys_NilCipherKey_Panics(t *testing.T) {
 			t.Fatal("expected non-empty panic message")
 		}
 	}()
-	NewKeys(nil, []byte("mac"), []byte("iv"), 0)
+	NewKeys(nil, fixedKey("mac", 32), fixedKey("iv", 16), 0)
 }
 
 func TestNewKeys_NilMacKey_Panics(t *testing.T) {
@@ -281,7 +282,7 @@ func TestNewKeys_NilMacKey_Panics(t *testing.T) {
 			t.Fatal("expected non-empty panic message")
 		}
 	}()
-	NewKeys([]byte("cipher"), nil, []byte("iv"), 0)
+	NewKeys(fixedKey("cipher", 32), nil, fixedKey("iv", 16), 0)
 }
 
 func TestNewKeys_NilIV_Panics(t *testing.T) {
@@ -298,18 +299,18 @@ func TestNewKeys_NilIV_Panics(t *testing.T) {
 			t.Fatal("expected non-empty panic message")
 		}
 	}()
-	NewKeys([]byte("cipher"), []byte("mac"), nil, 0)
+	NewKeys(fixedKey("cipher", 32), fixedKey("mac", 32), nil, 0)
 }
 
 func TestSeedMaterial_NilByDefault(t *testing.T) {
-	keys := NewKeys([]byte("cipher"), []byte("mac"), []byte("iv"), 1)
-	if keys.SeedMaterial() != nil {
-		t.Fatalf("expected nil SeedMaterial by default, got %v", keys.SeedMaterial())
+	keys := NewKeys(fixedKey("cipher", 32), fixedKey("mac", 32), fixedKey("iv", 16), 1)
+	if mustCopy(keys.SeedMaterial()) != nil {
+		t.Fatalf("expected nil SeedMaterial by default, got %v", mustCopy(keys.SeedMaterial()))
 	}
 }
 
 func TestSetSeedMaterial(t *testing.T) {
-	keys := NewKeys([]byte("cipher"), []byte("mac"), []byte("iv"), 1)
+	keys := NewKeys(fixedKey("cipher", 32), fixedKey("mac", 32), fixedKey("iv", 16), 1)
 	seed := make([]byte, 32)
 	for i := range seed {
 		seed[i] = byte(i)
@@ -317,14 +318,14 @@ func TestSetSeedMaterial(t *testing.T) {
 
 	keys.SetSeedMaterial(seed)
 
-	got := keys.SeedMaterial()
+	got := mustCopy(keys.SeedMaterial())
 	if !bytes.Equal(got, seed) {
 		t.Fatalf("SeedMaterial mismatch: got %v, want %v", got, seed)
 	}
 }
 
 func TestSetSeedMaterial_Overwrite(t *testing.T) {
-	keys := NewKeys([]byte("cipher"), []byte("mac"), []byte("iv"), 1)
+	keys := NewKeys(fixedKey("cipher", 32), fixedKey("mac", 32), fixedKey("iv", 16), 1)
 	first := []byte("first-seed-material-32-bytes-xxx")
 	second := []byte("second-seed-material-32-bytes-xx")
 
@@ -337,13 +338,13 @@ func TestSetSeedMaterial_Overwrite(t *testing.T) {
 	if !prev.IsDestroyed() {
 		t.Fatal("SetSeedMaterial must destroy the previous secret on overwrite")
 	}
-	if !bytes.Equal(keys.SeedMaterial(), second) {
+	if !bytes.Equal(mustCopy(keys.SeedMaterial()), second) {
 		t.Fatal("SetSeedMaterial should overwrite previous value")
 	}
 }
 
 func TestSetSeedMaterial_NilClearsPrevious(t *testing.T) {
-	keys := NewKeys([]byte("cipher"), []byte("mac"), []byte("iv"), 1)
+	keys := NewKeys(fixedKey("cipher", 32), fixedKey("mac", 32), fixedKey("iv", 16), 1)
 	keys.SetSeedMaterial([]byte("some-seed-material-32-bytes-xxxx"))
 	prev := keys.seedMaterial
 
@@ -353,7 +354,7 @@ func TestSetSeedMaterial_NilClearsPrevious(t *testing.T) {
 	if !prev.IsDestroyed() {
 		t.Fatal("SetSeedMaterial(nil) must destroy the previous secret")
 	}
-	if keys.SeedMaterial() != nil {
+	if mustCopy(keys.SeedMaterial()) != nil {
 		t.Fatal("SeedMaterial() should return nil after SetSeedMaterial(nil)")
 	}
 	if keys.seedMaterial != nil {
@@ -364,9 +365,9 @@ func TestSetSeedMaterial_NilClearsPrevious(t *testing.T) {
 func TestNewKeysFromStruct_WithSeedMaterial(t *testing.T) {
 	seed := []byte("seed-material-32-bytes-long-xxxx")
 	structure := &KeysStructure{
-		CipherKey:    mustGuard(t, []byte("cipher")),
-		MacKey:       mustGuard(t, []byte("mac")),
-		IV:           mustGuard(t, []byte("iv")),
+		CipherKey:    mustGuard(t, fixedKey("cipher", 32)),
+		MacKey:       mustGuard(t, fixedKey("mac", 32)),
+		IV:           mustGuard(t, fixedKey("iv", 16)),
 		Index:        5,
 		SeedMaterial: mustGuard(t, seed),
 	}
@@ -374,8 +375,8 @@ func TestNewKeysFromStruct_WithSeedMaterial(t *testing.T) {
 
 	keys := mustKeysFromStruct(t, structure)
 
-	if !bytes.Equal(keys.SeedMaterial(), seed) {
-		t.Fatalf("SeedMaterial not propagated from struct: got %v, want %v", keys.SeedMaterial(), seed)
+	if !bytes.Equal(mustCopy(keys.SeedMaterial()), seed) {
+		t.Fatalf("SeedMaterial not propagated from struct: got %v, want %v", mustCopy(keys.SeedMaterial()), seed)
 	}
 	// Confirm source struct is not consumed (clone semantics).
 	if !secrettest.Matches(t, &structure.SeedMaterial, seed) {
@@ -385,7 +386,7 @@ func TestNewKeysFromStruct_WithSeedMaterial(t *testing.T) {
 
 func TestNewStructFromKeys_WithSeedMaterial(t *testing.T) {
 	seed := []byte("seed-material-32-bytes-long-xxxx")
-	keys := NewKeys([]byte("cipher"), []byte("mac"), []byte("iv"), 3)
+	keys := NewKeys(fixedKey("cipher", 32), fixedKey("mac", 32), fixedKey("iv", 16), 3)
 	keys.SetSeedMaterial(seed)
 
 	structure := mustStructFromKeys(t, keys)
@@ -402,7 +403,7 @@ func TestNewStructFromKeys_WithSeedMaterial(t *testing.T) {
 }
 
 func TestNewStructFromKeys_NoSeedMaterial(t *testing.T) {
-	keys := NewKeys([]byte("cipher"), []byte("mac"), []byte("iv"), 0)
+	keys := NewKeys(fixedKey("cipher", 32), fixedKey("mac", 32), fixedKey("iv", 16), 0)
 	structure := mustStructFromKeys(t, keys)
 	if !secrettest.Empty(&structure.SeedMaterial) {
 		t.Fatalf("expected no SeedMaterial in struct when not set")
@@ -414,13 +415,13 @@ func TestSeedMaterial_RoundTrip(t *testing.T) {
 	for i := range seed {
 		seed[i] = byte(i * 3)
 	}
-	original := NewKeys([]byte("cipher-32-bytes-padded-xxxxxxxxx"), []byte("mac-32-bytes-padded-xxxxxxxxxxxxx"), []byte("iv-16-bytes-pad!"), 77)
+	original := NewKeys(fixedKey("cipher-32-bytes-padded-xxxxxxxxx", 32), fixedKey("mac-32-bytes-padded-xxxxxxxxxxxxx", 32), []byte("iv-16-bytes-pad!"), 77)
 	original.SetSeedMaterial(seed)
 
 	structure := mustStructFromKeys(t, original)
 	reconstructed := mustKeysFromStruct(t, structure)
 
-	if !bytes.Equal(reconstructed.SeedMaterial(), seed) {
+	if !bytes.Equal(mustCopy(reconstructed.SeedMaterial()), seed) {
 		t.Fatal("SeedMaterial round-trip mismatch")
 	}
 	if reconstructed.Index() != 77 {
@@ -443,7 +444,7 @@ func TestNewSeedOnlyKeys(t *testing.T) {
 	if keys.Index() != 7 {
 		t.Fatalf("expected index 7, got %d", keys.Index())
 	}
-	if !bytes.Equal(keys.SeedMaterial(), seed) {
+	if !bytes.Equal(mustCopy(keys.SeedMaterial()), seed) {
 		t.Fatal("SeedMaterial mismatch in NewSeedOnlyKeys")
 	}
 	// cipher/mac/iv must be nil in seed-only form.
@@ -467,9 +468,11 @@ func TestNewSeedOnlyKeys_NilInput(t *testing.T) {
 	if keys == nil {
 		t.Fatal("expected non-nil Keys even for nil seed input")
 	}
-	// SeedMaterial returns the guarded empty slice; len should be 0.
-	if len(keys.SeedMaterial()) != 0 {
-		t.Fatalf("expected empty SeedMaterial for nil seed input, got %v", keys.SeedMaterial())
+	// A seed-only key whose seed is empty has no key at all: SeedMaterial
+	// reports the short seed rather than returning an empty copy.
+	var lengthErr *KeyLengthError
+	if seed, err := keys.SeedMaterial(); !errors.As(err, &lengthErr) || seed != nil {
+		t.Fatalf("SeedMaterial() = %v, %v; want nil, KeyLengthError", seed, err)
 	}
 }
 
@@ -529,7 +532,7 @@ func TestNewKeysFromStruct_SeedOnlyBranch(t *testing.T) {
 	if keys.iv != nil {
 		t.Fatal("iv must be nil in seed-only branch of NewKeysFromStruct")
 	}
-	if !bytes.Equal(keys.SeedMaterial(), seed) {
+	if !bytes.Equal(mustCopy(keys.SeedMaterial()), seed) {
 		t.Fatal("SeedMaterial mismatch from seed-only branch")
 	}
 	if keys.Index() != 9 {

@@ -145,9 +145,10 @@ func (k *SenderChainKey) Next() (*SenderChainKey, error) {
 }
 
 // Seed will return a copy of the chain key bytes, made inside the enclave
-// borrow. The caller owns the copy and should zeroize it after use.
-func (k *SenderChainKey) Seed() []byte {
-	return copySecret(k.chainKey)
+// borrow. A missing, destroyed or wrong-length key is an error. The caller
+// owns the copy and should zeroize it after use.
+func (k *SenderChainKey) Seed() ([]byte, error) {
+	return copySecret(k.chainKey, "sender chain key", senderSeedLength)
 }
 
 // SeedSecret returns an independent locked copy of the chain key seed,

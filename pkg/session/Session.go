@@ -348,18 +348,15 @@ func (b *Builder) processV3(sessionRecord *record.Session,
 	// derived during PQXDH. Bob is DirectionB2A (receiver side).
 	// Self-sessions (where local and remote identity keys match) use
 	// math.MaxUint32 as the max forward jump to match Rust's u32::MAX.
-	if derivedKeys.InitialPQRKey != nil && !derivedKeys.InitialPQRKey.IsDestroyed() {
-		// spqr keeps no reference to the key; it is copied out of the
-		// read-only view and the copy is wiped once the state is built.
-		var pqrBytes []byte
-		if err := derivedKeys.InitialPQRKey.WithBytes(func(b []byte) error {
-			pqrBytes = append([]byte(nil), b...)
-			return nil
-		}); err != nil {
-			clear(pqrBytes)
-			derivedKeys.Zeroize()
-			return nil, nil, err
-		}
+	// A destroyed or short key is an error, not a session without PQR.
+	pqrBytes, pqrCopyErr := derivedKeys.CopyInitialPQRKey()
+	if pqrCopyErr != nil {
+		derivedKeys.Zeroize()
+		return nil, nil, pqrCopyErr
+	}
+	if pqrBytes != nil {
+		// spqr keeps no reference to the key; the copy is wiped once the
+		// state is built.
 		selfSession := bytes.Equal(
 			parameters.OurIdentityKeyPair().PublicKey().Serialize(),
 			parameters.TheirIdentityKey().PublicKey().Serialize(),
@@ -520,18 +517,15 @@ func (b *Builder) ProcessBundle(preKey *prekey.Bundle) error {
 	// derived during PQXDH. Alice is DirectionA2B (sender initiated session).
 	// Self-sessions (where local and remote identity keys match) use
 	// math.MaxUint32 as the max forward jump to match Rust's u32::MAX.
-	if derivedKeys.InitialPQRKey != nil && !derivedKeys.InitialPQRKey.IsDestroyed() {
-		// spqr keeps no reference to the key; it is copied out of the
-		// read-only view and the copy is wiped once the state is built.
-		var pqrBytes []byte
-		if err := derivedKeys.InitialPQRKey.WithBytes(func(b []byte) error {
-			pqrBytes = append([]byte(nil), b...)
-			return nil
-		}); err != nil {
-			clear(pqrBytes)
-			derivedKeys.Zeroize()
-			return err
-		}
+	// A destroyed or short key is an error, not a session without PQR.
+	pqrBytes, pqrCopyErr := derivedKeys.CopyInitialPQRKey()
+	if pqrCopyErr != nil {
+		derivedKeys.Zeroize()
+		return pqrCopyErr
+	}
+	if pqrBytes != nil {
+		// spqr keeps no reference to the key; the copy is wiped once the
+		// state is built.
 		selfSession := bytes.Equal(
 			parameters.OurIdentityKey().PublicKey().Serialize(),
 			parameters.TheirIdentityKey().PublicKey().Serialize(),

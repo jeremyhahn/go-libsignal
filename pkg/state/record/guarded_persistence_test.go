@@ -204,7 +204,7 @@ func TestSetPqRatchetStateReplacesPreviousState(t *testing.T) {
 		t.Fatalf("SetPqRatchetState (replacement): %v", err)
 	}
 
-	if got := state.PqRatchetState(); !bytes.Equal(got, []byte{0x03, 0x04, 0x05}) {
+	if got := mustCopy(state.PqRatchetState()); !bytes.Equal(got, []byte{0x03, 0x04, 0x05}) {
 		t.Fatalf("PqRatchetState() = %x, want %x", got, []byte{0x03, 0x04, 0x05})
 	}
 }
@@ -220,7 +220,7 @@ func TestCopyFromKeepsPqRatchetStateOnSelfCopy(t *testing.T) {
 
 	state.CopyFrom(state)
 
-	if got := state.PqRatchetState(); !bytes.Equal(got, []byte{0x09, 0x08}) {
+	if got := mustCopy(state.PqRatchetState()); !bytes.Equal(got, []byte{0x09, 0x08}) {
 		t.Fatalf("PqRatchetState() = %x, want %x", got, []byte{0x09, 0x08})
 	}
 }

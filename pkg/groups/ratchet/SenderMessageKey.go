@@ -138,9 +138,18 @@ func NewStructFromSenderMessageKey(key *SenderMessageKey) (_ *SenderMessageKeySt
 }
 
 // cloneLiveOptional clones live guarded material into a Secret held by value,
-// ready to cross the storage boundary. Absent material yields the zero Secret.
+// ready to cross the storage boundary. Absent (nil or empty) material yields
+// the zero Secret; destroyed material is an error, so a wiped key is never
+// persisted as one that was never there.
 func cloneLiveOptional(live *secret.Secret) (secret.Secret, error) {
-	if live.IsDestroyed() {
+	n := 0
+	if err := live.WithBytes(func(b []byte) error {
+		n = len(b)
+		return nil
+	}); err != nil {
+		return secret.Secret{}, err
+	}
+	if n == 0 {
 		return secret.Secret{}, nil
 	}
 	cloned, err := live.Clone()
@@ -183,44 +192,50 @@ func (k *SenderMessageKey) Iteration() uint32 {
 	return k.iteration
 }
 
-// Iv will return the sender message key's initialization vector.
-func (k *SenderMessageKey) Iv() []byte {
-	if k.iv == nil {
-		return nil
-	}
-	return copySecret(k.iv)
+// Sender key component lengths.
+const (
+	senderIVLength        = 16
+	senderCipherKeyLength = 32
+	senderSeedLength      = 32
+)
+
+// Iv will return a copy of the sender message key's initialization vector.
+// A missing, destroyed or wrong-length IV is an error.
+func (k *SenderMessageKey) Iv() ([]byte, error) {
+	return copySecret(k.iv, "iv", senderIVLength)
 }
 
-// CipherKey will return the key in bytes.
-func (k *SenderMessageKey) CipherKey() []byte {
-	if k.cipherKey == nil {
-		return nil
-	}
-	return copySecret(k.cipherKey)
+// CipherKey will return a copy of the cipher key. A missing, destroyed or
+// wrong-length key is an error.
+func (k *SenderMessageKey) CipherKey() ([]byte, error) {
+	return copySecret(k.cipherKey, "cipher key", senderCipherKeyLength)
 }
 
-// Seed will return the sender message key's seed.
-func (k *SenderMessageKey) Seed() []byte {
-	if k.seed == nil {
-		return nil
-	}
-	return copySecret(k.seed)
+// Seed will return a copy of the sender message key's seed. A missing,
+// destroyed or wrong-length seed is an error.
+func (k *SenderMessageKey) Seed() ([]byte, error) {
+	return copySecret(k.seed, "seed", senderSeedLength)
 }
 
 // copySecret copies s's bytes inside its enclave borrow, for the accessors
-// above whose value must leave the borrow. The caller owns the copy and
-// should zeroize it after use. A nil or destroyed secret yields nil.
-func copySecret(s *secret.Secret) []byte {
+// whose value must leave the borrow. The material must be exactly want
+// bytes. A nil, destroyed or wrong-length secret is an error, never a nil
+// or short copy. The caller owns the copy and should zeroize it.
+func copySecret(s *secret.Secret, field string, want int) ([]byte, error) {
+	if s == nil {
+		return nil, &MissingKeyError{Field: field}
+	}
 	var out []byte
 	if err := s.WithBytes(func(b []byte) error {
-		if b != nil {
-			out = append([]byte(nil), b...)
+		if len(b) != want {
+			return &KeyLengthError{Field: field, Got: len(b), Want: want}
 		}
+		out = append(make([]byte, 0, want), b...)
 		return nil
 	}); err != nil {
-		return nil
+		return nil, err
 	}
-	return out
+	return out, nil
 }
 
 // Zeroize destroys the guarded memory holding all sensitive key material.

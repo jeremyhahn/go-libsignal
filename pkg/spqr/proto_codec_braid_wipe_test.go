@@ -81,7 +81,7 @@ func assertWiped(t *testing.T, what string, bufs [][]byte) {
 func TestMarshalStateProto_WipesBraidCopies(t *testing.T) {
 	s := newBraidSPQR(t)
 	defer s.Zeroize()
-	liveRoot := append([]byte(nil), s.braid.State().ProtoAuth().ProtoAuthRootKey()...)
+	liveRoot := append([]byte(nil), mustCopy(s.braid.State().ProtoAuth().ProtoAuthRootKey())...)
 
 	auth, _ := captureStateMessage(t, nil)
 	out, err := MarshalStateProto(s)
@@ -93,7 +93,7 @@ func TestMarshalStateProto_WipesBraidCopies(t *testing.T) {
 	if err != nil || !bytes.Equal(out, again) {
 		t.Fatalf("returned bytes or live state changed: equal=%v err=%v", bytes.Equal(out, again), err)
 	}
-	if got := s.braid.State().ProtoAuth().ProtoAuthRootKey(); !bytes.Equal(got, liveRoot) {
+	if got := mustCopy(s.braid.State().ProtoAuth().ProtoAuthRootKey()); !bytes.Equal(got, liveRoot) {
 		t.Fatal("wiping the copies changed the live root key")
 	}
 
@@ -102,7 +102,7 @@ func TestMarshalStateProto_WipesBraidCopies(t *testing.T) {
 		t.Fatal("want the injected failure")
 	}
 	assertWiped(t, "failure: auth", *auth)
-	if got := s.braid.State().ProtoAuth().ProtoAuthRootKey(); !bytes.Equal(got, liveRoot) {
+	if got := mustCopy(s.braid.State().ProtoAuth().ProtoAuthRootKey()); !bytes.Equal(got, liveRoot) {
 		t.Fatal("the failure path changed the live root key")
 	}
 }

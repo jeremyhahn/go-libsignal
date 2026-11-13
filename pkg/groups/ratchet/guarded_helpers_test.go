@@ -100,9 +100,9 @@ func TestSenderMessageKeyStructIsAnIndependentClone(t *testing.T) {
 	// SHA-256 digest identifies the material without being it. (Needed here and
 	// not in the chain-key test above because that one compares against a source
 	// literal, which is already in the binary.)
-	ivDigest := sha256.Sum256(key.Iv())
-	cipherDigest := sha256.Sum256(key.CipherKey())
-	seedDigest := sha256.Sum256(key.Seed())
+	ivDigest := sha256.Sum256(mustCopy(key.Iv()))
+	cipherDigest := sha256.Sum256(mustCopy(key.CipherKey()))
+	seedDigest := sha256.Sum256(mustCopy(key.Seed()))
 
 	structure, err := NewStructFromSenderMessageKey(key)
 	if err != nil {
@@ -167,9 +167,9 @@ func TestSenderMessageKeyOptionalFieldCombinations(t *testing.T) {
 				got     []byte
 				want    []byte
 			}{
-				{"IV", combo.iv, key.Iv(), material["iv"]},
-				{"CipherKey", combo.cipher, key.CipherKey(), material["cipher"]},
-				{"Seed", combo.seed, key.Seed(), material["seed"]},
+				{"IV", combo.iv, absent(key.Iv()), material["iv"]},
+				{"CipherKey", combo.cipher, absent(key.CipherKey()), material["cipher"]},
+				{"Seed", combo.seed, absent(key.Seed()), material["seed"]},
 			}
 			for _, c := range checks {
 				if c.present && !bytes.Equal(c.got, c.want) {

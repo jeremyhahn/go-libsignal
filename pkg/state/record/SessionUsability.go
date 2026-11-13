@@ -82,7 +82,11 @@ func (s *State) HasUsableSenderChain(now time.Time, req SessionUsabilityRequirem
 		}
 	}
 	if req.Contains(SessionRequireSpqr) {
-		if secretLen(s.pqRatchetState) == 0 {
+		n, err := secretLen(s.pqRatchetState)
+		if err != nil {
+			return false, err
+		}
+		if n == 0 {
 			return false, nil
 		}
 	}

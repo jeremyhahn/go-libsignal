@@ -51,16 +51,16 @@ func TestProtoAccessorsNilPaths(t *testing.T) {
 	}
 
 	// Fields that are nil at KeysUnsampled state must return nil safely.
-	_ = s.ProtoDK()
-	_ = s.ProtoEKSeed()
-	_ = s.ProtoEKVector()
-	_ = s.ProtoReceivedCt1()
-	_ = s.ProtoBobEKSeed()
-	_ = s.ProtoBobHek()
-	_ = s.ProtoBobEncapSecret()
-	_ = s.ProtoBobEKVector()
-	_ = s.ProtoBobCt1()
-	_ = s.ProtoBobSS()
+	_, _ = s.ProtoDK()
+	_, _ = s.ProtoEKSeed()
+	_, _ = s.ProtoEKVector()
+	_, _ = s.ProtoReceivedCt1()
+	_, _ = s.ProtoBobEKSeed()
+	_, _ = s.ProtoBobHek()
+	_, _ = s.ProtoBobEncapSecret()
+	_, _ = s.ProtoBobEKVector()
+	_, _ = s.ProtoBobCt1()
+	_, _ = s.ProtoBobSS()
 	_ = s.ProtoHeaderEncoder()
 	_ = s.ProtoEKEncoder()
 	_ = s.ProtoCt1Encoder()
@@ -73,8 +73,8 @@ func TestProtoAccessorsNilPaths(t *testing.T) {
 	auth := s.ProtoAuth()
 	if auth != nil {
 		// If auth is non-nil, accessors must not panic.
-		_ = auth.ProtoAuthRootKey()
-		_ = auth.ProtoAuthMacKey()
+		_, _ = auth.ProtoAuthRootKey()
+		_, _ = auth.ProtoAuthMacKey()
 		_ = auth.ProtoAuthEpoch()
 	}
 }
@@ -83,10 +83,10 @@ func TestProtoAccessorsNilPaths(t *testing.T) {
 // methods return zero values without panicking.
 func TestAuthenticatorNilAccessors(t *testing.T) {
 	var a *Authenticator
-	if a.ProtoAuthRootKey() != nil {
+	if mustCopy(a.ProtoAuthRootKey()) != nil {
 		t.Error("nil Authenticator.ProtoAuthRootKey() should be nil")
 	}
-	if a.ProtoAuthMacKey() != nil {
+	if mustCopy(a.ProtoAuthMacKey()) != nil {
 		t.Error("nil Authenticator.ProtoAuthMacKey() should be nil")
 	}
 	if a.ProtoAuthEpoch() != 0 {

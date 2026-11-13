@@ -137,10 +137,10 @@ func TestGroupsSKMWire(t *testing.T) {
 
 			// Decrypt the SenderKeyMessage ciphertext with AES-256-CBC.
 			// cipher.Decrypt(iv, key, ciphertext) matching GroupCipher.Decrypt.
-			gotPlaintext, err := cipher.Decrypt(msgKey.Iv(), msgKey.CipherKey(), skm.Ciphertext())
+			gotPlaintext, err := cipher.Decrypt(mustCopy(msgKey.Iv()), mustCopy(msgKey.CipherKey()), skm.Ciphertext())
 			if err != nil {
 				t.Fatalf("cipher.Decrypt: %v\n  ciphertext: %x\n  iv: %x\n  key: %x",
-					err, skm.Ciphertext(), msgKey.Iv(), msgKey.CipherKey())
+					err, skm.Ciphertext(), mustCopy(msgKey.Iv()), mustCopy(msgKey.CipherKey()))
 			}
 
 			// DECRYPT-AND-MATCH: the recovered plaintext must equal the fixture plaintext.

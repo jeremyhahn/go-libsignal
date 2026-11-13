@@ -29,14 +29,14 @@ func TestNewSenderMessageKeyEmptySeed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSenderMessageKey with zero seed failed: %v", err)
 	}
-	if len(key.Iv()) != 16 {
-		t.Errorf("IV length = %d, want 16", len(key.Iv()))
+	if len(mustCopy(key.Iv())) != 16 {
+		t.Errorf("IV length = %d, want 16", len(mustCopy(key.Iv())))
 	}
-	if len(key.CipherKey()) != 32 {
-		t.Errorf("CipherKey length = %d, want 32", len(key.CipherKey()))
+	if len(mustCopy(key.CipherKey())) != 32 {
+		t.Errorf("CipherKey length = %d, want 32", len(mustCopy(key.CipherKey())))
 	}
-	if len(key.Seed()) != 32 {
-		t.Errorf("Seed length = %d, want 32", len(key.Seed()))
+	if len(mustCopy(key.Seed())) != 32 {
+		t.Errorf("Seed length = %d, want 32", len(mustCopy(key.Seed())))
 	}
 }
 
@@ -97,13 +97,13 @@ func TestNewSenderMessageKeyFromStructOnlyIV(t *testing.T) {
 	if key.Iteration() != 3 {
 		t.Errorf("Iteration() = %d, want 3", key.Iteration())
 	}
-	if key.Iv() == nil {
+	if mustCopy(key.Iv()) == nil {
 		t.Error("Iv() should not be nil when IV was provided")
 	}
-	if key.CipherKey() != nil {
+	if absent(key.CipherKey()) != nil {
 		t.Error("CipherKey() should be nil when not provided")
 	}
-	if key.Seed() != nil {
+	if absent(key.Seed()) != nil {
 		t.Error("Seed() should be nil when not provided")
 	}
 }
@@ -126,13 +126,13 @@ func TestNewSenderMessageKeyFromStructOnlySeed(t *testing.T) {
 	if key.Iteration() != 9 {
 		t.Errorf("Iteration() = %d, want 9", key.Iteration())
 	}
-	if key.Iv() != nil {
+	if absent(key.Iv()) != nil {
 		t.Error("Iv() should be nil when not provided")
 	}
-	if key.CipherKey() != nil {
+	if absent(key.CipherKey()) != nil {
 		t.Error("CipherKey() should be nil when not provided")
 	}
-	if key.Seed() == nil {
+	if mustCopy(key.Seed()) == nil {
 		t.Error("Seed() should not be nil when Seed was provided")
 	}
 }
@@ -155,13 +155,13 @@ func TestNewSenderMessageKeyFromStructOnlyCipherKey(t *testing.T) {
 	if key.Iteration() != 11 {
 		t.Errorf("Iteration() = %d, want 11", key.Iteration())
 	}
-	if key.Iv() != nil {
+	if absent(key.Iv()) != nil {
 		t.Error("Iv() should be nil when not provided")
 	}
-	if key.CipherKey() == nil {
+	if mustCopy(key.CipherKey()) == nil {
 		t.Error("CipherKey() should not be nil when CipherKey was provided")
 	}
-	if key.Seed() != nil {
+	if absent(key.Seed()) != nil {
 		t.Error("Seed() should be nil when not provided")
 	}
 }

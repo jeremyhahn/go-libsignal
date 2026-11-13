@@ -3,19 +3,25 @@ package mlkembraid
 import "github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 
 // copySecret copies the material of s out inside a WithBytes borrow, for a
-// value that must leave the borrow. A nil, empty or destroyed secret yields
-// nil. The caller should wipe the copy after use.
-func copySecret(s *secret.Secret) []byte {
+// value that must leave the borrow. A nil s is an absent field and yields
+// (nil, nil). A destroyed or empty secret is an error, never a nil copy, so
+// a failed borrow cannot pass for an absent field. The caller should wipe
+// the copy after use.
+func copySecret(s *secret.Secret) ([]byte, error) {
+	if s == nil {
+		return nil, nil
+	}
 	var out []byte
 	if err := s.WithBytes(func(b []byte) error {
-		if b != nil {
-			out = append([]byte(nil), b...)
+		if len(b) == 0 {
+			return &ErrInvalidInput{Field: "secret", Reason: "empty secret"}
 		}
+		out = append([]byte(nil), b...)
 		return nil
 	}); err != nil {
-		return nil
+		return nil, err
 	}
-	return out
+	return out, nil
 }
 
 // withBytes2 borrows a and b through WithBytes and calls fn with both views.

@@ -378,8 +378,8 @@ func TestPQXDHSenderReceiverAgreement(t *testing.T) {
 	}
 
 	// Both should produce the same root key.
-	senderRootBytes := senderKeys.RootKey.Bytes()
-	receiverRootBytes := receiverKeys.RootKey.Bytes()
+	senderRootBytes := mustCopy(senderKeys.RootKey.Bytes())
+	receiverRootBytes := mustCopy(receiverKeys.RootKey.Bytes())
 	if len(senderRootBytes) != len(receiverRootBytes) {
 		t.Fatal("PQXDH root key lengths should match")
 	}
@@ -440,8 +440,8 @@ func TestPQXDHReceiverSessionWithOPKAndKyber(t *testing.T) {
 	}
 
 	// Both must derive the same root key.
-	senderRoot := senderKeys.RootKey.Bytes()
-	receiverRoot := receiverKeys.RootKey.Bytes()
+	senderRoot := mustCopy(senderKeys.RootKey.Bytes())
+	receiverRoot := mustCopy(receiverKeys.RootKey.Bytes())
 	if len(senderRoot) != len(receiverRoot) {
 		t.Fatal("root key lengths should match")
 	}
@@ -511,8 +511,8 @@ func TestPQXDHReceiverSessionWithoutOPK(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	senderRoot := senderKeys.RootKey.Bytes()
-	receiverRoot := receiverKeys.RootKey.Bytes()
+	senderRoot := mustCopy(senderKeys.RootKey.Bytes())
+	receiverRoot := mustCopy(receiverKeys.RootKey.Bytes())
 	for i := range senderRoot {
 		if senderRoot[i] != receiverRoot[i] {
 			t.Fatal("PQXDH (no OPK) root keys should match")

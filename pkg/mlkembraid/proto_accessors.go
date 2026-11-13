@@ -24,19 +24,21 @@ func (s *State) ProtoAuth() *Authenticator {
 }
 
 // ProtoAuthRootKey returns the authenticator's root_key bytes for proto
-// marshaling. Returns nil if the authenticator or root key is nil/destroyed.
-func (a *Authenticator) ProtoAuthRootKey() []byte {
-	if a == nil || a.rootKey == nil || a.rootKey.IsDestroyed() {
-		return nil
+// marshaling. Returns nil, nil
+// when unset; a destroyed secret is an error.
+func (a *Authenticator) ProtoAuthRootKey() ([]byte, error) {
+	if a == nil || a.rootKey == nil {
+		return nil, nil
 	}
 	return copySecret(a.rootKey)
 }
 
 // ProtoAuthMacKey returns the authenticator's mac_key bytes for proto
-// marshaling. Returns nil if the mac key is nil or destroyed.
-func (a *Authenticator) ProtoAuthMacKey() []byte {
-	if a == nil || a.macKey == nil || a.macKey.IsDestroyed() {
-		return nil
+// marshaling. Returns nil, nil
+// when unset; a destroyed secret is an error.
+func (a *Authenticator) ProtoAuthMacKey() ([]byte, error) {
+	if a == nil || a.macKey == nil {
+		return nil, nil
 	}
 	return copySecret(a.macKey)
 }
@@ -49,54 +51,56 @@ func (a *Authenticator) ProtoAuthEpoch() uint64 {
 	return a.epoch
 }
 
-// ProtoDK returns the decapsulation key bytes (Alice's dk). Returns nil if
-// the secret is nil or destroyed.
-func (s *State) ProtoDK() []byte {
-	if s.dk == nil || s.dk.IsDestroyed() {
-		return nil
+// ProtoDK returns the decapsulation key bytes (Alice's dk). Returns nil, nil
+// when unset; a destroyed secret is an error.
+func (s *State) ProtoDK() ([]byte, error) {
+	if s.dk == nil {
+		return nil, nil
 	}
 	return copySecret(s.dk)
 }
 
-// ProtoEKSeed returns the ek_seed bytes. Returns nil if nil or destroyed.
-func (s *State) ProtoEKSeed() []byte {
-	if s.ekSeed == nil || s.ekSeed.IsDestroyed() {
-		return nil
+// ProtoEKSeed returns the ek_seed bytes. Returns nil, nil
+// when unset; a destroyed secret is an error.
+func (s *State) ProtoEKSeed() ([]byte, error) {
+	if s.ekSeed == nil {
+		return nil, nil
 	}
 	return copySecret(s.ekSeed)
 }
 
-// ProtoEKVector returns the ek_vector bytes. Returns nil if nil or destroyed.
-func (s *State) ProtoEKVector() []byte {
-	if s.ekVector == nil || s.ekVector.IsDestroyed() {
-		return nil
+// ProtoEKVector returns the ek_vector bytes. Returns nil, nil
+// when unset; a destroyed secret is an error.
+func (s *State) ProtoEKVector() ([]byte, error) {
+	if s.ekVector == nil {
+		return nil, nil
 	}
 	return copySecret(s.ekVector)
 }
 
-// ProtoReceivedCt1 returns the received ct1 bytes. Returns nil if nil or
-// destroyed.
-func (s *State) ProtoReceivedCt1() []byte {
-	if s.receivedCt1 == nil || s.receivedCt1.IsDestroyed() {
-		return nil
+// ProtoReceivedCt1 returns the received ct1 bytes. Returns nil, nil
+// when unset; a destroyed secret is an error.
+func (s *State) ProtoReceivedCt1() ([]byte, error) {
+	if s.receivedCt1 == nil {
+		return nil, nil
 	}
 	return copySecret(s.receivedCt1)
 }
 
-// ProtoBobEKSeed returns Bob's received ek_seed bytes (from header). Returns
-// nil if nil or destroyed.
-func (s *State) ProtoBobEKSeed() []byte {
-	if s.bobEkSeed == nil || s.bobEkSeed.IsDestroyed() {
-		return nil
+// ProtoBobEKSeed returns Bob's received ek_seed bytes (from header). Returns nil, nil
+// when unset; a destroyed secret is an error.
+func (s *State) ProtoBobEKSeed() ([]byte, error) {
+	if s.bobEkSeed == nil {
+		return nil, nil
 	}
 	return copySecret(s.bobEkSeed)
 }
 
-// ProtoBobHek returns Bob's received hek bytes (from header). Returns nil if
-// nil or destroyed.
-func (s *State) ProtoBobHek() []byte {
-	if s.bobHek == nil || s.bobHek.IsDestroyed() {
-		return nil
+// ProtoBobHek returns Bob's received hek bytes (from header). Returns nil, nil
+// when unset; a destroyed secret is an error.
+func (s *State) ProtoBobHek() ([]byte, error) {
+	if s.bobHek == nil {
+		return nil, nil
 	}
 	return copySecret(s.bobHek)
 }
@@ -104,36 +108,38 @@ func (s *State) ProtoBobHek() []byte {
 // ProtoBobEncapSecret returns Bob's packed encapsulation secret blob.
 // For IncrementalMLKEM768KEM this is 3072 bytes: es(2080) || ct1(960) || ss(32),
 // where es is the 2080-byte libcrux EncapsulationState wire format.
-// Returns nil if nil or destroyed.
-func (s *State) ProtoBobEncapSecret() []byte {
-	if s.bobEncapSecret == nil || s.bobEncapSecret.IsDestroyed() {
-		return nil
+// Returns nil, nil
+// when unset; a destroyed secret is an error.
+func (s *State) ProtoBobEncapSecret() ([]byte, error) {
+	if s.bobEncapSecret == nil {
+		return nil, nil
 	}
 	return copySecret(s.bobEncapSecret)
 }
 
-// ProtoBobEKVector returns Bob's received ek_vector bytes. Returns nil if nil
-// or destroyed.
-func (s *State) ProtoBobEKVector() []byte {
-	if s.bobEkVector == nil || s.bobEkVector.IsDestroyed() {
-		return nil
+// ProtoBobEKVector returns Bob's received ek_vector bytes. Returns nil, nil
+// when unset; a destroyed secret is an error.
+func (s *State) ProtoBobEKVector() ([]byte, error) {
+	if s.bobEkVector == nil {
+		return nil, nil
 	}
 	return copySecret(s.bobEkVector)
 }
 
-// ProtoBobCt1 returns Bob's ct1 bytes. Returns nil if nil or destroyed.
-func (s *State) ProtoBobCt1() []byte {
-	if s.bobCt1 == nil || s.bobCt1.IsDestroyed() {
-		return nil
+// ProtoBobCt1 returns Bob's ct1 bytes. Returns nil, nil
+// when unset; a destroyed secret is an error.
+func (s *State) ProtoBobCt1() ([]byte, error) {
+	if s.bobCt1 == nil {
+		return nil, nil
 	}
 	return copySecret(s.bobCt1)
 }
 
-// ProtoBobSS returns Bob's shared secret bytes. Returns nil if nil or
-// destroyed.
-func (s *State) ProtoBobSS() []byte {
-	if s.bobSS == nil || s.bobSS.IsDestroyed() {
-		return nil
+// ProtoBobSS returns Bob's shared secret bytes. Returns nil, nil
+// when unset; a destroyed secret is an error.
+func (s *State) ProtoBobSS() ([]byte, error) {
+	if s.bobSS == nil {
+		return nil, nil
 	}
 	return copySecret(s.bobSS)
 }

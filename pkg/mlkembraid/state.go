@@ -323,7 +323,11 @@ func (s *State) sendKeysSampled(_ IncrementalKEM) (*Message, uint64, *OutputKey,
 
 	// Header complete. Initialize ek encoder and transition to HeaderSent.
 	if s.ekEncoder == nil {
-		enc, err := NewEncoder(copySecret(s.ekVector), s.chunkSize)
+		ekVec, err := copySecret(s.ekVector)
+		if err != nil {
+			return nil, 0, nil, err
+		}
+		enc, err := NewEncoder(ekVec, s.chunkSize)
 		if err != nil {
 			return nil, 0, nil, err
 		}
@@ -552,7 +556,12 @@ func (s *State) aliceCompleteCt2(_ *Message, kemImpl IncrementalKEM) (uint64, *O
 	}
 
 	// VfyCt(epoch, ct1||ct2, mac) using the post-Update mac_key.
-	receivedCt1Bytes := copySecret(s.receivedCt1)
+	receivedCt1Bytes, err := copySecret(s.receivedCt1)
+	if err != nil {
+		s.auth.Zeroize()
+		s.auth = preUpdateAuth
+		return 0, nil, err
+	}
 	fullCT := make([]byte, 0, len(receivedCt1Bytes)+len(ct2))
 	fullCT = append(fullCT, receivedCt1Bytes...)
 	fullCT = append(fullCT, ct2...)
@@ -1097,7 +1106,10 @@ func (s *State) bobCompleteEncapsulationDeferred(kemImpl IncrementalKEM, chunkSi
 	// Retrieve ek_vector from stored field or from decoder.
 	var ekVector []byte
 	if s.bobEkVector != nil {
-		ekVector = copySecret(s.bobEkVector)
+		var err error
+		if ekVector, err = copySecret(s.bobEkVector); err != nil {
+			return 0, nil, err
+		}
 	}
 	if len(ekVector) == 0 && s.ekDecoder != nil && s.ekDecoder.HasMessage() {
 		var err error
@@ -1191,7 +1203,11 @@ func (s *State) bobCompleteEncapsulationDeferred(kemImpl IncrementalKEM, chunkSi
 
 	// Encode ct1 if not already encoded.
 	if s.ct1Encoder == nil {
-		ct1Enc, err := NewEncoder(copySecret(s.bobCt1), chunkSize)
+		ct1, err := copySecret(s.bobCt1)
+		if err != nil {
+			return 0, nil, err
+		}
+		ct1Enc, err := NewEncoder(ct1, chunkSize)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -1199,7 +1215,10 @@ func (s *State) bobCompleteEncapsulationDeferred(kemImpl IncrementalKEM, chunkSi
 	}
 
 	// Encode ct2 || MAC.
-	ct2Bytes := copySecret(s.bobCt2)
+	ct2Bytes, err := copySecret(s.bobCt2)
+	if err != nil {
+		return 0, nil, err
+	}
 	ct2WithMAC := make([]byte, 0, len(ct2Bytes)+MacSize)
 	ct2WithMAC = append(ct2WithMAC, ct2Bytes...)
 	ct2WithMAC = append(ct2WithMAC, ctMAC...)
@@ -1365,14 +1384,21 @@ func (s *State) bobCompleteEncapsulation(kemImpl IncrementalKEM, chunkSize int) 
 	}
 
 	// Encode ct1 for sending.
-	ct1Enc, err := NewEncoder(copySecret(s.bobCt1), chunkSize)
+	ct1Copy, err := copySecret(s.bobCt1)
+	if err != nil {
+		return nil, err
+	}
+	ct1Enc, err := NewEncoder(ct1Copy, chunkSize)
 	if err != nil {
 		return nil, err
 	}
 	s.ct1Encoder = ct1Enc
 
 	// Encode ct2 || MAC for sending.
-	ct2Bytes := copySecret(s.bobCt2)
+	ct2Bytes, err := copySecret(s.bobCt2)
+	if err != nil {
+		return nil, err
+	}
 	ct2WithMAC := make([]byte, 0, len(ct2Bytes)+MacSize)
 	ct2WithMAC = append(ct2WithMAC, ct2Bytes...)
 	ct2WithMAC = append(ct2WithMAC, ctMAC...)

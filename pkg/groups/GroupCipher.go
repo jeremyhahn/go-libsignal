@@ -77,9 +77,16 @@ func (c *GroupCipher) Encrypt(distributionID [16]byte, plaintext []byte) (protoc
 
 	// Encrypt the plaintext.
 	// Iv and CipherKey hand out owned heap copies: take each once and wipe it.
-	iv := senderKey.Iv()
+	// A destroyed or short component is an error, never a nil key.
+	iv, err := senderKey.Iv()
+	if err != nil {
+		return nil, err
+	}
 	defer crypto.Zeroize(iv)
-	cipherKey := senderKey.CipherKey()
+	cipherKey, err := senderKey.CipherKey()
+	if err != nil {
+		return nil, err
+	}
 	defer crypto.Zeroize(cipherKey)
 	ciphertext, err := cipher.Encrypt(iv, cipherKey, plaintext)
 	if err != nil {
@@ -171,9 +178,16 @@ func (c *GroupCipher) Decrypt(senderKeyMessage *protocol.SenderKeyMessage) ([]by
 
 	// Decrypt the message ciphertext.
 	// Iv and CipherKey hand out owned heap copies: take each once and wipe it.
-	iv := senderKey.Iv()
+	// A destroyed or short component is an error, never a nil key.
+	iv, err := senderKey.Iv()
+	if err != nil {
+		return nil, err
+	}
 	defer crypto.Zeroize(iv)
-	cipherKey := senderKey.CipherKey()
+	cipherKey, err := senderKey.CipherKey()
+	if err != nil {
+		return nil, err
+	}
 	defer crypto.Zeroize(cipherKey)
 	plaintext, err := cipher.Decrypt(iv, cipherKey, senderKeyMessage.Ciphertext())
 	if err != nil {

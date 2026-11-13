@@ -20,8 +20,8 @@ func TestNewDerivedSecrets(t *testing.T) {
 	if secrets == nil {
 		t.Fatal("expected non-nil DerivedSecrets")
 	}
-	rootKey := secrets.RootKey()
-	chainKey := secrets.ChainKey()
+	rootKey := mustCopy(secrets.RootKey())
+	chainKey := mustCopy(secrets.ChainKey())
 	if len(rootKey) != 32 {
 		t.Fatalf("expected 32-byte root key, got %d", len(rootKey))
 	}
@@ -49,7 +49,7 @@ func TestNewDerivedSecrets_DifferentHalves(t *testing.T) {
 		keyMaterial[i] = 0xBB
 	}
 	secrets := NewDerivedSecrets(keyMaterial)
-	if bytes.Equal(secrets.RootKey(), secrets.ChainKey()) {
+	if bytes.Equal(mustCopy(secrets.RootKey()), mustCopy(secrets.ChainKey())) {
 		t.Fatal("root and chain keys should differ when input halves differ")
 	}
 }
@@ -62,7 +62,7 @@ func TestNewKeyPair(t *testing.T) {
 	if kp == nil {
 		t.Fatal("expected non-nil KeyPair")
 	}
-	if !bytes.Equal(kp.RootKey.Bytes(), []byte("root")) {
+	if !bytes.Equal(mustCopy(kp.RootKey.Bytes()), []byte("root")) {
 		t.Fatal("RootKey mismatch")
 	}
 	if !bytes.Equal(kp.ChainKey.Key(), []byte("chain")) {
@@ -75,7 +75,7 @@ func TestNewKeyPair_AccessFields(t *testing.T) {
 	mockChain := &mockChainKey{data: []byte("chain-key-data"), idx: 7}
 
 	kp := NewKeyPair(mockRoot, mockChain)
-	if !bytes.Equal(kp.RootKey.Bytes(), []byte("root-key-data")) {
+	if !bytes.Equal(mustCopy(kp.RootKey.Bytes()), []byte("root-key-data")) {
 		t.Fatal("RootKey bytes mismatch")
 	}
 	if kp.ChainKey.Index() != 7 {
@@ -89,8 +89,8 @@ type mockRootKey struct {
 	data []byte
 }
 
-func (m *mockRootKey) Bytes() []byte {
-	return m.data
+func (m *mockRootKey) Bytes() ([]byte, error) {
+	return m.data, nil
 }
 
 func (m *mockRootKey) CreateChain(theirRatchetKey ecc.ECPublicKeyable, ourRatchetKey *ecc.ECKeyPair) (*KeyPair, error) {
@@ -138,7 +138,7 @@ func TestDerivedSecrets_Zeroize(t *testing.T) {
 	secrets := NewDerivedSecrets(keyMaterial)
 
 	// Verify keys are non-zero initially.
-	if len(secrets.RootKey()) != 32 {
+	if len(mustCopy(secrets.RootKey())) != 32 {
 		t.Fatal("root key should be 32 bytes before Zeroize")
 	}
 
@@ -192,9 +192,9 @@ func TestNewDerivedSecrets_96Bytes(t *testing.T) {
 		t.Fatal("expected non-nil DerivedSecrets")
 	}
 
-	rootKey := secrets.RootKey()
-	chainKey := secrets.ChainKey()
-	pqrKey := secrets.InitialPQRKey()
+	rootKey := mustCopy(secrets.RootKey())
+	chainKey := mustCopy(secrets.ChainKey())
+	pqrKey := mustCopy(secrets.InitialPQRKey())
 
 	if len(rootKey) != 32 {
 		t.Fatalf("expected 32-byte root key, got %d", len(rootKey))
@@ -231,7 +231,7 @@ func TestNewDerivedSecrets_64Bytes_NilPQRKey(t *testing.T) {
 		keyMaterial[i] = byte(i)
 	}
 	secrets := NewDerivedSecrets(keyMaterial)
-	if secrets.InitialPQRKey() != nil {
+	if mustCopy(secrets.InitialPQRKey()) != nil {
 		t.Fatal("64-byte key material should produce nil InitialPQRKey")
 	}
 }
@@ -245,7 +245,7 @@ func TestNewDerivedSecrets_96Bytes_Zeroize(t *testing.T) {
 	}
 	secrets := NewDerivedSecrets(keyMaterial)
 
-	if secrets.InitialPQRKey() == nil {
+	if mustCopy(secrets.InitialPQRKey()) == nil {
 		t.Fatal("expected non-nil PQR key before Zeroize")
 	}
 
@@ -279,7 +279,7 @@ func TestNewKeyPairWithPQR(t *testing.T) {
 	if kp == nil {
 		t.Fatal("expected non-nil KeyPair")
 	}
-	if !bytes.Equal(kp.RootKey.Bytes(), []byte("root")) {
+	if !bytes.Equal(mustCopy(kp.RootKey.Bytes()), []byte("root")) {
 		t.Fatal("RootKey mismatch")
 	}
 	if !bytes.Equal(kp.ChainKey.Key(), []byte("chain")) {

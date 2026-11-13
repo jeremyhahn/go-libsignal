@@ -227,7 +227,7 @@ func TestDecoderToProto_Nil(t *testing.T) {
 // nil because the authenticator's root key has been destroyed.
 func TestAuthToProto_DestroyedRootKey(t *testing.T) {
 	auth := makeTestAuth(t, 52)
-	// Destroy the authenticator to make ProtoAuthRootKey() return nil.
+	// Destroy the authenticator so ProtoAuthRootKey() fails its borrow.
 	auth.Zeroize()
 
 	state, err := mlkembraid.ProtoSetFromFields(
@@ -251,12 +251,9 @@ func TestAuthToProto_DestroyedRootKey(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error marshaling with destroyed authenticator root key")
 	}
-	var want *ErrProtoMissingField
-	if !errors.As(err, &want) {
-		t.Fatalf("want *ErrProtoMissingField, got %T: %v", err, err)
-	}
-	if want.Name != "auth.root_key" {
-		t.Errorf("ErrProtoMissingField.Name = %q, want %q", want.Name, "auth.root_key")
+	// A destroyed key is reported as destroyed, not hidden as a missing field.
+	if !errors.Is(err, secret.ErrSecretDestroyed) {
+		t.Fatalf("want ErrSecretDestroyed, got %T: %v", err, err)
 	}
 }
 

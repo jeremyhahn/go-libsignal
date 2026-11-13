@@ -30,9 +30,12 @@ var (
 
 // copyOut copies a secret's material out of locked memory for a protobuf
 // field, inside the secret's WithBytes borrow, and records the copy. A secret
-// that holds no material, or one that has been destroyed, yields nil, which
-// proto omits.
-func (o *ownedCopies) copyOut(s *secret.Secret) []byte {
+// that holds no material yields nil, which proto omits. A destroyed secret is
+// an error: serializing it as absent would write a record that silently
+// lacks a key, and a session reloaded without its PQ ratchet state, say,
+// would carry on without post-quantum protection.
+func (o *ownedCopies) copyOut(s *secret.Secret) ([]byte, error) {
+	beforeCopyOut(s)
 	var out []byte
 	if err := s.WithBytes(func(b []byte) error {
 		if len(b) > 0 {
@@ -40,10 +43,16 @@ func (o *ownedCopies) copyOut(s *secret.Secret) []byte {
 		}
 		return nil
 	}); err != nil {
-		return nil
+		crypto.Zeroize(out)
+		return nil, err
 	}
-	return o.keep(out)
+	return o.keep(out), nil
 }
+
+// beforeCopyOut runs just before copyOut borrows its source. It is a test
+// seam for a source destroyed between lookup and borrow; production code
+// leaves it a no-op.
+var beforeCopyOut = func(*secret.Secret) {}
 
 // keep records b as owned by the serializer and returns it.
 func (o *ownedCopies) keep(b []byte) []byte {

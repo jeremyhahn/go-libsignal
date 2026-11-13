@@ -29,6 +29,13 @@ func released(read func() []byte) (gone bool) {
 	return len(read()) == 0
 }
 
+// releasedCopy is released for an accessor that reports a destroyed key as
+// an error rather than an empty copy.
+func releasedCopy(read func() ([]byte, error)) bool {
+	b, err := read()
+	return err != nil || len(b) == 0
+}
+
 func newFilledPrivateKey(t *testing.T, fill byte) *ecc.GuardedECPrivateKey {
 	t.Helper()
 	var raw [32]byte
@@ -72,13 +79,13 @@ func TestDestroyPartialChainReleasesEveryGuardedComponent(t *testing.T) {
 	if !released(chainState.ChainKey().Key) {
 		t.Error("chain key was left in locked memory")
 	}
-	if !released(messageKeys.CipherKey) {
+	if !releasedCopy(messageKeys.CipherKey) {
 		t.Error("message cipher key was left in locked memory")
 	}
-	if !released(messageKeys.MacKey) {
+	if !releasedCopy(messageKeys.MacKey) {
 		t.Error("message mac key was left in locked memory")
 	}
-	if !released(messageKeys.Iv) {
+	if !releasedCopy(messageKeys.Iv) {
 		t.Error("message iv was left in locked memory")
 	}
 
@@ -159,7 +166,7 @@ func TestDestroyPartialStateReleasesEveryGuardedComponent(t *testing.T) {
 	if !basePrivate.IsDestroyed() {
 		t.Error("pending key exchange private key was left in locked memory")
 	}
-	if !released(rootKey.Bytes) {
+	if !releasedCopy(rootKey.Bytes) {
 		t.Error("root key was left in locked memory")
 	}
 	if !pqRatchetState.IsDestroyed() {
@@ -237,14 +244,14 @@ func TestPromoteStateReleasesTheEvictedArchivedState(t *testing.T) {
 	if got := len(session.PreviousSessionStates()); got != archivedStatesMaxLength {
 		t.Fatalf("archive holds %d states, want %d", got, archivedStatesMaxLength)
 	}
-	if released(oldest.rootKey.Bytes) {
+	if releasedCopy(oldest.rootKey.Bytes) {
 		t.Fatal("the oldest state was released before it was evicted")
 	}
 
 	// One more promotion pushes it over the bound and evicts it.
 	session.PromoteState(testState(t, 0x51))
 
-	if !released(oldest.rootKey.Bytes) {
+	if !releasedCopy(oldest.rootKey.Bytes) {
 		t.Error("evicted state's root key was left in locked memory")
 	}
 	if !released(oldest.senderChain.ChainKey().Key) {
@@ -256,7 +263,7 @@ func TestPromoteStateReleasesTheEvictedArchivedState(t *testing.T) {
 
 	// Everything still in the archive has to be untouched.
 	for i, state := range retained {
-		if released(state.rootKey.Bytes) {
+		if releasedCopy(state.rootKey.Bytes) {
 			t.Errorf("retained state %d was released along with the evicted one", i)
 		}
 	}

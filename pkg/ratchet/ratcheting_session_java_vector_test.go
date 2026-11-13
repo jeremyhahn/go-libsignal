@@ -134,8 +134,8 @@ func TestRatchetingSession_JavaVector(t *testing.T) {
 	}
 
 	// Verify root keys match between sender and receiver.
-	senderRootBytes := senderKeys.RootKey.Bytes()
-	receiverRootBytes := receiverKeys.RootKey.Bytes()
+	senderRootBytes := mustCopy(senderKeys.RootKey.Bytes())
+	receiverRootBytes := mustCopy(receiverKeys.RootKey.Bytes())
 	if !bytes.Equal(senderRootBytes, receiverRootBytes) {
 		t.Fatalf("root key mismatch:\n  sender:   %x\n  receiver: %x",
 			senderRootBytes, receiverRootBytes)
@@ -233,7 +233,7 @@ func TestRatchetingSession_JavaVector_SessionAgreementSymmetry(t *testing.T) {
 	}
 
 	// Both directions must agree.
-	if !bytes.Equal(senderKeys.RootKey.Bytes(), receiverKeys.RootKey.Bytes()) {
+	if !bytes.Equal(mustCopy(senderKeys.RootKey.Bytes()), mustCopy(receiverKeys.RootKey.Bytes())) {
 		t.Fatal("root keys must match for sender/receiver using same key material")
 	}
 	if !bytes.Equal(senderKeys.ChainKey.Key(), receiverKeys.ChainKey.Key()) {

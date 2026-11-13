@@ -83,13 +83,13 @@ func TestProtoSetFromFields_WithSecretFields(t *testing.T) {
 		t.Fatal("nil state")
 	}
 
-	if got := state.ProtoDK(); got == nil {
+	if got := mustCopy(state.ProtoDK()); got == nil {
 		t.Error("ProtoDK() should not be nil")
 	}
-	if got := state.ProtoEKSeed(); got == nil {
+	if got := mustCopy(state.ProtoEKSeed()); got == nil {
 		t.Error("ProtoEKSeed() should not be nil")
 	}
-	if got := state.ProtoEKVector(); got == nil {
+	if got := mustCopy(state.ProtoEKVector()); got == nil {
 		t.Error("ProtoEKVector() should not be nil")
 	}
 
@@ -140,25 +140,25 @@ func TestProtoSetFromFields_BobFields(t *testing.T) {
 	}
 
 	// All accessors should return non-nil bytes.
-	if got := state.ProtoReceivedCt1(); got == nil {
+	if got := mustCopy(state.ProtoReceivedCt1()); got == nil {
 		t.Error("ProtoReceivedCt1() should not be nil")
 	}
-	if got := state.ProtoBobEKSeed(); got == nil {
+	if got := mustCopy(state.ProtoBobEKSeed()); got == nil {
 		t.Error("ProtoBobEKSeed() should not be nil")
 	}
-	if got := state.ProtoBobHek(); got == nil {
+	if got := mustCopy(state.ProtoBobHek()); got == nil {
 		t.Error("ProtoBobHek() should not be nil")
 	}
-	if got := state.ProtoBobEncapSecret(); got == nil {
+	if got := mustCopy(state.ProtoBobEncapSecret()); got == nil {
 		t.Error("ProtoBobEncapSecret() should not be nil")
 	}
-	if got := state.ProtoBobEKVector(); got == nil {
+	if got := mustCopy(state.ProtoBobEKVector()); got == nil {
 		t.Error("ProtoBobEKVector() should not be nil")
 	}
-	if got := state.ProtoBobCt1(); got == nil {
+	if got := mustCopy(state.ProtoBobCt1()); got == nil {
 		t.Error("ProtoBobCt1() should not be nil")
 	}
-	if got := state.ProtoBobSS(); got == nil {
+	if got := mustCopy(state.ProtoBobSS()); got == nil {
 		t.Error("ProtoBobSS() should not be nil")
 	}
 
@@ -877,13 +877,13 @@ func TestStateProtoAccessors_BobFields(t *testing.T) {
 	s := bob.State()
 
 	// All bob fields are populated after a partial run.
-	_ = s.ProtoBobEKSeed()
-	_ = s.ProtoBobHek()
-	_ = s.ProtoBobEncapSecret()
-	_ = s.ProtoBobEKVector()
-	_ = s.ProtoBobCt1()
-	_ = s.ProtoBobSS()
-	_ = s.ProtoReceivedCt1()
+	_, _ = s.ProtoBobEKSeed()
+	_, _ = s.ProtoBobHek()
+	_, _ = s.ProtoBobEncapSecret()
+	_, _ = s.ProtoBobEKVector()
+	_, _ = s.ProtoBobCt1()
+	_, _ = s.ProtoBobSS()
+	_, _ = s.ProtoReceivedCt1()
 
 	// Encoder/decoder accessors must not panic.
 	_ = s.ProtoEKEncoder()

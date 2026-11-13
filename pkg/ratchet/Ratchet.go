@@ -112,27 +112,10 @@ func CalculateSenderSession(parameters *SenderParameters) (*session.KeyPair, *ke
 
 	// Copy bytes out of guarded memory before passing to constructors,
 	// since constructors move data into new guarded memory and zeroize the source.
-	rootKeyBytes := make([]byte, 32)
-	// The accessor returns an owned copy; wipe it once copied.
-	if src := derivedKeys.RootKey(); src != nil {
-		copy(rootKeyBytes, src)
-		crypto.Zeroize(src)
+	rootKeyBytes, chainKeyBytes, pqrKeyBytes, err := takeDerivedKeys(derivedKeys)
+	if err != nil {
+		return nil, nil, err
 	}
-	chainKeyBytes := make([]byte, 32)
-	// The accessor returns an owned copy; wipe it once copied.
-	if src := derivedKeys.ChainKey(); src != nil {
-		copy(chainKeyBytes, src)
-		crypto.Zeroize(src)
-	}
-
-	// Extract the InitialPQRKey for SPQR initialization.
-	var pqrKeyBytes []byte
-	if pqrBytes := derivedKeys.InitialPQRKey(); pqrBytes != nil {
-		pqrKeyBytes = make([]byte, 32)
-		copy(pqrKeyBytes, pqrBytes)
-		crypto.Zeroize(pqrBytes)
-	}
-	derivedKeys.Zeroize()
 
 	chainKey := chain.NewKey(kdf.DeriveSecrets, chainKeyBytes, 0)
 	rootKey := root.NewKey(kdf.DeriveSecrets, rootKeyBytes)
@@ -257,27 +240,10 @@ func CalculateReceiverSession(parameters *ReceiverParameters) (*session.KeyPair,
 
 	// Copy bytes out of guarded memory before passing to constructors,
 	// since constructors move data into new guarded memory and zeroize the source.
-	rootKeyBytes := make([]byte, 32)
-	// The accessor returns an owned copy; wipe it once copied.
-	if src := derivedKeys.RootKey(); src != nil {
-		copy(rootKeyBytes, src)
-		crypto.Zeroize(src)
+	rootKeyBytes, chainKeyBytes, pqrKeyBytes, err := takeDerivedKeys(derivedKeys)
+	if err != nil {
+		return nil, err
 	}
-	chainKeyBytes := make([]byte, 32)
-	// The accessor returns an owned copy; wipe it once copied.
-	if src := derivedKeys.ChainKey(); src != nil {
-		copy(chainKeyBytes, src)
-		crypto.Zeroize(src)
-	}
-
-	// Extract the InitialPQRKey for SPQR initialization.
-	var pqrKeyBytes []byte
-	if pqrBytes := derivedKeys.InitialPQRKey(); pqrBytes != nil {
-		pqrKeyBytes = make([]byte, 32)
-		copy(pqrKeyBytes, pqrBytes)
-		crypto.Zeroize(pqrBytes)
-	}
-	derivedKeys.Zeroize()
 
 	chainKey := chain.NewKey(kdf.DeriveSecrets, chainKeyBytes, 0)
 	rootKey := root.NewKey(kdf.DeriveSecrets, rootKeyBytes)
@@ -291,4 +257,24 @@ func CalculateReceiverSession(parameters *ReceiverParameters) (*session.KeyPair,
 	}
 
 	return sessionKeys, nil
+}
+
+// takeDerivedKeys copies the root, chain and initial PQR keys out of d and
+// zeroizes d. A failed copy is an error, never a zero key; the PQR key is
+// nil only when d holds none (a legacy 64-byte derivation).
+func takeDerivedKeys(d *session.DerivedSecrets) (rootKey, chainKey, pqrKey []byte, err error) {
+	defer d.Zeroize()
+	if rootKey, err = d.RootKey(); err != nil {
+		return nil, nil, nil, err
+	}
+	if chainKey, err = d.ChainKey(); err != nil {
+		crypto.Zeroize(rootKey)
+		return nil, nil, nil, err
+	}
+	if pqrKey, err = d.InitialPQRKey(); err != nil {
+		crypto.Zeroize(rootKey)
+		crypto.Zeroize(chainKey)
+		return nil, nil, nil, err
+	}
+	return rootKey, chainKey, pqrKey, nil
 }

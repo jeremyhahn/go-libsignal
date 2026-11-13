@@ -18,6 +18,10 @@ const MacKeyLength = 32
 // IVLength is the length of the initialization vector in bytes.
 const IVLength = 16
 
+// SeedMaterialLength is the length of the HMAC base material a message key
+// is derived from.
+const SeedMaterialLength = 32
+
 // KdfInfo is the HKDF info parameter used when deriving message keys.
 // Despite the historical name "WhisperMessageKeys", this string is passed
 // as the HKDF info (context) parameter, not the salt.
@@ -152,7 +156,16 @@ func NewKeysFromStruct(structure *KeysStructure) (_ *Keys, err error) {
 // so far is released before returning.
 func NewStructFromKeys(keys *Keys) (_ *KeysStructure, err error) {
 	// Seed-only form: matches Rust MessageKeyGenerator::into_pb Seed variant.
-	if !keys.seedMaterial.IsDestroyed() {
+	// A destroyed seed is an error: storing the key without it would later
+	// skip the PQR re-derivation.
+	seedLen := 0
+	if err := keys.seedMaterial.WithBytes(func(b []byte) error {
+		seedLen = len(b)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if seedLen > 0 {
 		clonedSeed, cloneErr := keys.seedMaterial.Clone()
 		if cloneErr != nil {
 			return nil, cloneErr
@@ -237,36 +250,45 @@ type Keys struct {
 }
 
 // CipherKey returns the key used to produce ciphertext as a copy made
-// inside the enclave borrow. The caller owns the copy and should zeroize it.
-func (k *Keys) CipherKey() []byte {
-	return copySecret(k.cipherKey)
+// inside the enclave borrow. A missing, destroyed or wrong-length key is an
+// error. The caller owns the copy and should zeroize it.
+func (k *Keys) CipherKey() ([]byte, error) {
+	return copySecret(k.cipherKey, "cipher key", CipherKeyLength)
 }
 
-// MacKey returns the message authentication code key as a copy
-// made inside the enclave borrow. The caller owns the copy and should zeroize it.
-func (k *Keys) MacKey() []byte {
-	return copySecret(k.macKey)
+// MacKey returns the message authentication code key as a copy made inside
+// the enclave borrow. A missing, destroyed or wrong-length key is an error.
+// The caller owns the copy and should zeroize it.
+func (k *Keys) MacKey() ([]byte, error) {
+	return copySecret(k.macKey, "mac key", MacKeyLength)
 }
 
-// Iv returns the initialization vector as a copy
-// made inside the enclave borrow. The caller owns the copy and should zeroize it.
-func (k *Keys) Iv() []byte {
-	return copySecret(k.iv)
+// Iv returns the initialization vector as a copy made inside the enclave
+// borrow. A missing, destroyed or wrong-length IV is an error. The caller
+// owns the copy and should zeroize it.
+func (k *Keys) Iv() ([]byte, error) {
+	return copySecret(k.iv, "iv", IVLength)
 }
 
 // copySecret copies s's bytes inside its enclave borrow, for the accessors
-// whose value must leave the borrow. A nil or destroyed secret yields nil.
-func copySecret(s *secret.Secret) []byte {
+// whose value must leave the borrow. The material must be exactly want
+// bytes. A nil, destroyed or wrong-length secret is an error, never a nil
+// or short copy.
+func copySecret(s *secret.Secret, field string, want int) ([]byte, error) {
+	if s == nil {
+		return nil, &MissingKeyError{Field: field}
+	}
 	var out []byte
 	if err := s.WithBytes(func(b []byte) error {
-		if b != nil {
-			out = append([]byte(nil), b...)
+		if len(b) != want {
+			return &KeyLengthError{Field: field, Got: len(b), Want: want}
 		}
+		out = append(make([]byte, 0, want), b...)
 		return nil
 	}); err != nil {
-		return nil
+		return nil, err
 	}
-	return out
+	return out, nil
 }
 
 // Index returns the number of times the chain key has been put through a key derivation
@@ -276,13 +298,14 @@ func (k *Keys) Index() uint32 {
 }
 
 // SeedMaterial returns a copy of the guarded HMAC base material for re-derivation,
-// made inside the enclave borrow, or nil if no seed material is stored. The
-// caller owns the copy and should zeroize it.
-func (k *Keys) SeedMaterial() []byte {
-	if k.seedMaterial == nil || k.seedMaterial.IsDestroyed() {
-		return nil
+// made inside the enclave borrow, or nil, nil if no seed material is stored.
+// A destroyed or wrong-length seed is an error, so it is never mistaken for
+// a key without one. The caller owns the copy and should zeroize it.
+func (k *Keys) SeedMaterial() ([]byte, error) {
+	if k.seedMaterial == nil {
+		return nil, nil
 	}
-	return copySecret(k.seedMaterial)
+	return copySecret(k.seedMaterial, "seed material", SeedMaterialLength)
 }
 
 // SetSeedMaterial stores the 32-byte HMAC base material for later re-derivation

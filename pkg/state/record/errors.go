@@ -82,3 +82,15 @@ type SignedPreKeyPublicKeyLengthError struct {
 func (e *SignedPreKeyPublicKeyLengthError) Error() string {
 	return fmt.Sprintf("record: signed pre-key public key: expected %d bytes, got %d", e.Want, e.Got)
 }
+
+// PrivateKeyLengthError indicates that a stored private key was missing or
+// held the wrong number of bytes. It is refused rather than zero-padded into
+// a key.
+type PrivateKeyLengthError struct {
+	Got  int
+	Want int
+}
+
+func (e *PrivateKeyLengthError) Error() string {
+	return fmt.Sprintf("record: private key: expected %d bytes, got %d", e.Want, e.Got)
+}
