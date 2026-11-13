@@ -232,20 +232,79 @@ func TestNewEmpty_ZeroSize(t *testing.T) {
 // Secret method tests
 // ---------------------------------------------------------------------------
 
-func TestSecret_Bytes_PanicsAfterDestroy(t *testing.T) {
+func TestSecret_WithBytes_AfterDestroy(t *testing.T) {
 	s, err := New([]byte{1, 2, 3})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.Destroy()
 
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatal("Bytes() should panic after Destroy()")
-		}
-	}()
-	_ = secrettest.Bytes(s)
+	called := false
+	err = s.WithBytes(func([]byte) error {
+		called = true
+		return nil
+	})
+	if !errors.Is(err, ErrSecretDestroyed) {
+		t.Fatalf("WithBytes after Destroy: got %v, want ErrSecretDestroyed", err)
+	}
+	if called {
+		t.Fatal("WithBytes called fn on a destroyed Secret")
+	}
+	if got := secrettest.Bytes(s); got != nil {
+		t.Fatalf("secrettest.Bytes after Destroy = %x, want nil", got)
+	}
+}
+
+// TestSecret_ReleasedBytesZeroed checks that once a Secret is released, no
+// read path yields its old material: borrows are refused, the test copy is
+// all zeros, and constant-time comparison against the original fails.
+func TestSecret_ReleasedBytesZeroed(t *testing.T) {
+	original := bytes.Repeat([]byte{0xA5}, 32)
+	input := append([]byte(nil), original...)
+	s, err := New(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(input, make([]byte, len(input))) {
+		t.Fatal("New did not wipe its input")
+	}
+	if !s.EqualTo(original) {
+		t.Fatal("Secret does not hold its material before release")
+	}
+
+	s.Destroy()
+	s.Destroy() // idempotent
+
+	if !s.IsDestroyed() {
+		t.Fatal("IsDestroyed is false after Destroy")
+	}
+	if got := secrettest.Array(s); got != [32]byte{} {
+		t.Fatalf("released Secret yields %x, want zeros", got)
+	}
+	if s.EqualTo(original) {
+		t.Fatal("released Secret still compares equal to its old material")
+	}
+	if _, err := s.Clone(); !errors.Is(err, ErrSecretDestroyed) {
+		t.Fatalf("Clone of released Secret: got %v, want ErrSecretDestroyed", err)
+	}
+
+	var input32 [32]byte
+	copy(input32[:], original)
+	s32, err := NewSecret32(input32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s32.Destroy()
+	if got := secrettest.Array(s32); got != [32]byte{} {
+		t.Fatalf("released Secret32 yields %x, want zeros", got)
+	}
+	err = s32.WithArray(func(*[32]byte) error {
+		t.Fatal("WithArray called fn on a released Secret32")
+		return nil
+	})
+	if !errors.Is(err, ErrSecretDestroyed) {
+		t.Fatalf("WithArray on released Secret32: got %v, want ErrSecretDestroyed", err)
+	}
 }
 
 func TestSecret_Size_AfterDestroy(t *testing.T) {
@@ -662,7 +721,7 @@ func TestSecret32_WithArray_AfterDestroy(t *testing.T) {
 	}
 }
 
-func TestSecret32_Bytes_PanicsAfterDestroy(t *testing.T) {
+func TestSecret32_WithBytes_AfterDestroy(t *testing.T) {
 	var input [32]byte
 	s, err := NewSecret32(input)
 	if err != nil {
@@ -670,12 +729,20 @@ func TestSecret32_Bytes_PanicsAfterDestroy(t *testing.T) {
 	}
 	s.Destroy()
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("Bytes() should panic after Destroy()")
-		}
-	}()
-	_ = secrettest.Bytes(s)
+	called := false
+	err = s.WithBytes(func([]byte) error {
+		called = true
+		return nil
+	})
+	if !errors.Is(err, ErrSecretDestroyed) {
+		t.Fatalf("WithBytes after Destroy: got %v, want ErrSecretDestroyed", err)
+	}
+	if called {
+		t.Fatal("WithBytes called fn on a destroyed Secret32")
+	}
+	if got := secrettest.Bytes(s); got != nil {
+		t.Fatalf("secrettest.Bytes after Destroy = %x, want nil", got)
+	}
 }
 
 func TestSecret32_Destroy_Idempotent(t *testing.T) {

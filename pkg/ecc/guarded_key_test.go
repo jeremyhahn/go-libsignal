@@ -305,6 +305,25 @@ func TestGuardedECPrivateKey_PublicKey_AfterDestroy(t *testing.T) {
 	}
 }
 
+// Serialize on a destroyed key returns zeros rather than panicking: the
+// WithBytes borrow refuses a destroyed enclave, so nothing is copied out.
+func TestGuardedECPrivateKey_Serialize_AfterDestroy(t *testing.T) {
+	kp, err := GenerateGuardedKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateGuardedKeyPair failed: %v", err)
+	}
+
+	priv := kp.GuardedPrivateKey()
+	if priv.Serialize() == ([32]byte{}) {
+		t.Fatal("expected non-zero serialization before destroy")
+	}
+	priv.Destroy()
+
+	if got := priv.Serialize(); got != ([32]byte{}) {
+		t.Fatalf("expected zero serialization after destroy, got %x", got)
+	}
+}
+
 // --- GuardedECPrivateKey: Destroy and IsDestroyed ---
 
 func TestGuardedECPrivateKey_Destroy_Idempotent(t *testing.T) {
