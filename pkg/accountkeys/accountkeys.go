@@ -4,7 +4,6 @@ package accountkeys
 
 import (
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"fmt"
 	"io"
@@ -92,30 +91,35 @@ func GenerateAccountEntropyPool() (AccountEntropyPool, error) {
 	defer randBuf.Destroy()
 
 	buf := make([]byte, EntropyPoolLength)
-	randBytes := randBuf.Bytes()
-	randIdx := 0
-
-	for i := range buf {
+	i := 0
+	for {
 		// Use rejection sampling to avoid modulo bias.
 		// 256 / 36 = 7 full ranges, remainder 4. Accept bytes < 252 (36*7).
-		for {
-			if randIdx >= len(randBytes) {
-				// Exhausted buffer; allocate more random bytes.
-				randBuf.Destroy()
-				randBuf, err = secretRandAlloc(randomBufSize)
-				if err != nil {
-					crypto.Zeroize(buf)
-					return "", &ErrGeneratingRandomEntropy{Err: err}
+		// The random bytes are read only inside the enclave borrow.
+		if borrowErr := randBuf.WithBytes(func(randBytes []byte) error {
+			for _, b := range randBytes {
+				if i >= len(buf) {
+					return nil
 				}
-				randBytes = randBuf.Bytes()
-				randIdx = 0
+				if b < 252 { // 36 * 7 = 252
+					buf[i] = alphabet[b%36]
+					i++
+				}
 			}
-			b := randBytes[randIdx]
-			randIdx++
-			if b < 252 { // 36 * 7 = 252
-				buf[i] = alphabet[b%36]
-				break
-			}
+			return nil
+		}); borrowErr != nil {
+			crypto.Zeroize(buf)
+			return "", &ErrGeneratingRandomEntropy{Err: borrowErr}
+		}
+		if i >= len(buf) {
+			break
+		}
+		// Exhausted buffer; allocate more random bytes.
+		randBuf.Destroy()
+		randBuf, err = secretRandAlloc(randomBufSize)
+		if err != nil {
+			crypto.Zeroize(buf)
+			return "", &ErrGeneratingRandomEntropy{Err: err}
 		}
 	}
 	pool := AccountEntropyPool(buf)
@@ -233,15 +237,21 @@ func HashPin(pin string, salt []byte) (*PinHash, error) {
 	// Copy each half into its own secret. Must copy before creating secrets
 	// since the view is into derivedSecret's guarded memory.
 	encBuf := make([]byte, 32)
-	copy(encBuf, derivedSecret.Bytes()[:32])
+	accBuf := make([]byte, 32)
+	if err := derivedSecret.WithBytes(func(derived []byte) error {
+		copy(encBuf, derived[:32])
+		copy(accBuf, derived[32:64])
+		return nil
+	}); err != nil {
+		return nil, &ErrSecuringSecret{Operation: "encryption key", Err: err}
+	}
 	encSecret, err := secretAlloc(encBuf)
 	if err != nil {
 		crypto.Zeroize(encBuf)
+		crypto.Zeroize(accBuf)
 		return nil, &ErrSecuringSecret{Operation: "encryption key", Err: err}
 	}
 
-	accBuf := make([]byte, 32)
-	copy(accBuf, derivedSecret.Bytes()[32:64])
 	accSecret, err := secretAlloc(accBuf)
 	if err != nil {
 		crypto.Zeroize(accBuf)
@@ -263,7 +273,7 @@ func VerifyPin(pin string, salt []byte, expectedAccessKey []byte) (bool, error) 
 		return false, err
 	}
 	defer h.Zeroize()
-	return subtle.ConstantTimeCompare(h.AccessKey.Bytes(), expectedAccessKey) == 1, nil
+	return h.AccessKey.EqualTo(expectedAccessKey), nil
 }
 
 // LocalPinHash creates a PHC-string encoded Argon2i hash of the PIN for local
@@ -284,8 +294,13 @@ func LocalPinHash(pin string) (string, error) {
 
 	// Copy salt out for use with Argon2 (which requires a plain slice).
 	salt := make([]byte, localPinHashSaltLength)
-	copy(salt, saltSecret.Bytes())
 	defer crypto.Zeroize(salt)
+	if err := saltSecret.WithBytes(func(b []byte) error {
+		copy(salt, b)
+		return nil
+	}); err != nil {
+		return "", err
+	}
 
 	return localPinHashWithSalt([]byte(normalized), salt)
 }
@@ -311,7 +326,13 @@ func localPinHashWithSalt(pin, salt []byte) (string, error) {
 
 	// Format as PHC-string: $argon2i$v=19$m=512,t=64,p=1$<b64salt>$<b64hash>
 	encodedSalt := base64RawEncode(salt)
-	encodedHash := base64RawEncode(derivedSecret.Bytes())
+	var encodedHash string
+	if err := derivedSecret.WithBytes(func(b []byte) error {
+		encodedHash = base64RawEncode(b)
+		return nil
+	}); err != nil {
+		return "", err
+	}
 	phc := fmt.Sprintf("$argon2i$v=19$m=%d,t=%d,p=%d$%s$%s",
 		localArgon2iMemory, localArgon2iTime, localArgon2iParallelism,
 		encodedSalt, encodedHash)
@@ -347,7 +368,7 @@ func VerifyLocalPinHash(pin string, encodedHash string) (bool, error) {
 	}
 	defer derivedSecret.Destroy()
 
-	return subtle.ConstantTimeCompare(derivedSecret.Bytes(), expectedHash) == 1, nil
+	return derivedSecret.EqualTo(expectedHash), nil
 }
 
 // MakeSalt generates a 32-byte salt for PIN hashing from a username and group ID.

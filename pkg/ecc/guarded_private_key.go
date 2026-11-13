@@ -145,7 +145,7 @@ func (g *GuardedECPrivateKey) VRFSign(rand io.Reader, message []byte) ([]byte, [
 		return nil, nil, &ErrReadingRandomness{Operation: "VRF signing", Err: err}
 	}
 
-	var sig *[64]byte
+	var sig *[96]byte
 	var vrf []byte
 	var signErr error
 	if err := g.key.WithArray(func(privateKey *[32]byte) error {
