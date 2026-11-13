@@ -6,6 +6,8 @@ package backup
 import (
 	"bytes"
 	"compress/gzip"
+	"crypto/hmac"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"math"
@@ -123,6 +125,49 @@ func TestVerifyHMAC_ValidInput(t *testing.T) {
 	var tooLarge *ErrBackupTooLarge
 	if errors.As(err, &tooLarge) {
 		t.Fatalf("VerifyHMAC returned ErrBackupTooLarge for in-budget corrupted input")
+	}
+}
+
+// TestVerifyHMAC_MissingKeyRejectsForgery checks that a MessageBackupKey with
+// no HMAC key does not verify data tagged under the empty key. Secret.WithBytes
+// hands fn a nil view for a nil Secret, so without the length check the HMAC
+// was keyed with nothing and anyone could forge a tag.
+func TestVerifyHMAC_MissingKeyRejectsForgery(t *testing.T) {
+	content := make([]byte, AESIVSize+AESBlockSize)
+	forger := hmac.New(sha256.New, nil)
+	forger.Write(content)
+	forged := forger.Sum(content)
+
+	err := VerifyHMAC(&MessageBackupKey{}, bytes.NewReader(forged))
+	if err == nil {
+		t.Fatal("VerifyHMAC accepted data tagged under an empty key")
+	}
+	var lenErr *ErrInvalidKeyLength
+	if !errors.As(err, &lenErr) {
+		t.Fatalf("VerifyHMAC error = %v (%T), want *ErrInvalidKeyLength", err, err)
+	}
+	if lenErr.Got != 0 || lenErr.Want != HMACKeyLen {
+		t.Fatalf("ErrInvalidKeyLength = %+v, want Got 0 Want %d", lenErr, HMACKeyLen)
+	}
+}
+
+// TestEncryptFrames_MissingHMACKeyFails checks that encryption refuses a key
+// whose HMAC half is missing instead of tagging output under an empty key.
+func TestEncryptFrames_MissingHMACKeyFails(t *testing.T) {
+	key := testKey()
+	defer key.Zeroize()
+	hmacKey := key.HMACKey
+	key.HMACKey = nil
+	defer hmacKey.Destroy()
+
+	var buf bytes.Buffer
+	err := NewFrameEncryptor(key).EncryptFrames(&buf, [][]byte{[]byte("frame")})
+	if err == nil {
+		t.Fatal("EncryptFrames succeeded without an HMAC key")
+	}
+	var lenErr *ErrInvalidKeyLength
+	if !errors.As(err, &lenErr) {
+		t.Fatalf("EncryptFrames error = %v (%T), want *ErrInvalidKeyLength", err, err)
 	}
 }
 
