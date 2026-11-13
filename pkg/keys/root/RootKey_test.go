@@ -60,12 +60,16 @@ func TestConstants(t *testing.T) {
 	}
 }
 
-func TestNewKey_BytesReturnsSameReference(t *testing.T) {
+func TestNewKey_BytesReturnsIndependentCopy(t *testing.T) {
 	key := NewKey(kdf.DeriveSecrets, []byte("some-key"))
 	b1 := key.Bytes()
 	b2 := key.Bytes()
-	if &b1[0] != &b2[0] {
-		t.Fatal("Bytes should return the same underlying slice")
+	if &b1[0] == &b2[0] {
+		t.Fatal("Bytes should return a fresh copy, not the locked view")
+	}
+	b1[0] ^= 0xFF
+	if b3 := key.Bytes(); b3[0] != b2[0] {
+		t.Fatal("mutating a copy from Bytes changed the key")
 	}
 }
 
