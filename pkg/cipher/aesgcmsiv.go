@@ -113,7 +113,12 @@ func (a *aesGCMSIV) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
 		panic("aesgcmsiv: plaintext exceeds RFC 8452 §6 maximum length")
 	}
 
-	ct, err := aesGCMSIVEncryptInternal(a.key.Bytes(), nonce, plaintext, additionalData)
+	var ct []byte
+	err := a.key.WithBytes(func(key []byte) error {
+		var encErr error
+		ct, encErr = aesGCMSIVEncryptInternal(key, nonce, plaintext, additionalData)
+		return encErr
+	})
 	if err != nil {
 		// panic: cryptographic invariant violation — the key was validated in
 		// NewAESGCMSIV; internal encryption with a valid key cannot fail.
@@ -135,7 +140,12 @@ func (a *aesGCMSIV) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte,
 		return nil, &ErrAESGCMSIVCiphertextTooShort{}
 	}
 
-	pt, err := aesGCMSIVDecryptInternal(a.key.Bytes(), nonce, ciphertext, additionalData)
+	var pt []byte
+	err := a.key.WithBytes(func(key []byte) error {
+		var decErr error
+		pt, decErr = aesGCMSIVDecryptInternal(key, nonce, ciphertext, additionalData)
+		return decErr
+	})
 	if err != nil {
 		return nil, err
 	}

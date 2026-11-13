@@ -65,7 +65,14 @@ func NewGuardedECPrivateKeyFromSecret(s *secret.Secret32) *GuardedECPrivateKey {
 //
 // Implements ECPrivateKeyable.
 func (g *GuardedECPrivateKey) Serialize() [32]byte {
-	return g.key.Array()
+	// The array is the value that leaves the borrow: it is copied inside it,
+	// and the caller zeroizes it after use.
+	var out [32]byte
+	_ = g.key.WithBytes(func(b []byte) error {
+		copy(out[:], b)
+		return nil
+	})
+	return out
 }
 
 // Type returns the EC key type identifier (DjbType = 0x05).
@@ -109,8 +116,13 @@ func (g *GuardedECPrivateKey) Sign(rand io.Reader, message []byte) ([64]byte, er
 		return [64]byte{}, &ErrReadingRandomness{Operation: "signing", Err: err}
 	}
 
-	privateKey := g.key.Ptr()
-	signature := sign(privateKey, message, random)
+	var signature *[64]byte
+	if err := g.key.WithArray(func(privateKey *[32]byte) error {
+		signature = sign(privateKey, message, random)
+		return nil
+	}); err != nil {
+		return [64]byte{}, ErrGuardedKeyDestroyed
+	}
 	if signature == nil {
 		return [64]byte{}, ErrSignFailed
 	}
@@ -133,8 +145,15 @@ func (g *GuardedECPrivateKey) VRFSign(rand io.Reader, message []byte) ([]byte, [
 		return nil, nil, &ErrReadingRandomness{Operation: "VRF signing", Err: err}
 	}
 
-	privateKey := g.key.Ptr()
-	sig, vrf, signErr := vxeddsaSign(privateKey, message, random)
+	var sig *[64]byte
+	var vrf []byte
+	var signErr error
+	if err := g.key.WithArray(func(privateKey *[32]byte) error {
+		sig, vrf, signErr = vxeddsaSign(privateKey, message, random)
+		return nil
+	}); err != nil {
+		return nil, nil, ErrGuardedKeyDestroyed
+	}
 	if signErr != nil {
 		return nil, nil, signErr
 	}
@@ -157,8 +176,14 @@ func (g *GuardedECPrivateKey) Agreement(peerPublic [32]byte) (ss *secret.Secret3
 		return nil, ErrGuardedKeyDestroyed
 	}
 
-	privateBytes := g.key.Bytes()
-	result, dhErr := curve25519.X25519(privateBytes, peerPublic[:])
+	var result []byte
+	var dhErr error
+	if err := g.key.WithBytes(func(privateBytes []byte) error {
+		result, dhErr = curve25519.X25519(privateBytes, peerPublic[:])
+		return nil
+	}); err != nil {
+		return nil, ErrGuardedKeyDestroyed
+	}
 	if dhErr != nil {
 		return nil, &ErrX25519Agreement{Err: dhErr}
 	}
@@ -189,8 +214,12 @@ func (g *GuardedECPrivateKey) PublicKey() [32]byte {
 		return [32]byte{}
 	}
 	var public [32]byte
-	privateKey := g.key.Ptr()
-	curve25519.ScalarBaseMult(&public, privateKey)
+	if err := g.key.WithArray(func(privateKey *[32]byte) error {
+		curve25519.ScalarBaseMult(&public, privateKey)
+		return nil
+	}); err != nil {
+		return [32]byte{}
+	}
 	return public
 }
 

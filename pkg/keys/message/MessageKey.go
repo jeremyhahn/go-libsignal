@@ -236,22 +236,37 @@ type Keys struct {
 	seedMaterial *secret.Secret
 }
 
-// CipherKey returns the key used to produce ciphertext as a view into guarded memory.
-// The returned slice must not be retained beyond the lifetime of this Keys.
+// CipherKey returns the key used to produce ciphertext as a copy made
+// inside the enclave borrow. The caller owns the copy and should zeroize it.
 func (k *Keys) CipherKey() []byte {
-	return k.cipherKey.Bytes()
+	return copySecret(k.cipherKey)
 }
 
-// MacKey returns the message authentication code key as a view into guarded memory.
-// The returned slice must not be retained beyond the lifetime of this Keys.
+// MacKey returns the message authentication code key as a copy
+// made inside the enclave borrow. The caller owns the copy and should zeroize it.
 func (k *Keys) MacKey() []byte {
-	return k.macKey.Bytes()
+	return copySecret(k.macKey)
 }
 
-// Iv returns the initialization vector as a view into guarded memory.
-// The returned slice must not be retained beyond the lifetime of this Keys.
+// Iv returns the initialization vector as a copy
+// made inside the enclave borrow. The caller owns the copy and should zeroize it.
 func (k *Keys) Iv() []byte {
-	return k.iv.Bytes()
+	return copySecret(k.iv)
+}
+
+// copySecret copies s's bytes inside its enclave borrow, for the accessors
+// whose value must leave the borrow. A nil or destroyed secret yields nil.
+func copySecret(s *secret.Secret) []byte {
+	var out []byte
+	if err := s.WithBytes(func(b []byte) error {
+		if b != nil {
+			out = append([]byte(nil), b...)
+		}
+		return nil
+	}); err != nil {
+		return nil
+	}
+	return out
 }
 
 // Index returns the number of times the chain key has been put through a key derivation
@@ -260,14 +275,14 @@ func (k *Keys) Index() uint32 {
 	return k.index
 }
 
-// SeedMaterial returns a view into the guarded HMAC base material for re-derivation,
-// or nil if no seed material is stored. The returned slice must not be retained
-// beyond the lifetime of this Keys.
+// SeedMaterial returns a copy of the guarded HMAC base material for re-derivation,
+// made inside the enclave borrow, or nil if no seed material is stored. The
+// caller owns the copy and should zeroize it.
 func (k *Keys) SeedMaterial() []byte {
 	if k.seedMaterial == nil || k.seedMaterial.IsDestroyed() {
 		return nil
 	}
-	return k.seedMaterial.Bytes()
+	return copySecret(k.seedMaterial)
 }
 
 // SetSeedMaterial stores the 32-byte HMAC base material for later re-derivation

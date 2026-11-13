@@ -2,6 +2,7 @@ package secret
 
 import (
 	"crypto/rand"
+	"errors"
 	"io"
 
 	"github.com/jeremyhahn/go-enclave"
@@ -85,8 +86,8 @@ func NewRandom(size int) (*Secret, error) {
 }
 
 // NewEmpty creates a Secret of the given size, initialized to zero, whose
-// locked pages stay writable so the caller can fill them in place through
-// Bytes.
+// locked pages stay writable so the caller can fill them in place inside
+// WithBytes.
 //
 // A size of zero yields a Secret that holds no material. Returns ErrSecretAlloc
 // if the underlying locked-memory allocation fails.
@@ -101,22 +102,31 @@ func NewEmpty(size int) (*Secret, error) {
 	return &Secret{enc: enc}, nil
 }
 
-// Bytes returns a view into the locked memory. The returned slice must not be
-// retained beyond the lifetime of the Secret, and a concurrent Destroy can
-// unmap the pages beneath it — the same contract the previous memguard-backed
-// view carried.
+// WithBytes calls fn with a view of the secret's locked memory and returns
+// fn's error. The view is valid only while fn runs: fn must not retain it
+// (or any sub-slice of it) and must not call a method on the same Secret,
+// which would deadlock against the enclave's borrow lock. A value that must
+// outlive fn is copied inside fn, and the caller wipes the copy when done.
 //
-// Panics if the secret has been destroyed. Callers should check IsDestroyed
-// first in contexts where destruction is possible.
-func (s *Secret) Bytes() []byte {
-	if s.IsDestroyed() {
-		panic("secret: attempt to access destroyed secret")
+// A nil Secret, or one that holds no material (size zero), calls fn with a
+// nil slice. A destroyed Secret does not call fn and returns
+// ErrSecretDestroyed; a nil fn returns ErrNilInput.
+func (s *Secret) WithBytes(fn func([]byte) error) error {
+	if fn == nil {
+		return &Error{kind: errNilInput}
 	}
-	b, err := s.enc.Open()
-	if err != nil {
-		panic("secret: attempt to access destroyed secret")
+	if s == nil || s.enc == nil {
+		return fn(nil)
 	}
-	return b
+	called := false
+	err := s.enc.WithBytes(func(b []byte) error {
+		called = true
+		return fn(b)
+	})
+	if !called && errors.Is(err, enclave.ErrEnclaveDestroyed) {
+		return &Error{kind: errSecretDestroyed}
+	}
+	return err
 }
 
 // Size returns the size of the secret in bytes.

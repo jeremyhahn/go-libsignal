@@ -56,34 +56,32 @@ func NewSecret32Random() (*Secret32, error) {
 	return &Secret32{inner: s}, nil
 }
 
-// Bytes returns a view into the guarded memory. The returned slice must not
-// be retained beyond the lifetime of the Secret32.
-//
-// Panics if the secret has been destroyed.
-func (s *Secret32) Bytes() []byte {
-	return s.inner.Bytes()
-}
-
-// Array returns a copy of the secret as a fixed 32-byte array. The caller
-// is responsible for zeroizing the returned array when done.
-//
-// Panics if the secret has been destroyed.
-func (s *Secret32) Array() [32]byte {
-	var out [32]byte
-	copy(out[:], s.inner.Bytes())
-	return out
-}
-
-// Ptr returns a pointer to the 32-byte array in locked memory. The pointer
-// aliases the locked pages and must not be retained beyond the lifetime of the
-// Secret32.
-//
-// Panics if the secret has been destroyed.
-func (s *Secret32) Ptr() *[32]byte {
-	if s.inner.IsDestroyed() {
-		panic("secret: attempt to access destroyed secret")
+// WithBytes calls fn with a view of the secret's 32 locked bytes, under the
+// contract of Secret.WithBytes: the view is valid only while fn runs and must
+// not be retained.
+func (s *Secret32) WithBytes(fn func([]byte) error) error {
+	if s == nil {
+		return &Error{kind: errSecretDestroyed}
 	}
-	return (*[32]byte)(s.inner.Bytes())
+	if s.inner.IsDestroyed() {
+		if fn == nil {
+			return &Error{kind: errNilInput}
+		}
+		return &Error{kind: errSecretDestroyed}
+	}
+	return s.inner.WithBytes(fn)
+}
+
+// WithArray calls fn with the secret's locked memory viewed as a 32-byte
+// array, for APIs that take *[32]byte. The pointer is valid only while fn
+// runs and must not be retained.
+func (s *Secret32) WithArray(fn func(*[32]byte) error) error {
+	if fn == nil {
+		return &Error{kind: errNilInput}
+	}
+	return s.WithBytes(func(b []byte) error {
+		return fn((*[32]byte)(b))
+	})
 }
 
 // Destroy zeroizes and frees the guarded memory. This method is idempotent
