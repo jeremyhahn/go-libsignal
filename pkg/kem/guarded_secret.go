@@ -280,7 +280,7 @@ func GuardedFromPublicAndPrivate(publicSerialized []byte, secretData []byte) (*G
 	if err != nil {
 		return nil, err
 	}
-	if err := validateSecretKeyMaterial(pk.Type(), len(sk.Data())); err != nil {
+	if err := validateSecretKeyMaterial(pk.Type(), sk.key.Size()); err != nil {
 		sk.Destroy()
 		return nil, err
 	}

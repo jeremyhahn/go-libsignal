@@ -119,8 +119,11 @@ func (g *GuardedKyber1024) Decapsulate(secretKey *GuardedSecretKey, ciphertext *
 		return nil, &KeyTypeMismatchError{Expected: KeyTypeKyber1024, Actual: ciphertext.Type(), KeyKind: "ciphertext"}
 	}
 
-	// Use the view into guarded memory for unmarshaling (no copy needed).
-	sk, unmarshalErr := guardedKyber1024Scheme.UnmarshalBinaryPrivateKey(secretKey.Data())
+	// Data returns an owned heap copy; the scheme copies it into its own key,
+	// so wipe the copy as soon as unmarshaling is done.
+	skBytes := secretKey.Data()
+	sk, unmarshalErr := guardedKyber1024Scheme.UnmarshalBinaryPrivateKey(skBytes)
+	zeroizeSlice(skBytes)
 	if unmarshalErr != nil {
 		return nil, &UnmarshalError{Algorithm: "kyber1024", KeyKind: "secret", Err: unmarshalErr}
 	}

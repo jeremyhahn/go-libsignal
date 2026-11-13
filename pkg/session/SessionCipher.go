@@ -16,6 +16,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/store"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/bytehelper"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 )
 
 const maxFutureMessages = 25000
@@ -186,6 +187,8 @@ func (d *Cipher) Encrypt(plaintext []byte) (protocol.CiphertextMessage, error) {
 		pqrMsg      []byte
 	)
 	if pqrState := sessionState.PqRatchetState(); len(pqrState) > 0 {
+		// PqRatchetState returns an owned copy; wipe it on return.
+		defer crypto.Zeroize(pqrState)
 		newState, msg, pqrKey, pqrErr := spqr.Send(pqrState)
 		if pqrErr != nil {
 			return nil, pqrErr
@@ -216,12 +219,16 @@ func (d *Cipher) Encrypt(plaintext []byte) (protocol.CiphertextMessage, error) {
 		return nil, err
 	}
 
+	// MacKey returns an owned copy; wipe it once the message is built.
+	macKey := messageKeys.MacKey()
+	defer crypto.Zeroize(macKey)
+
 	var ciphertextMessage protocol.CiphertextMessage
 	ciphertextMessage, err = protocol.NewSignalMessage(
 		sessionVersion,
 		chainKey.Index(),
 		previousCounter,
-		messageKeys.MacKey(),
+		macKey,
 		senderEphemeral,
 		ciphertextBody,
 		sessionState.LocalIdentityKey(),
@@ -594,8 +601,12 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 		// SPQR: If the stored key has seed material and the message carries PQR
 		// data, re-derive the message keys with the PQR salt from the SPQR ratchet.
 		if seed := skippedKeys.SeedMaterial(); len(seed) > 0 {
+			// SeedMaterial returns an owned copy; wipe it on return.
+			defer crypto.Zeroize(seed)
 			if pqrData := ciphertextMessage.PqRatchetKey(); len(pqrData) > 0 {
 				if pqrState := sessionState.PqRatchetState(); len(pqrState) > 0 {
+					// PqRatchetState returns an owned copy; wipe it on return.
+					defer crypto.Zeroize(pqrState)
 					newState, pqrKey, pqrErr := spqr.Recv(pqrState, pqrData)
 					if pqrErr != nil {
 						return nil, nil, pqrErr
@@ -623,16 +634,19 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 		// known, enforcing address binding on pre-key decrypt. Mirrors Rust
 		// rust/protocol/src/session_management.rs:242 and
 		// rust/protocol/src/triple_ratchet.rs TripleRatchet::decrypt.
+		// MacKey returns an owned copy; wipe it when decrypt returns.
+		skippedMacKey := skippedKeys.MacKey()
+		defer crypto.Zeroize(skippedMacKey)
 		if d.localAddress != nil && d.remoteAddress != nil {
 			err := ciphertextMessage.VerifyMacWithAddresses(messageVersion,
 				sessionState.RemoteIdentityKey(), sessionState.LocalIdentityKey(),
-				skippedKeys.MacKey(), d.remoteAddress, d.localAddress)
+				skippedMacKey, d.remoteAddress, d.localAddress)
 			if err != nil {
 				logger.Error("Unable to verify ciphertext mac (with addresses) for skipped key: ", err)
 				return nil, nil, err
 			}
 		} else {
-			err := ciphertextMessage.VerifyMac(messageVersion, sessionState.RemoteIdentityKey(), sessionState.LocalIdentityKey(), skippedKeys.MacKey())
+			err := ciphertextMessage.VerifyMac(messageVersion, sessionState.RemoteIdentityKey(), sessionState.LocalIdentityKey(), skippedMacKey)
 			if err != nil {
 				logger.Error("Unable to verify ciphertext mac for skipped key: ", err)
 				return nil, nil, err
@@ -664,6 +678,8 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 	var pqrSalt []byte
 	if pqrData := ciphertextMessage.PqRatchetKey(); len(pqrData) > 0 {
 		if pqrState := sessionState.PqRatchetState(); len(pqrState) > 0 {
+			// PqRatchetState returns an owned copy; wipe it on return.
+			defer crypto.Zeroize(pqrState)
 			newState, pqrKey, pqrErr := spqr.Recv(pqrState, pqrData)
 			if pqrErr != nil {
 				// SPQR duplicate errors can mean either a genuine replay (same
@@ -703,16 +719,19 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 	// F15: Use VerifyMacWithAddresses when both local and remote addresses are
 	// known, enforcing address binding. Mirrors Rust
 	// rust/protocol/src/session_management.rs:242.
+	// MacKey returns an owned copy; wipe it when decrypt returns.
+	macKey := messageKeys.MacKey()
+	defer crypto.Zeroize(macKey)
 	if d.localAddress != nil && d.remoteAddress != nil {
 		err := ciphertextMessage.VerifyMacWithAddresses(messageVersion,
 			sessionState.RemoteIdentityKey(), sessionState.LocalIdentityKey(),
-			messageKeys.MacKey(), d.remoteAddress, d.localAddress)
+			macKey, d.remoteAddress, d.localAddress)
 		if err != nil {
 			logger.Error("Unable to verify ciphertext mac (with addresses): ", err)
 			return nil, nil, err
 		}
 	} else {
-		err := ciphertextMessage.VerifyMac(messageVersion, sessionState.RemoteIdentityKey(), sessionState.LocalIdentityKey(), messageKeys.MacKey())
+		err := ciphertextMessage.VerifyMac(messageVersion, sessionState.RemoteIdentityKey(), sessionState.LocalIdentityKey(), macKey)
 		if err != nil {
 			logger.Error("Unable to verify ciphertext mac: ", err)
 			return nil, nil, err
@@ -738,6 +757,8 @@ func getOrCreateMessageKeys(sessionState *record.State, theirEphemeral ecc.ECPub
 			storedKeys := sessionState.RemoveMessageKeys(theirEphemeral, counter)
 			// SPQR: Re-derive with PQR salt if the stored key has seed material.
 			if seed := storedKeys.SeedMaterial(); len(seed) > 0 && len(pqrSalt) > 0 {
+				// SeedMaterial returns an owned copy; wipe it on return.
+				defer crypto.Zeroize(seed)
 				seedCopy := make([]byte, len(seed))
 				copy(seedCopy, seed)
 				// The stored keys leave the clone here and are superseded by
@@ -881,13 +902,21 @@ func getOrCreateChainKey(sessionState *record.State, theirEphemeral ecc.ECPublic
 // decrypt will use the given message keys and ciphertext and return
 // the plaintext bytes.
 func decrypt(keys *message.Keys, body []byte) ([]byte, error) {
-	return cipher.Decrypt(keys.Iv(), keys.CipherKey(), bytehelper.CopySlice(body))
+	// The accessors return owned copies; wipe them after use.
+	iv, cipherKey := keys.Iv(), keys.CipherKey()
+	defer crypto.Zeroize(iv)
+	defer crypto.Zeroize(cipherKey)
+	return cipher.Decrypt(iv, cipherKey, bytehelper.CopySlice(body))
 }
 
 // encrypt will use the given cipher, message keys, and plaintext bytes
 // and return ciphertext bytes.
 func encrypt(messageKeys *message.Keys, plaintext []byte) ([]byte, error) {
-	return cipher.Encrypt(messageKeys.Iv(), messageKeys.CipherKey(), plaintext)
+	// The accessors return owned copies; wipe them after use.
+	iv, cipherKey := messageKeys.Iv(), messageKeys.CipherKey()
+	defer crypto.Zeroize(iv)
+	defer crypto.Zeroize(cipherKey)
+	return cipher.Encrypt(iv, cipherKey, plaintext)
 }
 
 // isSpqrDuplicateErr returns true if the error indicates a duplicate/already-consumed

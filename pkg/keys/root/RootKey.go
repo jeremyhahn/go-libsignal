@@ -98,9 +98,17 @@ func (k *Key) CreateChain(theirRatchetKey ecc.ECPublicKeyable, ourRatchetKey *ec
 	// since NewKey/chain.NewKey will move data into new guarded memory
 	// and zeroize the source (which cannot be done on locked-memory views).
 	rootKeyBytes := make([]byte, 32)
-	copy(rootKeyBytes, derivedSecrets.RootKey())
+	// The accessor returns an owned copy; wipe it once copied.
+	if src := derivedSecrets.RootKey(); src != nil {
+		copy(rootKeyBytes, src)
+		crypto.Zeroize(src)
+	}
 	chainKeyBytes := make([]byte, 32)
-	copy(chainKeyBytes, derivedSecrets.ChainKey())
+	// The accessor returns an owned copy; wipe it once copied.
+	if src := derivedSecrets.ChainKey(); src != nil {
+		copy(chainKeyBytes, src)
+		crypto.Zeroize(src)
+	}
 	derivedSecrets.Zeroize()
 
 	// Create new root and chain key structures from the derived secrets.
