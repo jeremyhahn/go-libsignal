@@ -20,7 +20,7 @@ import (
 // the serialization helpers route empty input to the zero Secret before
 // reaching New.
 type Secret struct {
-	enc *enclave.MemoryEnclave
+	enc enclave.ByteAccess
 }
 
 // New creates a Secret from the given byte slice. The source slice is zeroized
@@ -122,7 +122,7 @@ func (s *Secret) Bytes() []byte {
 // Size returns the size of the secret in bytes.
 // Returns 0 if the secret has been destroyed or holds no material.
 func (s *Secret) Size() int {
-	if s == nil {
+	if s == nil || s.enc == nil {
 		return 0
 	}
 	return s.enc.Size()
@@ -131,16 +131,16 @@ func (s *Secret) Size() int {
 // Destroy zeroizes and frees the locked memory. This method is idempotent
 // and safe to call multiple times, including on a nil Secret.
 func (s *Secret) Destroy() {
-	if s == nil {
+	if s == nil || s.enc == nil {
 		return
 	}
-	s.enc.Destroy()
+	_ = s.enc.Destroy()
 }
 
 // IsDestroyed reports whether the secret holds no live material. A nil Secret,
 // the zero Secret, and a destroyed Secret all report true.
 func (s *Secret) IsDestroyed() bool {
-	return s == nil || !s.enc.IsAlive()
+	return s == nil || s.enc == nil || !s.enc.IsAlive()
 }
 
 // Clone creates an independent deep copy of the secret in new locked memory.
@@ -158,7 +158,7 @@ func (s *Secret) Clone() (*Secret, error) {
 	if s.IsDestroyed() {
 		return nil, &Error{kind: errSecretDestroyed}
 	}
-	var cloned *enclave.MemoryEnclave
+	var cloned enclave.ByteAccess
 	err := s.enc.WithBytes(func(src []byte) error {
 		dst, allocErr := newLockedSized(len(src))
 		if allocErr != nil {
@@ -187,5 +187,6 @@ func (s *Secret) EqualTo(other []byte) bool {
 	if s.IsDestroyed() {
 		return false
 	}
-	return s.enc.EqualTo(other)
+	ok, err := s.enc.EqualTo(other)
+	return err == nil && ok
 }
