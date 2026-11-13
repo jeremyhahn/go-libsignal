@@ -55,7 +55,12 @@ func (a *Authenticator) Update(epoch uint64, updateKey []byte) error {
 		return &ErrInvalidInput{Field: "updateKey", Reason: "must not be empty"}
 	}
 
-	derived, err := kdfAuth(a.rootKey.Bytes(), updateKey, epoch)
+	var derived []byte
+	err := a.rootKey.WithBytes(func(rootKey []byte) error {
+		var kErr error
+		derived, kErr = kdfAuth(rootKey, updateKey, epoch)
+		return kErr
+	})
 	if err != nil {
 		return &ErrKEMOperation{Op: "authenticator update", Err: err}
 	}
@@ -95,7 +100,7 @@ func (a *Authenticator) MacHdr(epoch uint64, header []byte) ([]byte, error) {
 	if epoch != a.epoch {
 		return nil, &ErrInvalidEpoch{Expected: a.epoch, Received: epoch}
 	}
-	return computeMAC(a.macKey.Bytes(), []byte(ProtocolInfo+":ekheader"), epoch, header), nil
+	return a.macWith([]byte(ProtocolInfo+":ekheader"), epoch, header)
 }
 
 // MacCt computes a MAC over a ciphertext at the current epoch per spec Section 2.4:
@@ -107,7 +112,7 @@ func (a *Authenticator) MacCt(epoch uint64, ct []byte) ([]byte, error) {
 	if epoch != a.epoch {
 		return nil, &ErrInvalidEpoch{Expected: a.epoch, Received: epoch}
 	}
-	return computeMAC(a.macKey.Bytes(), []byte(ProtocolInfo+":ciphertext"), epoch, ct), nil
+	return a.macWith([]byte(ProtocolInfo+":ciphertext"), epoch, ct)
 }
 
 // VfyHdr verifies a MAC over a header at the current epoch.
@@ -189,6 +194,19 @@ func kdfAuth(rootKey, updateKey []byte, epoch uint64) ([]byte, error) {
 	copy(ikm, rootKey)
 	copy(ikm[len(rootKey):], updateKey)
 	return kdf.DeriveSecrets(ikm, salt, info, 2*authKeySize)
+}
+
+// macWith computes computeMAC(mac_key, label, epoch, data) with the MAC key
+// borrowed through WithBytes for the computation only.
+func (a *Authenticator) macWith(label []byte, epoch uint64, data []byte) ([]byte, error) {
+	var mac []byte
+	if err := a.macKey.WithBytes(func(macKey []byte) error {
+		mac = computeMAC(macKey, label, epoch, data)
+		return nil
+	}); err != nil {
+		return nil, &ErrKEMOperation{Op: "authenticator mac", Err: err}
+	}
+	return mac, nil
 }
 
 // KDFOK implements KDF_OK per spec Section 2.2:

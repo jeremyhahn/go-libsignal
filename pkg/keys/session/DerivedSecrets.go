@@ -65,26 +65,41 @@ type DerivedSecrets struct {
 	pqrKey   *secret.Secret
 }
 
-// RootKey returns the RootKey bytes as a view into guarded memory.
-// The returned slice must not be retained beyond the lifetime of this DerivedSecrets.
+// RootKey returns a copy of the RootKey bytes, made inside a WithBytes
+// borrow of the guarded memory. The caller should wipe it after use.
 func (d *DerivedSecrets) RootKey() []byte {
-	return d.rootKey.Bytes()
+	return copySecret(d.rootKey)
 }
 
-// ChainKey returns the ChainKey bytes as a view into guarded memory.
-// The returned slice must not be retained beyond the lifetime of this DerivedSecrets.
+// ChainKey returns a copy of the ChainKey bytes, made inside a WithBytes
+// borrow of the guarded memory. The caller should wipe it after use.
 func (d *DerivedSecrets) ChainKey() []byte {
-	return d.chainKey.Bytes()
+	return copySecret(d.chainKey)
 }
 
-// InitialPQRKey returns the InitialPQRKey bytes as a view into guarded memory,
-// or nil if no PQR key was derived (e.g., for legacy 64-byte derivations).
-// The returned slice must not be retained beyond the lifetime of this DerivedSecrets.
+// InitialPQRKey returns a copy of the InitialPQRKey bytes, made inside a
+// WithBytes borrow, or nil if no PQR key was derived (e.g., for legacy
+// 64-byte derivations). The caller should wipe it after use.
 func (d *DerivedSecrets) InitialPQRKey() []byte {
 	if d.pqrKey == nil {
 		return nil
 	}
-	return d.pqrKey.Bytes()
+	return copySecret(d.pqrKey)
+}
+
+// copySecret copies the material of s out inside a WithBytes borrow. A nil,
+// empty or destroyed secret yields nil.
+func copySecret(s *secret.Secret) []byte {
+	var out []byte
+	if err := s.WithBytes(func(b []byte) error {
+		if b != nil {
+			out = append([]byte(nil), b...)
+		}
+		return nil
+	}); err != nil {
+		return nil
+	}
+	return out
 }
 
 // Zeroize destroys the guarded memory holding the derived secrets.

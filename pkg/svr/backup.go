@@ -51,9 +51,6 @@ func NewOPRFBackup4(serverIDs []uint64, password []byte, maxTries uint32) (*OPRF
 	}
 	defer inputSecret.Destroy()
 
-	// Recover the input as a fixed array for functions that require *[64]byte.
-	inputPtr := (*[64]byte)(inputSecret.Bytes())
-
 	kOprf := randomScalar()
 	defer zeroScalar(kOprf)
 
@@ -65,13 +62,29 @@ func NewOPRFBackup4(serverIDs []uint64, password []byte, maxTries uint32) (*OPRF
 
 	oprfShares := scalarsSummingTo(n, kOprf)
 	defer zeroizeScalars(oprfShares)
-	encShares := bytesXORingTo(n, sEnc.Bytes())
+	var encShares [][]byte
+	if err := sEnc.WithBytes(func(b []byte) error {
+		encShares = bytesXORingTo(n, b)
+		return nil
+	}); err != nil {
+		return nil, &Error{kind: errBadData}
+	}
 	zeroSc := ristretto255.NewScalar() // zero
 	zeroShares := scalarsSummingTo(n, zeroSc)
 	defer zeroizeScalars(zeroShares)
 
-	ap := authPt(inputPtr, kOprf)
-	commitments := authCommitments(serverIDs, inputPtr, ap)
+	// The input is borrowed for the auth point, the commitments and the
+	// master auth secret, which need it as a *[64]byte.
+	var commitments []authCommitment
+	var kAuth *secret.Secret
+	if err := withInput(inputSecret, func(inputPtr *[64]byte) error {
+		ap := authPt(inputPtr, kOprf)
+		commitments = authCommitments(serverIDs, inputPtr, ap)
+		kAuth = authSecret(inputPtr, ap)
+		return nil
+	}); err != nil {
+		return nil, &Error{kind: errBadData}
+	}
 	defer zeroizeCommitments(commitments)
 
 	// Random version identifier for this backup.
@@ -79,13 +92,19 @@ func NewOPRFBackup4(serverIDs []uint64, password []byte, maxTries uint32) (*OPRF
 	if err != nil {
 		return nil, &Error{kind: errBadData}
 	}
-	versionBytes := versionSecret.Bytes()
-	version := uint32(versionBytes[0]) | uint32(versionBytes[1])<<8 |
-		uint32(versionBytes[2])<<16 | uint32(versionBytes[3])<<24
+	var version uint32
+	if err := versionSecret.WithBytes(func(versionBytes []byte) error {
+		version = uint32(versionBytes[0]) | uint32(versionBytes[1])<<8 |
+			uint32(versionBytes[2])<<16 | uint32(versionBytes[3])<<24
+		return nil
+	}); err != nil {
+		versionSecret.Destroy()
+		kAuth.Destroy()
+		return nil, &Error{kind: errBadData}
+	}
 	versionSecret.Destroy()
 
-	kAuth := authSecret(inputPtr, ap)
-	output := encryptionKey(sEnc.Bytes(), kAuth.Bytes())
+	output := encryptionKeyFromSecrets(sEnc, kAuth)
 	kAuth.Destroy()
 
 	requests := make([][]byte, n)

@@ -55,7 +55,7 @@ func NewSignedPreKeyFromStruct(structure *SignedPreKeyStructure,
 	if err != nil {
 		return nil, err
 	}
-	privateKey, gErr := ecc.NewGuardedECPrivateKey(bytehelper.SliceToArray(structure.PrivateKey.BytesOrNil()))
+	privateKey, gErr := guardedPrivateKey(&structure.PrivateKey)
 	if gErr != nil {
 		return nil, gErr
 	}

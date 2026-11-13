@@ -34,11 +34,6 @@ func (r *Restore1) Zeroize() {
 	zeroScalar(r.blind)
 }
 
-// inputPtr returns the input as a *[64]byte pointer into guarded memory.
-func (r *Restore1) inputPtr() *[64]byte {
-	return (*[64]byte)(r.input.Bytes())
-}
-
 // NewRestore1 creates a new first-phase restore request set for the given
 // servers. The password is used to derive the OPRF input. A random blinding
 // scalar is generated internally.
@@ -54,10 +49,15 @@ func NewRestore1(serverIDs []uint64, password []byte) (*Restore1, error) {
 	if err != nil {
 		return nil, &Error{kind: errBadData}
 	}
-	inputPtr := (*[64]byte)(inputSecret.Bytes())
-
-	// blinded = inputHashPt(input) * blind
-	blinded := ristretto255.NewIdentityElement().ScalarMult(blind, inputHashPt(inputPtr))
+	// blinded = inputHashPt(input) * blind, with the input borrowed.
+	var blinded *ristretto255.Element
+	if err := withInput(inputSecret, func(inputPtr *[64]byte) error {
+		blinded = ristretto255.NewIdentityElement().ScalarMult(blind, inputHashPt(inputPtr))
+		return nil
+	}); err != nil {
+		inputSecret.Destroy()
+		return nil, &Error{kind: errBadData}
+	}
 	blindedBytes := blinded.Bytes()
 
 	requests := make([][]byte, len(serverIDs))
@@ -163,8 +163,16 @@ func (r *Restore1) Restore2(responses1 [][]byte, handshakeHashes [][]byte) (*Res
 	ap := ristretto255.NewIdentityElement().ScalarMult(blindInv, sum)
 
 	// Recompute auth commitments for the Schnorr proof.
-	inputPtr := r.inputPtr()
-	commitments := authCommitments(r.serverIDs, inputPtr, ap)
+	// The input is borrowed for the commitments and the blinded point.
+	var commitments []authCommitment
+	var blindedPt *ristretto255.Element
+	if err := withInput(r.input, func(inputPtr *[64]byte) error {
+		commitments = authCommitments(r.serverIDs, inputPtr, ap)
+		blindedPt = ristretto255.NewIdentityElement().ScalarMult(r.blind, inputHashPt(inputPtr))
+		return nil
+	}); err != nil {
+		return nil, &Error{kind: errBadData}
+	}
 	defer zeroizeCommitments(commitments)
 
 	// Random nonce for the Schnorr proof.
@@ -174,7 +182,6 @@ func (r *Restore1) Restore2(responses1 [][]byte, handshakeHashes [][]byte) (*Res
 	proofPtBytes := proofPt.Bytes()
 
 	// The blinded point bytes for the hash.
-	blindedPt := ristretto255.NewIdentityElement().ScalarMult(r.blind, inputHashPt(inputPtr))
 	blindedPtBytes := blindedPt.Bytes()
 
 	requests := make([][]byte, n)
@@ -341,10 +348,15 @@ func (r *Restore2Result) Restore(responses2 [][]byte) (*secret.Secret, error) {
 	}
 	defer sEnc.Destroy()
 
-	inputPtr := (*[64]byte)(r.input.Bytes())
-	kAuth := authSecret(inputPtr, r.authPoint)
+	var kAuth *secret.Secret
+	if err := withInput(r.input, func(inputPtr *[64]byte) error {
+		kAuth = authSecret(inputPtr, r.authPoint)
+		return nil
+	}); err != nil {
+		return nil, &Error{kind: errBadData}
+	}
 	defer kAuth.Destroy()
-	return encryptionKey(sEnc.Bytes(), kAuth.Bytes()), nil
+	return encryptionKeyFromSecrets(sEnc, kAuth), nil
 }
 
 // RestoreFull performs a complete two-phase restore as a convenience wrapper.

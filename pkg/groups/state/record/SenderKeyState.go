@@ -81,8 +81,14 @@ func NewSenderKeyStateFromStructure(structure *SenderKeyStateStructure,
 	if err != nil {
 		return nil, err
 	}
-	signingKeyPrivate, gErr := ecc.NewGuardedECPrivateKey(
-		bytehelper.SliceToArray(structure.SigningKeyPrivate.BytesOrNil()))
+	var signingKeyPrivate *ecc.GuardedECPrivateKey
+	gErr := structure.SigningKeyPrivate.WithBytes(func(b []byte) error {
+		// SliceToArray copies the view into an array, which
+		// NewGuardedECPrivateKey wipes after moving it into guarded memory.
+		var kErr error
+		signingKeyPrivate, kErr = ecc.NewGuardedECPrivateKey(bytehelper.SliceToArray(b))
+		return kErr
+	})
 	if gErr != nil {
 		return nil, gErr
 	}

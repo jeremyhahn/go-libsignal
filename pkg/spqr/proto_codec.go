@@ -239,7 +239,7 @@ func spqrChainToProto(s *SPQR) (*pqratchetpb.Chain, error) {
 		Direction:    directionToProto(s.direction),
 		CurrentEpoch: s.epoch,
 		SendEpoch:    s.sendEpoch,
-		NextRoot:     s.rootKey.Bytes(),
+		NextRoot:     copySecret(s.rootKey),
 		Params: &pqratchetpb.ChainParams{
 			MaxJump:    chainParamMaxJump(s.maxJump),
 			MaxOooKeys: chainParamMaxOOO(maxSkippedKeys),
@@ -289,7 +289,7 @@ func skippedRecvKeysForEpoch(skipped map[SkippedKeyID]*secret.Secret, epoch uint
 func chainSendDirToProto(chain *EpochChain) *pqratchetpb.Chain_Epoch_EpochDirection {
 	var next []byte
 	if chain.sendKey != nil && !chain.sendKey.IsDestroyed() {
-		next = chain.sendKey.Bytes()
+		next = copySecret(chain.sendKey)
 	}
 	return &pqratchetpb.Chain_Epoch_EpochDirection{
 		Ctr:  chain.sendCounter,
@@ -309,7 +309,7 @@ func chainSendDirToProto(chain *EpochChain) *pqratchetpb.Chain_Epoch_EpochDirect
 func chainRecvDirToProto(chain *EpochChain, skipped []skippedRecvRecord) *pqratchetpb.Chain_Epoch_EpochDirection {
 	var next []byte
 	if chain.recvKey != nil && !chain.recvKey.IsDestroyed() {
-		next = chain.recvKey.Bytes()
+		next = copySecret(chain.recvKey)
 	}
 
 	const recSize = 4 + keyLen // 36 bytes per KeyHistory record
@@ -322,7 +322,10 @@ func chainRecvDirToProto(chain *EpochChain, skipped []skippedRecvRecord) *pqratc
 			prev[off+1] = byte(rec.counter >> 16)
 			prev[off+2] = byte(rec.counter >> 8)
 			prev[off+3] = byte(rec.counter)
-			copy(prev[off+4:off+recSize], rec.key.Bytes())
+			_ = rec.key.WithBytes(func(k []byte) error {
+				copy(prev[off+4:off+recSize], k)
+				return nil
+			})
 		}
 	}
 

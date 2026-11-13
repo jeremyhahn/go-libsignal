@@ -318,8 +318,7 @@ func Send(serializedState []byte) (newState []byte, pqrMsg []byte, messageKey Me
 	}
 	pqrMsg = noneMsg.SerializeSCKA(counter)
 
-	messageKey = make([]byte, mk.Size())
-	copy(messageKey, mk.Bytes())
+	messageKey = copySecret(mk)
 
 	newState, err = s.Serialize()
 	if err != nil {
@@ -446,8 +445,7 @@ func (s *SPQR) SendBraid() (pqrMsg []byte, messageKey MessageKey, err error) {
 	}
 
 	// Copy message key bytes.
-	messageKey = make([]byte, mk.Size())
-	copy(messageKey, mk.Bytes())
+	messageKey = copySecret(mk)
 
 	return pqrMsg, messageKey, nil
 }
@@ -536,8 +534,7 @@ func (s *SPQR) RecvBraid(pqrMsg []byte) (messageKey MessageKey, err error) {
 	defer mk.Destroy()
 
 	// Copy message key bytes.
-	messageKey = make([]byte, mk.Size())
-	copy(messageKey, mk.Bytes())
+	messageKey = copySecret(mk)
 
 	return messageKey, nil
 }
@@ -609,8 +606,7 @@ func Recv(serializedState []byte, pqrMsg []byte) (newState []byte, messageKey Me
 		}
 		defer mk.Destroy()
 
-		messageKey = make([]byte, mk.Size())
-		copy(messageKey, mk.Bytes())
+		messageKey = copySecret(mk)
 
 		newState, err = s.Serialize()
 		if err != nil {
@@ -659,8 +655,7 @@ func Recv(serializedState []byte, pqrMsg []byte) (newState []byte, messageKey Me
 	}
 	defer mk.Destroy()
 
-	messageKey = make([]byte, mk.Size())
-	copy(messageKey, mk.Bytes())
+	messageKey = copySecret(mk)
 
 	newState, err = s.Serialize()
 	if err != nil {

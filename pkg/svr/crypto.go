@@ -46,8 +46,10 @@ func kdf(info, input1, input2 []byte, out []byte) {
 		panic("svr: failed to protect IKM: " + err.Error())
 	}
 	defer concatSecret.Destroy()
-	h := hkdf.New(sha256.New, concatSecret.Bytes(), nil, info)
-	if _, err := io.ReadFull(h, out); err != nil {
+	if err := concatSecret.WithBytes(func(ikm []byte) error {
+		_, rErr := io.ReadFull(hkdf.New(sha256.New, ikm, nil, info), out)
+		return rErr
+	}); err != nil {
 		panic("svr: HKDF expansion failed: " + err.Error())
 	}
 }
@@ -75,8 +77,12 @@ func randomScalar() *ristretto255.Scalar {
 		panic("svr: failed to allocate guarded entropy: " + err.Error())
 	}
 	defer entropy.Destroy()
-	s, err2 := ristretto255.NewScalar().SetUniformBytes(entropy.Bytes())
-	if err2 != nil {
+	var s *ristretto255.Scalar
+	if err2 := entropy.WithBytes(func(b []byte) error {
+		var sErr error
+		s, sErr = ristretto255.NewScalar().SetUniformBytes(b)
+		return sErr
+	}); err2 != nil {
 		panic("svr: failed to derive scalar from uniform bytes: " + err2.Error())
 	}
 	return s
@@ -176,31 +182,32 @@ func authCommitments(serverIDs []uint64, input *[64]byte, authPoint *ristretto25
 	kAuth := authSecret(input, authPoint)
 	defer kAuth.Destroy()
 	result := make([]authCommitment, len(serverIDs))
-	for i, id := range serverIDs {
-		idBytes := uint64ToBeBytes(id)
-		k := kdf64(
-			[]byte("Signal_SVR_ServerAuthorizationKey_20240823"),
-			kAuth.Bytes(),
-			idBytes[:],
-		)
-		defer crypto.ZeroizeArray64(&k)
-		kSecret, err := secret.New(k[:])
-		if err != nil {
-			panic("svr: failed to protect server auth key: " + err.Error())
+	if err := kAuth.WithBytes(func(kAuthBytes []byte) error {
+		for i, id := range serverIDs {
+			idBytes := uint64ToBeBytes(id)
+			k := kdf64(
+				[]byte("Signal_SVR_ServerAuthorizationKey_20240823"),
+				kAuthBytes,
+				idBytes[:],
+			)
+			// The Rust reference uses Scalar::hash_from_bytes::<Sha512>(&k),
+			// which computes SHA-512(k) and then calls
+			// from_bytes_mod_order_wide on the 64-byte hash output. We must
+			// replicate this: SHA-512 first, then SetUniformBytes (which
+			// performs mod-order reduction on 64 bytes).
+			h := sha512.Sum512(k[:])
+			crypto.ZeroizeArray64(&k)
+			s, serr := ristretto255.NewScalar().SetUniformBytes(h[:])
+			crypto.Zeroize(h[:])
+			if serr != nil {
+				panic("svr: failed to derive server auth scalar: " + serr.Error())
+			}
+			pt := ristretto255.NewIdentityElement().ScalarBaseMult(s)
+			result[i] = authCommitment{scalar: s, point: pt}
 		}
-		// The Rust reference uses Scalar::hash_from_bytes::<Sha512>(&k), which
-		// computes SHA-512(k) and then calls from_bytes_mod_order_wide on the
-		// 64-byte hash output. We must replicate this: SHA-512 first, then
-		// SetUniformBytes (which performs mod-order reduction on 64 bytes).
-		h := sha512.Sum512(kSecret.Bytes())
-		kSecret.Destroy()
-		s, serr := ristretto255.NewScalar().SetUniformBytes(h[:])
-		crypto.Zeroize(h[:])
-		if serr != nil {
-			panic("svr: failed to derive server auth scalar: " + serr.Error())
-		}
-		pt := ristretto255.NewIdentityElement().ScalarBaseMult(s)
-		result[i] = authCommitment{scalar: s, point: pt}
+		return nil
+	}); err != nil {
+		panic("svr: failed to access auth secret: " + err.Error())
 	}
 	return result
 }
@@ -240,6 +247,32 @@ func encryptionKey(sEnc []byte, kAuth []byte) *secret.Secret {
 		panic("svr: failed to protect encryption key: " + err.Error())
 	}
 	return s
+}
+
+// encryptionKeyFromSecrets derives the encryption key from sEnc and kAuth,
+// each borrowed through WithBytes for the derivation only.
+func encryptionKeyFromSecrets(sEnc, kAuth *secret.Secret) *secret.Secret {
+	var out *secret.Secret
+	if err := sEnc.WithBytes(func(sEncBytes []byte) error {
+		return kAuth.WithBytes(func(kAuthBytes []byte) error {
+			out = encryptionKey(sEncBytes, kAuthBytes)
+			return nil
+		})
+	}); err != nil {
+		panic("svr: failed to access encryption key inputs: " + err.Error())
+	}
+	return out
+}
+
+// withInput calls fn with the 64-byte input held in s, borrowed through
+// WithBytes. fn must not retain the pointer.
+func withInput(s *secret.Secret, fn func(input *[64]byte) error) error {
+	return s.WithBytes(func(b []byte) error {
+		if len(b) != 64 {
+			return &Error{kind: errBadData}
+		}
+		return fn((*[64]byte)(b))
+	})
 }
 
 // uint64ToBeBytes converts a uint64 to a big-endian byte array.

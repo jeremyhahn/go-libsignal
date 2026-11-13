@@ -3,11 +3,8 @@ package backup
 import (
 	"bytes"
 	"compress/gzip"
-	"crypto/aes"
 	"crypto/cipher"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/binary"
 	"io"
@@ -98,7 +95,7 @@ func (fe *FrameEncryptor) EncryptFrames(w io.Writer, frames [][]byte) error {
 	padded := pkcs7Pad(gzipBytes, AESBlockSize)
 
 	// Encrypt with AES-256-CBC.
-	block, err := aes.NewCipher(fe.key.AESKey.Bytes())
+	block, err := newAESBlock(fe.key.AESKey)
 	if err != nil {
 		return &ErrCreatingAESCipher{Err: err}
 	}
@@ -107,7 +104,10 @@ func (fe *FrameEncryptor) EncryptFrames(w io.Writer, frames [][]byte) error {
 	mode.CryptBlocks(ciphertext, padded)
 
 	// Compute HMAC over IV + ciphertext.
-	mac := hmac.New(sha256.New, fe.key.HMACKey.Bytes())
+	mac, err := newHMAC(fe.key.HMACKey)
+	if err != nil {
+		return err
+	}
 	mac.Write(iv[:])
 	mac.Write(ciphertext)
 	hmacDigest := mac.Sum(nil)
@@ -192,7 +192,10 @@ func (fd *FrameDecryptor) DecryptFrames(r io.Reader) (_ [][]byte, err error) {
 	expectedHMAC := payload[contentLen:]
 
 	// Verify HMAC over IV + ciphertext.
-	mac := hmac.New(sha256.New, fd.key.HMACKey.Bytes())
+	mac, err := newHMAC(fd.key.HMACKey)
+	if err != nil {
+		return nil, err
+	}
 	mac.Write(content)
 	computedHMAC := mac.Sum(nil)
 
@@ -226,7 +229,7 @@ func (fd *FrameDecryptor) decryptPayloadWithBudget(content []byte, budget int64)
 	}
 
 	// Decrypt with AES-256-CBC.
-	block, err := aes.NewCipher(fd.key.AESKey.Bytes())
+	block, err := newAESBlock(fd.key.AESKey)
 	if err != nil {
 		return nil, &ErrCreatingAESCipher{Err: err}
 	}
@@ -531,7 +534,7 @@ func (fe *FrameEncryptor) EncryptFramesModern(w io.Writer, frames [][]byte, meta
 	gzipBytes := PadGzippedBucketed(plaintext.Bytes())
 	// PKCS#7 pad and encrypt with AES-256-CBC.
 	padded := pkcs7Pad(gzipBytes, AESBlockSize)
-	block, err := aes.NewCipher(fe.key.AESKey.Bytes())
+	block, err := newAESBlock(fe.key.AESKey)
 	if err != nil {
 		return &ErrCreatingAESCipher{Err: err}
 	}
@@ -539,7 +542,10 @@ func (fe *FrameEncryptor) EncryptFramesModern(w io.Writer, frames [][]byte, meta
 	cipher.NewCBCEncrypter(block, iv[:]).CryptBlocks(ciphertext, padded)
 
 	// Compute HMAC over IV + ciphertext only (not magic or metadata).
-	mac := hmac.New(sha256.New, fe.key.HMACKey.Bytes())
+	mac, err := newHMAC(fe.key.HMACKey)
+	if err != nil {
+		return err
+	}
 	mac.Write(iv[:])
 	mac.Write(ciphertext)
 	hmacDigest := mac.Sum(nil)
@@ -612,7 +618,10 @@ func VerifyHMAC(key *MessageBackupKey, r io.Reader) error {
 	content := data[:contentLen]
 	expectedHMAC := data[contentLen:]
 
-	mac := hmac.New(sha256.New, key.HMACKey.Bytes())
+	mac, err := newHMAC(key.HMACKey)
+	if err != nil {
+		return err
+	}
 	mac.Write(content)
 	computedHMAC := mac.Sum(nil)
 

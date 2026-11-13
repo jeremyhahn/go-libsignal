@@ -68,7 +68,14 @@ func KDFHybrid(ecMK, pqMK *secret.Secret) (*HybridKeys, error) {
 		return nil, &ErrInvalidInput{Field: "pqMK", Reason: "must not be nil or destroyed"}
 	}
 
-	output, err := kdf.DeriveSecrets(ecMK.Bytes(), pqMK.Bytes(), []byte(kdfInfoHybrid), HybridKeySize)
+	var output []byte
+	err := ecMK.WithBytes(func(ec []byte) error {
+		return pqMK.WithBytes(func(pq []byte) error {
+			var deriveErr error
+			output, deriveErr = kdf.DeriveSecrets(ec, pq, []byte(kdfInfoHybrid), HybridKeySize)
+			return deriveErr
+		})
+	})
 	if err != nil { // coverage-exempt: DeriveSecrets only fails when outputLen > HKDF max (8160); HybridKeySize=80 is well below that
 		return nil, &ErrHybridKDFFailed{Cause: err}
 	}
@@ -93,7 +100,12 @@ func KDFHybridECOnly(ecMK *secret.Secret) (*HybridKeys, error) {
 	}
 
 	salt := make([]byte, 32)
-	output, err := kdf.DeriveSecrets(ecMK.Bytes(), salt, []byte(kdfInfoHybrid), HybridKeySize)
+	var output []byte
+	err := ecMK.WithBytes(func(ec []byte) error {
+		var deriveErr error
+		output, deriveErr = kdf.DeriveSecrets(ec, salt, []byte(kdfInfoHybrid), HybridKeySize)
+		return deriveErr
+	})
 	if err != nil { // coverage-exempt: DeriveSecrets only fails when outputLen > HKDF max (8160); HybridKeySize=80 is well below that
 		return nil, &ErrHybridKDFFailed{Cause: err}
 	}
@@ -117,29 +129,30 @@ func splitHybridOutput(output []byte) (*HybridKeys, error) {
 	}
 	defer raw.Destroy()
 
-	rawBytes := raw.Bytes()
-
-	ckBytes := make([]byte, cipherKeySize)
-	copy(ckBytes, rawBytes[:cipherKeySize])
-	ck, err := secret.New(ckBytes)
-	if err != nil { // coverage-exempt: only reachable on locked-memory allocation failure
-		return nil, &ErrHybridKDFFailed{Cause: err}
-	}
-
-	mkBytes := make([]byte, macKeySize)
-	copy(mkBytes, rawBytes[cipherKeySize:cipherKeySize+macKeySize])
-	mk, err := secret.New(mkBytes)
-	if err != nil { // coverage-exempt: only reachable on locked-memory allocation failure
-		ck.Destroy()
-		return nil, &ErrHybridKDFFailed{Cause: err}
-	}
-
-	ivBytes := make([]byte, ivSize)
-	copy(ivBytes, rawBytes[cipherKeySize+macKeySize:])
-	iv, err := secret.New(ivBytes)
+	// Each part is copied out of the read-only view into its own slice, which
+	// secret.New wipes as it moves the part into locked memory.
+	var ck, mk, iv *secret.Secret
+	err = raw.WithBytes(func(rawBytes []byte) error {
+		var newErr error
+		ckBytes := make([]byte, cipherKeySize)
+		copy(ckBytes, rawBytes[:cipherKeySize])
+		if ck, newErr = secret.New(ckBytes); newErr != nil { // coverage-exempt: only reachable on locked-memory allocation failure
+			return newErr
+		}
+		mkBytes := make([]byte, macKeySize)
+		copy(mkBytes, rawBytes[cipherKeySize:cipherKeySize+macKeySize])
+		if mk, newErr = secret.New(mkBytes); newErr != nil { // coverage-exempt: only reachable on locked-memory allocation failure
+			return newErr
+		}
+		ivBytes := make([]byte, ivSize)
+		copy(ivBytes, rawBytes[cipherKeySize+macKeySize:])
+		iv, newErr = secret.New(ivBytes)
+		return newErr
+	})
 	if err != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 		ck.Destroy()
 		mk.Destroy()
+		iv.Destroy()
 		return nil, &ErrHybridKDFFailed{Cause: err}
 	}
 
