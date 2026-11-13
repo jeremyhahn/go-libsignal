@@ -1,3 +1,5 @@
+//go:build !fips140only
+
 package root
 
 import (
