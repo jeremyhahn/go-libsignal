@@ -1,7 +1,6 @@
 package ecc
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
@@ -39,7 +38,7 @@ func TestGuardPrivateKey(t *testing.T) {
 	}
 	defer guarded.Destroy()
 
-	if !bytes.Equal(secrettest.Bytes(&guarded), expected[:]) {
+	if !secrettest.Matches(t, &guarded, expected[:]) {
 		t.Error("guarded key does not match the serialized private key")
 	}
 }

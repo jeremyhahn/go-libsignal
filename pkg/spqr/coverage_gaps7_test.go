@@ -1,7 +1,6 @@
 package spqr
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"math"
@@ -70,7 +69,7 @@ func TestSerializeWithSkippedKeysProtoRoundTrip(t *testing.T) {
 	sk2, ok := s2.skippedKeys[id]
 	if !ok {
 		t.Errorf("skipped key counter=1 missing after round-trip; got %d total", len(s2.skippedKeys))
-	} else if !bytes.Equal(secrettest.Bytes(sk2), skBytesCopy) {
+	} else if !secrettest.Matches(t, sk2, skBytesCopy) {
 		t.Error("skipped key bytes mismatch after round-trip")
 	}
 }
@@ -349,7 +348,7 @@ func TestProtoRecvPrevSkippedKeysRoundTrip(t *testing.T) {
 	if decErr != nil {
 		t.Fatalf("Decrypt counter=3: %v", decErr)
 	}
-	if string(secrettest.Bytes(mk3)) != string(secrettest.Bytes(senderKeys[2])) {
+	if !secrettest.Same(t, mk3, senderKeys[2]) {
 		t.Error("mk3 mismatch")
 	}
 	mk3.Destroy()
@@ -378,7 +377,7 @@ func TestProtoRecvPrevSkippedKeysRoundTrip(t *testing.T) {
 	if decErr1 != nil {
 		t.Fatalf("Decrypt counter=1 after round-trip: %v", decErr1)
 	}
-	if !bytes.Equal(secrettest.Bytes(mk1), secrettest.Bytes(senderKeys[0])) {
+	if !secrettest.Same(t, mk1, senderKeys[0]) {
 		t.Error("mk1 mismatch after round-trip")
 	}
 	mk1.Destroy()
@@ -400,7 +399,7 @@ func TestProtoRecvPrevSkippedKeysRoundTrip(t *testing.T) {
 	if decErr2 != nil {
 		t.Fatalf("Decrypt counter=2 after second round-trip: %v", decErr2)
 	}
-	if !bytes.Equal(secrettest.Bytes(mk2), secrettest.Bytes(senderKeys[1])) {
+	if !secrettest.Same(t, mk2, senderKeys[1]) {
 		t.Error("mk2 mismatch after second round-trip")
 	}
 	mk2.Destroy()
@@ -622,8 +621,7 @@ func TestAdvanceEpochOverflowPreCheck(t *testing.T) {
 
 	// Capture the root key bytes BEFORE the call so we can verify it is
 	// unchanged after the (correctly rejected) overflow attempt.
-	rkBefore := make([]byte, len(secrettest.Bytes(s.rootKey)))
-	copy(rkBefore, secrettest.Bytes(s.rootKey))
+	rkBefore := secrettest.Digest(t, s.rootKey)
 
 	chainCountBefore := len(s.chains)
 
@@ -651,7 +649,7 @@ func TestAdvanceEpochOverflowPreCheck(t *testing.T) {
 	if s.epoch != math.MaxUint64 {
 		t.Errorf("epoch mutated: got %d, want MaxUint64", s.epoch)
 	}
-	if !bytes.Equal(secrettest.Bytes(s.rootKey), rkBefore) {
+	if secrettest.Digest(t, s.rootKey) != rkBefore {
 		t.Error("root key mutated after ErrEpochOverflow")
 	}
 	if len(s.chains) != chainCountBefore {

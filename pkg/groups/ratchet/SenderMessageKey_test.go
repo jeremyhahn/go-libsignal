@@ -114,13 +114,13 @@ func TestNewSenderMessageKeyFromStruct(t *testing.T) {
 	if key.Iteration() != 42 {
 		t.Errorf("Iteration() = %d, want 42", key.Iteration())
 	}
-	if !bytes.Equal(key.Iv(), secrettest.Bytes(&structure.IV)) {
+	if !secrettest.Matches(t, &structure.IV, key.Iv()) {
 		t.Error("IV does not match")
 	}
-	if !bytes.Equal(key.CipherKey(), secrettest.Bytes(&structure.CipherKey)) {
+	if !secrettest.Matches(t, &structure.CipherKey, key.CipherKey()) {
 		t.Error("CipherKey does not match")
 	}
-	if !bytes.Equal(key.Seed(), secrettest.Bytes(&structure.Seed)) {
+	if !secrettest.Matches(t, &structure.Seed, key.Seed()) {
 		t.Error("Seed does not match")
 	}
 }
@@ -166,13 +166,13 @@ func TestNewStructFromSenderMessageKey(t *testing.T) {
 	if structure.Iteration != 10 {
 		t.Errorf("Structure.Iteration = %d, want 10", structure.Iteration)
 	}
-	if !bytes.Equal(secrettest.Bytes(&structure.IV), key.Iv()) {
+	if !secrettest.Matches(t, &structure.IV, key.Iv()) {
 		t.Error("Structure.IV.BytesOrNil() does not match key IV")
 	}
-	if !bytes.Equal(secrettest.Bytes(&structure.CipherKey), key.CipherKey()) {
+	if !secrettest.Matches(t, &structure.CipherKey, key.CipherKey()) {
 		t.Error("Structure.CipherKey.BytesOrNil() does not match key CipherKey")
 	}
-	if !bytes.Equal(secrettest.Bytes(&structure.Seed), key.Seed()) {
+	if !secrettest.Matches(t, &structure.Seed, key.Seed()) {
 		t.Error("Structure.Seed.BytesOrNil() does not match key Seed")
 	}
 }
@@ -338,13 +338,13 @@ func TestNewStructFromSenderMessageKeyNilFields(t *testing.T) {
 	if structure.Iteration != 3 {
 		t.Errorf("Iteration = %d, want 3", structure.Iteration)
 	}
-	if secrettest.Bytes(&structure.IV) != nil {
+	if !secrettest.Empty(&structure.IV) {
 		t.Error("IV should be nil when source iv is nil")
 	}
-	if secrettest.Bytes(&structure.CipherKey) != nil {
+	if !secrettest.Empty(&structure.CipherKey) {
 		t.Error("CipherKey should be nil when source cipherKey is nil")
 	}
-	if secrettest.Bytes(&structure.Seed) != nil {
+	if !secrettest.Empty(&structure.Seed) {
 		t.Error("Seed should be nil when source seed is nil")
 	}
 }

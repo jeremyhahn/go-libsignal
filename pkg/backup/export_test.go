@@ -300,19 +300,22 @@ func TestExportFullPipeline(t *testing.T) {
 	for i := range iv {
 		iv[i] = byte(i)
 	}
-	ciphertext, err := AESCBCEncryptExport(secrettest.Bytes(key.AESKey), iv, padded)
+	ciphertext, err := []byte(nil), error(nil)
+	secrettest.With(t, key.AESKey, func(k []byte) { ciphertext, err = AESCBCEncryptExport(k, iv, padded) })
 	if err != nil {
 		t.Fatalf("AESCBCEncryptExport: %v", err)
 	}
 
 	// Step 4: Compute HMAC.
-	checksum := HMACChecksum(secrettest.Bytes(key.HMACKey), iv, ciphertext)
+	var checksum []byte
+	secrettest.With(t, key.HMACKey, func(k []byte) { checksum = HMACChecksum(k, iv, ciphertext) })
 	if len(checksum) != HMACLen {
 		t.Fatalf("HMAC length = %d, want %d", len(checksum), HMACLen)
 	}
 
 	// Verify: decrypt and decompress should recover original.
-	decrypted, err := libcipher.AESCBCDecrypt(secrettest.Bytes(key.AESKey), iv, ciphertext)
+	decrypted, err := []byte(nil), error(nil)
+	secrettest.With(t, key.AESKey, func(k []byte) { decrypted, err = libcipher.AESCBCDecrypt(k, iv, ciphertext) })
 	if err != nil {
 		t.Fatalf("AESCBCDecrypt: %v", err)
 	}

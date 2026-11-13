@@ -60,10 +60,10 @@ func TestDeriveMessageBackupKey_EmptyToken(t *testing.T) {
 	}
 	defer mkNil.Zeroize()
 
-	if string(secrettest.Bytes(mkEmpty.HMACKey)) != string(secrettest.Bytes(mkNil.HMACKey)) {
+	if !secrettest.Same(t, mkEmpty.HMACKey, mkNil.HMACKey) {
 		t.Error("empty and nil token should produce identical HMAC key (legacy path)")
 	}
-	if string(secrettest.Bytes(mkEmpty.AESKey)) != string(secrettest.Bytes(mkNil.AESKey)) {
+	if !secrettest.Same(t, mkEmpty.AESKey, mkNil.AESKey) {
 		t.Error("empty and nil token should produce identical AES key (legacy path)")
 	}
 }

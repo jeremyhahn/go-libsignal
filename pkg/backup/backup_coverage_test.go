@@ -265,7 +265,8 @@ func TestDecryptFramesBadCiphertextAlignment(t *testing.T) {
 	ct := []byte{0x42}
 
 	// Compute valid HMAC over iv + ct.
-	hmacDigest := HMACChecksum(secrettest.Bytes(key.HMACKey), iv, ct)
+	var hmacDigest []byte
+	secrettest.With(t, key.HMACKey, func(k []byte) { hmacDigest = HMACChecksum(k, iv, ct) })
 	badData := make([]byte, 0, AESIVSize+1+HMACLen)
 	badData = append(badData, iv...)
 	badData = append(badData, ct...)
@@ -525,13 +526,15 @@ func TestDecryptFramesInvalidGzip(t *testing.T) {
 	for i := range iv {
 		iv[i] = byte(i)
 	}
-	ciphertext, err := AESCBCEncryptExport(secrettest.Bytes(key.AESKey), iv, padded)
+	ciphertext, err := []byte(nil), error(nil)
+	secrettest.With(t, key.AESKey, func(k []byte) { ciphertext, err = AESCBCEncryptExport(k, iv, padded) })
 	if err != nil {
 		t.Fatalf("AESCBCEncryptExport: %v", err)
 	}
 
 	// Compute HMAC over IV + ciphertext.
-	hmacDigest := HMACChecksum(secrettest.Bytes(key.HMACKey), iv, ciphertext)
+	var hmacDigest []byte
+	secrettest.With(t, key.HMACKey, func(k []byte) { hmacDigest = HMACChecksum(k, iv, ciphertext) })
 
 	// Assemble: IV + ciphertext + HMAC.
 	var data []byte
@@ -556,12 +559,14 @@ func TestDecryptFramesInvalidVarintInGzip(t *testing.T) {
 	padded := pkcs7Pad(plaintext, AESBlockSize)
 
 	iv := make([]byte, AESIVSize)
-	ciphertext, err := AESCBCEncryptExport(secrettest.Bytes(key.AESKey), iv, padded)
+	ciphertext, err := []byte(nil), error(nil)
+	secrettest.With(t, key.AESKey, func(k []byte) { ciphertext, err = AESCBCEncryptExport(k, iv, padded) })
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
 
-	hmacDigest := HMACChecksum(secrettest.Bytes(key.HMACKey), iv, ciphertext)
+	var hmacDigest []byte
+	secrettest.With(t, key.HMACKey, func(k []byte) { hmacDigest = HMACChecksum(k, iv, ciphertext) })
 	var data []byte
 	data = append(data, iv...)
 	data = append(data, ciphertext...)
@@ -594,12 +599,14 @@ func TestDecryptFramesBadPadding(t *testing.T) {
 		iv[i] = byte(i + 0x10)
 	}
 
-	ciphertext, err := aesEncryptRaw(secrettest.Bytes(key.AESKey), iv, plaintext)
+	ciphertext, err := []byte(nil), error(nil)
+	secrettest.With(t, key.AESKey, func(k []byte) { ciphertext, err = aesEncryptRaw(k, iv, plaintext) })
 	if err != nil {
 		t.Fatalf("aesEncryptRaw: %v", err)
 	}
 
-	hmacDigest := HMACChecksum(secrettest.Bytes(key.HMACKey), iv, ciphertext)
+	var hmacDigest []byte
+	secrettest.With(t, key.HMACKey, func(k []byte) { hmacDigest = HMACChecksum(k, iv, ciphertext) })
 	var data []byte
 	data = append(data, iv...)
 	data = append(data, ciphertext...)

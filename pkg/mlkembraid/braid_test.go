@@ -714,8 +714,8 @@ func TestFullEpochExchangeKeysMatch(t *testing.T) {
 		t.Fatal("both parties should produce output keys")
 	}
 
-	if !bytes.Equal(secrettest.Bytes(aliceKey.Key), secrettest.Bytes(bobKey.Key)) {
-		t.Errorf("output keys do not match:\n  Alice: %x\n  Bob:   %x", secrettest.Bytes(aliceKey.Key), secrettest.Bytes(bobKey.Key))
+	if !secrettest.Same(t, aliceKey.Key, bobKey.Key) {
+		t.Errorf("output keys do not match")
 	}
 
 	if aliceKey.Epoch != bobKey.Epoch {
@@ -1327,14 +1327,13 @@ func TestSendHeaderReceivedCallsEncaps1(t *testing.T) {
 	}
 
 	// Second Send should be idempotent (encapsSecret already set).
-	prevSecret := make([]byte, state.bobEncapSecret.Size())
-	copy(prevSecret, secrettest.Bytes(state.bobEncapSecret))
+	prevDigest := secrettest.Digest(t, state.bobEncapSecret)
 
 	_, _, _, err = state.Send(kemImpl)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(secrettest.Bytes(state.bobEncapSecret), prevSecret) {
+	if secrettest.Digest(t, state.bobEncapSecret) != prevDigest {
 		t.Error("bobEncapSecret should not change on subsequent Sends")
 	}
 }
@@ -1350,7 +1349,7 @@ func TestTwoPhaseEncapsViaProtocol(t *testing.T) {
 	if aliceKey == nil || bobKey == nil {
 		t.Fatal("both parties should produce output keys")
 	}
-	if !bytes.Equal(secrettest.Bytes(aliceKey.Key), secrettest.Bytes(bobKey.Key)) {
+	if !secrettest.Same(t, aliceKey.Key, bobKey.Key) {
 		t.Error("output keys should match with two-phase encapsulation")
 	}
 	if aliceKey.Epoch != bobKey.Epoch {
@@ -1432,9 +1431,8 @@ func TestPolynomialSCKAHandshakeSharedKey(t *testing.T) {
 	}
 
 	// The keys must agree.
-	if !bytes.Equal(secrettest.Bytes(aliceKey.Key), secrettest.Bytes(bobKey.Key)) {
-		t.Errorf("polynomial SCKA shared keys do not match:\n  Alice: %x\n  Bob:   %x",
-			secrettest.Bytes(aliceKey.Key), secrettest.Bytes(bobKey.Key))
+	if !secrettest.Same(t, aliceKey.Key, bobKey.Key) {
+		t.Errorf("polynomial SCKA shared keys do not match")
 	}
 
 	// Both keys must be for the same epoch.

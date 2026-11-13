@@ -982,13 +982,20 @@ func TestDecrypt_PreNegotiationECOnlyPath(t *testing.T) {
 
 	// Encrypt plaintext with AES-256-CBC.
 	plaintext := []byte("pre-negotiation ec-only message")
-	ciphertext, encErr := cipher.AESCBCEncrypt(secrettest.Bytes(hkeys.CipherKey), secrettest.Bytes(hkeys.IV), plaintext)
+	var ciphertext []byte
+	var encErr error
+	secrettest.With(t, hkeys.CipherKey, func(key []byte) {
+		secrettest.With(t, hkeys.IV, func(iv []byte) {
+			ciphertext, encErr = cipher.AESCBCEncrypt(key, iv, plaintext)
+		})
+	})
 	if encErr != nil {
 		t.Fatalf("AESCBCEncrypt: %v", encErr)
 	}
 
 	// Compute HMAC and build authenticated ciphertext: ciphertext || MAC.
-	mac := computeHMAC(secrettest.Bytes(hkeys.MacKey), ciphertext)
+	var mac []byte
+	secrettest.With(t, hkeys.MacKey, func(key []byte) { mac = computeHMAC(key, ciphertext) })
 	authenticated := make([]byte, len(ciphertext)+HMACSize)
 	copy(authenticated, ciphertext)
 	copy(authenticated[len(ciphertext):], mac)

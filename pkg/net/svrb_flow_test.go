@@ -1,7 +1,6 @@
 package net
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha512"
 	"errors"
@@ -345,8 +344,8 @@ func TestSvrBNetClient_Restore_FullSuccessFlow(t *testing.T) {
 		t.Fatalf("Restore() error = %v", err)
 	}
 
-	if !bytes.Equal(secrettest.Bytes(got), secrettest.Bytes(backup.Output)) {
-		t.Fatalf("restored secret does not match backup output\n  got:  %x\n  want: %x", secrettest.Bytes(got), secrettest.Bytes(backup.Output))
+	if !secrettest.Same(t, got, backup.Output) {
+		t.Fatalf("restored secret does not match backup output")
 	}
 
 	if !transport.closed {
@@ -390,7 +389,7 @@ func TestSvrBNetClient_Restore_MultiServerSuccess(t *testing.T) {
 		t.Fatalf("Restore() error = %v", err)
 	}
 
-	if !bytes.Equal(secrettest.Bytes(got), secrettest.Bytes(backup.Output)) {
+	if !secrettest.Same(t, got, backup.Output) {
 		t.Fatalf("restored secret does not match backup output")
 	}
 }

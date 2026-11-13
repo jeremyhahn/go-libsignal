@@ -651,12 +651,8 @@ func TestPQXDH_InitialPQRKey(t *testing.T) {
 	}
 
 	// Both sides must derive the same InitialPQRKey.
-	senderPQRBytes := secrettest.Bytes(senderKeys.InitialPQRKey)
-	receiverPQRBytes := secrettest.Bytes(receiverKeys.InitialPQRKey)
-	for i := range senderPQRBytes {
-		if senderPQRBytes[i] != receiverPQRBytes[i] {
-			t.Fatal("PQXDH sender and receiver must derive the same InitialPQRKey")
-		}
+	if !secrettest.Same(t, senderKeys.InitialPQRKey, receiverKeys.InitialPQRKey) {
+		t.Fatal("PQXDH sender and receiver must derive the same InitialPQRKey")
 	}
 	senderKeys.Zeroize()
 	receiverKeys.Zeroize()

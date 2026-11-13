@@ -328,7 +328,7 @@ func TestGuardedSecretKeyDecapsulate(t *testing.T) {
 	}
 	defer s32.Destroy()
 
-	if !bytes.Equal(secrettest.Bytes(s32), ss.Bytes()) {
+	if !secrettest.Matches(t, s32, ss.Bytes()) {
 		t.Error("decapsulated shared secret should match encapsulated")
 	}
 }

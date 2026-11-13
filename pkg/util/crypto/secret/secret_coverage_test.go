@@ -56,11 +56,8 @@ func TestNewEmpty_PositiveSizes(t *testing.T) {
 			t.Errorf("NewEmpty(%d) Size() = %d, want %d", size, s.Size(), size)
 		}
 		// All bytes must be zero.
-		for i, b := range secrettest.Bytes(s) {
-			if b != 0 {
-				t.Errorf("NewEmpty(%d) Bytes()[%d] = %d, want 0", size, i, b)
-				break
-			}
+		if !secrettest.IsZero(t, s) {
+			t.Errorf("NewEmpty(%d) is not zeroed", size)
 		}
 		s.Destroy()
 	}
@@ -75,13 +72,7 @@ func TestNewSecret32_ZeroArray(t *testing.T) {
 	}
 	defer s.Destroy()
 
-	arr := secrettest.Array(s)
-	for i, b := range arr {
-		if b != 0 {
-			t.Errorf("Array()[%d] = %d, want 0", i, b)
-			break
-		}
-	}
+	secrettest.Zeroed(t, s)
 }
 
 // TestNewSecret32_ZeroizeOnError validates the zeroization branch in NewSecret32.
@@ -121,16 +112,14 @@ func TestNewSecret32FromSlice_ExactSize(t *testing.T) {
 	}
 	defer s.Destroy()
 
-	b := secrettest.Bytes(s)
-	if len(b) != 32 {
-		t.Errorf("Bytes() length = %d, want 32", len(b))
+	if n := secrettest.Len(t, s); n != 32 {
+		t.Errorf("length = %d, want 32", n)
 	}
-	for i, v := range b {
-		if v != byte(i+200) {
-			t.Errorf("Bytes()[%d] = %d, want %d", i, v, byte(i+200))
-			break
-		}
+	want := make([]byte, 32)
+	for i := range want {
+		want[i] = byte(i + 200)
 	}
+	secrettest.Equal(t, s, want)
 }
 
 // TestNewSecret32Random_ProducesValidSize validates the full success path.
@@ -140,8 +129,8 @@ func TestNewSecret32Random_SizeIsAlways32(t *testing.T) {
 		if err != nil {
 			t.Fatalf("iteration %d: NewSecret32Random() error: %v", i, err)
 		}
-		if len(secrettest.Bytes(s)) != 32 {
-			t.Errorf("iteration %d: Bytes() length = %d, want 32", i, len(secrettest.Bytes(s)))
+		if n := secrettest.Len(t, s); n != 32 {
+			t.Errorf("iteration %d: length = %d, want 32", i, n)
 		}
 		s.Destroy()
 	}

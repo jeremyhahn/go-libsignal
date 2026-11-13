@@ -159,8 +159,8 @@ func TestKeysStructureZeroize(t *testing.T) {
 		"IV":           &structure.IV,
 		"SeedMaterial": &structure.SeedMaterial,
 	} {
-		if got := secrettest.Bytes(field); got != nil {
-			t.Errorf("%s still readable after Zeroize: %x", name, got)
+		if !secrettest.Empty(field) {
+			t.Errorf("%s still readable after Zeroize", name)
 		}
 	}
 

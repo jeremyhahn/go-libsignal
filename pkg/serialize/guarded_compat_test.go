@@ -419,7 +419,7 @@ func TestJSONPreKeyRecordSerializerNullSupersedingValue(t *testing.T) {
 	if !structure.PrivateKey.IsDestroyed() {
 		t.Error("the superseded private key was not released")
 	}
-	if secrettest.Bytes(&structure.PrivateKey) != nil {
+	if !secrettest.Empty(&structure.PrivateKey) {
 		t.Error("expected no private key material after the null")
 	}
 }

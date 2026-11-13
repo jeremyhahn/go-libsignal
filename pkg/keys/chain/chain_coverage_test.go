@@ -254,8 +254,8 @@ func TestKeyStructureZeroize(t *testing.T) {
 
 	ks.Zeroize()
 
-	if got := secrettest.Bytes(&ks.Key); got != nil {
-		t.Errorf("Key still readable after Zeroize: %x", got)
+	if !secrettest.Empty(&ks.Key) {
+		t.Errorf("Key still readable after Zeroize")
 	}
 	ks.Zeroize() // idempotent
 }

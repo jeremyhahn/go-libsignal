@@ -288,7 +288,7 @@ func TestNewKeyPairWithPQR(t *testing.T) {
 	if kp.InitialPQRKey == nil {
 		t.Fatal("expected non-nil InitialPQRKey secret")
 	}
-	if !bytes.Equal(secrettest.Bytes(kp.InitialPQRKey), original) {
+	if !secrettest.Matches(t, kp.InitialPQRKey, original) {
 		t.Fatal("InitialPQRKey content mismatch")
 	}
 	kp.Zeroize()

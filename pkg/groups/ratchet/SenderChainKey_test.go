@@ -148,7 +148,7 @@ func TestNewSenderChainKeyFromStruct(t *testing.T) {
 	if key.Iteration() != 10 {
 		t.Errorf("Iteration() = %d, want 10", key.Iteration())
 	}
-	if !bytes.Equal(key.Seed(), secrettest.Bytes(&structure.ChainKey)) {
+	if !secrettest.Matches(t, &structure.ChainKey, key.Seed()) {
 		t.Error("Seed does not match structure ChainKey")
 	}
 }
@@ -184,7 +184,7 @@ func TestNewStructFromSenderChainKey(t *testing.T) {
 	if structure.Iteration != 99 {
 		t.Errorf("Structure.Iteration = %d, want 99", structure.Iteration)
 	}
-	if !bytes.Equal(secrettest.Bytes(&structure.ChainKey), chainKey) {
+	if !secrettest.Matches(t, &structure.ChainKey, chainKey) {
 		t.Error("Structure.ChainKey.BytesOrNil() does not match original chain key")
 	}
 }

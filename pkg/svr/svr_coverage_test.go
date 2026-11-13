@@ -508,7 +508,7 @@ func TestAuthSecret_Deterministic(t *testing.T) {
 	defer a.Destroy()
 	b := authSecret(&input, pt)
 	defer b.Destroy()
-	if !bytes.Equal(secrettest.Bytes(a), secrettest.Bytes(b)) {
+	if !secrettest.Same(t, a, b) {
 		t.Error("authSecret should be deterministic")
 	}
 }

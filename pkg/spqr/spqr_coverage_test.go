@@ -1,7 +1,6 @@
 package spqr
 
 import (
-	"bytes"
 	"math"
 	"testing"
 
@@ -95,10 +94,10 @@ func TestSPQRReceiveKeyB2ADirection(t *testing.T) {
 	}
 
 	// Verify A's send key in epoch 1 equals B's recv key.
-	if !bytes.Equal(secrettest.Bytes(a.chains[1].sendKey), secrettest.Bytes(b.chains[1].recvKey)) {
+	if !secrettest.Same(t, a.chains[1].sendKey, b.chains[1].recvKey) {
 		t.Error("A's sendKey should equal B's recvKey after ReceiveKey")
 	}
-	if !bytes.Equal(secrettest.Bytes(a.chains[1].recvKey), secrettest.Bytes(b.chains[1].sendKey)) {
+	if !secrettest.Same(t, a.chains[1].recvKey, b.chains[1].sendKey) {
 		t.Error("A's recvKey should equal B's sendKey after ReceiveKey")
 	}
 
@@ -111,7 +110,7 @@ func TestSPQRReceiveKeyB2ADirection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("B Decrypt epoch 1: %v", err)
 	}
-	if !bytes.Equal(secrettest.Bytes(mk), secrettest.Bytes(mkd)) {
+	if !secrettest.Same(t, mk, mkd) {
 		t.Error("message key mismatch after ReceiveKey in both directions")
 	}
 	mk.Destroy()
@@ -152,7 +151,7 @@ func TestSPQRDecryptSkippedKeyRetrieval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decrypt counter 3: %v", err)
 	}
-	if !bytes.Equal(secrettest.Bytes(mks[2]), secrettest.Bytes(mkd2)) {
+	if !secrettest.Same(t, mks[2], mkd2) {
 		t.Error("message 3 key mismatch")
 	}
 	mkd2.Destroy()
@@ -162,7 +161,7 @@ func TestSPQRDecryptSkippedKeyRetrieval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decrypt skipped counter 2: %v", err)
 	}
-	if !bytes.Equal(secrettest.Bytes(mks[1]), secrettest.Bytes(mkd1)) {
+	if !secrettest.Same(t, mks[1], mkd1) {
 		t.Error("skipped message 2 key mismatch")
 	}
 	mkd1.Destroy()
@@ -177,7 +176,7 @@ func TestSPQRDecryptSkippedKeyRetrieval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decrypt skipped counter 1: %v", err)
 	}
-	if !bytes.Equal(secrettest.Bytes(mks[0]), secrettest.Bytes(mkd0)) {
+	if !secrettest.Same(t, mks[0], mkd0) {
 		t.Error("skipped message 1 key mismatch")
 	}
 	mkd0.Destroy()
@@ -339,10 +338,10 @@ func TestKdfSckaRKSuccessfulDerivation(t *testing.T) {
 	}
 
 	// All three derived keys should be distinct.
-	if bytes.Equal(secrettest.Bytes(newRK), secrettest.Bytes(newCKs)) {
+	if secrettest.Same(t, newRK, newCKs) {
 		t.Error("newRK and newCKs should differ")
 	}
-	if bytes.Equal(secrettest.Bytes(newRK), secrettest.Bytes(newCKr)) {
+	if secrettest.Same(t, newRK, newCKr) {
 		t.Error("newRK and newCKr should differ")
 	}
 }
@@ -365,7 +364,7 @@ func TestKdfSckaCKSuccessfulDerivation(t *testing.T) {
 	if nextCK.Size() != 32 {
 		t.Errorf("nextCK size = %d, want 32", nextCK.Size())
 	}
-	if bytes.Equal(secrettest.Bytes(mk), secrettest.Bytes(nextCK)) {
+	if secrettest.Same(t, mk, nextCK) {
 		t.Error("mk and nextCK should differ")
 	}
 }
@@ -400,7 +399,7 @@ func TestKdfSckaCKDifferentCounters(t *testing.T) {
 	defer mk2.Destroy()
 	defer next2.Destroy()
 
-	if bytes.Equal(secrettest.Bytes(mk1), secrettest.Bytes(mk2)) {
+	if secrettest.Same(t, mk1, mk2) {
 		t.Error("different counters should produce different message keys")
 	}
 }

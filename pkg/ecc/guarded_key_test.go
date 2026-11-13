@@ -250,7 +250,7 @@ func TestGuardedECPrivateKey_Agreement_Success(t *testing.T) {
 	defer ss2.Destroy()
 
 	// Shared secrets must match (DH commutativity).
-	if secrettest.Array(ss1) != secrettest.Array(ss2) {
+	if !secrettest.Same(t, ss1, ss2) {
 		t.Fatal("DH shared secrets do not match")
 	}
 }

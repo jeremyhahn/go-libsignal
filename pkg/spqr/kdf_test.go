@@ -91,10 +91,10 @@ func TestKdfSckaCKRustAlignment(t *testing.T) {
 	}
 
 	// Output split: nextCK(first 32) || mk(last 32)
-	if !bytes.Equal(secrettest.Bytes(nextCK), expected[:32]) {
+	if !secrettest.Matches(t, nextCK, expected[:32]) {
 		t.Error("nextCK does not match expected HKDF output (first 32 bytes)")
 	}
-	if !bytes.Equal(secrettest.Bytes(mk), expected[32:]) {
+	if !secrettest.Matches(t, mk, expected[32:]) {
 		t.Error("mk does not match expected HKDF output (last 32 bytes)")
 	}
 }
@@ -118,10 +118,9 @@ func TestKdfSckaCKCounterInInfo(t *testing.T) {
 			t.Fatalf("KdfSckaCK(ctr=%d): %v", ctr, err)
 		}
 
-		// Concatenate mk||nextCK as a combined fingerprint.
-		combined := make([]byte, 64)
-		copy(combined[:32], secrettest.Bytes(mk))
-		copy(combined[32:], secrettest.Bytes(nextCK))
+		// Fingerprint mk||nextCK by their digests, taken inside the borrows.
+		mkDigest, ckDigest := secrettest.Digest(t, mk), secrettest.Digest(t, nextCK)
+		combined := append(mkDigest[:], ckDigest[:]...)
 		results[ctr] = combined
 
 		mk.Destroy()
@@ -161,13 +160,13 @@ func TestKdfSckaInitRustAlignment(t *testing.T) {
 		t.Fatalf("DeriveSecrets: %v", err)
 	}
 
-	if !bytes.Equal(secrettest.Bytes(rk), expected[:32]) {
+	if !secrettest.Matches(t, rk, expected[:32]) {
 		t.Error("rk does not match expected output")
 	}
-	if !bytes.Equal(secrettest.Bytes(cks), expected[32:64]) {
+	if !secrettest.Matches(t, cks, expected[32:64]) {
 		t.Error("cks does not match expected output")
 	}
-	if !bytes.Equal(secrettest.Bytes(ckr), expected[64:96]) {
+	if !secrettest.Matches(t, ckr, expected[64:96]) {
 		t.Error("ckr does not match expected output")
 	}
 }
@@ -202,13 +201,13 @@ func TestKdfSckaRKRustAlignment(t *testing.T) {
 		t.Fatalf("DeriveSecrets: %v", err)
 	}
 
-	if !bytes.Equal(secrettest.Bytes(newRK), expected[:32]) {
+	if !secrettest.Matches(t, newRK, expected[:32]) {
 		t.Error("newRK does not match expected output")
 	}
-	if !bytes.Equal(secrettest.Bytes(newCKs), expected[32:64]) {
+	if !secrettest.Matches(t, newCKs, expected[32:64]) {
 		t.Error("newCKs does not match expected output")
 	}
-	if !bytes.Equal(secrettest.Bytes(newCKr), expected[64:96]) {
+	if !secrettest.Matches(t, newCKr, expected[64:96]) {
 		t.Error("newCKr does not match expected output")
 	}
 }
@@ -286,7 +285,7 @@ func TestCounterSemanticsEncryptDecryptRoundtrip(t *testing.T) {
 			t.Fatalf("Decrypt counter %d: %v", counter, decErr)
 		}
 
-		if !bytes.Equal(secrettest.Bytes(mk), secrettest.Bytes(mkd)) {
+		if !secrettest.Same(t, mk, mkd) {
 			t.Errorf("message key mismatch at counter %d", counter)
 		}
 		mk.Destroy()
@@ -324,10 +323,10 @@ func TestKdfSckaCKOutputSplit(t *testing.T) {
 	}
 
 	// First 32 bytes = nextCK (chain continues), last 32 bytes = mk (message key).
-	if !bytes.Equal(secrettest.Bytes(nextCK), raw[:32]) {
+	if !secrettest.Matches(t, nextCK, raw[:32]) {
 		t.Error("nextCK should be first 32 bytes of HKDF output")
 	}
-	if !bytes.Equal(secrettest.Bytes(mk), raw[32:]) {
+	if !secrettest.Matches(t, mk, raw[32:]) {
 		t.Error("mk should be last 32 bytes of HKDF output")
 	}
 }
@@ -368,14 +367,10 @@ func TestKdfSckaCKZeroSalt(t *testing.T) {
 	defer mk.Destroy()
 	defer nextCK.Destroy()
 
-	actualOutput := make([]byte, 64)
-	copy(actualOutput[:32], secrettest.Bytes(nextCK))
-	copy(actualOutput[32:], secrettest.Bytes(mk))
-
-	if !bytes.Equal(actualOutput, correctOutput) {
+	if !secrettest.Matches(t, nextCK, correctOutput[:32]) || !secrettest.Matches(t, mk, correctOutput[32:]) {
 		t.Error("KdfSckaCK does not match zero-salt HKDF computation")
 	}
-	if bytes.Equal(actualOutput, wrongOutput) {
+	if secrettest.Matches(t, nextCK, wrongOutput[:32]) && secrettest.Matches(t, mk, wrongOutput[32:]) {
 		t.Error("KdfSckaCK incorrectly matches chain-key-as-salt computation")
 	}
 }
@@ -389,13 +384,10 @@ func TestKdfDeterministicVectors(t *testing.T) {
 		t.Fatalf("KdfSckaInit: %v", err)
 	}
 
-	// Capture bytes for deterministic comparison.
-	rkHex := make([]byte, 32)
-	copy(rkHex, secrettest.Bytes(rk))
-	cksHex := make([]byte, 32)
-	copy(cksHex, secrettest.Bytes(cks))
-	ckrHex := make([]byte, 32)
-	copy(ckrHex, secrettest.Bytes(ckr))
+	// Capture digests for deterministic comparison.
+	rkDigest := secrettest.Digest(t, rk)
+	cksDigest := secrettest.Digest(t, cks)
+	ckrDigest := secrettest.Digest(t, ckr)
 	rk.Destroy()
 	cks.Destroy()
 	ckr.Destroy()
@@ -409,20 +401,18 @@ func TestKdfDeterministicVectors(t *testing.T) {
 	defer cks2.Destroy()
 	defer ckr2.Destroy()
 
-	if !bytes.Equal(rkHex, secrettest.Bytes(rk2)) {
+	if secrettest.Digest(t, rk2) != rkDigest {
 		t.Error("KdfSckaInit not deterministic for rk")
 	}
-	if !bytes.Equal(cksHex, secrettest.Bytes(cks2)) {
+	if secrettest.Digest(t, cks2) != cksDigest {
 		t.Error("KdfSckaInit not deterministic for cks")
 	}
-	if !bytes.Equal(ckrHex, secrettest.Bytes(ckr2)) {
+	if secrettest.Digest(t, ckr2) != ckrDigest {
 		t.Error("KdfSckaInit not deterministic for ckr")
 	}
 
 	// KdfSckaCK with known chain key and counter 1.
-	ckInput := make([]byte, 32)
-	copy(ckInput, secrettest.Bytes(cks2))
-	ck, err := secret.New(ckInput)
+	ck, err := cks2.Clone()
 	if err != nil {
 		t.Fatalf("secret.New: %v", err)
 	}
@@ -439,10 +429,10 @@ func TestKdfDeterministicVectors(t *testing.T) {
 	if mk.Size() != 32 || nextCK.Size() != 32 {
 		t.Error("KdfSckaCK output sizes are wrong")
 	}
-	if bytes.Equal(secrettest.Bytes(mk), make([]byte, 32)) {
+	if secrettest.Matches(t, mk, make([]byte, 32)) {
 		t.Error("mk should not be all zeros")
 	}
-	if bytes.Equal(secrettest.Bytes(nextCK), make([]byte, 32)) {
+	if secrettest.Matches(t, nextCK, make([]byte, 32)) {
 		t.Error("nextCK should not be all zeros")
 	}
 }

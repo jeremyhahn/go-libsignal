@@ -252,10 +252,11 @@ func TestKeyAgreement_Agreement_Success(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	defer ss.Destroy()
-	arr := secrettest.Array(ss)
-	if arr[0] != 0xBB {
-		t.Fatalf("expected shared secret[0]=0xBB, got 0x%02x", arr[0])
-	}
+	secrettest.With(t, ss, func(b []byte) {
+		if len(b) == 0 || b[0] != 0xBB {
+			t.Errorf("expected shared secret[0]=0xBB")
+		}
+	})
 }
 
 func TestKeyAgreement_Agreement_AfterDestroy(t *testing.T) {
@@ -301,10 +302,11 @@ func TestPrivateKey_CombinedInterface(t *testing.T) {
 		t.Fatalf("Agreement: expected no error, got %v", err)
 	}
 	defer ss.Destroy()
-	arr := secrettest.Array(ss)
-	if arr[0] != 0xCC {
-		t.Fatalf("Agreement: expected ss[0]=0xCC, got 0x%02x", arr[0])
-	}
+	secrettest.With(t, ss, func(b []byte) {
+		if len(b) == 0 || b[0] != 0xCC {
+			t.Errorf("Agreement: expected ss[0]=0xCC")
+		}
+	})
 
 	// Test PublicKey
 	if m.PublicKey() != [32]byte{0x55} {
@@ -334,10 +336,11 @@ func TestDecapsulator_Decapsulate_Success(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	defer ss.Destroy()
-	arr := secrettest.Array(ss)
-	if arr[0] != 0xDD {
-		t.Fatalf("expected ss[0]=0xDD, got 0x%02x", arr[0])
-	}
+	secrettest.With(t, ss, func(b []byte) {
+		if len(b) == 0 || b[0] != 0xDD {
+			t.Errorf("expected ss[0]=0xDD")
+		}
+	})
 }
 
 func TestDecapsulator_Decapsulate_AfterDestroy(t *testing.T) {
@@ -370,10 +373,11 @@ func TestEncapsulator_Encapsulate_Success(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	defer ss.Destroy()
-	arr := secrettest.Array(ss)
-	if arr[0] != 0xEE {
-		t.Fatalf("expected ss[0]=0xEE, got 0x%02x", arr[0])
-	}
+	secrettest.With(t, ss, func(b []byte) {
+		if len(b) == 0 || b[0] != 0xEE {
+			t.Errorf("expected ss[0]=0xEE")
+		}
+	})
 	if len(ct) != 3 {
 		t.Fatalf("expected ciphertext length 3, got %d", len(ct))
 	}

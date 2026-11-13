@@ -1,7 +1,6 @@
 package svr
 
 import (
-	"bytes"
 	"crypto/sha512"
 	"errors"
 	"sort"
@@ -258,7 +257,7 @@ func TestFullCreateRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Restore failed: %v", err)
 	}
-	if !bytes.Equal(secrettest.Bytes(got), secrettest.Bytes(backup.Output)) {
+	if !secrettest.Same(t, got, backup.Output) {
 		t.Fatal("restored secret does not match backup output")
 	}
 }
@@ -293,7 +292,7 @@ func TestFullCreateRestoreSingleServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Restore failed: %v", err)
 	}
-	if !bytes.Equal(secrettest.Bytes(got), secrettest.Bytes(backup.Output)) {
+	if !secrettest.Same(t, got, backup.Output) {
 		t.Fatal("restored secret does not match backup output")
 	}
 }
@@ -510,8 +509,8 @@ func TestEncryptionKeyKnownVector(t *testing.T) {
 		0x1b, 0x74, 0x7f, 0x5a, 0x94, 0xa5, 0x8f, 0x4b,
 		0x84, 0xf5, 0xd5, 0xf4, 0x04, 0x58, 0xb9, 0xe8,
 	}
-	if !bytes.Equal(secrettest.Bytes(got), want) {
-		t.Fatalf("encryptionKey mismatch:\n  got:  %x\n  want: %x", secrettest.Bytes(got), want)
+	if !secrettest.Matches(t, got, want) {
+		t.Fatalf("encryptionKey mismatch")
 	}
 }
 
@@ -554,7 +553,7 @@ func TestMultipleRestoresFromSameBackup(t *testing.T) {
 		if err != nil {
 			t.Fatalf("attempt %d: Restore failed: %v", attempt, err)
 		}
-		if !bytes.Equal(secrettest.Bytes(got), secrettest.Bytes(backup.Output)) {
+		if !secrettest.Same(t, got, backup.Output) {
 			t.Fatalf("attempt %d: restored secret does not match backup output", attempt)
 		}
 	}

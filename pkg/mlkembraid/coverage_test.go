@@ -204,7 +204,7 @@ func TestOutputKeyStruct(t *testing.T) {
 	if key.Epoch != 42 {
 		t.Error("Epoch mismatch")
 	}
-	if len(secrettest.Bytes(key.Key)) != 32 {
+	if secrettest.Len(t, key.Key) != 32 {
 		t.Error("Key length mismatch")
 	}
 	key.Key.Destroy()
@@ -266,7 +266,7 @@ func TestFullEpochExchangeLargeChunks(t *testing.T) {
 	if aliceKey == nil || bobKey == nil {
 		t.Fatal("both parties should produce output keys")
 	}
-	if !bytes.Equal(secrettest.Bytes(aliceKey.Key), secrettest.Bytes(bobKey.Key)) {
+	if !secrettest.Same(t, aliceKey.Key, bobKey.Key) {
 		t.Error("output keys should match with large chunks")
 	}
 	aliceKey.Key.Destroy()

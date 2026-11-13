@@ -195,7 +195,7 @@ func TestErrorsAsTypes(t *testing.T) {
 
 	// Use the backup_forward_secrecy BackupKey to trigger ErrInvalidACILength.
 	rawKey := [BackupKeyLength]byte{}
-	copy(rawKey[:], secrettest.Bytes(bk))
+	secrettest.With(t, bk, func(b []byte) { copy(rawKey[:], b) })
 	backupKey := NewBackupKey(rawKey)
 	defer backupKey.Zeroize()
 

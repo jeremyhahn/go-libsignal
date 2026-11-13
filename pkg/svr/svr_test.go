@@ -42,7 +42,7 @@ func TestNewBackup4(t *testing.T) {
 	t.Run("unique entropy", func(t *testing.T) {
 		b1, _ := NewBackup4(secret, 5)
 		b2, _ := NewBackup4(secret, 5)
-		if b1.Entropy.EqualTo(secrettest.Bytes(b2.Entropy)) {
+		if secrettest.Same(t, b1.Entropy, b2.Entropy) {
 			t.Error("two backups produced identical entropy")
 		}
 		if bytes.Equal(b1.RequestID, b2.RequestID) {

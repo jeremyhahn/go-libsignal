@@ -76,7 +76,7 @@ func TestNewKeysFromStruct(t *testing.T) {
 		t.Fatalf("expected index 99, got %d", keys.Index())
 	}
 	// The clones must be independent: the source structure keeps its material.
-	if !bytes.Equal(secrettest.Bytes(&structure.CipherKey), expectedCipher) {
+	if !secrettest.Matches(t, &structure.CipherKey, expectedCipher) {
 		t.Fatal("NewKeysFromStruct consumed the source structure's material")
 	}
 }
@@ -132,13 +132,13 @@ func TestNewKeysFromStruct_MissingComponent(t *testing.T) {
 func TestNewStructFromKeys(t *testing.T) {
 	keys := NewKeys([]byte("c"), []byte("m"), []byte("i"), 7)
 	structure := mustStructFromKeys(t, keys)
-	if !bytes.Equal(secrettest.Bytes(&structure.CipherKey), []byte("c")) {
+	if !secrettest.Matches(t, &structure.CipherKey, []byte("c")) {
 		t.Fatal("CipherKey mismatch in structure")
 	}
-	if !bytes.Equal(secrettest.Bytes(&structure.MacKey), []byte("m")) {
+	if !secrettest.Matches(t, &structure.MacKey, []byte("m")) {
 		t.Fatal("MacKey mismatch in structure")
 	}
-	if !bytes.Equal(secrettest.Bytes(&structure.IV), []byte("i")) {
+	if !secrettest.Matches(t, &structure.IV, []byte("i")) {
 		t.Fatal("IV mismatch in structure")
 	}
 	if structure.Index != 7 {
@@ -146,7 +146,7 @@ func TestNewStructFromKeys(t *testing.T) {
 	}
 	// The structure holds its own clones, not views into the live keys.
 	keys.Zeroize()
-	if !bytes.Equal(secrettest.Bytes(&structure.CipherKey), []byte("c")) {
+	if !secrettest.Matches(t, &structure.CipherKey, []byte("c")) {
 		t.Fatal("structure shares guarded memory with the live keys")
 	}
 }
@@ -378,7 +378,7 @@ func TestNewKeysFromStruct_WithSeedMaterial(t *testing.T) {
 		t.Fatalf("SeedMaterial not propagated from struct: got %v, want %v", keys.SeedMaterial(), seed)
 	}
 	// Confirm source struct is not consumed (clone semantics).
-	if !bytes.Equal(secrettest.Bytes(&structure.SeedMaterial), seed) {
+	if !secrettest.Matches(t, &structure.SeedMaterial, seed) {
 		t.Fatal("NewKeysFromStruct must not consume source SeedMaterial")
 	}
 }
@@ -390,13 +390,13 @@ func TestNewStructFromKeys_WithSeedMaterial(t *testing.T) {
 
 	structure := mustStructFromKeys(t, keys)
 
-	if !bytes.Equal(secrettest.Bytes(&structure.SeedMaterial), seed) {
-		t.Fatalf("SeedMaterial not copied to struct: got %v, want %v", secrettest.Bytes(&structure.SeedMaterial), seed)
+	if !secrettest.Matches(t, &structure.SeedMaterial, seed) {
+		t.Fatalf("SeedMaterial not copied to struct")
 	}
 	// Confirm the struct holds an independent clone: releasing the live keys
 	// must leave the structure's copy intact.
 	keys.Zeroize()
-	if !bytes.Equal(secrettest.Bytes(&structure.SeedMaterial), seed) {
+	if !secrettest.Matches(t, &structure.SeedMaterial, seed) {
 		t.Fatal("NewStructFromKeys must return an independent copy of SeedMaterial")
 	}
 }
@@ -404,8 +404,8 @@ func TestNewStructFromKeys_WithSeedMaterial(t *testing.T) {
 func TestNewStructFromKeys_NoSeedMaterial(t *testing.T) {
 	keys := NewKeys([]byte("cipher"), []byte("mac"), []byte("iv"), 0)
 	structure := mustStructFromKeys(t, keys)
-	if got := secrettest.Bytes(&structure.SeedMaterial); got != nil {
-		t.Fatalf("expected no SeedMaterial in struct when not set, got %v", got)
+	if !secrettest.Empty(&structure.SeedMaterial) {
+		t.Fatalf("expected no SeedMaterial in struct when not set")
 	}
 }
 
@@ -485,16 +485,16 @@ func TestNewStructFromKeys_SeedOnlyForm(t *testing.T) {
 	keys := NewSeedOnlyKeys(3, seed)
 	structure := mustStructFromKeys(t, keys)
 
-	if got := secrettest.Bytes(&structure.CipherKey); got != nil {
-		t.Fatalf("expected empty CipherKey in seed-only form, got %v", got)
+	if !secrettest.Empty(&structure.CipherKey) {
+		t.Fatalf("expected empty CipherKey in seed-only form")
 	}
-	if got := secrettest.Bytes(&structure.MacKey); got != nil {
-		t.Fatalf("expected empty MacKey in seed-only form, got %v", got)
+	if !secrettest.Empty(&structure.MacKey) {
+		t.Fatalf("expected empty MacKey in seed-only form")
 	}
-	if got := secrettest.Bytes(&structure.IV); got != nil {
-		t.Fatalf("expected empty IV in seed-only form, got %v", got)
+	if !secrettest.Empty(&structure.IV) {
+		t.Fatalf("expected empty IV in seed-only form")
 	}
-	if !bytes.Equal(secrettest.Bytes(&structure.SeedMaterial), seed) {
+	if !secrettest.Matches(t, &structure.SeedMaterial, seed) {
 		t.Fatal("SeedMaterial mismatch in seed-only structure")
 	}
 	if structure.Index != 3 {

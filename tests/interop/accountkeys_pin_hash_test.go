@@ -95,8 +95,8 @@ func TestAccountKeys_PinHash_AccessKey_KAT(t *testing.T) {
 			}
 			defer ph.Zeroize()
 
-			if !bytes.Equal(secrettest.Bytes(ph.AccessKey), want) {
-				t.Fatalf("access key mismatch:\n  got  %x\n  want %x", secrettest.Bytes(ph.AccessKey), want)
+			if !secrettest.Matches(t, ph.AccessKey, want) {
+				t.Fatalf("access key mismatch")
 			}
 		})
 	}

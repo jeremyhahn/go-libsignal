@@ -1,7 +1,6 @@
 package mlkembraid
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
@@ -173,7 +172,7 @@ func TestReceiveCt1ReceivedCompleteCt2(t *testing.T) {
 	if aliceKey == nil || bobKey == nil {
 		t.Fatal("both parties should produce output keys")
 	}
-	if !bytes.Equal(secrettest.Bytes(aliceKey.Key), secrettest.Bytes(bobKey.Key)) {
+	if !secrettest.Same(t, aliceKey.Key, bobKey.Key) {
 		t.Error("output keys should match")
 	}
 	aliceKey.Key.Destroy()
