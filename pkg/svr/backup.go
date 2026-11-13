@@ -41,6 +41,10 @@ func NewOPRFBackup4(serverIDs []uint64, password []byte, maxTries uint32) (*OPRF
 	if maxTries == 0 {
 		return nil, ErrBadData
 	}
+	// An empty password would reach HKDF as empty input key material.
+	if len(password) == 0 {
+		return nil, ErrEmptyPIN
+	}
 
 	n := len(serverIDs)
 	input := passwordToUniformInput(password)
