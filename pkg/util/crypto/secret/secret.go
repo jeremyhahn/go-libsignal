@@ -3,6 +3,7 @@ package secret
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/jeremyhahn/go-enclave"
@@ -150,11 +151,17 @@ func (s *Secret) Size() int {
 
 // Destroy zeroizes and frees the locked memory. This method is idempotent
 // and safe to call multiple times, including on a nil Secret.
+//
+// Destroy panics if the enclave reports that the release failed (a
+// corrupted canary, or a refused munlock or munmap): the material may
+// still be held, and such a failure must never pass silently.
 func (s *Secret) Destroy() {
 	if s == nil || s.enc == nil {
 		return
 	}
-	_ = s.enc.Destroy()
+	if err := s.enc.Destroy(); err != nil {
+		panic(fmt.Errorf("secret: destroy failed: %w", err))
+	}
 }
 
 // IsDestroyed reports whether the secret holds no live material. A nil Secret,
