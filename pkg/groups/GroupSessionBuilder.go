@@ -13,6 +13,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/groups/state/store"
 	"github.com/jeremyhahn/go-libsignal/pkg/protocol"
 	"github.com/jeremyhahn/go-libsignal/pkg/serialize"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/keyhelper"
 )
 
@@ -44,8 +45,18 @@ func (b *SessionBuilder) Process(senderKeyName *protocol.SenderKeyName,
 	if senderKeyRecord == nil {
 		senderKeyRecord = record.NewSenderKey(b.serializer.SenderKeyRecord, b.serializer.SenderKeyState)
 	}
-	senderKeyRecord.AddSenderKeyState(msg.Version(), msg.ID(), msg.Iteration(), msg.ChainKey(), msg.SignatureKey())
+	// ChainKey returns an owned plaintext copy. The receiver state copies it
+	// into locked memory, so wipe this copy once the state is built.
+	chainKey := distributionChainKey(msg)
+	defer crypto.Zeroize(chainKey)
+	senderKeyRecord.AddSenderKeyState(msg.Version(), msg.ID(), msg.Iteration(), chainKey, msg.SignatureKey())
 	return b.senderKeyStore.StoreSenderKey(senderKeyName, senderKeyRecord)
+}
+
+// distributionChainKey returns the owned chain key copy Process wipes. It is
+// a variable so tests can observe that the copy is wiped.
+var distributionChainKey = func(msg *protocol.SenderKeyDistributionMessage) []byte {
+	return msg.ChainKey()
 }
 
 // Create will create a new group session for the given name.
