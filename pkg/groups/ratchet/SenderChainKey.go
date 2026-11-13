@@ -17,6 +17,15 @@ func (e *ErrChainTooLong) Error() string {
 	return "ratchet: sender chain is too long"
 }
 
+// ErrEmptyChainKey is returned when a sender chain key has no key
+// material. Deriving from it would key HMAC with an empty key and give a
+// predictable message key and chain.
+type ErrEmptyChainKey struct{}
+
+func (e *ErrEmptyChainKey) Error() string {
+	return "ratchet: sender chain key is empty"
+}
+
 var messageKeySeed = []byte{0x01}
 var chainKeySeed = []byte{0x02}
 
@@ -150,8 +159,15 @@ func (k *SenderChainKey) Zeroize() {
 }
 
 func (k *SenderChainKey) getDerivative(seed []byte) ([]byte, error) {
+	if k == nil {
+		return nil, &ErrEmptyChainKey{}
+	}
 	var derived []byte
 	err := k.chainKey.WithBytes(func(key []byte) error {
+		// WithBytes borrows a nil or zero Secret as nil; refuse it.
+		if len(key) == 0 {
+			return &ErrEmptyChainKey{}
+		}
 		mac := hmac.New(sha256.New, key)
 		mac.Write(seed)
 		derived = mac.Sum(nil)
