@@ -50,6 +50,8 @@ func (b *SessionBuilder) Process(senderKeyName *protocol.SenderKeyName,
 
 // Create will create a new group session for the given name.
 // The distributionID identifies the SenderKey distribution for routing.
+// The returned message holds the chain key seed in locked memory; call its
+// Release once it has been serialized and sent.
 func (b *SessionBuilder) Create(distributionID [16]byte, senderKeyName *protocol.SenderKeyName) (*protocol.SenderKeyDistributionMessage, error) {
 	// Load the senderkey by name
 	senderKeyRecord, err := b.senderKeyStore.LoadSenderKey(senderKeyName)
@@ -85,12 +87,18 @@ func (b *SessionBuilder) Create(distributionID [16]byte, senderKeyName *protocol
 		return nil, err
 	}
 
-	// Create the group message to return.
-	senderKeyDistributionMessage := protocol.NewSenderKeyDistributionMessage(
+	// Create the group message to return. The seed goes to the message as a
+	// locked clone, never as a heap copy; the caller calls Release on it.
+	chainKey := state.SenderChainKey()
+	seed, err := chainKey.SeedSecret()
+	if err != nil {
+		return nil, err
+	}
+	senderKeyDistributionMessage := protocol.NewSenderKeyDistributionMessageFromSecret(
 		distributionID,
 		state.KeyID(),
-		state.SenderChainKey().Iteration(),
-		state.SenderChainKey().Seed(),
+		chainKey.Iteration(),
+		seed,
 		state.SigningKey().PublicKey(),
 		b.serializer.SenderKeyDistributionMessage,
 		protocol.SenderKeyCurrentVersion,

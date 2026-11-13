@@ -63,6 +63,7 @@ func TestSessionBuilderCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 	if skdm == nil {
 		t.Fatal("Create() returned nil SKDM")
 	}
@@ -84,12 +85,14 @@ func TestSessionBuilderCreateIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("First Create() error: %v", err)
 	}
+	defer skdm1.Release()
 
 	// Second create should return same state (not regenerate)
 	skdm2, err := builder.Create([16]byte{}, senderKeyName)
 	if err != nil {
 		t.Fatalf("Second Create() error: %v", err)
 	}
+	defer skdm2.Release()
 
 	if skdm1.ID() != skdm2.ID() {
 		t.Errorf("Second Create should reuse existing state: ID %d vs %d", skdm1.ID(), skdm2.ID())
@@ -112,6 +115,7 @@ func TestSessionBuilderProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 
 	// Serialize and deserialize the SKDM to simulate network transfer
 	skdmBytes, err := skdm.Serialize()
@@ -156,6 +160,7 @@ func TestSessionBuilderProcessNilRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 
 	// Process on builder with nil record in store (store returns nil)
 	if err := builder.Process(senderKeyName, skdm); err != nil {

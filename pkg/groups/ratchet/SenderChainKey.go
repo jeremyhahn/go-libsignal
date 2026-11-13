@@ -150,6 +150,16 @@ func (k *SenderChainKey) Seed() []byte {
 	return copySecret(k.chainKey)
 }
 
+// SeedSecret returns an independent locked copy of the chain key seed,
+// cloned region to region with no heap copy. The caller owns it and
+// destroys it.
+func (k *SenderChainKey) SeedSecret() (*secret.Secret, error) {
+	if k == nil || k.chainKey == nil {
+		return nil, &ErrEmptyChainKey{}
+	}
+	return k.chainKey.Clone()
+}
+
 // Zeroize destroys the guarded memory holding the chain key material.
 // This method is idempotent and safe to call multiple times.
 func (k *SenderChainKey) Zeroize() {

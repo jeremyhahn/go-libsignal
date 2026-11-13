@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
 // SenderKeyDistributionMessageSerializer is an interface for serializing and deserializing
@@ -66,12 +67,18 @@ func NewSenderKeyDistributionMessageFromStruct(structure *SenderKeyDistributionM
 		return nil, err
 	}
 
+	// Guard a copy of the chain key; the structure stays the caller's.
+	chainKey, err := guardChainKey(structure.ChainKey)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create the signal message object from the structure.
 	message := &SenderKeyDistributionMessage{
 		distributionID: structure.DistributionID,
 		id:             structure.ID,
 		iteration:      structure.Iteration,
-		chainKey:       structure.ChainKey,
+		chainKey:       chainKey,
 		version:        structure.Version,
 		signatureKey:   signingKey,
 		serializer:     serializer,
@@ -90,8 +97,28 @@ func NewSenderKeyDistributionMessageFromStruct(structure *SenderKeyDistributionM
 // The messageVersion parameter specifies the protocol version to use for this
 // distribution message, allowing it to match the version received from the
 // sender rather than always using the current version constant.
+//
+// The message guards its own copy of chainKey in locked memory; the caller
+// keeps (and wipes) chainKey. Call Release once the message is no longer
+// needed. It panics if the locked allocation fails.
 func NewSenderKeyDistributionMessage(distributionID [16]byte, id uint32, iteration uint32,
 	chainKey []byte, signatureKey ecc.ECPublicKeyable,
+	serializer SenderKeyDistributionMessageSerializer,
+	messageVersion uint32) *SenderKeyDistributionMessage {
+
+	guarded, err := guardChainKey(chainKey)
+	if err != nil {
+		panic(fmt.Errorf("protocol: guard sender key distribution chain key: %w", err))
+	}
+	return NewSenderKeyDistributionMessageFromSecret(distributionID, id, iteration,
+		guarded, signatureKey, serializer, messageVersion)
+}
+
+// NewSenderKeyDistributionMessageFromSecret returns a distribution message
+// that takes ownership of chainKey, which stays in locked memory. Release
+// destroys it.
+func NewSenderKeyDistributionMessageFromSecret(distributionID [16]byte, id uint32, iteration uint32,
+	chainKey *secret.Secret, signatureKey ecc.ECPublicKeyable,
 	serializer SenderKeyDistributionMessageSerializer,
 	messageVersion uint32) *SenderKeyDistributionMessage {
 
@@ -104,6 +131,15 @@ func NewSenderKeyDistributionMessage(distributionID [16]byte, id uint32, iterati
 		signatureKey:   signatureKey,
 		serializer:     serializer,
 	}
+}
+
+// guardChainKey moves a copy of b into locked memory; secret.New wipes the
+// copy. A nil b yields a nil Secret.
+func guardChainKey(b []byte) (*secret.Secret, error) {
+	if b == nil {
+		return nil, nil
+	}
+	return secret.New(append(make([]byte, 0, len(b)), b...))
 }
 
 // Version returns the protocol version of this distribution message.
@@ -127,7 +163,7 @@ type SenderKeyDistributionMessage struct {
 	distributionID [16]byte
 	id             uint32
 	iteration      uint32
-	chainKey       []byte
+	chainKey       *secret.Secret
 	version        uint32
 	signatureKey   ecc.ECPublicKeyable
 	serializer     SenderKeyDistributionMessageSerializer
@@ -148,9 +184,28 @@ func (p *SenderKeyDistributionMessage) Iteration() uint32 {
 	return p.iteration
 }
 
-// ChainKey will return the message's chain key in bytes.
+// ChainKey returns a fresh heap copy of the message's chain key, which the
+// caller owns and wipes, or nil once the message is released.
 func (p *SenderKeyDistributionMessage) ChainKey() []byte {
-	return p.chainKey
+	var out []byte
+	if err := p.chainKey.WithBytes(func(b []byte) error {
+		if b != nil {
+			out = append([]byte(nil), b...)
+		}
+		return nil
+	}); err != nil {
+		return nil
+	}
+	return out
+}
+
+// Release destroys the guarded chain key. It is idempotent; after it,
+// ChainKey returns nil and Serialize fails.
+func (p *SenderKeyDistributionMessage) Release() {
+	if p == nil {
+		return
+	}
+	p.chainKey.Destroy()
 }
 
 // SignatureKey will return the message's signature public key
@@ -161,15 +216,26 @@ func (p *SenderKeyDistributionMessage) SignatureKey() ecc.ECPublicKeyable {
 // Serialize will use the given serializer and return the message as
 // bytes.
 func (p *SenderKeyDistributionMessage) Serialize() ([]byte, error) {
-	structure := &SenderKeyDistributionMessageStructure{
-		DistributionID: p.distributionID,
-		ID:             p.id,
-		Iteration:      p.iteration,
-		ChainKey:       p.chainKey,
-		SigningKey:     p.signatureKey.Serialize(),
-		Version:        p.version,
+	// The chain key is serialized from inside the borrow, so no heap copy
+	// of it is made; the serializer encodes it into the returned bytes.
+	var out []byte
+	err := p.chainKey.WithBytes(func(chainKey []byte) error {
+		structure := &SenderKeyDistributionMessageStructure{
+			DistributionID: p.distributionID,
+			ID:             p.id,
+			Iteration:      p.iteration,
+			ChainKey:       chainKey,
+			SigningKey:     p.signatureKey.Serialize(),
+			Version:        p.version,
+		}
+		var serr error
+		out, serr = p.serializer.Serialize(structure)
+		return serr
+	})
+	if err != nil {
+		return nil, err
 	}
-	return p.serializer.Serialize(structure)
+	return out, nil
 }
 
 // Type will return the message's type.
