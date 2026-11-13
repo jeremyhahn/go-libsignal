@@ -3,6 +3,7 @@ package identity
 import (
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/proto/storagepb"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -87,6 +88,8 @@ func (k *KeyPair) PrivateKey() ecc.ECPrivateKeyable {
 // Rust source: rust/protocol/src/identity_key.rs — IdentityKeyPair::serialize (line 127)
 func (k *KeyPair) Serialize() ([]byte, error) {
 	privBytes := k.privateKey.Serialize()
+	// Serialize returns an owned copy; the marshaled output is the caller's.
+	defer crypto.ZeroizeArray32(&privBytes)
 	structure := &storagepb.IdentityKeyPairStructure{
 		PublicKey:  k.publicKey.Serialize(),
 		PrivateKey: privBytes[:],

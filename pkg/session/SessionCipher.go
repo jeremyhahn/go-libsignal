@@ -756,9 +756,11 @@ func getOrCreateMessageKeys(sessionState *record.State, theirEphemeral ecc.ECPub
 		if sessionState.HasMessageKeys(theirEphemeral, counter) {
 			storedKeys := sessionState.RemoveMessageKeys(theirEphemeral, counter)
 			// SPQR: Re-derive with PQR salt if the stored key has seed material.
-			if seed := storedKeys.SeedMaterial(); len(seed) > 0 && len(pqrSalt) > 0 {
-				// SeedMaterial returns an owned copy; wipe it on return.
-				defer crypto.Zeroize(seed)
+			// SeedMaterial returns an owned copy; wipe it on return, also
+			// when there is no PQR salt and the seed goes unused.
+			seed := storedKeys.SeedMaterial()
+			defer crypto.Zeroize(seed)
+			if len(seed) > 0 && len(pqrSalt) > 0 {
 				seedCopy := make([]byte, len(seed))
 				copy(seedCopy, seed)
 				// The stored keys leave the clone here and are superseded by

@@ -82,7 +82,10 @@ func (k *Kyber1024KEM) Decapsulate(secretKey *SecretKey, ciphertext *Ciphertext)
 		return nil, &KeyTypeMismatchError{Expected: KeyTypeKyber1024, Actual: ciphertext.Type(), KeyKind: "ciphertext"}
 	}
 
-	sk, err := kyber1024Scheme.UnmarshalBinaryPrivateKey(secretKey.Data())
+	// Data returns an owned copy; wipe it once the scheme has parsed it.
+	skBytes := secretKey.Data()
+	sk, err := kyber1024Scheme.UnmarshalBinaryPrivateKey(skBytes)
+	crypto.Zeroize(skBytes)
 	if err != nil {
 		return nil, &UnmarshalError{Algorithm: "kyber1024", KeyKind: "secret", Err: err}
 	}
