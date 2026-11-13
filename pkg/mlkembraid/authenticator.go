@@ -57,6 +57,11 @@ func (a *Authenticator) Update(epoch uint64, updateKey []byte) error {
 
 	var derived []byte
 	err := a.rootKey.WithBytes(func(rootKey []byte) error {
+		// WithBytes borrows a nil or zero Secret as nil; refuse it. A
+		// live root key is never empty (it starts as 32 zero bytes).
+		if len(rootKey) == 0 {
+			return &ErrInvalidInput{Field: "rootKey", Reason: "must not be empty"}
+		}
 		var kErr error
 		derived, kErr = kdfAuth(rootKey, updateKey, epoch)
 		return kErr
@@ -201,6 +206,11 @@ func kdfAuth(rootKey, updateKey []byte, epoch uint64) ([]byte, error) {
 func (a *Authenticator) macWith(label []byte, epoch uint64, data []byte) ([]byte, error) {
 	var mac []byte
 	if err := a.macKey.WithBytes(func(macKey []byte) error {
+		// A nil or zero MAC key is borrowed as nil; HMAC under an empty
+		// key would be forgeable.
+		if len(macKey) == 0 {
+			return &ErrInvalidInput{Field: "macKey", Reason: "must not be empty"}
+		}
 		mac = computeMAC(macKey, label, epoch, data)
 		return nil
 	}); err != nil {

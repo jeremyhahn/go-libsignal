@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/sha512"
+	"errors"
 	"io"
 	"runtime"
 
@@ -248,12 +249,20 @@ func encryptionKey(sEnc []byte, kAuth []byte) *secret.Secret {
 	return s
 }
 
+// errEmptyKeyMaterial is returned when a borrowed secret that keys the
+// encryption key derivation holds no material.
+var errEmptyKeyMaterial = errors.New("svr: key material is empty")
+
 // encryptionKeyFromSecrets derives the encryption key from sEnc and kAuth,
 // each borrowed through WithBytes for the derivation only.
 func encryptionKeyFromSecrets(sEnc, kAuth *secret.Secret) *secret.Secret {
 	var out *secret.Secret
 	if err := sEnc.WithBytes(func(sEncBytes []byte) error {
 		return kAuth.WithBytes(func(kAuthBytes []byte) error {
+			// WithBytes borrows a nil or zero Secret as nil; refuse it.
+			if len(sEncBytes) == 0 || len(kAuthBytes) == 0 {
+				return errEmptyKeyMaterial
+			}
 			out = encryptionKey(sEncBytes, kAuthBytes)
 			return nil
 		})

@@ -205,6 +205,11 @@ func deriveMessageKeysFromSeed(kdfFunc kdf.HKDF, inputKeyMaterial []byte, pqrSal
 
 	var keyMaterialBytes []byte
 	err = inputKeySecret.WithBytes(func(input []byte) error {
+		// An empty seed gives a zero Secret, which WithBytes borrows as
+		// nil; HKDF over it would give predictable message keys.
+		if len(input) == 0 {
+			return ErrEmptySeed
+		}
 		var kdfErr error
 		keyMaterialBytes, kdfErr = kdfFunc(input, pqrSalt, []byte(message.KdfInfo), message.DerivedSecretsSize)
 		return kdfErr
@@ -261,6 +266,10 @@ func (c *Key) BaseMaterial(seed []byte) []byte {
 // Deriving from it would key HMAC with an empty key and give predictable
 // message keys and chain keys.
 var ErrEmptyChainKey = errors.New("chain: chain key is empty")
+
+// ErrEmptySeed is returned when message keys are derived from an empty
+// seed.
+var ErrEmptySeed = errors.New("chain: message key seed is empty")
 
 // ErrDestroyedChainKey is returned when a chain key has been destroyed.
 var ErrDestroyedChainKey = errors.New("chain: attempt to access destroyed chain key")

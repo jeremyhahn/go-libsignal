@@ -3,6 +3,8 @@
 package root
 
 import (
+	"errors"
+
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/kdf"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/chain"
@@ -66,6 +68,11 @@ func (k *Key) Bytes() []byte {
 	return out
 }
 
+// ErrEmptyRootKey is returned when a root key has no key material.
+// Using it as the HKDF salt would derive the next root and chain keys
+// from the DH output alone.
+var ErrEmptyRootKey = errors.New("root: root key is empty")
+
 // CreateChain creates a new RootKey and ChainKey from the recipient's ratchet key and our private key.
 func (k *Key) CreateChain(theirRatchetKey ecc.ECPublicKeyable, ourRatchetKey *ecc.ECKeyPair) (*session.KeyPair, error) {
 	keyMaterial := make([]byte, 32)
@@ -82,6 +89,10 @@ func (k *Key) CreateChain(theirRatchetKey ecc.ECPublicKeyable, ourRatchetKey *ec
 	copy(keyMaterial, sharedSecret[:])
 	var derivedSecretBytes []byte
 	err := k.key.WithBytes(func(rootKey []byte) error {
+		// WithBytes borrows a nil or zero Secret as nil; refuse it.
+		if len(rootKey) == 0 {
+			return ErrEmptyRootKey
+		}
 		var dErr error
 		derivedSecretBytes, dErr = kdf.DeriveSecrets(keyMaterial, rootKey, []byte(KdfInfo), ChainDerivedSecretsSize)
 		return dErr
