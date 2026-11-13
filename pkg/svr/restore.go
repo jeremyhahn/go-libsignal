@@ -50,9 +50,9 @@ func NewRestore1(serverIDs []uint64, password []byte) (*Restore1, error) {
 		return nil, &Error{kind: errBadData}
 	}
 	// blinded = inputHashPt(input) * blind, with the input borrowed.
-	var blinded *ristretto255.Element
+	blinded := ristretto255.NewIdentityElement()
 	if err := withInput(inputSecret, func(inputPtr *[64]byte) error {
-		blinded = ristretto255.NewIdentityElement().ScalarMult(blind, inputHashPt(inputPtr))
+		blinded.ScalarMult(blind, inputHashPt(inputPtr))
 		return nil
 	}); err != nil {
 		inputSecret.Destroy()
@@ -165,10 +165,10 @@ func (r *Restore1) Restore2(responses1 [][]byte, handshakeHashes [][]byte) (*Res
 	// Recompute auth commitments for the Schnorr proof.
 	// The input is borrowed for the commitments and the blinded point.
 	var commitments []authCommitment
-	var blindedPt *ristretto255.Element
+	blindedPt := ristretto255.NewIdentityElement()
 	if err := withInput(r.input, func(inputPtr *[64]byte) error {
 		commitments = authCommitments(r.serverIDs, inputPtr, ap)
-		blindedPt = ristretto255.NewIdentityElement().ScalarMult(r.blind, inputHashPt(inputPtr))
+		blindedPt.ScalarMult(r.blind, inputHashPt(inputPtr))
 		return nil
 	}); err != nil {
 		return nil, &Error{kind: errBadData}

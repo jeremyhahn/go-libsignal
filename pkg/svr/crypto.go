@@ -77,10 +77,9 @@ func randomScalar() *ristretto255.Scalar {
 		panic("svr: failed to allocate guarded entropy: " + err.Error())
 	}
 	defer entropy.Destroy()
-	var s *ristretto255.Scalar
+	s := ristretto255.NewScalar()
 	if err2 := entropy.WithBytes(func(b []byte) error {
-		var sErr error
-		s, sErr = ristretto255.NewScalar().SetUniformBytes(b)
+		_, sErr := s.SetUniformBytes(b)
 		return sErr
 	}); err2 != nil {
 		panic("svr: failed to derive scalar from uniform bytes: " + err2.Error())
