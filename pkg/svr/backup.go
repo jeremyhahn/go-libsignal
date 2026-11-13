@@ -83,12 +83,16 @@ func NewOPRFBackup4(serverIDs []uint64, password []byte, maxTries uint32) (*OPRF
 		kAuth = authSecret(inputPtr, ap)
 		return nil
 	}); err != nil {
+		kAuth.Destroy()
 		return nil, &Error{kind: errBadData}
 	}
+	// Destroy kAuth on every return from here on, including a failed
+	// version allocation.
+	defer kAuth.Destroy()
 	defer zeroizeCommitments(commitments)
 
 	// Random version identifier for this backup.
-	versionSecret, err := secret.NewRandom(4)
+	versionSecret, err := versionRandAlloc(4)
 	if err != nil {
 		return nil, &Error{kind: errBadData}
 	}
@@ -99,13 +103,11 @@ func NewOPRFBackup4(serverIDs []uint64, password []byte, maxTries uint32) (*OPRF
 		return nil
 	}); err != nil {
 		versionSecret.Destroy()
-		kAuth.Destroy()
 		return nil, &Error{kind: errBadData}
 	}
 	versionSecret.Destroy()
 
 	output := encryptionKeyFromSecrets(sEnc, kAuth)
-	kAuth.Destroy()
 
 	requests := make([][]byte, n)
 	for i := 0; i < n; i++ {
@@ -133,6 +135,10 @@ func NewOPRFBackup4(serverIDs []uint64, password []byte, maxTries uint32) (*OPRF
 		Output:   output,
 	}, nil
 }
+
+// versionRandAlloc allocates the random backup version; tests replace it
+// to exercise the version allocation failure.
+var versionRandAlloc = secret.NewRandom
 
 // FinalizeBackup4 processes server responses to backup requests. It verifies
 // that all servers returned OK status and returns the minimum tries remaining.
