@@ -55,7 +55,7 @@ func New(data []byte) (*Secret, error) {
 // if the underlying locked-memory allocation or the random read fails. Under a
 // budget (see SetAllocator) the call briefly holds two reservations, the
 // scratch region and the frozen one, and needs room for both.
-func NewRandom(size int) (*Secret, error) {
+func NewRandom(size int) (out *Secret, retErr error) {
 	if size == 0 {
 		return &Secret{}, nil
 	}
@@ -66,7 +66,17 @@ func NewRandom(size int) (*Secret, error) {
 	if err != nil {
 		return nil, newAllocError(err)
 	}
-	defer scratch.Destroy()
+	// A failed scratch release is reported, and the fresh secret is not
+	// handed out alongside an error.
+	defer func() {
+		if destroyErr := scratch.Destroy(); destroyErr != nil {
+			if out != nil {
+				out.Destroy()
+				out = nil
+			}
+			retErr = errors.Join(retErr, destroyErr)
+		}
+	}()
 
 	var s *Secret
 	if err := scratch.WithBytes(func(b []byte) error {
@@ -179,8 +189,7 @@ func (s *Secret) Clone() (*Secret, error) {
 			return nil
 		})
 		if copyErr != nil {
-			dst.Destroy()
-			return copyErr
+			return errors.Join(copyErr, dst.Destroy())
 		}
 		cloned = dst
 		return nil
