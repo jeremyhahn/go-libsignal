@@ -194,7 +194,7 @@ jobs:
       # this file is guarded; the work it captures has already run.
       - name: Upload test log
         if: failure() && github.server_url == 'https://github.com'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-log
           path: test.log
@@ -254,7 +254,7 @@ jobs:
 
       - name: Upload property test log
         if: failure() && github.server_url == 'https://github.com'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: proptest-log
           path: proptest.log
@@ -312,7 +312,7 @@ jobs:
 
       - name: Upload security logs
         if: always() && github.server_url == 'https://github.com'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: security-logs
           path: |
@@ -464,7 +464,7 @@ jobs:
 
       - name: Upload integration test log
         if: failure() && github.server_url == 'https://github.com'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: integration-test-log
           path: integration-test.log
@@ -537,7 +537,7 @@ jobs:
 
       - name: Upload coverage
         if: always() && github.server_url == 'https://github.com'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: |
