@@ -3,6 +3,8 @@ package secret
 import (
 	"errors"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // TestNew_ZeroLengthSlice covers the empty-slice path in New (not nil).
@@ -54,7 +56,7 @@ func TestNewEmpty_PositiveSizes(t *testing.T) {
 			t.Errorf("NewEmpty(%d) Size() = %d, want %d", size, s.Size(), size)
 		}
 		// All bytes must be zero.
-		for i, b := range s.Bytes() {
+		for i, b := range secrettest.Bytes(s) {
 			if b != 0 {
 				t.Errorf("NewEmpty(%d) Bytes()[%d] = %d, want 0", size, i, b)
 				break
@@ -73,7 +75,7 @@ func TestNewSecret32_ZeroArray(t *testing.T) {
 	}
 	defer s.Destroy()
 
-	arr := s.Array()
+	arr := secrettest.Array(s)
 	for i, b := range arr {
 		if b != 0 {
 			t.Errorf("Array()[%d] = %d, want 0", i, b)
@@ -119,7 +121,7 @@ func TestNewSecret32FromSlice_ExactSize(t *testing.T) {
 	}
 	defer s.Destroy()
 
-	b := s.Bytes()
+	b := secrettest.Bytes(s)
 	if len(b) != 32 {
 		t.Errorf("Bytes() length = %d, want 32", len(b))
 	}
@@ -138,8 +140,8 @@ func TestNewSecret32Random_SizeIsAlways32(t *testing.T) {
 		if err != nil {
 			t.Fatalf("iteration %d: NewSecret32Random() error: %v", i, err)
 		}
-		if len(s.Bytes()) != 32 {
-			t.Errorf("iteration %d: Bytes() length = %d, want 32", i, len(s.Bytes()))
+		if len(secrettest.Bytes(s)) != 32 {
+			t.Errorf("iteration %d: Bytes() length = %d, want 32", i, len(secrettest.Bytes(s)))
 		}
 		s.Destroy()
 	}

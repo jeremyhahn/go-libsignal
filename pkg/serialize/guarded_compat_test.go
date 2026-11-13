@@ -11,6 +11,8 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/chain"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/message"
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // The persisted-state private key fields moved from plain []byte into guarded
@@ -417,7 +419,7 @@ func TestJSONPreKeyRecordSerializerNullSupersedingValue(t *testing.T) {
 	if !structure.PrivateKey.IsDestroyed() {
 		t.Error("the superseded private key was not released")
 	}
-	if structure.PrivateKey.BytesOrNil() != nil {
+	if secrettest.Bytes(&structure.PrivateKey) != nil {
 		t.Error("expected no private key material after the null")
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/mlkembraid"
 	pqratchetpb "github.com/jeremyhahn/go-libsignal/pkg/proto/pqratchetpb"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // sharedSecretForTest returns a deterministic 32-byte shared secret for a
@@ -878,7 +880,7 @@ func TestProtoEpochLinkToChain_ValidRecords(t *testing.T) {
 	if !ok {
 		t.Fatal("skippedKeys should contain counter 7 for epoch 3")
 	}
-	if !bytes.Equal(sk.Bytes(), prev[4:recSize]) {
+	if !bytes.Equal(secrettest.Bytes(sk), prev[4:recSize]) {
 		t.Error("skipped key bytes mismatch")
 	}
 	sk.Destroy()
@@ -1051,7 +1053,7 @@ func TestSkippedKeysPrevRoundTrip(t *testing.T) {
 		}
 		// Verify the key from original matches the key from deserialized.
 		origSk := s.skippedKeys[id]
-		if !bytes.Equal(sk.Bytes(), origSk.Bytes()) {
+		if !bytes.Equal(secrettest.Bytes(sk), secrettest.Bytes(origSk)) {
 			t.Errorf("counter %d: key mismatch after round-trip", ctr)
 		}
 	}
@@ -1123,8 +1125,8 @@ func TestSkippedKeysPrevRustFormat(t *testing.T) {
 		t.Fatal("missing skipped key for counter=1")
 	}
 	wantKey1 := prev[4 : 4+keyLen]
-	if !bytes.Equal(sk1.Bytes(), wantKey1) {
-		t.Errorf("counter=1 key mismatch: got %x, want %x", sk1.Bytes(), wantKey1)
+	if !bytes.Equal(secrettest.Bytes(sk1), wantKey1) {
+		t.Errorf("counter=1 key mismatch: got %x, want %x", secrettest.Bytes(sk1), wantKey1)
 	}
 	sk1.Destroy()
 
@@ -1135,8 +1137,8 @@ func TestSkippedKeysPrevRustFormat(t *testing.T) {
 		t.Fatal("missing skipped key for counter=100")
 	}
 	wantKey2 := prev[recSize+4 : recSize+4+keyLen]
-	if !bytes.Equal(sk2.Bytes(), wantKey2) {
-		t.Errorf("counter=100 key mismatch: got %x, want %x", sk2.Bytes(), wantKey2)
+	if !bytes.Equal(secrettest.Bytes(sk2), wantKey2) {
+		t.Errorf("counter=100 key mismatch: got %x, want %x", secrettest.Bytes(sk2), wantKey2)
 	}
 	sk2.Destroy()
 }

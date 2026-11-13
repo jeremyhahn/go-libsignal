@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/kdf"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // TestMessageKeysWithSeed verifies that MessageKeysWithSeed returns valid message
@@ -252,7 +254,7 @@ func TestKeyStructureZeroize(t *testing.T) {
 
 	ks.Zeroize()
 
-	if got := ks.Key.BytesOrNil(); got != nil {
+	if got := secrettest.Bytes(&ks.Key); got != nil {
 		t.Errorf("Key still readable after Zeroize: %x", got)
 	}
 	ks.Zeroize() // idempotent

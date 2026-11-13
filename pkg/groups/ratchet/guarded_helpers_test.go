@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // mustGuard moves a copy of the given bytes into guarded memory, for building
@@ -36,7 +38,7 @@ func TestSenderChainKeyStructIsAnIndependentClone(t *testing.T) {
 	defer structure.Zeroize()
 
 	key.Zeroize()
-	if !bytes.Equal(structure.ChainKey.BytesOrNil(), []byte("sender-chain-key-material-32-byt")) {
+	if !bytes.Equal(secrettest.Bytes(&structure.ChainKey), []byte("sender-chain-key-material-32-byt")) {
 		t.Fatal("structure shares guarded memory with the live chain key")
 	}
 }
@@ -59,7 +61,7 @@ func TestSenderChainKeyFromStructIsAnIndependentClone(t *testing.T) {
 	}
 
 	key.Zeroize()
-	if !bytes.Equal(structure.ChainKey.BytesOrNil(), []byte("another-chain-key-of-32-bytes!!!")) {
+	if !bytes.Equal(secrettest.Bytes(&structure.ChainKey), []byte("another-chain-key-of-32-bytes!!!")) {
 		t.Fatal("NewSenderChainKeyFromStruct consumed or aliased the source structure")
 	}
 }
@@ -109,9 +111,9 @@ func TestSenderMessageKeyStructIsAnIndependentClone(t *testing.T) {
 	defer structure.Zeroize()
 
 	key.Zeroize()
-	if sha256.Sum256(structure.IV.BytesOrNil()) != ivDigest ||
-		sha256.Sum256(structure.CipherKey.BytesOrNil()) != cipherDigest ||
-		sha256.Sum256(structure.Seed.BytesOrNil()) != seedDigest {
+	if sha256.Sum256(secrettest.Bytes(&structure.IV)) != ivDigest ||
+		sha256.Sum256(secrettest.Bytes(&structure.CipherKey)) != cipherDigest ||
+		sha256.Sum256(secrettest.Bytes(&structure.Seed)) != seedDigest {
 		t.Fatal("structure shares guarded memory with the live message key")
 	}
 }

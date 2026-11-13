@@ -15,6 +15,8 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/kem"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/identity"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 func genKP(t *testing.T) *ecc.ECKeyPair {
@@ -649,8 +651,8 @@ func TestPQXDH_InitialPQRKey(t *testing.T) {
 	}
 
 	// Both sides must derive the same InitialPQRKey.
-	senderPQRBytes := senderKeys.InitialPQRKey.Bytes()
-	receiverPQRBytes := receiverKeys.InitialPQRKey.Bytes()
+	senderPQRBytes := secrettest.Bytes(senderKeys.InitialPQRKey)
+	receiverPQRBytes := secrettest.Bytes(receiverKeys.InitialPQRKey)
 	for i := range senderPQRBytes {
 		if senderPQRBytes[i] != receiverPQRBytes[i] {
 			t.Fatal("PQXDH sender and receiver must derive the same InitialPQRKey")

@@ -3,6 +3,8 @@ package ratchet
 import (
 	"bytes"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // TestSenderChainKeyStructure_Zeroize verifies that Zeroize overwrites the
@@ -15,7 +17,7 @@ func TestSenderChainKeyStructure_Zeroize(t *testing.T) {
 
 	// Verify non-zero before zeroize.
 	allZero := true
-	for _, b := range structure.ChainKey.BytesOrNil() {
+	for _, b := range secrettest.Bytes(&structure.ChainKey) {
 		if b != 0 {
 			allZero = false
 			break
@@ -27,7 +29,7 @@ func TestSenderChainKeyStructure_Zeroize(t *testing.T) {
 
 	structure.Zeroize()
 
-	for i, b := range structure.ChainKey.BytesOrNil() {
+	for i, b := range secrettest.Bytes(&structure.ChainKey) {
 		if b != 0 {
 			t.Errorf("ChainKey[%d] = %d after Zeroize, want 0", i, b)
 		}
@@ -62,17 +64,17 @@ func TestSenderMessageKeyStructure_Zeroize(t *testing.T) {
 
 	structure.Zeroize()
 
-	for i, b := range structure.IV.BytesOrNil() {
+	for i, b := range secrettest.Bytes(&structure.IV) {
 		if b != 0 {
 			t.Errorf("IV[%d] = %d after Zeroize, want 0", i, b)
 		}
 	}
-	for i, b := range structure.CipherKey.BytesOrNil() {
+	for i, b := range secrettest.Bytes(&structure.CipherKey) {
 		if b != 0 {
 			t.Errorf("CipherKey[%d] = %d after Zeroize, want 0", i, b)
 		}
 	}
-	for i, b := range structure.Seed.BytesOrNil() {
+	for i, b := range secrettest.Bytes(&structure.Seed) {
 		if b != 0 {
 			t.Errorf("Seed[%d] = %d after Zeroize, want 0", i, b)
 		}
@@ -97,12 +99,12 @@ func TestSenderMessageKeyStructure_Zeroize_PartialFields(t *testing.T) {
 	}
 	structure.Zeroize() // must not panic and must zero the non-nil fields
 
-	for i, b := range structure.IV.BytesOrNil() {
+	for i, b := range secrettest.Bytes(&structure.IV) {
 		if b != 0 {
 			t.Errorf("IV[%d] = %d after Zeroize, want 0", i, b)
 		}
 	}
-	for i, b := range structure.Seed.BytesOrNil() {
+	for i, b := range secrettest.Bytes(&structure.Seed) {
 		if b != 0 {
 			t.Errorf("Seed[%d] = %d after Zeroize, want 0", i, b)
 		}
@@ -227,8 +229,8 @@ func TestSenderMessageKeyStructure_RoundTripWithZeroize(t *testing.T) {
 
 	}
 	// Save copies of the structure values before zeroize.
-	ivCopy := make([]byte, len(structure.IV.BytesOrNil()))
-	copy(ivCopy, structure.IV.BytesOrNil())
+	ivCopy := make([]byte, len(secrettest.Bytes(&structure.IV)))
+	copy(ivCopy, secrettest.Bytes(&structure.IV))
 
 	// Zeroize the structure.
 	structure.Zeroize()

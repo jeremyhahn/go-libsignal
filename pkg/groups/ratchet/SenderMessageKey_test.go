@@ -3,6 +3,8 @@ package ratchet
 import (
 	"bytes"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 func TestNewSenderMessageKey(t *testing.T) {
@@ -112,13 +114,13 @@ func TestNewSenderMessageKeyFromStruct(t *testing.T) {
 	if key.Iteration() != 42 {
 		t.Errorf("Iteration() = %d, want 42", key.Iteration())
 	}
-	if !bytes.Equal(key.Iv(), structure.IV.BytesOrNil()) {
+	if !bytes.Equal(key.Iv(), secrettest.Bytes(&structure.IV)) {
 		t.Error("IV does not match")
 	}
-	if !bytes.Equal(key.CipherKey(), structure.CipherKey.BytesOrNil()) {
+	if !bytes.Equal(key.CipherKey(), secrettest.Bytes(&structure.CipherKey)) {
 		t.Error("CipherKey does not match")
 	}
-	if !bytes.Equal(key.Seed(), structure.Seed.BytesOrNil()) {
+	if !bytes.Equal(key.Seed(), secrettest.Bytes(&structure.Seed)) {
 		t.Error("Seed does not match")
 	}
 }
@@ -164,13 +166,13 @@ func TestNewStructFromSenderMessageKey(t *testing.T) {
 	if structure.Iteration != 10 {
 		t.Errorf("Structure.Iteration = %d, want 10", structure.Iteration)
 	}
-	if !bytes.Equal(structure.IV.BytesOrNil(), key.Iv()) {
+	if !bytes.Equal(secrettest.Bytes(&structure.IV), key.Iv()) {
 		t.Error("Structure.IV.BytesOrNil() does not match key IV")
 	}
-	if !bytes.Equal(structure.CipherKey.BytesOrNil(), key.CipherKey()) {
+	if !bytes.Equal(secrettest.Bytes(&structure.CipherKey), key.CipherKey()) {
 		t.Error("Structure.CipherKey.BytesOrNil() does not match key CipherKey")
 	}
-	if !bytes.Equal(structure.Seed.BytesOrNil(), key.Seed()) {
+	if !bytes.Equal(secrettest.Bytes(&structure.Seed), key.Seed()) {
 		t.Error("Structure.Seed.BytesOrNil() does not match key Seed")
 	}
 }
@@ -336,13 +338,13 @@ func TestNewStructFromSenderMessageKeyNilFields(t *testing.T) {
 	if structure.Iteration != 3 {
 		t.Errorf("Iteration = %d, want 3", structure.Iteration)
 	}
-	if structure.IV.BytesOrNil() != nil {
+	if secrettest.Bytes(&structure.IV) != nil {
 		t.Error("IV should be nil when source iv is nil")
 	}
-	if structure.CipherKey.BytesOrNil() != nil {
+	if secrettest.Bytes(&structure.CipherKey) != nil {
 		t.Error("CipherKey should be nil when source cipherKey is nil")
 	}
-	if structure.Seed.BytesOrNil() != nil {
+	if secrettest.Bytes(&structure.Seed) != nil {
 		t.Error("Seed should be nil when source seed is nil")
 	}
 }

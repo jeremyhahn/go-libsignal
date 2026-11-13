@@ -14,6 +14,8 @@ import (
 
 	"github.com/jeremyhahn/go-libsignal/pkg/svr"
 	"github.com/jeremyhahn/go-libsignal/pkg/svr/svrpb"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // svrTestPassword builds an SVR password fixture of the length production
@@ -343,8 +345,8 @@ func TestSvrBNetClient_Restore_FullSuccessFlow(t *testing.T) {
 		t.Fatalf("Restore() error = %v", err)
 	}
 
-	if !bytes.Equal(got.Bytes(), backup.Output.Bytes()) {
-		t.Fatalf("restored secret does not match backup output\n  got:  %x\n  want: %x", got.Bytes(), backup.Output.Bytes())
+	if !bytes.Equal(secrettest.Bytes(got), secrettest.Bytes(backup.Output)) {
+		t.Fatalf("restored secret does not match backup output\n  got:  %x\n  want: %x", secrettest.Bytes(got), secrettest.Bytes(backup.Output))
 	}
 
 	if !transport.closed {
@@ -388,7 +390,7 @@ func TestSvrBNetClient_Restore_MultiServerSuccess(t *testing.T) {
 		t.Fatalf("Restore() error = %v", err)
 	}
 
-	if !bytes.Equal(got.Bytes(), backup.Output.Bytes()) {
+	if !bytes.Equal(secrettest.Bytes(got), secrettest.Bytes(backup.Output)) {
 		t.Fatalf("restored secret does not match backup output")
 	}
 }

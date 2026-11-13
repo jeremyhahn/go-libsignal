@@ -29,7 +29,7 @@ func released(read func() []byte) (gone bool) {
 	return len(read()) == 0
 }
 
-func guardedPrivateKey(t *testing.T, fill byte) *ecc.GuardedECPrivateKey {
+func newFilledPrivateKey(t *testing.T, fill byte) *ecc.GuardedECPrivateKey {
 	t.Helper()
 	var raw [32]byte
 	for i := range raw {
@@ -44,7 +44,7 @@ func guardedPrivateKey(t *testing.T, fill byte) *ecc.GuardedECPrivateKey {
 
 func guardedKeyPair(t *testing.T, fill byte) (*ecc.ECKeyPair, *ecc.GuardedECPrivateKey) {
 	t.Helper()
-	privateKey := guardedPrivateKey(t, fill)
+	privateKey := newFilledPrivateKey(t, fill)
 	var public [32]byte
 	public[0] = fill
 	return ecc.NewECKeyPair(ecc.NewDjbECPublicKey(public), privateKey), privateKey

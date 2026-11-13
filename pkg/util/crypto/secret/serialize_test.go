@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 func TestNewOptionalGuardsDataAndWipesSource(t *testing.T) {
@@ -51,7 +53,7 @@ func TestNewValueEmptyInputYieldsZeroSecret(t *testing.T) {
 			if !guarded.IsDestroyed() {
 				t.Error("the zero Secret should report as holding no material")
 			}
-			if guarded.BytesOrNil() != nil {
+			if secrettest.Bytes(&guarded) != nil {
 				t.Error("BytesOrNil on the zero Secret should be nil")
 			}
 			// Destroying material that was never allocated is a no-op.
@@ -74,7 +76,7 @@ func TestNewOptionalEmptyInputReturnsNil(t *testing.T) {
 				t.Fatal("expected nil secret for empty input")
 			}
 			// The nil secret must behave as "no material" rather than panic.
-			if guarded.BytesOrNil() != nil {
+			if secrettest.Bytes(guarded) != nil {
 				t.Error("BytesOrNil on nil secret should be nil")
 			}
 			if !guarded.IsDestroyed() {
@@ -90,12 +92,12 @@ func TestBytesOrNilAfterDestroy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if got := guarded.BytesOrNil(); !bytes.Equal(got, []byte{9, 9, 9}) {
+	if got := secrettest.Bytes(guarded); !bytes.Equal(got, []byte{9, 9, 9}) {
 		t.Fatalf("BytesOrNil = %v, want [9 9 9]", got)
 	}
 
 	guarded.Destroy()
-	if got := guarded.BytesOrNil(); got != nil {
+	if got := secrettest.Bytes(guarded); got != nil {
 		t.Errorf("BytesOrNil after Destroy = %v, want nil", got)
 	}
 }
@@ -200,7 +202,7 @@ func TestUnmarshalJSONAbsentMaterial(t *testing.T) {
 		if err := json.Unmarshal([]byte(`{"Key":""}`), &decoded); err != nil {
 			t.Fatalf("json.Unmarshal: %v", err)
 		}
-		if decoded.Key.BytesOrNil() != nil {
+		if secrettest.Bytes(decoded.Key) != nil {
 			t.Error("expected no material for an empty string")
 		}
 	})
@@ -217,7 +219,7 @@ func TestUnmarshalJSONRejectsInvalidInput(t *testing.T) {
 			if err := s.UnmarshalJSON([]byte(input)); err == nil {
 				t.Fatalf("expected an error for %s", input)
 			}
-			if s.BytesOrNil() != nil {
+			if secrettest.Bytes(&s) != nil {
 				t.Error("a rejected decode must not leave material behind")
 			}
 		})
@@ -289,7 +291,7 @@ func TestValueFieldNullReleasesMaterial(t *testing.T) {
 	if !value.Key.IsDestroyed() {
 		t.Error("the superseded material was not destroyed")
 	}
-	if value.Key.BytesOrNil() != nil {
+	if secrettest.Bytes(&value.Key) != nil {
 		t.Error("expected no material after a null supersedes the value")
 	}
 
@@ -325,7 +327,7 @@ func TestFromSecret(t *testing.T) {
 
 func TestFromSecretNil(t *testing.T) {
 	value := FromSecret(nil)
-	if value.BytesOrNil() != nil {
+	if secrettest.Bytes(&value) != nil {
 		t.Error("FromSecret(nil) should hold no material")
 	}
 	value.Destroy() // must not panic

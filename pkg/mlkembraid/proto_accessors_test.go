@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/mlkembraid/internal/polynomial"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // ================== ProtoSetFromFields ==================
@@ -667,8 +669,8 @@ func TestAuthenticator_Update_Valid(t *testing.T) {
 	}
 	defer auth.Zeroize()
 
-	oldMAC := make([]byte, len(auth.macKey.Bytes()))
-	copy(oldMAC, auth.macKey.Bytes())
+	oldMAC := make([]byte, len(secrettest.Bytes(auth.macKey)))
+	copy(oldMAC, secrettest.Bytes(auth.macKey))
 
 	newKey := make([]byte, 32)
 	for i := range newKey {

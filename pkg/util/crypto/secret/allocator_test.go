@@ -18,14 +18,14 @@ var page = enclave.LockedSize(32)
 
 // installBudget resets the package, installs a budget of maxBytes and restores
 // the unconfigured state when the test ends.
-func installBudget(t *testing.T, maxBytes int64) *enclave.Allocator {
+func installBudget(t *testing.T, maxBytes int64) enclave.Allocator {
 	t.Helper()
 	resetAllocator()
 	t.Cleanup(resetAllocator)
 	if err := SetAllocator(maxBytes); err != nil {
 		t.Fatalf("SetAllocator(%d): %v", maxBytes, err)
 	}
-	return admission.Load()
+	return admission.Load().a
 }
 
 // requireBudgetExhausted asserts that a constructor was refused by the budget.
@@ -46,7 +46,7 @@ func requireBudgetExhausted(t *testing.T, s *Secret, err error) {
 	}
 }
 
-func requireInUse(t *testing.T, a *enclave.Allocator, want int64) {
+func requireInUse(t *testing.T, a enclave.Allocator, want int64) {
 	t.Helper()
 	if got := a.InUse(); got != want {
 		t.Errorf("InUse() = %d, want %d", got, want)
@@ -97,7 +97,7 @@ func TestSetAllocator_SecondCallFails(t *testing.T) {
 	if !errors.Is(err, ErrAllocatorAlreadySet) {
 		t.Errorf("second SetAllocator = %v, want ErrAllocatorAlreadySet", err)
 	}
-	if admission.Load() != first {
+	if admission.Load().a != first {
 		t.Error("second SetAllocator replaced the installed allocator")
 	}
 }

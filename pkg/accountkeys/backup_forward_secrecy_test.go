@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/hex"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // Test vectors from the Rust libsignal implementation.
@@ -29,8 +31,8 @@ func TestDeriveBackupKeyFromEntropyPool(t *testing.T) {
 		}
 		defer key.Zeroize()
 		expected := mustHex("ea26a2ddb5dba5ef9e34e1b8dea1f5ae7f255306a6d2d883e542306eaa9fe985")
-		if !bytes.Equal(key.data.Bytes(), expected) {
-			t.Fatalf("backup key mismatch\ngot:  %x\nwant: %x", key.data.Bytes(), expected)
+		if !bytes.Equal(secrettest.Bytes(key.data), expected) {
+			t.Fatalf("backup key mismatch\ngot:  %x\nwant: %x", secrettest.Bytes(key.data), expected)
 		}
 	})
 
@@ -52,7 +54,7 @@ func TestDeriveBackupKeyFromEntropyPool(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer key2.Zeroize()
-		if !bytes.Equal(key1.data.Bytes(), key2.data.Bytes()) {
+		if !bytes.Equal(secrettest.Bytes(key1.data), secrettest.Bytes(key2.data)) {
 			t.Fatal("same pool should derive same key")
 		}
 	})
@@ -152,7 +154,7 @@ func TestBackupKey_DeriveECKey(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer ecKey.Destroy()
-		if isAllZeroBuf(ecKey.Bytes()) {
+		if isAllZeroBuf(secrettest.Bytes(ecKey)) {
 			t.Fatal("EC key should not be all zeros")
 		}
 	})
@@ -173,7 +175,7 @@ func TestBackupKey_DeriveECKey(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer ec2.Destroy()
-		if !bytes.Equal(ec1.Bytes(), ec2.Bytes()) {
+		if !bytes.Equal(secrettest.Bytes(ec1), secrettest.Bytes(ec2)) {
 			t.Fatal("same inputs should produce same EC key")
 		}
 	})
@@ -194,7 +196,7 @@ func TestBackupKey_DeriveECKey(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		// They are different lengths, but check the first 16 bytes differ.
-		if bytes.Equal(ecKey.Bytes()[:BackupIDLength], id.data[:]) {
+		if bytes.Equal(secrettest.Bytes(ecKey)[:BackupIDLength], id.data[:]) {
 			t.Fatal("EC key should differ from backup ID")
 		}
 	})
@@ -233,7 +235,7 @@ func TestBackupKey_DeriveLocalBackupMetadataKey(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer mk2.Destroy()
-		if !bytes.Equal(mk1.Bytes(), mk2.Bytes()) {
+		if !bytes.Equal(secrettest.Bytes(mk1), secrettest.Bytes(mk2)) {
 			t.Fatal("same key should produce same metadata key")
 		}
 	})
@@ -335,7 +337,7 @@ func TestBackupKey_DeriveMediaEncryptionKeyData(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer ek2.Destroy()
-		if !bytes.Equal(ek1.Bytes(), ek2.Bytes()) {
+		if !bytes.Equal(secrettest.Bytes(ek1), secrettest.Bytes(ek2)) {
 			t.Fatal("same inputs should produce same encryption key")
 		}
 	})
@@ -382,7 +384,7 @@ func TestBackupKey_DeriveThumbnailTransitEncryptionKeyData(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer thumbKey.Destroy()
-		if bytes.Equal(mediaKey.Bytes(), thumbKey.Bytes()) {
+		if bytes.Equal(secrettest.Bytes(mediaKey), secrettest.Bytes(thumbKey)) {
 			t.Fatal("thumbnail key should differ from media encryption key")
 		}
 	})
@@ -486,10 +488,10 @@ func TestBackupKey_DeriveForwardSecrecyEncryptionKey(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer encKey.Zeroize()
-		if isAllZeroBuf(encKey.CipherKey.Bytes()) {
+		if isAllZeroBuf(secrettest.Bytes(encKey.CipherKey)) {
 			t.Fatal("cipher key should not be all zeros")
 		}
-		if isAllZeroBuf(encKey.HMACKey.Bytes()) {
+		if isAllZeroBuf(secrettest.Bytes(encKey.HMACKey)) {
 			t.Fatal("HMAC key should not be all zeros")
 		}
 	})
@@ -505,7 +507,7 @@ func TestBackupKey_DeriveForwardSecrecyEncryptionKey(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer encKey.Zeroize()
-		if bytes.Equal(encKey.CipherKey.Bytes(), encKey.HMACKey.Bytes()) {
+		if bytes.Equal(secrettest.Bytes(encKey.CipherKey), secrettest.Bytes(encKey.HMACKey)) {
 			t.Fatal("cipher key and HMAC key should differ")
 		}
 	})
@@ -527,7 +529,7 @@ func TestBackupKey_DeriveForwardSecrecyEncryptionKey(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer ek2.Zeroize()
-		if !bytes.Equal(ek1.CipherKey.Bytes(), ek2.CipherKey.Bytes()) || !bytes.Equal(ek1.HMACKey.Bytes(), ek2.HMACKey.Bytes()) {
+		if !bytes.Equal(secrettest.Bytes(ek1.CipherKey), secrettest.Bytes(ek2.CipherKey)) || !bytes.Equal(secrettest.Bytes(ek1.HMACKey), secrettest.Bytes(ek2.HMACKey)) {
 			t.Fatal("same inputs should produce same encryption key")
 		}
 	})
@@ -548,10 +550,10 @@ func TestBackupKey_DeriveForwardSecrecyEncryptionKey(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer ek2.Zeroize()
-		if bytes.Equal(ek1.CipherKey.Bytes(), ek2.CipherKey.Bytes()) {
+		if bytes.Equal(secrettest.Bytes(ek1.CipherKey), secrettest.Bytes(ek2.CipherKey)) {
 			t.Fatal("different salts should produce different cipher keys")
 		}
-		if bytes.Equal(ek1.HMACKey.Bytes(), ek2.HMACKey.Bytes()) {
+		if bytes.Equal(secrettest.Bytes(ek1.HMACKey), secrettest.Bytes(ek2.HMACKey)) {
 			t.Fatal("different salts should produce different HMAC keys")
 		}
 	})
@@ -585,7 +587,7 @@ func TestBackupKey_DeriveForwardSecrecyEncryptionKey(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer ek.Zeroize()
-		if bytes.Equal(pw.data[:], ek.CipherKey.Bytes()) {
+		if bytes.Equal(pw.data[:], secrettest.Bytes(ek.CipherKey)) {
 			t.Fatal("password should differ from cipher key even with same salt")
 		}
 	})
@@ -671,7 +673,7 @@ func TestBackupForwardSecrecyEncryptionKey_Zeroize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if isAllZeroBuf(encKey.CipherKey.Bytes()) || isAllZeroBuf(encKey.HMACKey.Bytes()) {
+	if isAllZeroBuf(secrettest.Bytes(encKey.CipherKey)) || isAllZeroBuf(secrettest.Bytes(encKey.HMACKey)) {
 		t.Fatal("keys should be non-zero before Zeroize")
 	}
 	encKey.Zeroize()

@@ -7,6 +7,8 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/chain"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/message"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 func TestNewDerivedSecrets(t *testing.T) {
@@ -286,7 +288,7 @@ func TestNewKeyPairWithPQR(t *testing.T) {
 	if kp.InitialPQRKey == nil {
 		t.Fatal("expected non-nil InitialPQRKey secret")
 	}
-	if !bytes.Equal(kp.InitialPQRKey.Bytes(), original) {
+	if !bytes.Equal(secrettest.Bytes(kp.InitialPQRKey), original) {
 		t.Fatal("InitialPQRKey content mismatch")
 	}
 	kp.Zeroize()

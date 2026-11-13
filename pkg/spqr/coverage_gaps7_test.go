@@ -9,6 +9,8 @@ import (
 
 	"github.com/jeremyhahn/go-libsignal/pkg/mlkembraid"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // ============================================================================
@@ -68,7 +70,7 @@ func TestSerializeWithSkippedKeysProtoRoundTrip(t *testing.T) {
 	sk2, ok := s2.skippedKeys[id]
 	if !ok {
 		t.Errorf("skipped key counter=1 missing after round-trip; got %d total", len(s2.skippedKeys))
-	} else if !bytes.Equal(sk2.Bytes(), skBytesCopy) {
+	} else if !bytes.Equal(secrettest.Bytes(sk2), skBytesCopy) {
 		t.Error("skipped key bytes mismatch after round-trip")
 	}
 }
@@ -347,7 +349,7 @@ func TestProtoRecvPrevSkippedKeysRoundTrip(t *testing.T) {
 	if decErr != nil {
 		t.Fatalf("Decrypt counter=3: %v", decErr)
 	}
-	if string(mk3.Bytes()) != string(senderKeys[2].Bytes()) {
+	if string(secrettest.Bytes(mk3)) != string(secrettest.Bytes(senderKeys[2])) {
 		t.Error("mk3 mismatch")
 	}
 	mk3.Destroy()
@@ -376,7 +378,7 @@ func TestProtoRecvPrevSkippedKeysRoundTrip(t *testing.T) {
 	if decErr1 != nil {
 		t.Fatalf("Decrypt counter=1 after round-trip: %v", decErr1)
 	}
-	if !bytes.Equal(mk1.Bytes(), senderKeys[0].Bytes()) {
+	if !bytes.Equal(secrettest.Bytes(mk1), secrettest.Bytes(senderKeys[0])) {
 		t.Error("mk1 mismatch after round-trip")
 	}
 	mk1.Destroy()
@@ -398,7 +400,7 @@ func TestProtoRecvPrevSkippedKeysRoundTrip(t *testing.T) {
 	if decErr2 != nil {
 		t.Fatalf("Decrypt counter=2 after second round-trip: %v", decErr2)
 	}
-	if !bytes.Equal(mk2.Bytes(), senderKeys[1].Bytes()) {
+	if !bytes.Equal(secrettest.Bytes(mk2), secrettest.Bytes(senderKeys[1])) {
 		t.Error("mk2 mismatch after second round-trip")
 	}
 	mk2.Destroy()
@@ -620,8 +622,8 @@ func TestAdvanceEpochOverflowPreCheck(t *testing.T) {
 
 	// Capture the root key bytes BEFORE the call so we can verify it is
 	// unchanged after the (correctly rejected) overflow attempt.
-	rkBefore := make([]byte, len(s.rootKey.Bytes()))
-	copy(rkBefore, s.rootKey.Bytes())
+	rkBefore := make([]byte, len(secrettest.Bytes(s.rootKey)))
+	copy(rkBefore, secrettest.Bytes(s.rootKey))
 
 	chainCountBefore := len(s.chains)
 
@@ -649,7 +651,7 @@ func TestAdvanceEpochOverflowPreCheck(t *testing.T) {
 	if s.epoch != math.MaxUint64 {
 		t.Errorf("epoch mutated: got %d, want MaxUint64", s.epoch)
 	}
-	if !bytes.Equal(s.rootKey.Bytes(), rkBefore) {
+	if !bytes.Equal(secrettest.Bytes(s.rootKey), rkBefore) {
 		t.Error("root key mutated after ErrEpochOverflow")
 	}
 	if len(s.chains) != chainCountBefore {

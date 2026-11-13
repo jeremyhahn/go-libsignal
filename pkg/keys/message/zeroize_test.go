@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // TestKeysZeroize verifies that Zeroize destroys all guarded memory fields
@@ -157,7 +159,7 @@ func TestKeysStructureZeroize(t *testing.T) {
 		"IV":           &structure.IV,
 		"SeedMaterial": &structure.SeedMaterial,
 	} {
-		if got := field.BytesOrNil(); got != nil {
+		if got := secrettest.Bytes(field); got != nil {
 			t.Errorf("%s still readable after Zeroize: %x", name, got)
 		}
 	}

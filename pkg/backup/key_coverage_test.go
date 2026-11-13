@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/accountkeys"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // TestBackupIDZeroize verifies that BackupID.Zeroize() wipes all bytes to zero.
@@ -58,10 +60,10 @@ func TestDeriveMessageBackupKey_EmptyToken(t *testing.T) {
 	}
 	defer mkNil.Zeroize()
 
-	if string(mkEmpty.HMACKey.Bytes()) != string(mkNil.HMACKey.Bytes()) {
+	if string(secrettest.Bytes(mkEmpty.HMACKey)) != string(secrettest.Bytes(mkNil.HMACKey)) {
 		t.Error("empty and nil token should produce identical HMAC key (legacy path)")
 	}
-	if string(mkEmpty.AESKey.Bytes()) != string(mkNil.AESKey.Bytes()) {
+	if string(secrettest.Bytes(mkEmpty.AESKey)) != string(secrettest.Bytes(mkNil.AESKey)) {
 		t.Error("empty and nil token should produce identical AES key (legacy path)")
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"io"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // errWriter is an io.Writer that always returns an error.
@@ -263,7 +265,7 @@ func TestDecryptFramesBadCiphertextAlignment(t *testing.T) {
 	ct := []byte{0x42}
 
 	// Compute valid HMAC over iv + ct.
-	hmacDigest := HMACChecksum(key.HMACKey.Bytes(), iv, ct)
+	hmacDigest := HMACChecksum(secrettest.Bytes(key.HMACKey), iv, ct)
 	badData := make([]byte, 0, AESIVSize+1+HMACLen)
 	badData = append(badData, iv...)
 	badData = append(badData, ct...)
@@ -523,13 +525,13 @@ func TestDecryptFramesInvalidGzip(t *testing.T) {
 	for i := range iv {
 		iv[i] = byte(i)
 	}
-	ciphertext, err := AESCBCEncryptExport(key.AESKey.Bytes(), iv, padded)
+	ciphertext, err := AESCBCEncryptExport(secrettest.Bytes(key.AESKey), iv, padded)
 	if err != nil {
 		t.Fatalf("AESCBCEncryptExport: %v", err)
 	}
 
 	// Compute HMAC over IV + ciphertext.
-	hmacDigest := HMACChecksum(key.HMACKey.Bytes(), iv, ciphertext)
+	hmacDigest := HMACChecksum(secrettest.Bytes(key.HMACKey), iv, ciphertext)
 
 	// Assemble: IV + ciphertext + HMAC.
 	var data []byte
@@ -554,12 +556,12 @@ func TestDecryptFramesInvalidVarintInGzip(t *testing.T) {
 	padded := pkcs7Pad(plaintext, AESBlockSize)
 
 	iv := make([]byte, AESIVSize)
-	ciphertext, err := AESCBCEncryptExport(key.AESKey.Bytes(), iv, padded)
+	ciphertext, err := AESCBCEncryptExport(secrettest.Bytes(key.AESKey), iv, padded)
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
 
-	hmacDigest := HMACChecksum(key.HMACKey.Bytes(), iv, ciphertext)
+	hmacDigest := HMACChecksum(secrettest.Bytes(key.HMACKey), iv, ciphertext)
 	var data []byte
 	data = append(data, iv...)
 	data = append(data, ciphertext...)
@@ -592,12 +594,12 @@ func TestDecryptFramesBadPadding(t *testing.T) {
 		iv[i] = byte(i + 0x10)
 	}
 
-	ciphertext, err := aesEncryptRaw(key.AESKey.Bytes(), iv, plaintext)
+	ciphertext, err := aesEncryptRaw(secrettest.Bytes(key.AESKey), iv, plaintext)
 	if err != nil {
 		t.Fatalf("aesEncryptRaw: %v", err)
 	}
 
-	hmacDigest := HMACChecksum(key.HMACKey.Bytes(), iv, ciphertext)
+	hmacDigest := HMACChecksum(secrettest.Bytes(key.HMACKey), iv, ciphertext)
 	var data []byte
 	data = append(data, iv...)
 	data = append(data, ciphertext...)

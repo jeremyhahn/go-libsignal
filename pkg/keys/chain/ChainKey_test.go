@@ -7,6 +7,8 @@ import (
 
 	"github.com/jeremyhahn/go-libsignal/pkg/kdf"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 func TestNewKey(t *testing.T) {
@@ -143,7 +145,7 @@ func TestNewKeyFromStruct(t *testing.T) {
 	}
 	// The clone must be independent: the source structure keeps its material,
 	// and destroying it must not disturb the key built from it.
-	if !bytes.Equal(structure.Key.BytesOrNil(), expected) {
+	if !bytes.Equal(secrettest.Bytes(&structure.Key), expected) {
 		t.Fatal("NewKeyFromStruct consumed the source structure's material")
 	}
 }
@@ -176,7 +178,7 @@ func TestNewStructFromKey(t *testing.T) {
 	}
 	defer structure.Zeroize()
 
-	if !bytes.Equal(structure.Key.BytesOrNil(), []byte("key-data")) {
+	if !bytes.Equal(secrettest.Bytes(&structure.Key), []byte("key-data")) {
 		t.Fatal("Key mismatch in structure")
 	}
 	if structure.Index != 7 {
@@ -184,7 +186,7 @@ func TestNewStructFromKey(t *testing.T) {
 	}
 	// The structure holds its own clone, not a view into the live key.
 	key.Zeroize()
-	if !bytes.Equal(structure.Key.BytesOrNil(), []byte("key-data")) {
+	if !bytes.Equal(secrettest.Bytes(&structure.Key), []byte("key-data")) {
 		t.Fatal("structure shares guarded memory with the live key")
 	}
 }

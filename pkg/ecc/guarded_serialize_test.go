@@ -3,6 +3,8 @@ package ecc
 import (
 	"bytes"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // TestGuardPrivateKey covers the conversion both record layers use to move an
@@ -37,7 +39,7 @@ func TestGuardPrivateKey(t *testing.T) {
 	}
 	defer guarded.Destroy()
 
-	if !bytes.Equal(guarded.BytesOrNil(), expected[:]) {
+	if !bytes.Equal(secrettest.Bytes(&guarded), expected[:]) {
 		t.Error("guarded key does not match the serialized private key")
 	}
 }

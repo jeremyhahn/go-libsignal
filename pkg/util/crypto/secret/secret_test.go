@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/jeremyhahn/go-enclave"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // ---------------------------------------------------------------------------
@@ -174,7 +176,7 @@ func TestNewRandom_HappyPath(t *testing.T) {
 	}
 	// Verify it is not all zeros (astronomically unlikely for 64 random bytes).
 	allZero := true
-	for _, b := range s.Bytes() {
+	for _, b := range secrettest.Bytes(s) {
 		if b != 0 {
 			allZero = false
 			break
@@ -207,7 +209,7 @@ func TestNewEmpty_HappyPath(t *testing.T) {
 	if s.Size() != 16 {
 		t.Errorf("Size() = %d, want 16", s.Size())
 	}
-	for i, b := range s.Bytes() {
+	for i, b := range secrettest.Bytes(s) {
 		if b != 0 {
 			t.Errorf("Bytes()[%d] = %d, want 0", i, b)
 		}
@@ -243,7 +245,7 @@ func TestSecret_Bytes_PanicsAfterDestroy(t *testing.T) {
 			t.Fatal("Bytes() should panic after Destroy()")
 		}
 	}()
-	_ = s.Bytes()
+	_ = secrettest.Bytes(s)
 }
 
 func TestSecret_Size_AfterDestroy(t *testing.T) {
@@ -375,7 +377,7 @@ func TestSecret_Clone_DoesNotStageOnTheHeap(t *testing.T) {
 	}
 
 	// The copy still has to be a correct one.
-	if !cloned.EqualTo(original.Bytes()) {
+	if !cloned.EqualTo(secrettest.Bytes(original)) {
 		t.Error("clone does not match the original")
 	}
 	if cloned.Size() != size {
@@ -539,7 +541,7 @@ func TestNewSecret32Random_HappyPath(t *testing.T) {
 	}
 	defer s.Destroy()
 
-	b := s.Bytes()
+	b := secrettest.Bytes(s)
 	if len(b) != 32 {
 		t.Errorf("len(Bytes()) = %d, want 32", len(b))
 	}
@@ -569,7 +571,7 @@ func TestNewSecret32Random_Uniqueness(t *testing.T) {
 	}
 	defer s2.Destroy()
 
-	if s1.EqualTo(s2.Array()) {
+	if s1.EqualTo(secrettest.Array(s2)) {
 		t.Error("two random Secret32 values should differ (astronomically unlikely collision)")
 	}
 }
@@ -589,7 +591,7 @@ func TestSecret32_Array(t *testing.T) {
 	}
 	defer s.Destroy()
 
-	arr := s.Array()
+	arr := secrettest.Array(s)
 	for i := range arr {
 		if arr[i] != byte(i*3) {
 			t.Errorf("Array()[%d] = %d, want %d", i, arr[i], byte(i*3))
@@ -607,15 +609,15 @@ func TestSecret32_Array_IsCopy(t *testing.T) {
 	}
 	defer s.Destroy()
 
-	arr := s.Array()
+	arr := secrettest.Array(s)
 	arr[0] = 0xFF // Modify the copy.
 	// Original should be unchanged.
-	if s.Bytes()[0] != 0x42 {
+	if secrettest.Bytes(s)[0] != 0x42 {
 		t.Error("Array() should return a copy, not a reference")
 	}
 }
 
-func TestSecret32_Ptr(t *testing.T) {
+func TestSecret32_WithArray(t *testing.T) {
 	var input [32]byte
 	input[0] = 0xAB
 	input[31] = 0xCD
@@ -625,16 +627,21 @@ func TestSecret32_Ptr(t *testing.T) {
 	}
 	defer s.Destroy()
 
-	ptr := s.Ptr()
-	if ptr == nil {
-		t.Fatal("Ptr() returned nil")
-	}
-	if ptr[0] != 0xAB || ptr[31] != 0xCD {
-		t.Errorf("Ptr() content mismatch: got [0]=%x [31]=%x", ptr[0], ptr[31])
+	err = s.WithArray(func(arr *[32]byte) error {
+		if arr == nil {
+			t.Fatal("WithArray lent a nil array")
+		}
+		if arr[0] != 0xAB || arr[31] != 0xCD {
+			t.Errorf("WithArray content mismatch: got [0]=%x [31]=%x", arr[0], arr[31])
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WithArray: %v", err)
 	}
 }
 
-func TestSecret32_Ptr_PanicsAfterDestroy(t *testing.T) {
+func TestSecret32_WithArray_AfterDestroy(t *testing.T) {
 	var input [32]byte
 	s, err := NewSecret32(input)
 	if err != nil {
@@ -642,12 +649,17 @@ func TestSecret32_Ptr_PanicsAfterDestroy(t *testing.T) {
 	}
 	s.Destroy()
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("Ptr() should panic after Destroy()")
-		}
-	}()
-	_ = s.Ptr()
+	called := false
+	err = s.WithArray(func(*[32]byte) error {
+		called = true
+		return nil
+	})
+	if err == nil {
+		t.Fatal("WithArray on a destroyed Secret32 returned nil error")
+	}
+	if called {
+		t.Fatal("WithArray called fn on a destroyed Secret32")
+	}
 }
 
 func TestSecret32_Bytes_PanicsAfterDestroy(t *testing.T) {
@@ -663,7 +675,7 @@ func TestSecret32_Bytes_PanicsAfterDestroy(t *testing.T) {
 			t.Fatal("Bytes() should panic after Destroy()")
 		}
 	}()
-	_ = s.Bytes()
+	_ = secrettest.Bytes(s)
 }
 
 func TestSecret32_Destroy_Idempotent(t *testing.T) {
@@ -740,7 +752,7 @@ func TestSecret32_Clone_Independence(t *testing.T) {
 	if cloned.IsDestroyed() {
 		t.Error("clone should survive original destruction")
 	}
-	if cloned.Bytes()[0] != 0xFF {
+	if secrettest.Bytes(cloned)[0] != 0xFF {
 		t.Error("clone content should be preserved")
 	}
 	cloned.Destroy()

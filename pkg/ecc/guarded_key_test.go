@@ -17,6 +17,8 @@ import (
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // --- GuardedECPrivateKey: NewGuardedECPrivateKey ---
@@ -248,7 +250,7 @@ func TestGuardedECPrivateKey_Agreement_Success(t *testing.T) {
 	defer ss2.Destroy()
 
 	// Shared secrets must match (DH commutativity).
-	if ss1.Array() != ss2.Array() {
+	if secrettest.Array(ss1) != secrettest.Array(ss2) {
 		t.Fatal("DH shared secrets do not match")
 	}
 }

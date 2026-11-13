@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // ---------------------------------------------------------------------------
@@ -250,7 +252,7 @@ func TestKeyAgreement_Agreement_Success(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	defer ss.Destroy()
-	arr := ss.Array()
+	arr := secrettest.Array(ss)
 	if arr[0] != 0xBB {
 		t.Fatalf("expected shared secret[0]=0xBB, got 0x%02x", arr[0])
 	}
@@ -299,7 +301,7 @@ func TestPrivateKey_CombinedInterface(t *testing.T) {
 		t.Fatalf("Agreement: expected no error, got %v", err)
 	}
 	defer ss.Destroy()
-	arr := ss.Array()
+	arr := secrettest.Array(ss)
 	if arr[0] != 0xCC {
 		t.Fatalf("Agreement: expected ss[0]=0xCC, got 0x%02x", arr[0])
 	}
@@ -332,7 +334,7 @@ func TestDecapsulator_Decapsulate_Success(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	defer ss.Destroy()
-	arr := ss.Array()
+	arr := secrettest.Array(ss)
 	if arr[0] != 0xDD {
 		t.Fatalf("expected ss[0]=0xDD, got 0x%02x", arr[0])
 	}
@@ -368,7 +370,7 @@ func TestEncapsulator_Encapsulate_Success(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 	defer ss.Destroy()
-	arr := ss.Array()
+	arr := secrettest.Array(ss)
 	if arr[0] != 0xEE {
 		t.Fatalf("expected ss[0]=0xEE, got 0x%02x", arr[0])
 	}
