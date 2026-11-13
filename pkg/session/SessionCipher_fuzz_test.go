@@ -44,15 +44,25 @@ import (
 // that call Cipher.Decrypt; Bob's builder is returned for targets that call
 // Cipher.DecryptPreKeyMessage. No host-side state is modified; all stores are
 // in-memory only.
-func buildFuzzSession() (aliceCipher *session.Cipher, bobBuilder *session.Builder,
+func buildFuzzSession(tb testing.TB) (aliceCipher *session.Cipher, bobBuilder *session.Builder,
 	bobCipher *session.Cipher,
 	signalSer protocol.SignalMessageSerializer,
 	preKeySer protocol.PreKeySignalMessageSerializer) {
 
 	ser := serialize.NewProtobufSerializer()
 
-	aliceKP, _ := keyhelper.GenerateIdentityKeyPair()
-	bobKP, _ := keyhelper.GenerateIdentityKeyPair()
+	tb.Helper()
+	// Every setup error fails the test: a key that failed to allocate (for
+	// instance on the locked-memory limit) must not surface later as a nil
+	// dereference.
+	aliceKP, err := keyhelper.GenerateIdentityKeyPair()
+	if err != nil {
+		tb.Fatalf("setup: alice identity: %v", err)
+	}
+	bobKP, err := keyhelper.GenerateIdentityKeyPair()
+	if err != nil {
+		tb.Fatalf("setup: bob identity: %v", err)
+	}
 	aliceRegID := keyhelper.GenerateRegistrationID()
 	bobRegID := keyhelper.GenerateRegistrationID()
 
@@ -76,21 +86,32 @@ func buildFuzzSession() (aliceCipher *session.Cipher, bobBuilder *session.Builde
 
 	// Generate Bob's pre-key material and populate his stores.
 	// start=1: GeneratePreKeys requires start >= 1 (pre-key ID 0 is invalid).
-	bobPreKeyList, _ := keyhelper.GeneratePreKeys(1, 10, ser.PreKeyRecord)
+	bobPreKeyList, err := keyhelper.GeneratePreKeys(1, 10, ser.PreKeyRecord)
+	if err != nil {
+		tb.Fatalf("setup: GeneratePreKeys: %v", err)
+	}
 	for _, pk := range bobPreKeyList {
 		if err := bobPreKeyStore.StorePreKey(pk.ID().Value,
 			record.NewPreKey(pk.ID().Value, pk.KeyPair(), ser.PreKeyRecord)); err != nil {
 			panic("setup: StorePreKey: " + err.Error())
 		}
 	}
-	bobSPK, _ := keyhelper.GenerateSignedPreKey(bobKP, 0, ser.SignedPreKeyRecord)
+	bobSPK, err := keyhelper.GenerateSignedPreKey(bobKP, 0, ser.SignedPreKeyRecord)
+	if err != nil {
+		tb.Fatalf("setup: GenerateSignedPreKey: %v", err)
+	}
 	if err := bobSignedPKStore.StoreSignedPreKey(bobSPK.ID(),
 		record.NewSignedPreKey(bobSPK.ID(), bobSPK.Timestamp(), bobSPK.KeyPair(),
 			bobSPK.Signature(), ser.SignedPreKeyRecord)); err != nil {
 		panic("setup: StoreSignedPreKey: " + err.Error())
 	}
-	bobKyberPreKey, _ := keyhelper.GenerateKyberPreKey(bobKP.PrivateKey(), 42, &mockKyberPreKeySerializer{})
-	_ = bobKyberStore.StoreKyberPreKey(42, bobKyberPreKey)
+	bobKyberPreKey, err := keyhelper.GenerateKyberPreKey(bobKP.PrivateKey(), 42, &mockKyberPreKeySerializer{})
+	if err != nil {
+		tb.Fatalf("setup: GenerateKyberPreKey: %v", err)
+	}
+	if err := bobKyberStore.StoreKyberPreKey(42, bobKyberPreKey); err != nil {
+		tb.Fatalf("setup: StoreKyberPreKey: %v", err)
+	}
 
 	// Build Alice's session toward Bob using Bob's bundle.
 	aliceBuilder := session.NewBuilderWithKyber(
@@ -110,7 +131,9 @@ func buildFuzzSession() (aliceCipher *session.Cipher, bobBuilder *session.Builde
 		bobKyberPreKey.PublicKey(),
 		bobKyberPreKey.Signature(),
 	)
-	_ = aliceBuilder.ProcessBundle(bundle)
+	if err := aliceBuilder.ProcessBundle(bundle); err != nil {
+		tb.Fatalf("setup: ProcessBundle: %v", err)
+	}
 	aliceCipher = session.NewCipherWithIdentityAndLocalAddress(aliceBuilder, aliceAddr, bobAddr, aliceIdentityStore)
 
 	bobBuilder = session.NewBuilderWithKyber(
@@ -138,7 +161,7 @@ func FuzzDecryptSignalMessage(f *testing.F) {
 	// Seed 2: unknown future version byte — must be rejected before any crypto.
 	f.Add([]byte{0xFF, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
 
-	cipher, _, _, signalSer, _ := buildFuzzSession()
+	cipher, _, _, signalSer, _ := buildFuzzSession(f)
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		msg, err := protocol.NewSignalMessageFromBytes(data, signalSer)
@@ -167,7 +190,7 @@ func FuzzDecryptPreKeyMessage(f *testing.F) {
 	// Seed 2: empty slice — degenerate minimum input.
 	f.Add([]byte{})
 
-	_, builder, cipher, signalSer, preKeySer := buildFuzzSession()
+	_, builder, cipher, signalSer, preKeySer := buildFuzzSession(f)
 
 	f.Fuzz(func(t *testing.T, data []byte) {
 		msg, err := protocol.NewPreKeySignalMessageFromBytes(data, preKeySer, signalSer)

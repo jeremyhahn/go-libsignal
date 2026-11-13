@@ -11,8 +11,8 @@ import (
 // Secret holds sensitive key material in mlock'd, guard-page protected memory.
 // The underlying region is zeroized on destruction and protected from swap.
 //
-// The backing store is go-enclave's MemoryEnclave, the portfolio locked-memory
-// primitive: reaching RLIMIT_MEMLOCK returns a typed error from construction
+// The backing store is go-enclave's locked memory, read only through
+// ByteAccess.WithBytes: reaching RLIMIT_MEMLOCK returns a typed error from construction
 // rather than purging every live buffer in the process the way memguard did.
 //
 // A zero-length input holds no material: the returned Secret reports Size()==0
