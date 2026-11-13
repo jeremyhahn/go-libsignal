@@ -319,8 +319,33 @@ func TestGuardedECPrivateKey_Serialize_AfterDestroy(t *testing.T) {
 	}
 	priv.Destroy()
 
-	if got := priv.Serialize(); got != ([32]byte{}) {
-		t.Fatalf("expected zero serialization after destroy, got %x", got)
+	// Serialize must reject a destroyed key, never hand back zeros.
+	func() {
+		defer func() {
+			if r := recover(); r != ErrGuardedKeyDestroyed {
+				t.Fatalf("Serialize after destroy: want panic(ErrGuardedKeyDestroyed), got %v", r)
+			}
+		}()
+		got := priv.Serialize()
+		t.Fatalf("Serialize after destroy returned %x", got)
+	}()
+
+	// The generic consumers return the rejection as an error.
+	msg := []byte("message")
+	if _, err := CalculateSignature(priv, msg); err != ErrGuardedKeyDestroyed {
+		t.Errorf("CalculateSignature: want ErrGuardedKeyDestroyed, got %v", err)
+	}
+	if _, err := CalculateSignatureWithRandomness(priv, msg, [64]byte{}); err != ErrGuardedKeyDestroyed {
+		t.Errorf("CalculateSignatureWithRandomness: want ErrGuardedKeyDestroyed, got %v", err)
+	}
+	if _, _, err := VXEdDSASign(priv, msg); err != ErrGuardedKeyDestroyed {
+		t.Errorf("VXEdDSASign: want ErrGuardedKeyDestroyed, got %v", err)
+	}
+	if _, err := GuardPrivateKey(priv); err != ErrGuardedKeyDestroyed {
+		t.Errorf("GuardPrivateKey: want ErrGuardedKeyDestroyed, got %v", err)
+	}
+	if _, err := priv.Agreement([32]byte{9}); err != ErrGuardedKeyDestroyed {
+		t.Errorf("Agreement: want ErrGuardedKeyDestroyed, got %v", err)
 	}
 }
 

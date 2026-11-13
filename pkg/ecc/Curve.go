@@ -24,7 +24,10 @@ func VXEdDSASign(key ECPrivateKeyable, message []byte) ([]byte, []byte, error) {
 		return nil, nil, err
 	}
 
-	privateKey := key.Serialize()
+	privateKey, err := privateKeyArray(key)
+	if err != nil {
+		return nil, nil, err
+	}
 	defer crypto.Zeroize(privateKey[:])
 
 	sig, vrf, err := vxeddsaSign(&privateKey, message, random)
@@ -154,7 +157,10 @@ func CalculateSignature(signingKey ECPrivateKeyable, message []byte) ([64]byte, 
 	}
 
 	// Get the private key.
-	privateKey := signingKey.Serialize()
+	privateKey, err := privateKeyArray(signingKey)
+	if err != nil {
+		return [64]byte{}, err
+	}
 	defer crypto.Zeroize(privateKey[:])
 
 	// Sign the message.
@@ -170,7 +176,10 @@ func CalculateSignature(signingKey ECPrivateKeyable, message []byte) ([64]byte, 
 // using the provided 64-byte randomness. This allows deterministic signing for
 // test vectors and explicit randomness control (e.g., PNI alternate-identity).
 func CalculateSignatureWithRandomness(signingKey ECPrivateKeyable, message []byte, randomness [64]byte) ([64]byte, error) {
-	privateKey := signingKey.Serialize()
+	privateKey, err := privateKeyArray(signingKey)
+	if err != nil {
+		return [64]byte{}, err
+	}
 	defer crypto.Zeroize(privateKey[:])
 
 	signature := sign(&privateKey, message, randomness)

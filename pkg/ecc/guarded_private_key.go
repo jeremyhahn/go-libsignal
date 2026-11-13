@@ -67,12 +67,35 @@ func NewGuardedECPrivateKeyFromSecret(s *secret.Secret32) *GuardedECPrivateKey {
 func (g *GuardedECPrivateKey) Serialize() [32]byte {
 	// The array is the value that leaves the borrow: it is copied inside it,
 	// and the caller zeroizes it after use.
+	//
+	// A destroyed (or missing) key is rejected: Serialize has no error
+	// return, and handing back zeros would let a caller sign or agree with
+	// an all-zero scalar. The generic consumers in this package check
+	// IsDestroyed first and return ErrGuardedKeyDestroyed instead.
 	var out [32]byte
-	_ = g.key.WithBytes(func(b []byte) error {
+	if err := g.key.WithBytes(func(b []byte) error {
+		if len(b) != len(out) {
+			return ErrGuardedKeyDestroyed
+		}
 		copy(out[:], b)
 		return nil
-	})
+	}); err != nil {
+		panic(ErrGuardedKeyDestroyed)
+	}
 	return out
+}
+
+// privateKeyArray returns the serialized private key of key, rejecting a
+// nil key and a destroyed guarded key with an error rather than letting
+// the caller run on zero key material. The caller zeroizes the result.
+func privateKeyArray(key ECPrivateKeyable) ([32]byte, error) {
+	if key == nil {
+		return [32]byte{}, ErrNilPrivateKey
+	}
+	if d, ok := key.(interface{ IsDestroyed() bool }); ok && d.IsDestroyed() {
+		return [32]byte{}, ErrGuardedKeyDestroyed
+	}
+	return key.Serialize(), nil
 }
 
 // Type returns the EC key type identifier (DjbType = 0x05).
@@ -97,7 +120,7 @@ func (g *GuardedECPrivateKey) Destroy() {
 
 // IsDestroyed reports whether the guarded key has been destroyed.
 func (g *GuardedECPrivateKey) IsDestroyed() bool {
-	return g.key == nil || g.key.IsDestroyed()
+	return g == nil || g.key == nil || g.key.IsDestroyed()
 }
 
 // Sign performs XEdDSA signing over the message using the guarded private key.
