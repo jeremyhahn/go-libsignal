@@ -53,6 +53,7 @@ func TestGroupSessionBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unable to create group session: %v", err)
 	}
+	defer aliceSkdm.Release()
 	aliceSendingCipher := groups.NewGroupCipher(alice.groupBuilder, aliceSenderKeyName, alice.senderKeyStore)
 
 	// Create a one-to-one session cipher to encrypt the skdm to Bob.
@@ -89,6 +90,7 @@ func TestGroupSessionBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unable to create senderkey distribution message from bytes: %v", err)
 	}
+	defer bobReceivedSkdm.Release()
 
 	// ***** Alice Send *****
 
@@ -112,6 +114,7 @@ func TestGroupSessionBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unable to create group session: %v", err)
 	}
+	defer bobSkdm.Release()
 	bobSendingCipher := groups.NewGroupCipher(bob.groupBuilder, bobSenderKeyName, bob.senderKeyStore)
 
 	// Encrypt the senderKey distribution message to send to Alice.
@@ -145,6 +148,7 @@ func TestGroupSessionBuilder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unable to create senderkey distribution message from bytes: %v", err)
 	}
+	defer aliceReceivedSkdm.Release()
 
 	// ***** Bob Send *****
 

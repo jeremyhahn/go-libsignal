@@ -126,6 +126,7 @@ func TestSessionBuilderProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSenderKeyDistributionMessageFromBytes() error: %v", err)
 	}
+	defer receivedSkdm.Release()
 
 	// Bob processes the received SKDM
 	if err := bobBuilder.Process(senderKeyName, receivedSkdm); err != nil {

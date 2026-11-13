@@ -59,6 +59,7 @@ func TestGroupCipherEncryptDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
@@ -74,6 +75,7 @@ func TestGroupCipherEncryptDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSenderKeyDistributionMessageFromBytes() error: %v", err)
 	}
+	defer receivedSkdm.Release()
 	if err := bobBuilder.Process(senderKeyName, receivedSkdm); err != nil {
 		t.Fatalf("Process() error: %v", err)
 	}
@@ -120,6 +122,7 @@ func TestGroupCipherEncryptMultipleMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
@@ -133,6 +136,7 @@ func TestGroupCipherEncryptMultipleMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSenderKeyDistributionMessageFromBytes() error: %v", err)
 	}
+	defer receivedSkdm.Release()
 	if err := bobBuilder.Process(senderKeyName, receivedSkdm); err != nil {
 		t.Fatalf("Process() error: %v", err)
 	}
@@ -186,10 +190,11 @@ func TestGroupCipherDecryptNoSession(t *testing.T) {
 	aliceAddress := protocol.NewSignalAddress("alice", 1)
 	senderKeyName := protocol.NewSenderKeyName(groupID, aliceAddress)
 
-	_, err := aliceBuilder.Create(testDistributionID, senderKeyName)
+	created, err := aliceBuilder.Create(testDistributionID, senderKeyName)
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer created.Release()
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
 	encrypted, err := aliceCipher.Encrypt(testDistributionID, []byte("test"))
@@ -256,6 +261,7 @@ func TestGroupCipherDecryptWrongKeyID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
 	// Bob receives SKDM
@@ -263,6 +269,7 @@ func TestGroupCipherDecryptWrongKeyID(t *testing.T) {
 	bobBuilder := NewGroupSessionBuilder(bobStore, serializer)
 	skdmBytes, _ := skdm.Serialize()
 	receivedSkdm, _ := protocol.NewSenderKeyDistributionMessageFromBytes(skdmBytes, serializer.SenderKeyDistributionMessage)
+	defer receivedSkdm.Release()
 	if err := bobBuilder.Process(senderKeyName, receivedSkdm); err != nil {
 		t.Fatalf("Process() error: %v", err)
 	}
@@ -308,6 +315,7 @@ func TestGroupCipherDecryptDuplicateMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
@@ -315,6 +323,7 @@ func TestGroupCipherDecryptDuplicateMessage(t *testing.T) {
 	bobBuilder := NewGroupSessionBuilder(bobStore, serializer)
 	skdmBytes, _ := skdm.Serialize()
 	receivedSkdm, _ := protocol.NewSenderKeyDistributionMessageFromBytes(skdmBytes, serializer.SenderKeyDistributionMessage)
+	defer receivedSkdm.Release()
 	if err := bobBuilder.Process(senderKeyName, receivedSkdm); err != nil {
 		t.Fatalf("Process() error: %v", err)
 	}
@@ -354,6 +363,7 @@ func TestGroupCipherDecryptInvalidSignature(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
 	// Bob receives Alice's real SKDM
@@ -361,6 +371,7 @@ func TestGroupCipherDecryptInvalidSignature(t *testing.T) {
 	bobBuilder := NewGroupSessionBuilder(bobStore, serializer)
 	skdmBytes, _ := skdm.Serialize()
 	receivedSkdm, _ := protocol.NewSenderKeyDistributionMessageFromBytes(skdmBytes, serializer.SenderKeyDistributionMessage)
+	defer receivedSkdm.Release()
 	if err := bobBuilder.Process(senderKeyName, receivedSkdm); err != nil {
 		t.Fatalf("Process() error: %v", err)
 	}
@@ -407,10 +418,11 @@ func TestGroupCipherDecryptEmptyRecord(t *testing.T) {
 	aliceAddress := protocol.NewSignalAddress("alice", 1)
 	senderKeyName := protocol.NewSenderKeyName(groupID, aliceAddress)
 
-	_, err := aliceBuilder.Create(testDistributionID, senderKeyName)
+	created, err := aliceBuilder.Create(testDistributionID, senderKeyName)
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer created.Release()
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
 	// Encrypt
@@ -474,6 +486,7 @@ func TestGroupCipherDecryptTooFarInFuture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
@@ -481,6 +494,7 @@ func TestGroupCipherDecryptTooFarInFuture(t *testing.T) {
 	bobBuilder := NewGroupSessionBuilder(bobStore, serializer)
 	skdmBytes, _ := skdm.Serialize()
 	receivedSkdm, _ := protocol.NewSenderKeyDistributionMessageFromBytes(skdmBytes, serializer.SenderKeyDistributionMessage)
+	defer receivedSkdm.Release()
 	if err := bobBuilder.Process(senderKeyName, receivedSkdm); err != nil {
 		t.Fatalf("Process() error: %v", err)
 	}
@@ -524,6 +538,7 @@ func TestGroupCipherOutOfOrderDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
@@ -537,6 +552,7 @@ func TestGroupCipherOutOfOrderDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSenderKeyDistributionMessageFromBytes() error: %v", err)
 	}
+	defer receivedSkdm.Release()
 	if err := bobBuilder.Process(senderKeyName, receivedSkdm); err != nil {
 		t.Fatalf("Process() error: %v", err)
 	}
@@ -614,6 +630,7 @@ func TestGroupCipherDecryptMismatchedKeyID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
 	// Bob processes Alice's SKDM (so Bob has a non-empty record)
@@ -621,6 +638,7 @@ func TestGroupCipherDecryptMismatchedKeyID(t *testing.T) {
 	bobBuilder := NewGroupSessionBuilder(bobStore, serializer)
 	skdmBytes, _ := skdm.Serialize()
 	receivedSkdm, _ := protocol.NewSenderKeyDistributionMessageFromBytes(skdmBytes, serializer.SenderKeyDistributionMessage)
+	defer receivedSkdm.Release()
 	if err := bobBuilder.Process(senderKeyName, receivedSkdm); err != nil {
 		t.Fatalf("Process() error: %v", err)
 	}
@@ -669,6 +687,7 @@ func TestGroupCipherDecryptSerializeError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
 	// Bob processes Alice's SKDM
@@ -676,6 +695,7 @@ func TestGroupCipherDecryptSerializeError(t *testing.T) {
 	bobBuilder := NewGroupSessionBuilder(bobStore, serializer)
 	skdmBytes, _ := skdm.Serialize()
 	receivedSkdm, _ := protocol.NewSenderKeyDistributionMessageFromBytes(skdmBytes, serializer.SenderKeyDistributionMessage)
+	defer receivedSkdm.Release()
 	if err := bobBuilder.Process(senderKeyName, receivedSkdm); err != nil {
 		t.Fatalf("Process() error: %v", err)
 	}
@@ -740,10 +760,11 @@ func TestGroupCipherDecryptNilStore(t *testing.T) {
 	aliceAddress := protocol.NewSignalAddress("alice", 1)
 	senderKeyName := protocol.NewSenderKeyName(groupID, aliceAddress)
 
-	_, err := aliceBuilder.Create(testDistributionID, senderKeyName)
+	created, err := aliceBuilder.Create(testDistributionID, senderKeyName)
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer created.Release()
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
 	enc, err := aliceCipher.Encrypt(testDistributionID, []byte("test"))
@@ -786,6 +807,7 @@ func TestGroupCipherDecryptTooFarInFutureErrorType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
@@ -793,6 +815,7 @@ func TestGroupCipherDecryptTooFarInFutureErrorType(t *testing.T) {
 	bobBuilder := NewGroupSessionBuilder(bobStore, serializer)
 	skdmBytes, _ := skdm.Serialize()
 	receivedSkdm, _ := protocol.NewSenderKeyDistributionMessageFromBytes(skdmBytes, serializer.SenderKeyDistributionMessage)
+	defer receivedSkdm.Release()
 	if err := bobBuilder.Process(senderKeyName, receivedSkdm); err != nil {
 		t.Fatalf("Process() error: %v", err)
 	}
@@ -836,6 +859,7 @@ func TestGroupCipherDecryptDuplicateMessageErrorType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
@@ -843,6 +867,7 @@ func TestGroupCipherDecryptDuplicateMessageErrorType(t *testing.T) {
 	bobBuilder := NewGroupSessionBuilder(bobStore, serializer)
 	skdmBytes, _ := skdm.Serialize()
 	receivedSkdm, _ := protocol.NewSenderKeyDistributionMessageFromBytes(skdmBytes, serializer.SenderKeyDistributionMessage)
+	defer receivedSkdm.Release()
 	if err := bobBuilder.Process(senderKeyName, receivedSkdm); err != nil {
 		t.Fatalf("Process() error: %v", err)
 	}
@@ -881,12 +906,14 @@ func TestGroupCipherDecryptInvalidSignatureErrorType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
 	bobStore := newInMemorySenderKeyStore()
 	bobBuilder := NewGroupSessionBuilder(bobStore, serializer)
 	skdmBytes, _ := skdm.Serialize()
 	receivedSkdm, _ := protocol.NewSenderKeyDistributionMessageFromBytes(skdmBytes, serializer.SenderKeyDistributionMessage)
+	defer receivedSkdm.Release()
 	if err := bobBuilder.Process(senderKeyName, receivedSkdm); err != nil {
 		t.Fatalf("Process() error: %v", err)
 	}
@@ -1056,6 +1083,7 @@ func TestDecryptUsesDistributionIDFromMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyNameA, aliceStore)
 
 	plaintext := []byte("message for distribution A")
@@ -1070,6 +1098,7 @@ func TestDecryptUsesDistributionIDFromMessage(t *testing.T) {
 	skdmBytes, _ := skdm.Serialize()
 	receivedSkdm, _ := protocol.NewSenderKeyDistributionMessageFromBytes(
 		skdmBytes, serializer.SenderKeyDistributionMessage)
+	defer receivedSkdm.Release()
 	if err := bobBuilder.Process(senderKeyNameA, receivedSkdm); err != nil {
 		t.Fatal(err)
 	}
@@ -1118,10 +1147,11 @@ func TestDecryptNoRecordForDistributionID(t *testing.T) {
 	// Alice: create session and encrypt under distribution A
 	aliceStore := newInMemorySenderKeyStore()
 	aliceBuilder := NewGroupSessionBuilder(aliceStore, serializer)
-	_, err := aliceBuilder.Create(distA, senderKeyNameA)
+	created, err := aliceBuilder.Create(distA, senderKeyNameA)
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer created.Release()
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyNameA, aliceStore)
 
 	enc, err := aliceCipher.Encrypt(distA, []byte("test"))
@@ -1139,10 +1169,11 @@ func TestDecryptNoRecordForDistributionID(t *testing.T) {
 	bobBuilder := NewGroupSessionBuilder(bobStore, serializer)
 
 	// Create a session for distribution B so the store is not empty
-	_, err = bobBuilder.Create(distB, senderKeyNameB)
+	createdB, err := bobBuilder.Create(distB, senderKeyNameB)
 	if err != nil {
 		t.Fatalf("Create(distB) error: %v", err)
 	}
+	defer createdB.Release()
 
 	// Bob's cipher is constructed with the B group ID
 	bobCipher := NewGroupCipher(bobBuilder, senderKeyNameB, bobStore)

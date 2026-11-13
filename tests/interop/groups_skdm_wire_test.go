@@ -114,6 +114,7 @@ func TestGroupsSKDMWire(t *testing.T) {
 				serializer.SenderKeyDistributionMessage,
 				v.Inputs.MessageVersion,
 			)
+			defer msg.Release()
 
 			// Serialize and compare bytes.
 			got, err := msg.Serialize()

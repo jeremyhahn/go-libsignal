@@ -61,8 +61,9 @@ var distributionChainKey = func(msg *protocol.SenderKeyDistributionMessage) []by
 
 // Create will create a new group session for the given name.
 // The distributionID identifies the SenderKey distribution for routing.
-// The returned message holds the chain key seed in locked memory; call its
-// Release once it has been serialized and sent.
+// The returned message holds the chain key seed in locked memory, which the
+// garbage collector never frees; the caller must call its Release once it has
+// been serialized and sent.
 func (b *SessionBuilder) Create(distributionID [16]byte, senderKeyName *protocol.SenderKeyName) (*protocol.SenderKeyDistributionMessage, error) {
 	// Load the senderkey by name
 	senderKeyRecord, err := b.senderKeyStore.LoadSenderKey(senderKeyName)

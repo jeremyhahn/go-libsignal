@@ -57,6 +57,7 @@ func TestNewSenderKeyDistributionMessageFromStruct(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		defer msg.Release()
 		if msg.ID() != 1 {
 			t.Fatal("id mismatch")
 		}
@@ -151,6 +152,7 @@ func TestNewSenderKeyDistributionMessage(t *testing.T) {
 	chainKey := validChainKey()
 
 	msg := NewSenderKeyDistributionMessage([16]byte{}, 1, 10, chainKey, signingKey.PublicKey(), serializer, SenderKeyCurrentVersion)
+	defer msg.Release()
 	if msg.ID() != 1 {
 		t.Fatal("id mismatch")
 	}
@@ -169,6 +171,7 @@ func TestSenderKeyDistributionMessageVersion(t *testing.T) {
 
 	t.Run("uses provided version", func(t *testing.T) {
 		msg := NewSenderKeyDistributionMessage([16]byte{}, 1, 10, chainKey, signingKey.PublicKey(), serializer, SenderKeyCurrentVersion)
+		defer msg.Release()
 		if msg.Version() != SenderKeyCurrentVersion {
 			t.Fatalf("expected version %d, got %d", SenderKeyCurrentVersion, msg.Version())
 		}
@@ -178,6 +181,7 @@ func TestSenderKeyDistributionMessageVersion(t *testing.T) {
 		// Verify that a custom version is preserved rather than overwritten
 		customVersion := uint32(2)
 		msg := NewSenderKeyDistributionMessage([16]byte{}, 1, 10, chainKey, signingKey.PublicKey(), serializer, customVersion)
+		defer msg.Release()
 		if msg.Version() != customVersion {
 			t.Fatalf("expected version %d, got %d", customVersion, msg.Version())
 		}
@@ -190,6 +194,7 @@ func TestSenderKeyDistributionMessageSerialize(t *testing.T) {
 	chainKey := validChainKey()
 
 	msg := NewSenderKeyDistributionMessage([16]byte{}, 1, 10, chainKey, signingKey.PublicKey(), serializer, SenderKeyCurrentVersion)
+	defer msg.Release()
 
 	serialized, err := msg.Serialize()
 	if err != nil {
@@ -200,6 +205,7 @@ func TestSenderKeyDistributionMessageSerialize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer msg2.Release()
 
 	if msg2.ID() != 1 {
 		t.Fatal("id mismatch after roundtrip")
