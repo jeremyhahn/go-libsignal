@@ -6,8 +6,7 @@ package backup
 import (
 	"bytes"
 	"compress/gzip"
-	"crypto/hmac"
-	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"math"
@@ -133,12 +132,16 @@ func TestVerifyHMAC_ValidInput(t *testing.T) {
 // hands fn a nil view for a nil Secret, so without the length check the HMAC
 // was keyed with nothing and anyone could forge a tag.
 func TestVerifyHMAC_MissingKeyRejectsForgery(t *testing.T) {
-	content := make([]byte, AESIVSize+AESBlockSize)
-	forger := hmac.New(sha256.New, nil)
-	forger.Write(content)
-	forged := forger.Sum(content)
+	// HMAC-SHA256 under the empty key over the 32 zero content bytes,
+	// precomputed: hmac.New with an empty key panics in the FIPS suite.
+	const emptyKeyTag = "33ad0a1c607ec03b09e6cd9893680ce210adf300aa1f2660e1b22e10f170f92a"
+	tag, err := hex.DecodeString(emptyKeyTag)
+	if err != nil {
+		t.Fatalf("decode fixture: %v", err)
+	}
+	forged := append(make([]byte, AESIVSize+AESBlockSize), tag...)
 
-	err := VerifyHMAC(&MessageBackupKey{}, bytes.NewReader(forged))
+	err = VerifyHMAC(&MessageBackupKey{}, bytes.NewReader(forged))
 	if err == nil {
 		t.Fatal("VerifyHMAC accepted data tagged under an empty key")
 	}
