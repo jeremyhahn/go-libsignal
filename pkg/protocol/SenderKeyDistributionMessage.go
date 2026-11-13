@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
@@ -24,6 +25,12 @@ func NewSenderKeyDistributionMessageFromBytes(serialized []byte,
 	signalMessageStructure, err := serializer.Deserialize(serialized)
 	if err != nil {
 		return nil, err
+	}
+	// The decoded structure and its chain key buffer belong to this call.
+	// The message keeps only a guarded copy, so wipe the decoder's buffer on
+	// every return path, including validation errors.
+	if signalMessageStructure != nil {
+		defer crypto.Zeroize(signalMessageStructure.ChainKey)
 	}
 
 	return NewSenderKeyDistributionMessageFromStruct(signalMessageStructure, serializer)
