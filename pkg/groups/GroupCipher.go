@@ -9,6 +9,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/groups/state/record"
 	"github.com/jeremyhahn/go-libsignal/pkg/groups/state/store"
 	"github.com/jeremyhahn/go-libsignal/pkg/protocol"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 )
 
 // maxForwardJumps limits the forward jump in sender key iteration.
@@ -75,7 +76,12 @@ func (c *GroupCipher) Encrypt(distributionID [16]byte, plaintext []byte) (protoc
 	}
 
 	// Encrypt the plaintext.
-	ciphertext, err := cipher.Encrypt(senderKey.Iv(), senderKey.CipherKey(), plaintext)
+	// Iv and CipherKey hand out owned heap copies: take each once and wipe it.
+	iv := senderKey.Iv()
+	defer crypto.Zeroize(iv)
+	cipherKey := senderKey.CipherKey()
+	defer crypto.Zeroize(cipherKey)
+	ciphertext, err := cipher.Encrypt(iv, cipherKey, plaintext)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +170,12 @@ func (c *GroupCipher) Decrypt(senderKeyMessage *protocol.SenderKeyMessage) ([]by
 	}
 
 	// Decrypt the message ciphertext.
-	plaintext, err := cipher.Decrypt(senderKey.Iv(), senderKey.CipherKey(), senderKeyMessage.Ciphertext())
+	// Iv and CipherKey hand out owned heap copies: take each once and wipe it.
+	iv := senderKey.Iv()
+	defer crypto.Zeroize(iv)
+	cipherKey := senderKey.CipherKey()
+	defer crypto.Zeroize(cipherKey)
+	plaintext, err := cipher.Decrypt(iv, cipherKey, senderKeyMessage.Ciphertext())
 	if err != nil {
 		return nil, err
 	}
