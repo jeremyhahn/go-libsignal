@@ -162,6 +162,9 @@ func (bk *BackupKey) DeriveBackupID(aci protocol.ServiceId) (*BackupID, error) {
 	// backup key borrowed for the HKDF.
 	var id [BackupIDLen]byte
 	if err := bk.key.WithBytes(func(key []byte) error {
+		if len(key) != BackupKeyLen {
+			return &ErrInvalidKeyLength{Field: "backupKey", Got: len(key), Want: BackupKeyLen}
+		}
 		reader := hkdf.New(sha256.New, key, nil, info)
 		_, rErr := io.ReadFull(reader, id[:])
 		return rErr
@@ -210,6 +213,11 @@ func DeriveMessageBackupKey(bk *BackupKey, id *BackupID, forwardSecrecyToken []b
 
 	if err := full.WithBytes(func(fullBuf []byte) error {
 		if err := bk.key.WithBytes(func(key []byte) error {
+			// A zero-value BackupKey borrows as nil: never derive from
+			// the public salt and info alone.
+			if len(key) != BackupKeyLen {
+				return &ErrInvalidKeyLength{Field: "backupKey", Got: len(key), Want: BackupKeyLen}
+			}
 			reader := hkdf.New(sha256.New, key, salt, info)
 			_, rErr := io.ReadFull(reader, fullBuf)
 			return rErr

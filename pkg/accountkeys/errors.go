@@ -70,6 +70,18 @@ func (e *ErrInvalidSaltLength) Error() string {
 	return fmt.Sprintf("accountkeys: salt must be %d bytes, got %d", e.Expected, e.Got)
 }
 
+// ErrInvalidBackupKey is returned when a backup key holds no root key of
+// the expected length (a zero-value BackupKey), so nothing is derived from
+// public inputs alone.
+type ErrInvalidBackupKey struct {
+	Expected int
+	Got      int
+}
+
+func (e *ErrInvalidBackupKey) Error() string {
+	return fmt.Sprintf("accountkeys: backup key must be %d bytes, got %d", e.Expected, e.Got)
+}
+
 // ErrEmptyPIN indicates the PIN is empty after normalization.
 type ErrEmptyPIN struct{}
 
