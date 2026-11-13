@@ -324,8 +324,14 @@ func TestDecrypt_InvalidCompositeMessage(t *testing.T) {
 func TestKDFHybrid_Success(t *testing.T) {
 	ecMKBytes := make([]byte, 32)
 	pqMKBytes := make([]byte, 32)
-	ecMK, _ := secret.New(ecMKBytes)
-	pqMK, _ := secret.New(pqMKBytes)
+	ecMK, err := secret.New(ecMKBytes)
+	if err != nil {
+		t.Fatalf("secret.New ecMK: %v", err)
+	}
+	pqMK, err := secret.New(pqMKBytes)
+	if err != nil {
+		t.Fatalf("secret.New pqMK: %v", err)
+	}
 	defer ecMK.Destroy()
 	defer pqMK.Destroy()
 
@@ -349,10 +355,13 @@ func TestKDFHybrid_Success(t *testing.T) {
 // TestKDFHybrid_NilECKey verifies that a nil EC key is rejected.
 func TestKDFHybrid_NilECKey(t *testing.T) {
 	pqMKBytes := make([]byte, 32)
-	pqMK, _ := secret.New(pqMKBytes)
+	pqMK, err := secret.New(pqMKBytes)
+	if err != nil {
+		t.Fatalf("secret.New pqMK: %v", err)
+	}
 	defer pqMK.Destroy()
 
-	_, err := tripleratchet.KDFHybrid(nil, pqMK)
+	_, err = tripleratchet.KDFHybrid(nil, pqMK)
 	if err == nil {
 		t.Fatal("expected error for nil ecMK")
 	}
@@ -361,7 +370,10 @@ func TestKDFHybrid_NilECKey(t *testing.T) {
 // TestKDFHybridECOnly_Success verifies the EC-only KDF path.
 func TestKDFHybridECOnly_Success(t *testing.T) {
 	ecMKBytes := make([]byte, 32)
-	ecMK, _ := secret.New(ecMKBytes)
+	ecMK, err := secret.New(ecMKBytes)
+	if err != nil {
+		t.Fatalf("secret.New ecMK: %v", err)
+	}
 	defer ecMK.Destroy()
 
 	hkeys, err := tripleratchet.KDFHybridECOnly(ecMK)

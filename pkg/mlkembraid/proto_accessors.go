@@ -29,7 +29,7 @@ func (a *Authenticator) ProtoAuthRootKey() []byte {
 	if a == nil || a.rootKey == nil || a.rootKey.IsDestroyed() {
 		return nil
 	}
-	return a.rootKey.Bytes()
+	return copySecret(a.rootKey)
 }
 
 // ProtoAuthMacKey returns the authenticator's mac_key bytes for proto
@@ -38,7 +38,7 @@ func (a *Authenticator) ProtoAuthMacKey() []byte {
 	if a == nil || a.macKey == nil || a.macKey.IsDestroyed() {
 		return nil
 	}
-	return a.macKey.Bytes()
+	return copySecret(a.macKey)
 }
 
 // ProtoAuthEpoch returns the authenticator's epoch for proto marshaling.
@@ -55,7 +55,7 @@ func (s *State) ProtoDK() []byte {
 	if s.dk == nil || s.dk.IsDestroyed() {
 		return nil
 	}
-	return s.dk.Bytes()
+	return copySecret(s.dk)
 }
 
 // ProtoEKSeed returns the ek_seed bytes. Returns nil if nil or destroyed.
@@ -63,7 +63,7 @@ func (s *State) ProtoEKSeed() []byte {
 	if s.ekSeed == nil || s.ekSeed.IsDestroyed() {
 		return nil
 	}
-	return s.ekSeed.Bytes()
+	return copySecret(s.ekSeed)
 }
 
 // ProtoEKVector returns the ek_vector bytes. Returns nil if nil or destroyed.
@@ -71,7 +71,7 @@ func (s *State) ProtoEKVector() []byte {
 	if s.ekVector == nil || s.ekVector.IsDestroyed() {
 		return nil
 	}
-	return s.ekVector.Bytes()
+	return copySecret(s.ekVector)
 }
 
 // ProtoReceivedCt1 returns the received ct1 bytes. Returns nil if nil or
@@ -80,7 +80,7 @@ func (s *State) ProtoReceivedCt1() []byte {
 	if s.receivedCt1 == nil || s.receivedCt1.IsDestroyed() {
 		return nil
 	}
-	return s.receivedCt1.Bytes()
+	return copySecret(s.receivedCt1)
 }
 
 // ProtoBobEKSeed returns Bob's received ek_seed bytes (from header). Returns
@@ -89,7 +89,7 @@ func (s *State) ProtoBobEKSeed() []byte {
 	if s.bobEkSeed == nil || s.bobEkSeed.IsDestroyed() {
 		return nil
 	}
-	return s.bobEkSeed.Bytes()
+	return copySecret(s.bobEkSeed)
 }
 
 // ProtoBobHek returns Bob's received hek bytes (from header). Returns nil if
@@ -98,7 +98,7 @@ func (s *State) ProtoBobHek() []byte {
 	if s.bobHek == nil || s.bobHek.IsDestroyed() {
 		return nil
 	}
-	return s.bobHek.Bytes()
+	return copySecret(s.bobHek)
 }
 
 // ProtoBobEncapSecret returns Bob's packed encapsulation secret blob.
@@ -109,7 +109,7 @@ func (s *State) ProtoBobEncapSecret() []byte {
 	if s.bobEncapSecret == nil || s.bobEncapSecret.IsDestroyed() {
 		return nil
 	}
-	return s.bobEncapSecret.Bytes()
+	return copySecret(s.bobEncapSecret)
 }
 
 // ProtoBobEKVector returns Bob's received ek_vector bytes. Returns nil if nil
@@ -118,7 +118,7 @@ func (s *State) ProtoBobEKVector() []byte {
 	if s.bobEkVector == nil || s.bobEkVector.IsDestroyed() {
 		return nil
 	}
-	return s.bobEkVector.Bytes()
+	return copySecret(s.bobEkVector)
 }
 
 // ProtoBobCt1 returns Bob's ct1 bytes. Returns nil if nil or destroyed.
@@ -126,7 +126,7 @@ func (s *State) ProtoBobCt1() []byte {
 	if s.bobCt1 == nil || s.bobCt1.IsDestroyed() {
 		return nil
 	}
-	return s.bobCt1.Bytes()
+	return copySecret(s.bobCt1)
 }
 
 // ProtoBobSS returns Bob's shared secret bytes. Returns nil if nil or
@@ -135,7 +135,7 @@ func (s *State) ProtoBobSS() []byte {
 	if s.bobSS == nil || s.bobSS.IsDestroyed() {
 		return nil
 	}
-	return s.bobSS.Bytes()
+	return copySecret(s.bobSS)
 }
 
 // ProtoHeaderEncoder returns the header encoder for proto marshaling.

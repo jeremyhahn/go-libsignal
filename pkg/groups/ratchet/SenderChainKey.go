@@ -17,6 +17,15 @@ func (e *ErrChainTooLong) Error() string {
 	return "ratchet: sender chain is too long"
 }
 
+// ErrEmptyChainKey is returned when a sender chain key has no key
+// material. Deriving from it would key HMAC with an empty key and give a
+// predictable message key and chain.
+type ErrEmptyChainKey struct{}
+
+func (e *ErrEmptyChainKey) Error() string {
+	return "ratchet: sender chain key is empty"
+}
+
 var messageKeySeed = []byte{0x01}
 var chainKeySeed = []byte{0x02}
 
@@ -103,7 +112,11 @@ func (k *SenderChainKey) Iteration() uint32 {
 
 // SenderMessageKey derives a new SenderMessageKey from this chain key.
 func (k *SenderChainKey) SenderMessageKey() (*SenderMessageKey, error) {
-	return NewSenderMessageKey(k.iteration, k.getDerivative(messageKeySeed, k.chainKey.Bytes()))
+	derived, err := k.getDerivative(messageKeySeed)
+	if err != nil {
+		return nil, err
+	}
+	return NewSenderMessageKey(k.iteration, derived)
 }
 
 // Next returns the next SenderChainKey in the chain. It returns
@@ -113,7 +126,10 @@ func (k *SenderChainKey) Next() (*SenderChainKey, error) {
 	if k.iteration == math.MaxUint32 {
 		return nil, &ErrChainTooLong{}
 	}
-	derived := k.getDerivative(chainKeySeed, k.chainKey.Bytes())
+	derived, err := k.getDerivative(chainKeySeed)
+	if err != nil {
+		return nil, err
+	}
 	// derived is freshly allocated by HMAC, safe to pass directly to secret.New
 	// which will zeroize it (that's fine, it's a throwaway buffer).
 	s, err := secret.New(derived)
@@ -128,9 +144,20 @@ func (k *SenderChainKey) Next() (*SenderChainKey, error) {
 	}, nil
 }
 
-// Seed will return a copy of the chain key bytes.
+// Seed will return a copy of the chain key bytes, made inside the enclave
+// borrow. The caller owns the copy and should zeroize it after use.
 func (k *SenderChainKey) Seed() []byte {
-	return k.chainKey.Bytes()
+	return copySecret(k.chainKey)
+}
+
+// SeedSecret returns an independent locked copy of the chain key seed,
+// cloned region to region with no heap copy. The caller owns it and
+// destroys it.
+func (k *SenderChainKey) SeedSecret() (*secret.Secret, error) {
+	if k == nil || k.chainKey == nil {
+		return nil, &ErrEmptyChainKey{}
+	}
+	return k.chainKey.Clone()
 }
 
 // Zeroize destroys the guarded memory holding the chain key material.
@@ -141,9 +168,23 @@ func (k *SenderChainKey) Zeroize() {
 	}
 }
 
-func (k *SenderChainKey) getDerivative(seed []byte, key []byte) []byte {
-	mac := hmac.New(sha256.New, key)
-	mac.Write(seed)
-
-	return mac.Sum(nil)
+func (k *SenderChainKey) getDerivative(seed []byte) ([]byte, error) {
+	if k == nil {
+		return nil, &ErrEmptyChainKey{}
+	}
+	var derived []byte
+	err := k.chainKey.WithBytes(func(key []byte) error {
+		// WithBytes borrows a nil or zero Secret as nil; refuse it.
+		if len(key) == 0 {
+			return &ErrEmptyChainKey{}
+		}
+		mac := hmac.New(sha256.New, key)
+		mac.Write(seed)
+		derived = mac.Sum(nil)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return derived, nil
 }

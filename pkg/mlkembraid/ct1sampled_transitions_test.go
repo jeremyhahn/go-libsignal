@@ -1,8 +1,9 @@
 package mlkembraid
 
 import (
-	"bytes"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // --- Transition 10: Ct1Sampled receives Ek -> EkReceivedCt1Sampled ---
@@ -228,8 +229,8 @@ func TestTransition9_Ct1SampledEkCt1AckComplete(t *testing.T) {
 	if outKey == nil {
 		t.Fatal("expected output key from encapsulation")
 	}
-	if len(outKey.Key.Bytes()) != 32 {
-		t.Errorf("output key length = %d, want 32", len(outKey.Key.Bytes()))
+	if secrettest.Len(t, outKey.Key) != 32 {
+		t.Errorf("output key length = %d, want 32", secrettest.Len(t, outKey.Key))
 	}
 	if state.ct2Encoder == nil {
 		t.Error("ct2Encoder should be created")
@@ -387,8 +388,8 @@ func TestCt1Acknowledged_EkCompleteTriggersEncaps(t *testing.T) {
 	if outKey == nil {
 		t.Fatal("expected output key")
 	}
-	if len(outKey.Key.Bytes()) != 32 {
-		t.Errorf("output key length = %d, want 32", len(outKey.Key.Bytes()))
+	if secrettest.Len(t, outKey.Key) != 32 {
+		t.Errorf("output key length = %d, want 32", secrettest.Len(t, outKey.Key))
 	}
 }
 
@@ -569,7 +570,7 @@ func TestFullProtocolExchangeNewTransitions(t *testing.T) {
 	if bobKey == nil {
 		t.Fatal("Bob did not produce an output key")
 	}
-	if !bytes.Equal(aliceKey.Key.Bytes(), bobKey.Key.Bytes()) {
+	if !secrettest.Same(t, aliceKey.Key, bobKey.Key) {
 		t.Error("output keys should match")
 	}
 	if aliceKey.Epoch != bobKey.Epoch {

@@ -41,6 +41,10 @@ func NewOPRFBackup4(serverIDs []uint64, password []byte, maxTries uint32) (*OPRF
 	if maxTries == 0 {
 		return nil, ErrBadData
 	}
+	// An empty password would reach HKDF as empty input key material.
+	if len(password) == 0 {
+		return nil, ErrEmptyPIN
+	}
 
 	n := len(serverIDs)
 	input := passwordToUniformInput(password)
@@ -50,9 +54,6 @@ func NewOPRFBackup4(serverIDs []uint64, password []byte, maxTries uint32) (*OPRF
 		return nil, &Error{kind: errBadData}
 	}
 	defer inputSecret.Destroy()
-
-	// Recover the input as a fixed array for functions that require *[64]byte.
-	inputPtr := (*[64]byte)(inputSecret.Bytes())
 
 	kOprf := randomScalar()
 	defer zeroScalar(kOprf)
@@ -65,28 +66,52 @@ func NewOPRFBackup4(serverIDs []uint64, password []byte, maxTries uint32) (*OPRF
 
 	oprfShares := scalarsSummingTo(n, kOprf)
 	defer zeroizeScalars(oprfShares)
-	encShares := bytesXORingTo(n, sEnc.Bytes())
+	var encShares [][]byte
+	if err := sEnc.WithBytes(func(b []byte) error {
+		encShares = bytesXORingTo(n, b)
+		return nil
+	}); err != nil {
+		return nil, &Error{kind: errBadData}
+	}
 	zeroSc := ristretto255.NewScalar() // zero
 	zeroShares := scalarsSummingTo(n, zeroSc)
 	defer zeroizeScalars(zeroShares)
 
-	ap := authPt(inputPtr, kOprf)
-	commitments := authCommitments(serverIDs, inputPtr, ap)
+	// The input is borrowed for the auth point, the commitments and the
+	// master auth secret, which need it as a *[64]byte.
+	var commitments []authCommitment
+	var kAuth *secret.Secret
+	if err := withInput(inputSecret, func(inputPtr *[64]byte) error {
+		ap := authPt(inputPtr, kOprf)
+		commitments = authCommitments(serverIDs, inputPtr, ap)
+		kAuth = authSecretAlloc(inputPtr, ap)
+		return nil
+	}); err != nil {
+		kAuth.Destroy()
+		return nil, &Error{kind: errBadData}
+	}
+	// Destroy kAuth on every return from here on, including a failed
+	// version allocation.
+	defer kAuth.Destroy()
 	defer zeroizeCommitments(commitments)
 
 	// Random version identifier for this backup.
-	versionSecret, err := secret.NewRandom(4)
+	versionSecret, err := versionRandAlloc(4)
 	if err != nil {
 		return nil, &Error{kind: errBadData}
 	}
-	versionBytes := versionSecret.Bytes()
-	version := uint32(versionBytes[0]) | uint32(versionBytes[1])<<8 |
-		uint32(versionBytes[2])<<16 | uint32(versionBytes[3])<<24
+	var version uint32
+	if err := versionSecret.WithBytes(func(versionBytes []byte) error {
+		version = uint32(versionBytes[0]) | uint32(versionBytes[1])<<8 |
+			uint32(versionBytes[2])<<16 | uint32(versionBytes[3])<<24
+		return nil
+	}); err != nil {
+		versionSecret.Destroy()
+		return nil, &Error{kind: errBadData}
+	}
 	versionSecret.Destroy()
 
-	kAuth := authSecret(inputPtr, ap)
-	output := encryptionKey(sEnc.Bytes(), kAuth.Bytes())
-	kAuth.Destroy()
+	output := encryptionKeyFromSecrets(sEnc, kAuth)
 
 	requests := make([][]byte, n)
 	for i := 0; i < n; i++ {
@@ -114,6 +139,14 @@ func NewOPRFBackup4(serverIDs []uint64, password []byte, maxTries uint32) (*OPRF
 		Output:   output,
 	}, nil
 }
+
+// versionRandAlloc allocates the random backup version; tests replace it
+// to exercise the version allocation failure.
+var versionRandAlloc = secret.NewRandom
+
+// authSecretAlloc builds the master authorization secret; tests wrap it to
+// check that kAuth is destroyed on the failure paths.
+var authSecretAlloc = authSecret
 
 // FinalizeBackup4 processes server responses to backup requests. It verifies
 // that all servers returned OK status and returns the minimum tries remaining.

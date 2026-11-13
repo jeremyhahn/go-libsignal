@@ -67,6 +67,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Alice Create: %v", err)
 	}
+	defer skdm.Release()
 
 	// Serialize the SKDM as it would travel over the network.
 	skdmBytes, err := skdm.Serialize()
@@ -81,6 +82,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Bob deserialize SKDM: %v", err)
 	}
+	defer receivedSkdmBob.Release()
 	if err := bobBuilder.Process(aliceSKName, receivedSkdmBob); err != nil {
 		log.Fatalf("Bob Process: %v", err)
 	}
@@ -92,6 +94,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Charlie deserialize SKDM: %v", err)
 	}
+	defer receivedSkdmCharlie.Release()
 	if err := charlieBuilder.Process(aliceSKName, receivedSkdmCharlie); err != nil {
 		log.Fatalf("Charlie Process: %v", err)
 	}

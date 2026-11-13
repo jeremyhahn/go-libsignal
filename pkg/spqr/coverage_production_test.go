@@ -1046,7 +1046,7 @@ func TestStateKindToInnerState_KeysSampled_MissingEkSeed(t *testing.T) {
 		t.Fatalf("ProtoSetFromFields: %v", err)
 	}
 	pb := &pqratchetpb.V1State{}
-	err = stateKindToInnerState(state, pb)
+	err = stateKindToInnerState(state, pb, &braidCopies{})
 	if err == nil {
 		t.Fatal("expected error from stateKindToInnerState with missing ekSeed")
 	}
@@ -1072,7 +1072,7 @@ func TestStateKindToInnerState_HeaderSent_MissingDK(t *testing.T) {
 		t.Fatalf("ProtoSetFromFields: %v", err)
 	}
 	pb := &pqratchetpb.V1State{}
-	err = stateKindToInnerState(state, pb)
+	err = stateKindToInnerState(state, pb, &braidCopies{})
 	if err == nil {
 		t.Fatal("expected error from stateKindToInnerState with missing dk (HeaderSent)")
 	}
@@ -1099,7 +1099,7 @@ func TestStateKindToInnerState_Ct1Received_MissingDK(t *testing.T) {
 		t.Fatalf("ProtoSetFromFields: %v", err)
 	}
 	pb := &pqratchetpb.V1State{}
-	err = stateKindToInnerState(state, pb)
+	err = stateKindToInnerState(state, pb, &braidCopies{})
 	if err == nil {
 		t.Fatal("expected error from stateKindToInnerState with missing dk (Ct1Received)")
 	}
@@ -1125,7 +1125,7 @@ func TestStateKindToInnerState_EkSentCt1Received_MissingDK(t *testing.T) {
 		t.Fatalf("ProtoSetFromFields: %v", err)
 	}
 	pb := &pqratchetpb.V1State{}
-	err = stateKindToInnerState(state, pb)
+	err = stateKindToInnerState(state, pb, &braidCopies{})
 	if err == nil {
 		t.Fatal("expected error from stateKindToInnerState with missing dk (EkSentCt1Received)")
 	}
@@ -1150,7 +1150,7 @@ func TestStateKindToInnerState_NoHeaderReceived_MissingDecoder(t *testing.T) {
 		t.Fatalf("ProtoSetFromFields: %v", err)
 	}
 	pb := &pqratchetpb.V1State{}
-	err = stateKindToInnerState(state, pb)
+	err = stateKindToInnerState(state, pb, &braidCopies{})
 	if err == nil {
 		t.Fatal("expected error from stateKindToInnerState with missing headerDecoder (NoHeaderReceived)")
 	}
@@ -1175,7 +1175,7 @@ func TestStateKindToInnerState_Ct2Sampled_MissingEncoder(t *testing.T) {
 		t.Fatalf("ProtoSetFromFields: %v", err)
 	}
 	pb := &pqratchetpb.V1State{}
-	err = stateKindToInnerState(state, pb)
+	err = stateKindToInnerState(state, pb, &braidCopies{})
 	if err == nil {
 		t.Fatal("expected error from stateKindToInnerState with missing ct2Encoder (Ct2Sampled)")
 	}
@@ -1221,7 +1221,7 @@ func TestStateKindToInnerState_Ct1Sampled_MissingCt1(t *testing.T) {
 		t.Fatalf("ProtoSetFromFields: %v", err)
 	}
 	pb := &pqratchetpb.V1State{}
-	err = stateKindToInnerState(state, pb)
+	err = stateKindToInnerState(state, pb, &braidCopies{})
 	if err == nil {
 		t.Fatal("expected error from stateKindToInnerState with nil bobCt1 (Ct1Sampled)")
 	}
@@ -1261,7 +1261,7 @@ func TestStateKindToInnerState_EkReceivedCt1Sampled_MissingCt1(t *testing.T) {
 		t.Fatalf("ProtoSetFromFields: %v", err)
 	}
 	pb := &pqratchetpb.V1State{}
-	err = stateKindToInnerState(state, pb)
+	err = stateKindToInnerState(state, pb, &braidCopies{})
 	if err == nil {
 		t.Fatal("expected error from stateKindToInnerState with nil bobCt1 (EkReceivedCt1Sampled)")
 	}
@@ -1301,7 +1301,7 @@ func TestStateKindToInnerState_Ct1Acknowledged_MissingCt1(t *testing.T) {
 		t.Fatalf("ProtoSetFromFields: %v", err)
 	}
 	pb := &pqratchetpb.V1State{}
-	err = stateKindToInnerState(state, pb)
+	err = stateKindToInnerState(state, pb, &braidCopies{})
 	if err == nil {
 		t.Fatal("expected error from stateKindToInnerState with nil bobCt1 (Ct1Acknowledged)")
 	}
@@ -1329,7 +1329,7 @@ func TestStateKindToInnerState_HeaderReceived_MissingBobEkSeed(t *testing.T) {
 		t.Fatalf("ProtoSetFromFields: %v", err)
 	}
 	pb := &pqratchetpb.V1State{}
-	err = stateKindToInnerState(state, pb)
+	err = stateKindToInnerState(state, pb, &braidCopies{})
 	if err == nil {
 		t.Fatal("expected error from stateKindToInnerState with nil bobEkSeed (HeaderReceived)")
 	}

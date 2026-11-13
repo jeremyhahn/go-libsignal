@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 func TestNewSenderChainKey(t *testing.T) {
@@ -146,7 +148,7 @@ func TestNewSenderChainKeyFromStruct(t *testing.T) {
 	if key.Iteration() != 10 {
 		t.Errorf("Iteration() = %d, want 10", key.Iteration())
 	}
-	if !bytes.Equal(key.Seed(), structure.ChainKey.BytesOrNil()) {
+	if !secrettest.Matches(t, &structure.ChainKey, key.Seed()) {
 		t.Error("Seed does not match structure ChainKey")
 	}
 }
@@ -182,7 +184,7 @@ func TestNewStructFromSenderChainKey(t *testing.T) {
 	if structure.Iteration != 99 {
 		t.Errorf("Structure.Iteration = %d, want 99", structure.Iteration)
 	}
-	if !bytes.Equal(structure.ChainKey.BytesOrNil(), chainKey) {
+	if !secrettest.Matches(t, &structure.ChainKey, chainKey) {
 		t.Error("Structure.ChainKey.BytesOrNil() does not match original chain key")
 	}
 }

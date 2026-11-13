@@ -1,10 +1,11 @@
 package accountkeys
 
 import (
-	"bytes"
 	"encoding/hex"
 	"strings"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 func TestGenerateAccountEntropyPool(t *testing.T) {
@@ -124,7 +125,7 @@ func TestAccountEntropyPool_DeriveSVRKey(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer key2.Destroy()
-		if !bytes.Equal(key1.Bytes(), key2.Bytes()) {
+		if !secrettest.Same(t, key1, key2) {
 			t.Fatal("same pool should derive same key")
 		}
 	})
@@ -142,7 +143,7 @@ func TestAccountEntropyPool_DeriveSVRKey(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer key2.Destroy()
-		if bytes.Equal(key1.Bytes(), key2.Bytes()) {
+		if secrettest.Same(t, key1, key2) {
 			t.Fatal("different pools should derive different keys")
 		}
 	})
@@ -181,7 +182,7 @@ func TestAccountEntropyPool_DeriveBackupKey(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer key2.Destroy()
-		if !bytes.Equal(key1.Bytes(), key2.Bytes()) {
+		if !secrettest.Same(t, key1, key2) {
 			t.Fatal("same pool should derive same key")
 		}
 	})
@@ -198,7 +199,7 @@ func TestAccountEntropyPool_DeriveBackupKey(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer backupKey.Destroy()
-		if bytes.Equal(svrKey.Bytes(), backupKey.Bytes()) {
+		if secrettest.Same(t, svrKey, backupKey) {
 			t.Fatal("SVR key and backup key should differ")
 		}
 	})
@@ -229,10 +230,10 @@ func TestHashPin(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer h2.Zeroize()
-		if !bytes.Equal(h1.AccessKey.Bytes(), h2.AccessKey.Bytes()) {
+		if !secrettest.Same(t, h1.AccessKey, h2.AccessKey) {
 			t.Fatal("same PIN and salt should produce same access key")
 		}
-		if !bytes.Equal(h1.EncryptionKey.Bytes(), h2.EncryptionKey.Bytes()) {
+		if !secrettest.Same(t, h1.EncryptionKey, h2.EncryptionKey) {
 			t.Fatal("same PIN and salt should produce same encryption key")
 		}
 	})
@@ -243,7 +244,7 @@ func TestHashPin(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer h.Zeroize()
-		if bytes.Equal(h.AccessKey.Bytes(), h.EncryptionKey.Bytes()) {
+		if secrettest.Same(t, h.AccessKey, h.EncryptionKey) {
 			t.Fatal("access key and encryption key should differ")
 		}
 	})
@@ -256,10 +257,10 @@ func TestHashPin(t *testing.T) {
 		}
 		defer h.Zeroize()
 		// Just verify both fields are populated and different
-		if isAllZero(h.EncryptionKey.Bytes()) {
+		if secrettest.IsZero(t, h.EncryptionKey) {
 			t.Fatal("encryption key should not be zero")
 		}
-		if isAllZero(h.AccessKey.Bytes()) {
+		if secrettest.IsZero(t, h.AccessKey) {
 			t.Fatal("access key should not be zero")
 		}
 	})
@@ -275,8 +276,8 @@ func TestHashPin(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer h.Zeroize()
-		if !bytesEqual(h.AccessKey.Bytes(), expectedAccessKey) {
-			t.Fatalf("access key mismatch\ngot:  %x\nwant: %x", h.AccessKey.Bytes(), expectedAccessKey)
+		if !secrettest.Matches(t, h.AccessKey, expectedAccessKey) {
+			t.Fatalf("access key mismatch")
 		}
 	})
 
@@ -291,7 +292,7 @@ func TestHashPin(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer h2.Zeroize()
-		if bytes.Equal(h1.AccessKey.Bytes(), h2.AccessKey.Bytes()) {
+		if secrettest.Same(t, h1.AccessKey, h2.AccessKey) {
 			t.Fatal("different PINs should produce different access keys")
 		}
 	})
@@ -311,7 +312,7 @@ func TestHashPin(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer h2.Zeroize()
-		if bytes.Equal(h1.AccessKey.Bytes(), h2.AccessKey.Bytes()) {
+		if secrettest.Same(t, h1.AccessKey, h2.AccessKey) {
 			t.Fatal("different salts should produce different keys")
 		}
 	})
@@ -348,7 +349,7 @@ func TestHashPin(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer h2.Zeroize()
-		if !bytes.Equal(h1.AccessKey.Bytes(), h2.AccessKey.Bytes()) {
+		if !secrettest.Same(t, h1.AccessKey, h2.AccessKey) {
 			t.Fatal("trimmed PINs should produce same keys")
 		}
 	})
@@ -368,7 +369,7 @@ func TestHashPin(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer h2.Zeroize()
-		if !bytes.Equal(h1.AccessKey.Bytes(), h2.AccessKey.Bytes()) {
+		if !secrettest.Same(t, h1.AccessKey, h2.AccessKey) {
 			t.Fatal("all-digit non-ASCII PIN must hash identically to its ASCII equivalent")
 		}
 	})
@@ -388,7 +389,7 @@ func TestHashPin(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		defer h2.Zeroize()
-		if bytes.Equal(h1.AccessKey.Bytes(), h2.AccessKey.Bytes()) {
+		if secrettest.Same(t, h1.AccessKey, h2.AccessKey) {
 			t.Fatal("mixed text PIN with non-ASCII digit must not hash the same as the ASCII-digit version")
 		}
 	})
@@ -405,12 +406,10 @@ func TestVerifyPin(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		// Copy access key bytes before passing to VerifyPin.
-		accessKeyBytes := make([]byte, len(h.AccessKey.Bytes()))
-		copy(accessKeyBytes, h.AccessKey.Bytes())
+		ok, err := false, error(nil)
+		secrettest.With(t, h.AccessKey, func(k []byte) { ok, err = VerifyPin("1234", salt, k) })
 		h.Zeroize()
 
-		ok, err := VerifyPin("1234", salt, accessKeyBytes)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -424,11 +423,10 @@ func TestVerifyPin(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		accessKeyBytes := make([]byte, len(h.AccessKey.Bytes()))
-		copy(accessKeyBytes, h.AccessKey.Bytes())
+		ok, err := false, error(nil)
+		secrettest.With(t, h.AccessKey, func(k []byte) { ok, err = VerifyPin("5678", salt, k) })
 		h.Zeroize()
 
-		ok, err := VerifyPin("5678", salt, accessKeyBytes)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -567,10 +565,10 @@ func TestPinHash_Zeroize(t *testing.T) {
 	}
 
 	// Verify fields are non-zero before Zeroize.
-	if isAllZero(h.EncryptionKey.Bytes()) {
+	if secrettest.IsZero(t, h.EncryptionKey) {
 		t.Fatal("encryption key should be non-zero before Zeroize")
 	}
-	if isAllZero(h.AccessKey.Bytes()) {
+	if secrettest.IsZero(t, h.AccessKey) {
 		t.Fatal("access key should be non-zero before Zeroize")
 	}
 
@@ -725,15 +723,6 @@ func bytesEqual(a, b []byte) bool {
 	}
 	for i := range a {
 		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func isAllZero(b []byte) bool {
-	for _, v := range b {
-		if v != 0 {
 			return false
 		}
 	}

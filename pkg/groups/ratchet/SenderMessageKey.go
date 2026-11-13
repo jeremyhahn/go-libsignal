@@ -188,7 +188,7 @@ func (k *SenderMessageKey) Iv() []byte {
 	if k.iv == nil {
 		return nil
 	}
-	return k.iv.Bytes()
+	return copySecret(k.iv)
 }
 
 // CipherKey will return the key in bytes.
@@ -196,7 +196,7 @@ func (k *SenderMessageKey) CipherKey() []byte {
 	if k.cipherKey == nil {
 		return nil
 	}
-	return k.cipherKey.Bytes()
+	return copySecret(k.cipherKey)
 }
 
 // Seed will return the sender message key's seed.
@@ -204,7 +204,23 @@ func (k *SenderMessageKey) Seed() []byte {
 	if k.seed == nil {
 		return nil
 	}
-	return k.seed.Bytes()
+	return copySecret(k.seed)
+}
+
+// copySecret copies s's bytes inside its enclave borrow, for the accessors
+// above whose value must leave the borrow. The caller owns the copy and
+// should zeroize it after use. A nil or destroyed secret yields nil.
+func copySecret(s *secret.Secret) []byte {
+	var out []byte
+	if err := s.WithBytes(func(b []byte) error {
+		if b != nil {
+			out = append([]byte(nil), b...)
+		}
+		return nil
+	}); err != nil {
+		return nil
+	}
+	return out
 }
 
 // Zeroize destroys the guarded memory holding all sensitive key material.

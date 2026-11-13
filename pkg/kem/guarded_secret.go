@@ -54,7 +54,7 @@ func NewGuardedSecretKey(keyType KeyType, data []byte) (k *GuardedSecretKey, err
 // validates them, so a guarded key cannot bypass the checks a heap-backed one
 // is subject to.
 func NewGuardedSecretKeyFromSecret(keyType KeyType, s *secret.Secret) (*GuardedSecretKey, error) {
-	if err := validateSecretKeyMaterial(keyType, len(s.BytesOrNil())); err != nil {
+	if err := validateSecretKeyMaterial(keyType, guardedLen(s)); err != nil {
 		s.Destroy()
 		return nil, err
 	}
@@ -81,13 +81,36 @@ func (g *GuardedSecretKey) Type() KeyType {
 	return g.keyType
 }
 
-// Data returns a view into the guarded memory holding the key material.
-// The returned slice must not be retained beyond the lifetime of the
-// GuardedSecretKey.
+// Data returns a copy of the key material, made inside the enclave borrow.
+// The caller owns the copy and should zeroize it after use.
 //
 // Panics if the key has been destroyed.
 func (g *GuardedSecretKey) Data() []byte {
-	return g.key.Bytes()
+	return copyGuarded(g.key)
+}
+
+// guardedLen reports the length of s's material, or 0 for a nil or
+// destroyed secret.
+func guardedLen(s *secret.Secret) int {
+	if s.IsDestroyed() {
+		return 0
+	}
+	return s.Size()
+}
+
+// copyGuarded copies s's bytes inside its enclave borrow, for the accessors
+// whose value must leave the borrow. It panics if s has been destroyed.
+func copyGuarded(s interface {
+	WithBytes(func([]byte) error) error
+}) []byte {
+	var out []byte
+	if err := s.WithBytes(func(b []byte) error {
+		out = append([]byte(nil), b...)
+		return nil
+	}); err != nil {
+		panic("kem: attempt to access destroyed secret")
+	}
+	return out
 }
 
 // Destroy zeroizes and frees the guarded memory holding the secret key.
@@ -191,13 +214,12 @@ func NewGuardedSharedSecretFromSecret32(s *secret.Secret32) *GuardedSharedSecret
 	return &GuardedSharedSecret{inner: s}
 }
 
-// Bytes returns a view into the guarded memory holding the shared secret.
-// The returned slice must not be retained beyond the lifetime of the
-// GuardedSharedSecret.
+// Bytes returns a copy of the shared secret, made inside the enclave borrow.
+// The caller owns the copy and should zeroize it after use.
 //
 // Panics if the shared secret has been destroyed.
 func (g *GuardedSharedSecret) Bytes() []byte {
-	return g.inner.Bytes()
+	return copyGuarded(g.inner)
 }
 
 // Array returns a copy of the shared secret as a fixed 32-byte array.
@@ -205,7 +227,14 @@ func (g *GuardedSharedSecret) Bytes() []byte {
 //
 // Panics if the shared secret has been destroyed.
 func (g *GuardedSharedSecret) Array() [32]byte {
-	return g.inner.Array()
+	var out [32]byte
+	if err := g.inner.WithBytes(func(b []byte) error {
+		copy(out[:], b)
+		return nil
+	}); err != nil {
+		panic("kem: attempt to access destroyed secret")
+	}
+	return out
 }
 
 // Destroy zeroizes and frees the guarded memory holding the shared secret.
@@ -251,7 +280,7 @@ func GuardedFromPublicAndPrivate(publicSerialized []byte, secretData []byte) (*G
 	if err != nil {
 		return nil, err
 	}
-	if err := validateSecretKeyMaterial(pk.Type(), len(sk.Data())); err != nil {
+	if err := validateSecretKeyMaterial(pk.Type(), sk.key.Size()); err != nil {
 		sk.Destroy()
 		return nil, err
 	}

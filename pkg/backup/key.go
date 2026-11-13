@@ -125,20 +125,26 @@ func DeriveBackupKey(pool accountkeys.AccountEntropyPool) (*BackupKey, error) {
 		return nil, &ErrInvalidEntropyPool{Err: err}
 	}
 
-	// Derive into guarded memory.
-	keySecret, err := secret.NewEmpty(BackupKeyLen)
+	// Derive straight into a locked, writable secret inside its borrow, so
+	// the key never sits in a heap buffer.
+	keySecret, err := secretEmptyAlloc(BackupKeyLen)
 	if err != nil {
 		return nil, &ErrSecuringSecret{Operation: "HKDF output", Err: err}
 	}
-
-	reader := hkdf.New(sha256.New, []byte(pool), nil, []byte(backupKeyDerivationInfo))
-	if _, err := io.ReadFull(reader, keySecret.Bytes()); err != nil {
+	if err := keySecret.WithBytes(func(buf []byte) error {
+		reader := hkdf.New(sha256.New, []byte(pool), nil, []byte(backupKeyDerivationInfo))
+		_, rErr := io.ReadFull(reader, buf)
+		return rErr
+	}); err != nil {
 		keySecret.Destroy()
 		return nil, &ErrDerivingKey{KeyType: "backup key", Err: err}
 	}
-
 	return &BackupKey{key: keySecret}, nil
 }
+
+// secretEmptyAlloc allocates the locked secrets the derivations write
+// into; tests replace it to exercise the allocation-failure paths.
+var secretEmptyAlloc = secret.NewEmpty
 
 // DeriveBackupID derives a BackupID from the BackupKey and an ACI ServiceId
 // using HKDF-SHA256 with the info string "20241024_SIGNAL_BACKUP_ID:" concatenated
@@ -152,20 +158,19 @@ func (bk *BackupKey) DeriveBackupID(aci protocol.ServiceId) (*BackupID, error) {
 	uuid := aci.UUID()
 	info := append([]byte(backupIDDerivationInfo), uuid[:]...)
 
-	// Derive into guarded memory, copy out, then destroy the secret.
-	idSecret, err := secret.NewEmpty(BackupIDLen)
-	if err != nil {
-		return nil, &ErrSecuringSecret{Operation: "HKDF output", Err: err}
-	}
-	defer idSecret.Destroy()
-
-	reader := hkdf.New(sha256.New, bk.key.Bytes(), nil, info)
-	if _, err := io.ReadFull(reader, idSecret.Bytes()); err != nil {
+	// The backup ID is public: derive it straight into the result, with the
+	// backup key borrowed for the HKDF.
+	var id [BackupIDLen]byte
+	if err := bk.key.WithBytes(func(key []byte) error {
+		if len(key) != BackupKeyLen {
+			return &ErrInvalidKeyLength{Field: "backupKey", Got: len(key), Want: BackupKeyLen}
+		}
+		reader := hkdf.New(sha256.New, key, nil, info)
+		_, rErr := io.ReadFull(reader, id[:])
+		return rErr
+	}); err != nil {
 		return nil, &ErrDerivingKey{KeyType: "backup ID", Err: err}
 	}
-
-	var id [BackupIDLen]byte
-	copy(id[:], idSecret.Bytes())
 	return &BackupID{id: id}, nil
 }
 
@@ -186,35 +191,53 @@ func DeriveMessageBackupKey(bk *BackupKey, id *BackupID, forwardSecrecyToken []b
 
 	info := append([]byte(dst), id.id[:]...)
 
-	// Derive into guarded memory, then split into two secrets.
+	// Derive into a locked intermediate with the backup key borrowed, then
+	// fill each half's locked secret inside the intermediate's borrow; no
+	// key material passes through the heap.
 	const totalLen = HMACKeyLen + AESKeyLen
-	fullSecret, err := secret.NewEmpty(totalLen)
+	full, err := secretEmptyAlloc(totalLen)
 	if err != nil {
 		return nil, &ErrSecuringSecret{Operation: "HKDF output", Err: err}
 	}
-	defer fullSecret.Destroy()
+	defer full.Destroy()
 
-	reader := hkdf.New(sha256.New, bk.key.Bytes(), salt, info)
-	if _, err := io.ReadFull(reader, fullSecret.Bytes()); err != nil {
-		return nil, &ErrDerivingKey{KeyType: "message backup key", Err: err}
-	}
-
-	// Copy each half into its own secret.
-	hmacBuf := make([]byte, HMACKeyLen)
-	copy(hmacBuf, fullSecret.Bytes()[:HMACKeyLen])
-	hmacSecret, err := secret.New(hmacBuf)
+	hmacSecret, err := secretEmptyAlloc(HMACKeyLen)
 	if err != nil {
-		crypto.Zeroize(hmacBuf)
 		return nil, &ErrSecuringSecret{Operation: "HMAC key", Err: err}
 	}
-
-	aesBuf := make([]byte, AESKeyLen)
-	copy(aesBuf, fullSecret.Bytes()[HMACKeyLen:])
-	aesSecret, err := secret.New(aesBuf)
+	aesSecret, err := secretEmptyAlloc(AESKeyLen)
 	if err != nil {
-		crypto.Zeroize(aesBuf)
 		hmacSecret.Destroy()
 		return nil, &ErrSecuringSecret{Operation: "AES key", Err: err}
+	}
+
+	if err := full.WithBytes(func(fullBuf []byte) error {
+		if err := bk.key.WithBytes(func(key []byte) error {
+			// A zero-value BackupKey borrows as nil: never derive from
+			// the public salt and info alone.
+			if len(key) != BackupKeyLen {
+				return &ErrInvalidKeyLength{Field: "backupKey", Got: len(key), Want: BackupKeyLen}
+			}
+			reader := hkdf.New(sha256.New, key, salt, info)
+			_, rErr := io.ReadFull(reader, fullBuf)
+			return rErr
+		}); err != nil {
+			return err
+		}
+		if err := hmacSecret.WithBytes(func(dst []byte) error {
+			copy(dst, fullBuf[:HMACKeyLen])
+			return nil
+		}); err != nil {
+			return err
+		}
+		return aesSecret.WithBytes(func(dst []byte) error {
+			copy(dst, fullBuf[HMACKeyLen:])
+			return nil
+		})
+	}); err != nil {
+		hmacSecret.Destroy()
+		aesSecret.Destroy()
+		return nil, &ErrDerivingKey{KeyType: "message backup key", Err: err}
 	}
 
 	return &MessageBackupKey{

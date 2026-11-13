@@ -81,6 +81,8 @@ func (k *MLKEM768IncrementalKEM) KeyGen() ([]byte, []byte, []byte, error) {
 	if err != nil {
 		return nil, nil, nil, &ErrKEMOperation{Op: "KeyGen", Err: err}
 	}
+	// The caller gets its own copy of dk; wipe the key pair's copy.
+	defer kp.Secret.Zeroize()
 
 	// Get raw public key data (without type prefix).
 	ekFull := kp.Public.Data()

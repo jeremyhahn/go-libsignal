@@ -5,7 +5,6 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/kdf"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/chain"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/message"
-	"github.com/jeremyhahn/go-libsignal/pkg/util/bytehelper"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
@@ -46,7 +45,6 @@ func NewChainFromStructure(structure *ChainStructure) (*Chain, error) {
 		return nil, nil
 	}
 	// Alias to SliceToArray
-	getArray := bytehelper.SliceToArray
 
 	// Populate the chain as it is decoded so that every guarded allocation made
 	// so far is reachable by the cleanup below, whichever step fails.
@@ -64,8 +62,8 @@ func NewChainFromStructure(structure *ChainStructure) (*Chain, error) {
 		return nil, err
 	}
 	var senderRatchetKeyPrivate ecc.ECPrivateKeyable
-	if privateKeyBytes := structure.SenderRatchetKeyPrivate.BytesOrNil(); len(privateKeyBytes) == 32 {
-		guardedKey, gErr := ecc.NewGuardedECPrivateKey(getArray(privateKeyBytes))
+	if secretLen(&structure.SenderRatchetKeyPrivate) == 32 {
+		guardedKey, gErr := guardedPrivateKey(&structure.SenderRatchetKeyPrivate)
 		if gErr != nil {
 			return nil, gErr
 		}

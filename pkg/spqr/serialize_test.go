@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // TestSerializeDeserializeRoundTrip verifies that Serialize/Deserialize round-trips
@@ -65,7 +67,7 @@ func TestSerializeDeserializeRoundTrip(t *testing.T) {
 	if restored.direction != alice.direction {
 		t.Errorf("direction: got %v, want %v", restored.direction, alice.direction)
 	}
-	if !bytes.Equal(restored.rootKey.Bytes(), alice.rootKey.Bytes()) {
+	if !secrettest.Same(t, restored.rootKey, alice.rootKey) {
 		t.Error("rootKey mismatch after round trip")
 	}
 	if len(restored.chains) != len(alice.chains) {
@@ -86,14 +88,14 @@ func TestSerializeDeserializeRoundTrip(t *testing.T) {
 		if origChain.sendKey != nil && !origChain.sendKey.IsDestroyed() {
 			if restoredChain.sendKey == nil || restoredChain.sendKey.IsDestroyed() {
 				t.Errorf("epoch %d sendKey missing after round trip", epoch)
-			} else if !bytes.Equal(restoredChain.sendKey.Bytes(), origChain.sendKey.Bytes()) {
+			} else if !secrettest.Same(t, restoredChain.sendKey, origChain.sendKey) {
 				t.Errorf("epoch %d sendKey mismatch", epoch)
 			}
 		}
 		if origChain.recvKey != nil && !origChain.recvKey.IsDestroyed() {
 			if restoredChain.recvKey == nil || restoredChain.recvKey.IsDestroyed() {
 				t.Errorf("epoch %d recvKey missing after round trip", epoch)
-			} else if !bytes.Equal(restoredChain.recvKey.Bytes(), origChain.recvKey.Bytes()) {
+			} else if !secrettest.Same(t, restoredChain.recvKey, origChain.recvKey) {
 				t.Errorf("epoch %d recvKey mismatch", epoch)
 			}
 		}
@@ -111,7 +113,7 @@ func TestSerializeDeserializeRoundTrip(t *testing.T) {
 	if ctr1 != ctr2 {
 		t.Errorf("counter mismatch: original=%d, restored=%d", ctr1, ctr2)
 	}
-	if !bytes.Equal(mk1.Bytes(), mk2.Bytes()) {
+	if !secrettest.Same(t, mk1, mk2) {
 		t.Error("message key mismatch between original and restored")
 	}
 	mk1.Destroy()
@@ -204,7 +206,7 @@ func TestSerializeEmptyState(t *testing.T) {
 	if len(restored.skippedKeys) != 0 {
 		t.Errorf("skippedKeys count: got %d, want 0", len(restored.skippedKeys))
 	}
-	if !bytes.Equal(restored.rootKey.Bytes(), s.rootKey.Bytes()) {
+	if !secrettest.Same(t, restored.rootKey, s.rootKey) {
 		t.Error("rootKey mismatch")
 	}
 }

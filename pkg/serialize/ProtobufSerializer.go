@@ -427,8 +427,12 @@ type ProtobufStateSerializer struct{}
 
 // Serialize will take a session state structure and convert it to protobuf bytes.
 func (s *ProtobufStateSerializer) Serialize(state *record.StateStructure) ([]byte, error) {
-	pb := stateStructureToProto(state)
-	serialized, err := proto.Marshal(pb)
+	// Wipe the heap copies of secret material once marshaled.
+	o := newOwnedCopies()
+	defer o.wipe()
+
+	pb := stateStructureToProto(state, o)
+	serialized, err := marshalRecord(pb)
 	if err != nil {
 		return nil, err
 	}
@@ -458,24 +462,29 @@ type ProtobufSessionSerializer struct{}
 
 // Serialize will take a session structure and convert it to protobuf bytes.
 func (s *ProtobufSessionSerializer) Serialize(session *record.SessionStructure) ([]byte, error) {
+	// Wipe the heap copies of secret material once marshaled.
+	o := newOwnedCopies()
+	defer o.wipe()
+
 	// Serialize each previous state independently so they can be stored
 	// as opaque bytes in the RecordStructure.
 	previousSessions := make([][]byte, len(session.PreviousStates))
 	for i, prevState := range session.PreviousStates {
-		prevPb := stateStructureToProto(prevState)
-		prevBytes, err := proto.Marshal(prevPb)
+		prevPb := stateStructureToProto(prevState, o)
+		prevBytes, err := marshalRecord(prevPb)
 		if err != nil {
 			return nil, err
 		}
-		previousSessions[i] = prevBytes
+		// The marshaled previous state embeds the copied secrets.
+		previousSessions[i] = o.keep(prevBytes)
 	}
 
 	pb := &storagepb.RecordStructure{
-		CurrentSession:   stateStructureToProto(session.SessionState),
+		CurrentSession:   stateStructureToProto(session.SessionState, o),
 		PreviousSessions: previousSessions,
 	}
 
-	serialized, err := proto.Marshal(pb)
+	serialized, err := marshalRecord(pb)
 	if err != nil {
 		return nil, err
 	}
@@ -547,12 +556,16 @@ type ProtobufPreKeyRecordSerializer struct{}
 
 // Serialize will take a prekey record structure and convert it to protobuf bytes.
 func (s *ProtobufPreKeyRecordSerializer) Serialize(preKey *record.PreKeyStructure) ([]byte, error) {
+	// Wipe the heap copies of secret material once marshaled.
+	o := newOwnedCopies()
+	defer o.wipe()
+
 	pb := &storagepb.PreKeyRecordStructure{
 		Id:         preKey.ID,
 		PublicKey:  preKey.PublicKey,
-		PrivateKey: preKey.PrivateKey.BytesOrNil(),
+		PrivateKey: o.copyOut(&preKey.PrivateKey),
 	}
-	serialized, err := proto.Marshal(pb)
+	serialized, err := marshalRecord(pb)
 	if err != nil {
 		return nil, err
 	}
@@ -591,14 +604,18 @@ type ProtobufSignedPreKeyRecordSerializer struct{}
 
 // Serialize will take a signed prekey record structure and convert it to protobuf bytes.
 func (s *ProtobufSignedPreKeyRecordSerializer) Serialize(signedPreKey *record.SignedPreKeyStructure) ([]byte, error) {
+	// Wipe the heap copies of secret material once marshaled.
+	o := newOwnedCopies()
+	defer o.wipe()
+
 	pb := &storagepb.SignedPreKeyRecordStructure{
 		Id:         signedPreKey.ID,
 		PublicKey:  signedPreKey.PublicKey,
-		PrivateKey: signedPreKey.PrivateKey.BytesOrNil(),
+		PrivateKey: o.copyOut(&signedPreKey.PrivateKey),
 		Signature:  signedPreKey.Signature,
 		Timestamp:  uint64(signedPreKey.Timestamp),
 	}
-	serialized, err := proto.Marshal(pb)
+	serialized, err := marshalRecord(pb)
 	if err != nil {
 		return nil, err
 	}
@@ -639,8 +656,12 @@ type ProtobufSenderKeyStateSerializer struct{}
 
 // Serialize will take a senderkey state structure and convert it to protobuf bytes.
 func (s *ProtobufSenderKeyStateSerializer) Serialize(state *groupRecord.SenderKeyStateStructure) ([]byte, error) {
-	pb := senderKeyStateStructureToProto(state)
-	serialized, err := proto.Marshal(pb)
+	// Wipe the heap copies of secret material once marshaled.
+	o := newOwnedCopies()
+	defer o.wipe()
+
+	pb := senderKeyStateStructureToProto(state, o)
+	serialized, err := marshalRecord(pb)
 	if err != nil {
 		return nil, err
 	}
@@ -670,16 +691,20 @@ type ProtobufSenderKeyRecordSerializer struct{}
 
 // Serialize will take a senderkey structure and convert it to protobuf bytes.
 func (s *ProtobufSenderKeyRecordSerializer) Serialize(senderKey *groupRecord.SenderKeyStructure) ([]byte, error) {
+	// Wipe the heap copies of secret material once marshaled.
+	o := newOwnedCopies()
+	defer o.wipe()
+
 	states := make([]*storagepb.SenderKeyStateStructure, len(senderKey.SenderKeyStates))
 	for i, state := range senderKey.SenderKeyStates {
-		states[i] = senderKeyStateStructureToProto(state)
+		states[i] = senderKeyStateStructureToProto(state, o)
 	}
 
 	pb := &storagepb.SenderKeyRecordStructure{
 		SenderKeyStates: states,
 	}
 
-	serialized, err := proto.Marshal(pb)
+	serialized, err := marshalRecord(pb)
 	if err != nil {
 		return nil, err
 	}
@@ -736,7 +761,7 @@ func (s *ProtobufSenderKeyRecordSerializer) Deserialize(serialized []byte) (*gro
 // =============================================================================
 
 // stateStructureToProto converts a Go StateStructure to a protobuf SessionStructure.
-func stateStructureToProto(state *record.StateStructure) *storagepb.SessionStructure {
+func stateStructureToProto(state *record.StateStructure, o *ownedCopies) *storagepb.SessionStructure {
 	if state == nil {
 		return nil
 	}
@@ -745,7 +770,7 @@ func stateStructureToProto(state *record.StateStructure) *storagepb.SessionStruc
 		SessionVersion:       uint32(state.SessionVersion),
 		LocalIdentityPublic:  state.LocalIdentityPublic,
 		RemoteIdentityPublic: state.RemoteIdentityPublic,
-		RootKey:              state.RootKey.BytesOrNil(),
+		RootKey:              o.copyOut(&state.RootKey),
 		PreviousCounter:      state.PreviousCounter,
 		RemoteRegistrationId: state.RemoteRegistrationID,
 		LocalRegistrationId:  state.LocalRegistrationID,
@@ -754,14 +779,14 @@ func stateStructureToProto(state *record.StateStructure) *storagepb.SessionStruc
 
 	// Convert sender chain.
 	if state.SenderChain != nil {
-		pb.SenderChain = chainStructureToProto(state.SenderChain)
+		pb.SenderChain = chainStructureToProto(state.SenderChain, o)
 	}
 
 	// Convert receiver chains.
 	if state.ReceiverChains != nil {
 		pb.ReceiverChains = make([]*storagepb.SessionStructure_Chain, len(state.ReceiverChains))
 		for i, rc := range state.ReceiverChains {
-			pb.ReceiverChains[i] = chainStructureToProto(rc)
+			pb.ReceiverChains[i] = chainStructureToProto(rc, o)
 		}
 	}
 
@@ -788,7 +813,7 @@ func stateStructureToProto(state *record.StateStructure) *storagepb.SessionStruc
 	}
 
 	// Convert PQ ratchet state.
-	if pqRatchetState := state.PqRatchetState.BytesOrNil(); len(pqRatchetState) > 0 {
+	if pqRatchetState := o.copyOut(&state.PqRatchetState); len(pqRatchetState) > 0 {
 		pb.PqRatchetState = pqRatchetState
 	}
 
@@ -881,21 +906,21 @@ func protoToStateStructure(pb *storagepb.SessionStructure) (_ *record.StateStruc
 }
 
 // chainStructureToProto converts a Go ChainStructure to a protobuf Chain.
-func chainStructureToProto(cs *record.ChainStructure) *storagepb.SessionStructure_Chain {
+func chainStructureToProto(cs *record.ChainStructure, o *ownedCopies) *storagepb.SessionStructure_Chain {
 	if cs == nil {
 		return nil
 	}
 
 	pbChain := &storagepb.SessionStructure_Chain{
 		SenderRatchetKey:        cs.SenderRatchetKeyPublic,
-		SenderRatchetKeyPrivate: cs.SenderRatchetKeyPrivate.BytesOrNil(),
+		SenderRatchetKeyPrivate: o.copyOut(&cs.SenderRatchetKeyPrivate),
 	}
 
 	// Convert chain key.
 	if cs.ChainKey != nil {
 		pbChain.ChainKey = &storagepb.SessionStructure_Chain_ChainKey{
 			Index: cs.ChainKey.Index,
-			Key:   cs.ChainKey.Key.BytesOrNil(),
+			Key:   o.copyOut(&cs.ChainKey.Key),
 		}
 	}
 
@@ -905,10 +930,10 @@ func chainStructureToProto(cs *record.ChainStructure) *storagepb.SessionStructur
 		for i, mk := range cs.MessageKeys {
 			pbChain.MessageKeys[i] = &storagepb.SessionStructure_Chain_MessageKey{
 				Index:     mk.Index,
-				CipherKey: mk.CipherKey.BytesOrNil(),
-				MacKey:    mk.MacKey.BytesOrNil(),
-				Iv:        mk.IV.BytesOrNil(),
-				Seed:      mk.SeedMaterial.BytesOrNil(),
+				CipherKey: o.copyOut(&mk.CipherKey),
+				MacKey:    o.copyOut(&mk.MacKey),
+				Iv:        o.copyOut(&mk.IV),
+				Seed:      o.copyOut(&mk.SeedMaterial),
 			}
 		}
 	}
@@ -990,7 +1015,7 @@ func protoToChainStructure(pbChain *storagepb.SessionStructure_Chain) (_ *record
 // =============================================================================
 
 // senderKeyStateStructureToProto converts a Go SenderKeyStateStructure to its protobuf equivalent.
-func senderKeyStateStructureToProto(state *groupRecord.SenderKeyStateStructure) *storagepb.SenderKeyStateStructure {
+func senderKeyStateStructureToProto(state *groupRecord.SenderKeyStateStructure, o *ownedCopies) *storagepb.SenderKeyStateStructure {
 	if state == nil {
 		return nil
 	}
@@ -1000,7 +1025,7 @@ func senderKeyStateStructureToProto(state *groupRecord.SenderKeyStateStructure) 
 		MessageVersion: state.MessageVersion,
 		SenderSigningKey: &storagepb.SenderKeyStateStructure_SenderSigningKey{
 			Public:  state.SigningKeyPublic,
-			Private: state.SigningKeyPrivate.BytesOrNil(),
+			Private: o.copyOut(&state.SigningKeyPrivate),
 		},
 	}
 
@@ -1008,7 +1033,7 @@ func senderKeyStateStructureToProto(state *groupRecord.SenderKeyStateStructure) 
 	if state.SenderChainKey != nil {
 		pb.SenderChainKey = &storagepb.SenderKeyStateStructure_SenderChainKey{
 			Iteration: state.SenderChainKey.Iteration,
-			Seed:      state.SenderChainKey.ChainKey.BytesOrNil(),
+			Seed:      o.copyOut(&state.SenderChainKey.ChainKey),
 		}
 	}
 
@@ -1018,7 +1043,7 @@ func senderKeyStateStructureToProto(state *groupRecord.SenderKeyStateStructure) 
 		for i, key := range state.Keys {
 			pb.SenderMessageKeys[i] = &storagepb.SenderKeyStateStructure_SenderMessageKey{
 				Iteration: key.Iteration,
-				Seed:      key.Seed.BytesOrNil(),
+				Seed:      o.copyOut(&key.Seed),
 			}
 		}
 	}

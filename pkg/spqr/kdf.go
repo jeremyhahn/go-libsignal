@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/kdf"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
@@ -54,41 +55,12 @@ func KdfSckaInit(sharedSecret []byte) (rk, cks, ckr *secret.Secret, err error) {
 		return nil, nil, nil, err
 	}
 
-	// Wrap the intermediate output in a Secret so it is zeroized after splitting.
-	outputSecret, err := secret.New(output)
+	// Split inside locked memory; splitLocked wipes output.
+	keys, err := splitLocked(output, 3)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	defer outputSecret.Destroy()
-
-	outputBytes := outputSecret.Bytes()
-
-	// Copy each key segment before passing to secret.New (which zeroizes the source).
-	rkBytes := make([]byte, keyLen)
-	copy(rkBytes, outputBytes[:keyLen])
-	rk, err = secret.New(rkBytes)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	cksBytes := make([]byte, keyLen)
-	copy(cksBytes, outputBytes[keyLen:2*keyLen])
-	cks, err = secret.New(cksBytes)
-	if err != nil {
-		rk.Destroy()
-		return nil, nil, nil, err
-	}
-
-	ckrBytes := make([]byte, keyLen)
-	copy(ckrBytes, outputBytes[2*keyLen:])
-	ckr, err = secret.New(ckrBytes)
-	if err != nil {
-		rk.Destroy()
-		cks.Destroy()
-		return nil, nil, nil, err
-	}
-
-	return rk, cks, ckr, nil
+	return keys[0], keys[1], keys[2], nil
 }
 
 // KdfSckaRK derives a new root key, send chain key, and receive chain key
@@ -107,45 +79,22 @@ func KdfSckaRK(rk *secret.Secret, sckaOutput []byte) (newRK, newCKs, newCKr *sec
 		}
 	}
 
-	output, err := kdf.DeriveSecrets(sckaOutput, rk.Bytes(), []byte(ChainAddEpochInfo), kdfOutputLen)
+	var output []byte
+	err = rk.WithBytes(func(rkBytes []byte) error {
+		var dErr error
+		output, dErr = kdf.DeriveSecrets(sckaOutput, rkBytes, []byte(ChainAddEpochInfo), kdfOutputLen)
+		return dErr
+	})
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	// Wrap the intermediate output in a Secret so it is zeroized after splitting.
-	outputSecret, err := secret.New(output)
+	// Split inside locked memory; splitLocked wipes output.
+	keys, err := splitLocked(output, 3)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	defer outputSecret.Destroy()
-
-	outputBytes := outputSecret.Bytes()
-
-	rkBytes := make([]byte, keyLen)
-	copy(rkBytes, outputBytes[:keyLen])
-	newRK, err = secret.New(rkBytes)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	cksBytes := make([]byte, keyLen)
-	copy(cksBytes, outputBytes[keyLen:2*keyLen])
-	newCKs, err = secret.New(cksBytes)
-	if err != nil {
-		newRK.Destroy()
-		return nil, nil, nil, err
-	}
-
-	ckrBytes := make([]byte, keyLen)
-	copy(ckrBytes, outputBytes[2*keyLen:])
-	newCKr, err = secret.New(ckrBytes)
-	if err != nil {
-		newRK.Destroy()
-		newCKs.Destroy()
-		return nil, nil, nil, err
-	}
-
-	return newRK, newCKs, newCKr, nil
+	return keys[0], keys[1], keys[2], nil
 }
 
 // KdfSckaCK derives a next chain key and message key from the current chain
@@ -171,35 +120,58 @@ func KdfSckaCK(ck *secret.Secret, ctr uint32) (mk, nextCK *secret.Secret, err er
 	binary.BigEndian.PutUint32(ctrBytes, ctr)
 	info := slices.Concat(ctrBytes, []byte(ChainNextInfo))
 
-	output, err := kdf.DeriveSecrets(ck.Bytes(), zeroSalt(), info, sckaCKOutputLen)
+	var output []byte
+	err = ck.WithBytes(func(ckBytes []byte) error {
+		var dErr error
+		output, dErr = kdf.DeriveSecrets(ckBytes, zeroSalt(), info, sckaCKOutputLen)
+		return dErr
+	})
 	if err != nil {
 		return nil, nil, err
 	}
-
-	// Wrap the intermediate output in a Secret so it is zeroized after splitting.
-	outputSecret, err := secret.New(output)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer outputSecret.Destroy()
-
-	outputBytes := outputSecret.Bytes()
 
 	// Split: nextCK(first 32) || mk(last 32), matching Rust reference.
-	nextCKBytes := make([]byte, keyLen)
-	copy(nextCKBytes, outputBytes[:keyLen])
-	nextCK, err = secret.New(nextCKBytes)
+	// Split inside locked memory; splitLocked wipes output.
+	keys, err := splitLocked(output, 2)
 	if err != nil {
 		return nil, nil, err
 	}
+	return keys[1], keys[0], nil
+}
 
-	mkBytes := make([]byte, keyLen)
-	copy(mkBytes, outputBytes[keyLen:])
-	mk, err = secret.New(mkBytes)
-	if err != nil {
-		nextCK.Destroy()
-		return nil, nil, err
+// splitLocked moves a KDF output into a locked scratch region at once,
+// wiping output, and splits it there into n keyLen-byte secrets. Each
+// secret.New moves its segment locked region to locked region, so no
+// unprotected copy of a segment exists during the split.
+func splitLocked(output []byte, n int) (_ []*secret.Secret, err error) {
+	defer crypto.Zeroize(output)
+	if len(output) != n*keyLen {
+		return nil, &ErrInvalidInput{Field: "kdf output", Reason: "unexpected length"}
 	}
+	scratch, err := secret.NewEmpty(len(output))
+	if err != nil {
+		return nil, err
+	}
+	defer scratch.Destroy()
 
-	return mk, nextCK, nil
+	keys := make([]*secret.Secret, 0, n)
+	err = scratch.WithBytes(func(b []byte) error {
+		copy(b, output)
+		crypto.Zeroize(output)
+		for i := 0; i < n; i++ {
+			k, nErr := secret.New(b[i*keyLen : (i+1)*keyLen])
+			if nErr != nil {
+				return nErr
+			}
+			keys = append(keys, k)
+		}
+		return nil
+	})
+	if err != nil {
+		for _, k := range keys {
+			k.Destroy()
+		}
+		return nil, err
+	}
+	return keys, nil
 }

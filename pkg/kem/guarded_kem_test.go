@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 func TestNewGuardedKyber1024(t *testing.T) {
@@ -326,7 +328,7 @@ func TestGuardedSecretKeyDecapsulate(t *testing.T) {
 	}
 	defer s32.Destroy()
 
-	if !bytes.Equal(s32.Bytes(), ss.Bytes()) {
+	if !secrettest.Matches(t, s32, ss.Bytes()) {
 		t.Error("decapsulated shared secret should match encapsulated")
 	}
 }

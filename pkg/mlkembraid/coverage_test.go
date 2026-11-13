@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // mustSecret creates a *secret.Secret from raw bytes for testing.
@@ -202,7 +204,7 @@ func TestOutputKeyStruct(t *testing.T) {
 	if key.Epoch != 42 {
 		t.Error("Epoch mismatch")
 	}
-	if len(key.Key.Bytes()) != 32 {
+	if secrettest.Len(t, key.Key) != 32 {
 		t.Error("Key length mismatch")
 	}
 	key.Key.Destroy()
@@ -264,7 +266,7 @@ func TestFullEpochExchangeLargeChunks(t *testing.T) {
 	if aliceKey == nil || bobKey == nil {
 		t.Fatal("both parties should produce output keys")
 	}
-	if !bytes.Equal(aliceKey.Key.Bytes(), bobKey.Key.Bytes()) {
+	if !secrettest.Same(t, aliceKey.Key, bobKey.Key) {
 		t.Error("output keys should match with large chunks")
 	}
 	aliceKey.Key.Destroy()

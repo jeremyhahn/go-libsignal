@@ -170,7 +170,7 @@ func SealedSenderMultiRecipientEncrypt(
 	defer mSecret.Destroy()
 
 	// Step 2: Derive r = HKDF(ikm=M, salt=nil, info="Sealed Sender v2: r (2023-08)", len=32).
-	rRaw, err := kdf.DeriveSecrets(mSecret.Bytes(), nil, []byte(v2HKDFRInfo), 32)
+	rRaw, err := deriveFromSecret(mSecret, []byte(v2HKDFRInfo), 32)
 	if err != nil {
 		return nil, &V2OperationError{Operation: "failed to derive r", Err: err}
 	}
@@ -181,7 +181,7 @@ func SealedSenderMultiRecipientEncrypt(
 	defer rSecret.Destroy()
 
 	// Step 3: Derive K = HKDF(ikm=M, salt=nil, info="Sealed Sender v2: K", len=32).
-	kRaw, err := kdf.DeriveSecrets(mSecret.Bytes(), nil, []byte(v2HKDFKInfo), 32)
+	kRaw, err := deriveFromSecret(mSecret, []byte(v2HKDFKInfo), 32)
 	if err != nil {
 		return nil, &V2OperationError{Operation: "failed to derive K", Err: err}
 	}
@@ -193,7 +193,7 @@ func SealedSenderMultiRecipientEncrypt(
 
 	// Step 4: Create ephemeral key pair E from r (clamp and compute public).
 	var ephPriv [32]byte
-	copy(ephPriv[:], rSecret.Bytes())
+	copyFromSecret(ephPriv[:], rSecret)
 	ephPriv[0] &= 248
 	ephPriv[31] &= 127
 	ephPriv[31] |= 64
@@ -206,14 +206,19 @@ func SealedSenderMultiRecipientEncrypt(
 
 	// Recover ephPriv from guarded memory for ScalarBaseMult.
 	var ephPrivForMult [32]byte
-	copy(ephPrivForMult[:], ephPrivSecret.Bytes())
+	copyFromSecret(ephPrivForMult[:], ephPrivSecret)
 	defer crypto.ZeroizeArray32(&ephPrivForMult)
 	var ephPub [32]byte
 	curve25519.ScalarBaseMult(&ephPub, &ephPrivForMult)
 
 	// Step 5: Encrypt the USMC with AES-256-GCM-SIV(key=K, nonce=zeros(12), aad=empty).
 	zeroNonce := make([]byte, v2NonceSize)
-	encryptedPayload, err := signalcipher.AESGCMSIVEncrypt(kSecret.Bytes(), zeroNonce, usmc.Serialize(), nil)
+	var encryptedPayload []byte
+	err = kSecret.WithBytes(func(k []byte) error {
+		var aeadErr error
+		encryptedPayload, aeadErr = signalcipher.AESGCMSIVEncrypt(k, zeroNonce, usmc.Serialize(), nil)
+		return aeadErr
+	})
 	if err != nil {
 		return nil, &V2OperationError{Operation: "failed to encrypt payload", Err: err}
 	}
@@ -298,7 +303,7 @@ func SealedSenderMultiRecipientEncrypt(
 		ri := grp.devices[0]
 
 		// shared = ECDH(ephPriv, recipientIdentityKey)
-		copy(ephPrivForMult[:], ephPrivSecret.Bytes())
+		copyFromSecret(ephPrivForMult[:], ephPrivSecret)
 		shared, dhErr := kdf.CalculateSharedSecret(ri.identityPubRaw, ephPrivForMult)
 		if dhErr != nil {
 			return nil, dhErr
@@ -323,7 +328,7 @@ func SealedSenderMultiRecipientEncrypt(
 		}
 
 		// dhKey = HKDF(ikm, salt=nil, info="Sealed Sender v2: DH", len=32)
-		dhKeyRaw, err := kdf.DeriveSecrets(ikmSecret.Bytes(), nil, []byte(v2HKDFDHInfo), 32)
+		dhKeyRaw, err := deriveFromSecret(ikmSecret, []byte(v2HKDFDHInfo), 32)
 		ikmSecret.Destroy()
 		if err != nil {
 			return nil, &V2OperationError{Operation: "failed to derive DH key", Err: err}
@@ -335,13 +340,18 @@ func SealedSenderMultiRecipientEncrypt(
 
 		// C_i = dhKey XOR M
 		ci := make([]byte, v2EncryptedMKeySize)
-		subtle.XORBytes(ci, dhKeySecret.Bytes(), mSecret.Bytes())
+		_ = dhKeySecret.WithBytes(func(dhKey []byte) error {
+			return mSecret.WithBytes(func(m []byte) error {
+				subtle.XORBytes(ci, dhKey, m)
+				return nil
+			})
+		})
 		dhKeySecret.Destroy()
 
 		// Sender authentication tag:
 		// senderShared = ECDH(ourPriv, recipientPub)
 		var ourPrivForDH [32]byte
-		copy(ourPrivForDH[:], ourPrivSecret.Bytes())
+		copyFromSecret(ourPrivForDH[:], ourPrivSecret)
 		senderShared, sdhErr := kdf.CalculateSharedSecret(ri.identityPubRaw, ourPrivForDH)
 		crypto.ZeroizeArray32(&ourPrivForDH)
 		if sdhErr != nil {
@@ -366,7 +376,7 @@ func SealedSenderMultiRecipientEncrypt(
 		}
 
 		// AT_i = HKDF(senderIkm, salt=nil, info="Sealed Sender v2: DH-sender", len=16)
-		ati, err := kdf.DeriveSecrets(senderIkmSecret.Bytes(), nil, []byte(v2HKDFDHSenderInfo), v2AuthTagSize)
+		ati, err := deriveFromSecret(senderIkmSecret, []byte(v2HKDFDHSenderInfo), v2AuthTagSize)
 		senderIkmSecret.Destroy()
 		if err != nil {
 			return nil, &V2OperationError{Operation: "failed to derive auth tag", Err: err}
@@ -554,7 +564,7 @@ func SealedSenderV2DecryptToUSMC(
 
 	// Step 1: shared = ECDH(ephPub, ourPriv)
 	var ourPriv [32]byte
-	copy(ourPriv[:], ourPrivSecret.Bytes())
+	copyFromSecret(ourPriv[:], ourPrivSecret)
 	defer crypto.ZeroizeArray32(&ourPriv)
 	shared, dhErr := kdf.CalculateSharedSecret(ephPub, ourPriv)
 	if dhErr != nil {
@@ -572,7 +582,7 @@ func SealedSenderV2DecryptToUSMC(
 	ephPubSerialized := v2SerializePublicKey(ephPub)
 	ourPubSerialized := v2SerializePublicKey(ourPub)
 	ikmBytes := make([]byte, 32+33+33)
-	copy(ikmBytes[0:32], sharedSecret.Bytes())
+	copyFromSecret(ikmBytes[0:32], sharedSecret)
 	copy(ikmBytes[32:65], ephPubSerialized)
 	copy(ikmBytes[65:98], ourPubSerialized)
 	ikmSecret, err := secret.New(ikmBytes)
@@ -580,7 +590,7 @@ func SealedSenderV2DecryptToUSMC(
 		return nil, err
 	}
 
-	dhKeyRaw, err := kdf.DeriveSecrets(ikmSecret.Bytes(), nil, []byte(v2HKDFDHInfo), 32)
+	dhKeyRaw, err := deriveFromSecret(ikmSecret, []byte(v2HKDFDHInfo), 32)
 	ikmSecret.Destroy()
 	if err != nil {
 		return nil, &V2OperationError{Operation: "failed to derive DH key", Err: err}
@@ -591,7 +601,10 @@ func SealedSenderV2DecryptToUSMC(
 	}
 
 	var mRecovered [v2MSize]byte
-	subtle.XORBytes(mRecovered[:], dhKeySecret.Bytes(), ci)
+	_ = dhKeySecret.WithBytes(func(dhKey []byte) error {
+		subtle.XORBytes(mRecovered[:], dhKey, ci)
+		return nil
+	})
 	dhKeySecret.Destroy()
 	defer crypto.ZeroizeArray32(&mRecovered)
 
@@ -602,7 +615,7 @@ func SealedSenderV2DecryptToUSMC(
 	defer mRecoveredSecret.Destroy()
 
 	// Step 3: r = HKDF(ikm=M, info="Sealed Sender v2: r (2023-08)", len=32)
-	rRaw, err := kdf.DeriveSecrets(mRecoveredSecret.Bytes(), nil, []byte(v2HKDFRInfo), 32)
+	rRaw, err := deriveFromSecret(mRecoveredSecret, []byte(v2HKDFRInfo), 32)
 	if err != nil {
 		return nil, &V2OperationError{Operation: "failed to derive r", Err: err}
 	}
@@ -613,7 +626,7 @@ func SealedSenderV2DecryptToUSMC(
 	defer rSecret.Destroy()
 
 	// Step 4: K = HKDF(ikm=M, info="Sealed Sender v2: K", len=32)
-	kRaw, err := kdf.DeriveSecrets(mRecoveredSecret.Bytes(), nil, []byte(v2HKDFKInfo), 32)
+	kRaw, err := deriveFromSecret(mRecoveredSecret, []byte(v2HKDFKInfo), 32)
 	if err != nil {
 		return nil, &V2OperationError{Operation: "failed to derive K", Err: err}
 	}
@@ -625,7 +638,7 @@ func SealedSenderV2DecryptToUSMC(
 
 	// Step 5: Validate ephemeral key: derive E' from r, verify E'.public == E.public.
 	var ephPrivCheck [32]byte
-	copy(ephPrivCheck[:], rSecret.Bytes())
+	copyFromSecret(ephPrivCheck[:], rSecret)
 	ephPrivCheck[0] &= 248
 	ephPrivCheck[31] &= 127
 	ephPrivCheck[31] |= 64
@@ -636,7 +649,7 @@ func SealedSenderV2DecryptToUSMC(
 	}
 
 	var ephPrivForMult [32]byte
-	copy(ephPrivForMult[:], ephPrivCheckSecret.Bytes())
+	copyFromSecret(ephPrivForMult[:], ephPrivCheckSecret)
 	ephPrivCheckSecret.Destroy()
 	defer crypto.ZeroizeArray32(&ephPrivForMult)
 
@@ -649,7 +662,12 @@ func SealedSenderV2DecryptToUSMC(
 
 	// Step 6: Decrypt payload with AES-256-GCM-SIV(key=K, nonce=zeros(12)).
 	zeroNonce := make([]byte, v2NonceSize)
-	usmcBytes, err := signalcipher.AESGCMSIVDecrypt(kSecret.Bytes(), zeroNonce, parsed.EncryptedPayload, nil)
+	var usmcBytes []byte
+	err = kSecret.WithBytes(func(k []byte) error {
+		var aeadErr error
+		usmcBytes, aeadErr = signalcipher.AESGCMSIVDecrypt(k, zeroNonce, parsed.EncryptedPayload, nil)
+		return aeadErr
+	})
 	if err != nil {
 		return nil, &V2OperationError{Operation: "failed to decrypt payload", Err: err}
 	}
@@ -677,7 +695,7 @@ func SealedSenderV2DecryptToUSMC(
 	senderPubRaw := senderKey.PublicKey() // [32]byte
 
 	// senderShared = ECDH(ourPriv, senderPub)
-	copy(ourPriv[:], ourPrivSecret.Bytes())
+	copyFromSecret(ourPriv[:], ourPrivSecret)
 	senderShared, sdhErr := kdf.CalculateSharedSecret(senderPubRaw, ourPriv)
 	if sdhErr != nil {
 		return nil, sdhErr
@@ -703,7 +721,7 @@ func SealedSenderV2DecryptToUSMC(
 		return nil, err
 	}
 
-	expectedAT, err := kdf.DeriveSecrets(senderIkmSecret.Bytes(), nil, []byte(v2HKDFDHSenderInfo), v2AuthTagSize)
+	expectedAT, err := deriveFromSecret(senderIkmSecret, []byte(v2HKDFDHSenderInfo), v2AuthTagSize)
 	senderIkmSecret.Destroy()
 	senderSharedSecret.Destroy()
 	if err != nil {
@@ -715,7 +733,7 @@ func SealedSenderV2DecryptToUSMC(
 	}
 	defer expectedATSecret.Destroy()
 
-	if subtle.ConstantTimeCompare(expectedATSecret.Bytes(), ati) != 1 {
+	if !expectedATSecret.EqualTo(ati) {
 		return nil, &V2InputError{Detail: "sender authentication tag verification failed"}
 	}
 
@@ -841,7 +859,7 @@ func SealedSenderV2DecryptReceivedToUSMC(
 
 	// Step 1: shared = ECDH(ephPub, ourPriv)
 	var ourPriv [32]byte
-	copy(ourPriv[:], ourPrivSecret.Bytes())
+	copyFromSecret(ourPriv[:], ourPrivSecret)
 	defer crypto.ZeroizeArray32(&ourPriv)
 	shared, dhErr := kdf.CalculateSharedSecret(ephPub, ourPriv)
 	if dhErr != nil {
@@ -858,7 +876,7 @@ func SealedSenderV2DecryptReceivedToUSMC(
 	ephPubSerialized := v2SerializePublicKey(ephPub)
 	ourPubSerialized := v2SerializePublicKey(ourPub)
 	ikmBytes := make([]byte, 32+33+33)
-	copy(ikmBytes[0:32], sharedSecret.Bytes())
+	copyFromSecret(ikmBytes[0:32], sharedSecret)
 	copy(ikmBytes[32:65], ephPubSerialized)
 	copy(ikmBytes[65:98], ourPubSerialized)
 	ikmSecret, err := secret.New(ikmBytes)
@@ -866,7 +884,7 @@ func SealedSenderV2DecryptReceivedToUSMC(
 		return nil, err
 	}
 
-	dhKeyRaw, err := kdf.DeriveSecrets(ikmSecret.Bytes(), nil, []byte(v2HKDFDHInfo), 32)
+	dhKeyRaw, err := deriveFromSecret(ikmSecret, []byte(v2HKDFDHInfo), 32)
 	ikmSecret.Destroy()
 	if err != nil {
 		return nil, ErrV2ReceivedDecryptFailed
@@ -877,7 +895,10 @@ func SealedSenderV2DecryptReceivedToUSMC(
 	}
 
 	var mRecovered [v2MSize]byte
-	subtle.XORBytes(mRecovered[:], dhKeySecret.Bytes(), ci)
+	_ = dhKeySecret.WithBytes(func(dhKey []byte) error {
+		subtle.XORBytes(mRecovered[:], dhKey, ci)
+		return nil
+	})
 	dhKeySecret.Destroy()
 	defer crypto.ZeroizeArray32(&mRecovered)
 
@@ -888,7 +909,7 @@ func SealedSenderV2DecryptReceivedToUSMC(
 	defer mRecoveredSecret.Destroy()
 
 	// Step 3: r = HKDF(ikm=M, info="Sealed Sender v2: r (2023-08)", len=32)
-	rRaw, err := kdf.DeriveSecrets(mRecoveredSecret.Bytes(), nil, []byte(v2HKDFRInfo), 32)
+	rRaw, err := deriveFromSecret(mRecoveredSecret, []byte(v2HKDFRInfo), 32)
 	if err != nil {
 		return nil, ErrV2ReceivedDecryptFailed
 	}
@@ -899,7 +920,7 @@ func SealedSenderV2DecryptReceivedToUSMC(
 	defer rSecret.Destroy()
 
 	// Step 4: K = HKDF(ikm=M, info="Sealed Sender v2: K", len=32)
-	kRaw, err := kdf.DeriveSecrets(mRecoveredSecret.Bytes(), nil, []byte(v2HKDFKInfo), 32)
+	kRaw, err := deriveFromSecret(mRecoveredSecret, []byte(v2HKDFKInfo), 32)
 	if err != nil {
 		return nil, ErrV2ReceivedDecryptFailed
 	}
@@ -911,7 +932,7 @@ func SealedSenderV2DecryptReceivedToUSMC(
 
 	// Step 5: Validate ephemeral key: derive E' from r, verify E'.public == E.public.
 	var ephPrivCheck [32]byte
-	copy(ephPrivCheck[:], rSecret.Bytes())
+	copyFromSecret(ephPrivCheck[:], rSecret)
 	ephPrivCheck[0] &= 248
 	ephPrivCheck[31] &= 127
 	ephPrivCheck[31] |= 64
@@ -922,7 +943,7 @@ func SealedSenderV2DecryptReceivedToUSMC(
 	}
 
 	var ephPrivForMult [32]byte
-	copy(ephPrivForMult[:], ephPrivCheckSecret.Bytes())
+	copyFromSecret(ephPrivForMult[:], ephPrivCheckSecret)
 	ephPrivCheckSecret.Destroy()
 	defer crypto.ZeroizeArray32(&ephPrivForMult)
 
@@ -935,7 +956,12 @@ func SealedSenderV2DecryptReceivedToUSMC(
 
 	// Step 6: Decrypt payload with AES-256-GCM-SIV(key=K, nonce=zeros(12)).
 	zeroNonce := make([]byte, v2NonceSize)
-	usmcBytes, err := signalcipher.AESGCMSIVDecrypt(kSecret.Bytes(), zeroNonce, received.EncryptedPayload, nil)
+	var usmcBytes []byte
+	err = kSecret.WithBytes(func(k []byte) error {
+		var aeadErr error
+		usmcBytes, aeadErr = signalcipher.AESGCMSIVDecrypt(k, zeroNonce, received.EncryptedPayload, nil)
+		return aeadErr
+	})
 	if err != nil {
 		return nil, ErrV2ReceivedDecryptFailed
 	}
@@ -965,7 +991,7 @@ func SealedSenderV2DecryptReceivedToUSMC(
 	senderKey := usmcContent.Sender().Key()
 	senderPubRaw := senderKey.PublicKey() // [32]byte
 
-	copy(ourPriv[:], ourPrivSecret.Bytes())
+	copyFromSecret(ourPriv[:], ourPrivSecret)
 	senderShared, sdhErr := kdf.CalculateSharedSecret(senderPubRaw, ourPriv)
 	if sdhErr != nil {
 		return nil, sdhErr
@@ -989,7 +1015,7 @@ func SealedSenderV2DecryptReceivedToUSMC(
 		return nil, err
 	}
 
-	expectedAT, err := kdf.DeriveSecrets(senderIkmSecret.Bytes(), nil, []byte(v2HKDFDHSenderInfo), v2AuthTagSize)
+	expectedAT, err := deriveFromSecret(senderIkmSecret, []byte(v2HKDFDHSenderInfo), v2AuthTagSize)
 	senderIkmSecret.Destroy()
 	senderSharedSecret.Destroy()
 	if err != nil {
@@ -1001,7 +1027,7 @@ func SealedSenderV2DecryptReceivedToUSMC(
 	}
 	defer expectedATSecret.Destroy()
 
-	if subtle.ConstantTimeCompare(expectedATSecret.Bytes(), ati) != 1 {
+	if !expectedATSecret.EqualTo(ati) {
 		return nil, ErrV2ReceivedAuthTagMismatch
 	}
 

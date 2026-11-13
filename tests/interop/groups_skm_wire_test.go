@@ -110,6 +110,7 @@ func TestGroupsSKMWire(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewSenderKeyDistributionMessageFromBytes: %v", err)
 			}
+			defer skdm.Release()
 
 			// Rebuild the SenderChainKey at the SKDM's iteration.
 			chainKey := ratchet.NewSenderChainKey(skdm.Iteration(), skdm.ChainKey())

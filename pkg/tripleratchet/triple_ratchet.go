@@ -263,8 +263,11 @@ func (tr *TripleRatchet) Encrypt(plaintext []byte) ([]byte, error) {
 	// the locked-memory constructor, which destructively zeroes the source slice.
 	// Zeroing a locked-memory-protected page via a raw pointer causes a segfault.
 	if outputKey != nil { // coverage-exempt: braid.Send never produces OutputKey in current protocol
-		epochSecretBytes := make([]byte, len(outputKey.Key.Bytes()))
-		copy(epochSecretBytes, outputKey.Key.Bytes())
+		epochSecretBytes := []byte{}
+		_ = outputKey.Key.WithBytes(func(b []byte) error {
+			epochSecretBytes = append(epochSecretBytes, b...)
+			return nil
+		})
 		outputKey.Key.Destroy()
 		if epochErr := tr.advancePQEpoch(epochSecretBytes); epochErr != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 			return nil, epochErr
@@ -296,13 +299,26 @@ func (tr *TripleRatchet) Encrypt(plaintext []byte) ([]byte, error) {
 	defer hkeys.Zeroize()
 
 	// Step 6: AES-256-CBC encrypt.
-	ciphertext, encErr := cipher.AESCBCEncrypt(hkeys.CipherKey.Bytes(), hkeys.IV.Bytes(), plaintext)
+	var ciphertext []byte
+	encErr := hkeys.CipherKey.WithBytes(func(key []byte) error {
+		return hkeys.IV.WithBytes(func(iv []byte) error {
+			var aesErr error
+			ciphertext, aesErr = cipher.AESCBCEncrypt(key, iv, plaintext)
+			return aesErr
+		})
+	})
 	if encErr != nil { // coverage-exempt: AESCBCEncrypt only fails on invalid key/IV length; KDFHybrid always produces 32-byte key and 16-byte IV
 		return nil, &ErrDecryptFailed{Cause: encErr}
 	}
 
 	// Step 7: HMAC-SHA256 over ciphertext.
-	mac := computeHMAC(hkeys.MacKey.Bytes(), ciphertext)
+	var mac []byte
+	if macErr := hkeys.MacKey.WithBytes(func(key []byte) error {
+		mac = computeHMAC(key, ciphertext)
+		return nil
+	}); macErr != nil {
+		return nil, &ErrDecryptFailed{Cause: macErr}
+	}
 
 	// authenticated ciphertext: encrypted_payload || mac(32 bytes)
 	authenticated := make([]byte, len(ciphertext)+HMACSize)
@@ -408,8 +424,11 @@ func (tr *TripleRatchet) decryptWithSnapshot(
 	// the locked-memory constructor, which destructively zeroes the source slice.
 	// Zeroing a locked-memory-protected page via a raw pointer causes a segfault.
 	if outputKey != nil { // coverage-exempt: reachable only in a synchronized bidirectional TripleRatchet session after the full ML-KEM Braid SCKA handshake completes; requires both parties to exchange braid messages in both directions, which is not achievable in unit tests using a simple symmetric EC cipher without a full session-layer implementation
-		epochSecretBytes := make([]byte, len(outputKey.Key.Bytes()))
-		copy(epochSecretBytes, outputKey.Key.Bytes())
+		epochSecretBytes := []byte{}
+		_ = outputKey.Key.WithBytes(func(b []byte) error {
+			epochSecretBytes = append(epochSecretBytes, b...)
+			return nil
+		})
 		outputKey.Key.Destroy()
 		if epochErr := tr.advancePQEpoch(epochSecretBytes); epochErr != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 			return nil, epochErr
@@ -446,13 +465,26 @@ func (tr *TripleRatchet) decryptWithSnapshot(
 	receivedMAC := authenticatedCiphertext[ciphertextLen:]
 
 	// Step 6: verify HMAC-SHA256 (constant-time).
-	expectedMAC := computeHMAC(hkeys.MacKey.Bytes(), ciphertext)
+	var expectedMAC []byte
+	if macErr := hkeys.MacKey.WithBytes(func(key []byte) error {
+		expectedMAC = computeHMAC(key, ciphertext)
+		return nil
+	}); macErr != nil {
+		return nil, &ErrDecryptFailed{Cause: macErr}
+	}
 	if !hmac.Equal(expectedMAC, receivedMAC) {
 		return nil, &ErrMACVerificationFailed{}
 	}
 
 	// Step 7: AES-256-CBC decrypt.
-	plaintext, decErr := cipher.AESCBCDecrypt(hkeys.CipherKey.Bytes(), hkeys.IV.Bytes(), ciphertext)
+	var plaintext []byte
+	decErr := hkeys.CipherKey.WithBytes(func(key []byte) error {
+		return hkeys.IV.WithBytes(func(iv []byte) error {
+			var aesErr error
+			plaintext, aesErr = cipher.AESCBCDecrypt(key, iv, ciphertext)
+			return aesErr
+		})
+	})
 	if decErr != nil { // coverage-exempt: only reachable when ciphertext is not block-aligned after valid MAC; MAC verification above ensures the ciphertext was produced by Encrypt which always PKCS7-pads
 		return nil, &ErrDecryptFailed{Cause: decErr}
 	}
@@ -471,7 +503,12 @@ func (tr *TripleRatchet) advancePQEpoch(epochSecret []byte) error {
 	}
 	defer epochSec.Destroy()
 
-	newRK, newCKs, newCKr, kdfErr := spqr.KdfSckaRK(tr.rootKey, epochSec.Bytes())
+	var newRK, newCKs, newCKr *secret.Secret
+	kdfErr := epochSec.WithBytes(func(b []byte) error {
+		var err error
+		newRK, newCKs, newCKr, err = spqr.KdfSckaRK(tr.rootKey, b)
+		return err
+	})
 	if kdfErr != nil {
 		return &ErrSPQRFailed{Op: "KdfSckaRK", Cause: kdfErr}
 	}

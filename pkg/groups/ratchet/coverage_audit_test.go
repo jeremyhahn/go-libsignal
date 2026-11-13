@@ -2,7 +2,10 @@ package ratchet
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // TestSenderChainKeyStructure_Zeroize verifies that Zeroize overwrites the
@@ -14,23 +17,15 @@ func TestSenderChainKeyStructure_Zeroize(t *testing.T) {
 	}
 
 	// Verify non-zero before zeroize.
-	allZero := true
-	for _, b := range structure.ChainKey.BytesOrNil() {
-		if b != 0 {
-			allZero = false
-			break
-		}
-	}
+	allZero := secrettest.IsZero(t, &structure.ChainKey)
 	if allZero {
 		t.Fatal("test setup: ChainKey should be non-zero before Zeroize")
 	}
 
 	structure.Zeroize()
 
-	for i, b := range structure.ChainKey.BytesOrNil() {
-		if b != 0 {
-			t.Errorf("ChainKey[%d] = %d after Zeroize, want 0", i, b)
-		}
+	if !secrettest.Empty(&structure.ChainKey) {
+		t.Error("ChainKey still lends material after Zeroize")
 	}
 }
 
@@ -62,20 +57,14 @@ func TestSenderMessageKeyStructure_Zeroize(t *testing.T) {
 
 	structure.Zeroize()
 
-	for i, b := range structure.IV.BytesOrNil() {
-		if b != 0 {
-			t.Errorf("IV[%d] = %d after Zeroize, want 0", i, b)
-		}
+	if !secrettest.Empty(&structure.IV) {
+		t.Error("IV still lends material after Zeroize")
 	}
-	for i, b := range structure.CipherKey.BytesOrNil() {
-		if b != 0 {
-			t.Errorf("CipherKey[%d] = %d after Zeroize, want 0", i, b)
-		}
+	if !secrettest.Empty(&structure.CipherKey) {
+		t.Error("CipherKey still lends material after Zeroize")
 	}
-	for i, b := range structure.Seed.BytesOrNil() {
-		if b != 0 {
-			t.Errorf("Seed[%d] = %d after Zeroize, want 0", i, b)
-		}
+	if !secrettest.Empty(&structure.Seed) {
+		t.Error("Seed still lends material after Zeroize")
 	}
 }
 
@@ -97,15 +86,11 @@ func TestSenderMessageKeyStructure_Zeroize_PartialFields(t *testing.T) {
 	}
 	structure.Zeroize() // must not panic and must zero the non-nil fields
 
-	for i, b := range structure.IV.BytesOrNil() {
-		if b != 0 {
-			t.Errorf("IV[%d] = %d after Zeroize, want 0", i, b)
-		}
+	if !secrettest.Empty(&structure.IV) {
+		t.Error("IV still lends material after Zeroize")
 	}
-	for i, b := range structure.Seed.BytesOrNil() {
-		if b != 0 {
-			t.Errorf("Seed[%d] = %d after Zeroize, want 0", i, b)
-		}
+	if !secrettest.Empty(&structure.Seed) {
+		t.Error("Seed still lends material after Zeroize")
 	}
 }
 
@@ -227,14 +212,13 @@ func TestSenderMessageKeyStructure_RoundTripWithZeroize(t *testing.T) {
 
 	}
 	// Save copies of the structure values before zeroize.
-	ivCopy := make([]byte, len(structure.IV.BytesOrNil()))
-	copy(ivCopy, structure.IV.BytesOrNil())
+	ivDigest := secrettest.Digest(t, &structure.IV)
 
 	// Zeroize the structure.
 	structure.Zeroize()
 
 	// The original key's IV must still be accessible (independent memory).
-	if !bytes.Equal(key.Iv(), ivCopy) {
+	if sha256.Sum256(key.Iv()) != ivDigest {
 		t.Error("zeroizing the structure must not affect the original key's IV")
 	}
 

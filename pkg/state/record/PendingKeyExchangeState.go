@@ -46,7 +46,7 @@ func NewPendingKeyExchangeFromStruct(structure *PendingKeyExchangeStructure) (*P
 	}()
 
 	// Convert the bytes in the given structure to ECC objects using guarded keys.
-	localBaseKeyPrivate, err := ecc.NewGuardedECPrivateKey(getArray(structure.LocalBaseKeyPrivate.BytesOrNil()))
+	localBaseKeyPrivate, err := guardedPrivateKey(&structure.LocalBaseKeyPrivate)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func NewPendingKeyExchangeFromStruct(structure *PendingKeyExchangeStructure) (*P
 		localBaseKeyPrivate,
 	)
 
-	localRatchetKeyPrivate, err := ecc.NewGuardedECPrivateKey(getArray(structure.LocalRatchetKeyPrivate.BytesOrNil()))
+	localRatchetKeyPrivate, err := guardedPrivateKey(&structure.LocalRatchetKeyPrivate)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func NewPendingKeyExchangeFromStruct(structure *PendingKeyExchangeStructure) (*P
 		localRatchetKeyPrivate,
 	)
 
-	localIdentityKeyPrivate, err := ecc.NewGuardedECPrivateKey(getArray(structure.LocalIdentityKeyPrivate.BytesOrNil()))
+	localIdentityKeyPrivate, err := guardedPrivateKey(&structure.LocalIdentityKeyPrivate)
 	if err != nil {
 		return nil, err
 	}

@@ -68,9 +68,31 @@ func NewBackupKey(data [BackupKeyLength]byte) BackupKey {
 func (k *BackupKey) Bytes() [BackupKeyLength]byte {
 	var out [BackupKeyLength]byte
 	if k.data != nil && !k.data.IsDestroyed() {
-		copy(out[:], k.data.Bytes())
+		_ = k.data.WithBytes(func(b []byte) error {
+			copy(out[:], b)
+			return nil
+		})
 	}
 	return out
+}
+
+// expandInto fills out with HKDF-SHA256 output keyed by the backup key, read
+// inside the enclave borrow. It panics if the key has been destroyed, as
+// reading a destroyed key always has.
+func (k *BackupKey) expandInto(out, salt, info []byte) error {
+	var data *secret.Secret
+	if k != nil {
+		data = k.data
+	}
+	return data.WithBytes(func(key []byte) error {
+		// A nil secret borrows as nil: refuse to derive from public
+		// inputs alone.
+		if len(key) != BackupKeyLength {
+			return &ErrInvalidBackupKey{Expected: BackupKeyLength, Got: len(key)}
+		}
+		hkdfExpandInto(out, key, salt, info)
+		return nil
+	})
 }
 
 // Zeroize securely wipes the backup key material from memory.
@@ -125,7 +147,9 @@ func (k *BackupKey) DeriveBackupId(aci []byte) (BackupId, error) {
 	}
 	info := append([]byte(backupIDInfo), aci...)
 	var id BackupId
-	hkdfExpandInto(id.data[:], k.data.Bytes(), nil, info)
+	if err := k.expandInto(id.data[:], nil, info); err != nil {
+		return BackupId{}, err
+	}
 	return id, nil
 }
 
@@ -135,7 +159,9 @@ func (k *BackupKey) DeriveBackupId(aci []byte) (BackupId, error) {
 func (k *BackupKey) DeriveECKey(aciServiceIdBinary []byte) (*secret.Secret, error) {
 	info := append([]byte(backupECKeyInfo), aciServiceIdBinary...)
 	buf := make([]byte, 32)
-	hkdfExpandInto(buf, k.data.Bytes(), nil, info)
+	if err := k.expandInto(buf, nil, info); err != nil {
+		return nil, err
+	}
 	// secretAlloc zeroizes buf (move semantics).
 	s, err := secretAlloc(buf)
 	if err != nil {
@@ -149,7 +175,9 @@ func (k *BackupKey) DeriveECKey(aciServiceIdBinary []byte) (*secret.Secret, erro
 // The returned Secret must be destroyed by the caller when no longer needed.
 func (k *BackupKey) DeriveLocalBackupMetadataKey() (*secret.Secret, error) {
 	buf := make([]byte, LocalBackupMetadataKeyLength)
-	hkdfExpandInto(buf, k.data.Bytes(), nil, []byte(localBackupMetadataKeyInfo))
+	if err := k.expandInto(buf, nil, []byte(localBackupMetadataKeyInfo)); err != nil {
+		return nil, err
+	}
 	s, err := secretAlloc(buf)
 	if err != nil {
 		crypto.Zeroize(buf)
@@ -162,7 +190,9 @@ func (k *BackupKey) DeriveLocalBackupMetadataKey() (*secret.Secret, error) {
 func (k *BackupKey) DeriveMediaId(mediaName string) ([MediaIDLength]byte, error) {
 	info := append([]byte(mediaIDInfo), []byte(mediaName)...)
 	var id [MediaIDLength]byte
-	hkdfExpandInto(id[:], k.data.Bytes(), nil, info)
+	if err := k.expandInto(id[:], nil, info); err != nil {
+		return [MediaIDLength]byte{}, err
+	}
 	return id, nil
 }
 
@@ -172,7 +202,9 @@ func (k *BackupKey) DeriveMediaId(mediaName string) ([MediaIDLength]byte, error)
 func (k *BackupKey) DeriveMediaEncryptionKeyData(mediaId [MediaIDLength]byte) (*secret.Secret, error) {
 	info := append([]byte(mediaEncryptionKeyInfo), mediaId[:]...)
 	buf := make([]byte, MediaEncryptionKeyLength)
-	hkdfExpandInto(buf, k.data.Bytes(), nil, info)
+	if err := k.expandInto(buf, nil, info); err != nil {
+		return nil, err
+	}
 	s, err := secretAlloc(buf)
 	if err != nil {
 		crypto.Zeroize(buf)
@@ -187,7 +219,9 @@ func (k *BackupKey) DeriveMediaEncryptionKeyData(mediaId [MediaIDLength]byte) (*
 func (k *BackupKey) DeriveThumbnailTransitEncryptionKeyData(mediaId [MediaIDLength]byte) (*secret.Secret, error) {
 	info := append([]byte(thumbnailTransitEncryptionKeyInfo), mediaId[:]...)
 	buf := make([]byte, MediaEncryptionKeyLength)
-	hkdfExpandInto(buf, k.data.Bytes(), nil, info)
+	if err := k.expandInto(buf, nil, info); err != nil {
+		return nil, err
+	}
 	s, err := secretAlloc(buf)
 	if err != nil {
 		crypto.Zeroize(buf)
@@ -217,7 +251,10 @@ func (p *BackupForwardSecrecyPassword) Zeroize() {
 // "Signal Message Backup 20250627:SVR PIN".
 func (k *BackupKey) DeriveForwardSecrecyPassword(salt []byte) (BackupForwardSecrecyPassword, error) {
 	var pw BackupForwardSecrecyPassword
-	hkdfExpandInto(pw.data[:], k.data.Bytes(), salt, []byte(forwardSecrecyPasswordInfo))
+	if err := k.expandInto(pw.data[:], salt, []byte(forwardSecrecyPasswordInfo)); err != nil {
+		crypto.Zeroize(pw.data[:])
+		return BackupForwardSecrecyPassword{}, err
+	}
 	return pw, nil
 }
 
@@ -253,19 +290,27 @@ func (k *BackupKey) DeriveForwardSecrecyEncryptionKey(salt []byte) (BackupForwar
 	}
 	defer bufSecret.Destroy()
 
-	hkdfExpandInto(bufSecret.Bytes(), k.data.Bytes(), salt, []byte(forwardSecrecyEncryptionKeyInfo))
-
-	// Copy each half into its own secret.
+	// Expand into the locked buffer and copy each half out, all inside the
+	// enclave borrows; each half moves into its own secret below.
 	cipherBuf := make([]byte, backupForwardSecrecyEncryptionKeyCipherKeySize)
-	copy(cipherBuf, bufSecret.Bytes()[:backupForwardSecrecyEncryptionKeyCipherKeySize])
+	hmacBuf := make([]byte, backupForwardSecrecyEncryptionKeyHMACKeySize)
+	if err := bufSecret.WithBytes(func(buf []byte) error {
+		if err := k.expandInto(buf, salt, []byte(forwardSecrecyEncryptionKeyInfo)); err != nil {
+			return err
+		}
+		copy(cipherBuf, buf[:backupForwardSecrecyEncryptionKeyCipherKeySize])
+		copy(hmacBuf, buf[backupForwardSecrecyEncryptionKeyCipherKeySize:])
+		return nil
+	}); err != nil {
+		return BackupForwardSecrecyEncryptionKey{}, &ErrSecuringSecret{Operation: "HKDF output", Err: err}
+	}
 	cipherSecret, err := secretAlloc(cipherBuf)
 	if err != nil {
 		crypto.Zeroize(cipherBuf)
+		crypto.Zeroize(hmacBuf)
 		return BackupForwardSecrecyEncryptionKey{}, &ErrSecuringSecret{Operation: "cipher key", Err: err}
 	}
 
-	hmacBuf := make([]byte, backupForwardSecrecyEncryptionKeyHMACKeySize)
-	copy(hmacBuf, bufSecret.Bytes()[backupForwardSecrecyEncryptionKeyCipherKeySize:])
 	hmacSecret, err := secretAlloc(hmacBuf)
 	if err != nil {
 		crypto.Zeroize(hmacBuf)

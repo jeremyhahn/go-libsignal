@@ -17,6 +17,8 @@ import (
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // --- GuardedECPrivateKey: NewGuardedECPrivateKey ---
@@ -248,7 +250,7 @@ func TestGuardedECPrivateKey_Agreement_Success(t *testing.T) {
 	defer ss2.Destroy()
 
 	// Shared secrets must match (DH commutativity).
-	if ss1.Array() != ss2.Array() {
+	if !secrettest.Same(t, ss1, ss2) {
 		t.Fatal("DH shared secrets do not match")
 	}
 }
@@ -300,6 +302,50 @@ func TestGuardedECPrivateKey_PublicKey_AfterDestroy(t *testing.T) {
 	pub := priv.PublicKey()
 	if pub != ([32]byte{}) {
 		t.Fatal("expected zero public key after destroy")
+	}
+}
+
+// Serialize on a destroyed key returns zeros rather than panicking: the
+// WithBytes borrow refuses a destroyed enclave, so nothing is copied out.
+func TestGuardedECPrivateKey_Serialize_AfterDestroy(t *testing.T) {
+	kp, err := GenerateGuardedKeyPair()
+	if err != nil {
+		t.Fatalf("GenerateGuardedKeyPair failed: %v", err)
+	}
+
+	priv := kp.GuardedPrivateKey()
+	if priv.Serialize() == ([32]byte{}) {
+		t.Fatal("expected non-zero serialization before destroy")
+	}
+	priv.Destroy()
+
+	// Serialize must reject a destroyed key, never hand back zeros.
+	func() {
+		defer func() {
+			if r := recover(); r != ErrGuardedKeyDestroyed {
+				t.Fatalf("Serialize after destroy: want panic(ErrGuardedKeyDestroyed), got %v", r)
+			}
+		}()
+		got := priv.Serialize()
+		t.Fatalf("Serialize after destroy returned %x", got)
+	}()
+
+	// The generic consumers return the rejection as an error.
+	msg := []byte("message")
+	if _, err := CalculateSignature(priv, msg); err != ErrGuardedKeyDestroyed {
+		t.Errorf("CalculateSignature: want ErrGuardedKeyDestroyed, got %v", err)
+	}
+	if _, err := CalculateSignatureWithRandomness(priv, msg, [64]byte{}); err != ErrGuardedKeyDestroyed {
+		t.Errorf("CalculateSignatureWithRandomness: want ErrGuardedKeyDestroyed, got %v", err)
+	}
+	if _, _, err := VXEdDSASign(priv, msg); err != ErrGuardedKeyDestroyed {
+		t.Errorf("VXEdDSASign: want ErrGuardedKeyDestroyed, got %v", err)
+	}
+	if _, err := GuardPrivateKey(priv); err != ErrGuardedKeyDestroyed {
+		t.Errorf("GuardPrivateKey: want ErrGuardedKeyDestroyed, got %v", err)
+	}
+	if _, err := priv.Agreement([32]byte{9}); err != ErrGuardedKeyDestroyed {
+		t.Errorf("Agreement: want ErrGuardedKeyDestroyed, got %v", err)
 	}
 }
 

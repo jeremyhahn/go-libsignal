@@ -1092,6 +1092,7 @@ func TestLiveInterop_SenderKey_RustEncryptGoDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSenderKeyDistributionMessageFromBytes: %v", err)
 	}
+	defer skdm.Release()
 	if err := bobGroupBuilder.Process(senderKeyName, skdm); err != nil {
 		t.Fatalf("Process SKDM: %v", err)
 	}
@@ -1140,6 +1141,7 @@ func TestLiveInterop_SenderKey_GoEncryptRustDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create SKDM: %v", err)
 	}
+	defer skdm.Release()
 	skdmBytes, err := skdm.Serialize()
 	if err != nil {
 		t.Fatalf("SKDM Serialize: %v", err)

@@ -19,6 +19,8 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/cipher"
 	"github.com/jeremyhahn/go-libsignal/pkg/mlkembraid"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // ---- Error-injecting ECCipher helpers ----
@@ -980,13 +982,20 @@ func TestDecrypt_PreNegotiationECOnlyPath(t *testing.T) {
 
 	// Encrypt plaintext with AES-256-CBC.
 	plaintext := []byte("pre-negotiation ec-only message")
-	ciphertext, encErr := cipher.AESCBCEncrypt(hkeys.CipherKey.Bytes(), hkeys.IV.Bytes(), plaintext)
+	var ciphertext []byte
+	var encErr error
+	secrettest.With(t, hkeys.CipherKey, func(key []byte) {
+		secrettest.With(t, hkeys.IV, func(iv []byte) {
+			ciphertext, encErr = cipher.AESCBCEncrypt(key, iv, plaintext)
+		})
+	})
 	if encErr != nil {
 		t.Fatalf("AESCBCEncrypt: %v", encErr)
 	}
 
 	// Compute HMAC and build authenticated ciphertext: ciphertext || MAC.
-	mac := computeHMAC(hkeys.MacKey.Bytes(), ciphertext)
+	var mac []byte
+	secrettest.With(t, hkeys.MacKey, func(key []byte) { mac = computeHMAC(key, ciphertext) })
 	authenticated := make([]byte, len(ciphertext)+HMACSize)
 	copy(authenticated, ciphertext)
 	copy(authenticated[len(ciphertext):], mac)

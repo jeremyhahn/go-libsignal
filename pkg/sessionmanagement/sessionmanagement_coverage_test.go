@@ -631,6 +631,7 @@ func TestMessageDecrypt_SenderKeyDistributionMessageRejected(t *testing.T) {
 		ser.SenderKeyDistributionMessage,
 		3,
 	)
+	defer skdm.Release()
 	addr := protocol.NewSignalAddress("x", 1)
 
 	_, err = sessionmanagement.MessageDecrypt(

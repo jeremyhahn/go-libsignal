@@ -9,6 +9,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/root"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/session"
 	"github.com/jeremyhahn/go-libsignal/pkg/logger"
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/errorhelper"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/optional"
@@ -102,7 +103,7 @@ func NewStateFromStructure(structure *StateStructure, serializer StateSerializer
 	// Clone the PQ ratchet state guarded-to-guarded, so the serialized SPQR
 	// state — which carries live ratchet secrets — never lands on the Go heap.
 	// The structure keeps its own copy; the caller Zeroizes it.
-	if len(structure.PqRatchetState.BytesOrNil()) > 0 {
+	if secretLen(&structure.PqRatchetState) > 0 {
 		pqRatchetState, pqErr := structure.PqRatchetState.Clone()
 		if pqErr != nil {
 			return nil, pqErr
@@ -118,7 +119,7 @@ func NewStateFromStructure(structure *StateStructure, serializer StateSerializer
 	state.previousCounter = structure.PreviousCounter
 	state.remoteIdentityPublic = identity.NewKey(remoteIdentityPublic)
 	state.remoteRegistrationID = structure.RemoteRegistrationID
-	state.rootKey = root.NewKey(kdf.DeriveSecrets, copyBytes(structure.RootKey.BytesOrNil()))
+	state.rootKey = root.NewKey(kdf.DeriveSecrets, copySecret(&structure.RootKey))
 	state.senderBaseKey = senderBaseKey
 	state.serializer = serializer
 	state.sessionVersion = structure.SessionVersion
@@ -283,12 +284,11 @@ func (s *State) SessionWithSelf() bool {
 	return true
 }
 
-// PqRatchetState returns a view into the guarded memory holding the serialized
-// SPQR ratchet state, or nil if not set. The state carries live ratchet
-// secrets, so the returned slice must not be retained: it is invalidated by the
-// next SetPqRatchetState or CopyFrom on this state.
+// PqRatchetState returns a heap copy of the serialized SPQR ratchet state,
+// read inside a WithBytes borrow, or nil if not set. The state carries live
+// ratchet secrets, so the caller should wipe the copy after use.
 func (s *State) PqRatchetState() []byte {
-	return s.pqRatchetState.BytesOrNil()
+	return copySecret(s.pqRatchetState)
 }
 
 // SetPqRatchetState moves the given serialized SPQR ratchet state into guarded
@@ -397,10 +397,9 @@ func (s *State) ReceiverChainKey(senderEphemeral ecc.ECPublicKeyable) *chain.Key
 		return nil
 	}
 
-	// Copy bytes out of guarded memory before passing to constructor,
-	// since NewKey moves data into new guarded memory and zeroizes the source.
-	keyBytes := make([]byte, len(receiverChain.chainKey.Key()))
-	copy(keyBytes, receiverChain.chainKey.Key())
+	// Key returns an owned copy, which NewKey moves into new guarded memory
+	// and zeroizes; no other copy is taken.
+	keyBytes := receiverChain.chainKey.Key()
 	return chain.NewKey(
 		kdf.DeriveSecrets,
 		keyBytes,
@@ -461,9 +460,9 @@ func (s *State) SetSenderChain(senderRatchetKeyPair *ecc.ECKeyPair, chainKey ses
 // SenderChainKey will return the chain key of the session state.
 func (s *State) SenderChainKey() session.ChainKeyable {
 	chainKey := s.senderChain.chainKey
-	// Copy bytes out of guarded memory before passing to constructor.
-	keyBytes := make([]byte, len(chainKey.Key()))
-	copy(keyBytes, chainKey.Key())
+	// Key returns an owned copy, which NewKey moves into new guarded memory
+	// and zeroizes; no other copy is taken.
+	keyBytes := chainKey.Key()
 	return chain.NewKey(kdf.DeriveSecrets, keyBytes, chainKey.Index())
 }
 
@@ -561,21 +560,15 @@ func (s *State) RemoveMessageKeys(senderEphemeral ecc.ECPublicKeyable, counter u
 	// This matches Rust MessageKeyGenerator::Seed where keys are re-derived via
 	// MessageKeyGenerator::keys_and_pqr at rust/protocol/src/ratchet/keys.rs:33-43.
 	if seed := messageKey.SeedMaterial(); len(seed) > 0 {
-		seedCopy := make([]byte, len(seed))
-		copy(seedCopy, seed)
-		result := message.NewSeedOnlyKeys(messageKey.Index(), seedCopy)
-		return result
+		// SeedMaterial returns an owned copy; NewSeedOnlyKeys copies it
+		// again, so wipe this one.
+		defer crypto.Zeroize(seed)
+		return message.NewSeedOnlyKeys(messageKey.Index(), seed)
 	}
 
-	// Derived-keys form: copy bytes out of guarded memory before passing to
-	// constructor so we do not hold a reference into the now-removed chain entry.
-	cipherCopy := make([]byte, len(messageKey.CipherKey()))
-	copy(cipherCopy, messageKey.CipherKey())
-	macCopy := make([]byte, len(messageKey.MacKey()))
-	copy(macCopy, messageKey.MacKey())
-	ivCopy := make([]byte, len(messageKey.Iv()))
-	copy(ivCopy, messageKey.Iv())
-	return message.NewKeys(cipherCopy, macCopy, ivCopy, messageKey.Index())
+	// Derived-keys form: each accessor returns an owned copy, which NewKeys
+	// moves into new guarded memory and zeroizes.
+	return message.NewKeys(messageKey.CipherKey(), messageKey.MacKey(), messageKey.Iv(), messageKey.Index())
 }
 
 // SetMessageKeys will update the chain associated with the given sender key with
@@ -588,25 +581,19 @@ func (s *State) SetMessageKeys(senderEphemeral ecc.ECPublicKeyable, messageKeys 
 	chainState := chainAndIndex.ReceiverChain
 
 	// Copy bytes out of guarded memory before passing to constructor.
-	cipherCopy := make([]byte, len(messageKeys.CipherKey()))
-	copy(cipherCopy, messageKeys.CipherKey())
-	macCopy := make([]byte, len(messageKeys.MacKey()))
-	copy(macCopy, messageKeys.MacKey())
-	ivCopy := make([]byte, len(messageKeys.Iv()))
-	copy(ivCopy, messageKeys.Iv())
-
-	// Add the message keys to our chain state.
+	// Add the message keys to our chain state. Each accessor returns an owned
+	// copy, which NewKeys moves into new guarded memory and zeroizes.
 	newKeys := message.NewKeys(
-		cipherCopy,
-		macCopy,
-		ivCopy,
+		messageKeys.CipherKey(),
+		messageKeys.MacKey(),
+		messageKeys.Iv(),
 		messageKeys.Index(),
 	)
 	// Propagate seed material for SPQR re-derivation of skipped keys.
+	// SetSeedMaterial copies the seed, so wipe the owned copy.
 	if seed := messageKeys.SeedMaterial(); len(seed) > 0 {
-		seedCopy := make([]byte, len(seed))
-		copy(seedCopy, seed)
-		newKeys.SetSeedMaterial(seedCopy)
+		newKeys.SetSeedMaterial(seed)
+		crypto.Zeroize(seed)
 	}
 	chainState.AddMessageKeys(newKeys)
 
@@ -952,7 +939,9 @@ func (s *State) structure() (_ *StateStructure, err error) {
 
 	// Move the root key and the PQ ratchet state into guarded memory.
 	if s.rootKey != nil {
-		if structure.RootKey, err = secret.NewValue(copyBytes(s.rootKey.Bytes())); err != nil {
+		// Bytes hands out an owned copy; NewValue moves it into guarded
+		// memory and wipes it, so no second copy is left behind.
+		if structure.RootKey, err = secret.NewValue(s.rootKey.Bytes()); err != nil {
 			return nil, err
 		}
 	}
@@ -969,11 +958,3 @@ func (s *State) structure() (_ *StateStructure, err error) {
 
 // copyBytes returns an independent copy of the given slice.
 // This is used to safely extract bytes from guarded memory for serialization.
-func copyBytes(src []byte) []byte {
-	if src == nil {
-		return nil
-	}
-	dst := make([]byte, len(src))
-	copy(dst, src)
-	return dst
-}

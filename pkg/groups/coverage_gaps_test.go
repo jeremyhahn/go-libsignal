@@ -59,10 +59,11 @@ func TestGroupCipherEncrypt_StoreError(t *testing.T) {
 	address := protocol.NewSignalAddress("alice", 1)
 	senderKeyName := protocol.NewSenderKeyName(groupID, address)
 
-	_, err := realBuilder.Create(testDistributionID, senderKeyName)
+	created, err := realBuilder.Create(testDistributionID, senderKeyName)
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer created.Release()
 
 	// Now use a store that delegates loads to the real store but fails on store.
 	failStore := &errSenderKeyStore{
@@ -111,10 +112,11 @@ func TestGroupCipherDecrypt_LoadError(t *testing.T) {
 	aliceAddress := protocol.NewSignalAddress("alice", 1)
 	senderKeyName := protocol.NewSenderKeyName(groupID, aliceAddress)
 
-	_, err := aliceBuilder.Create(testDistributionID, senderKeyName)
+	created, err := aliceBuilder.Create(testDistributionID, senderKeyName)
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer created.Release()
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
 	enc, err := aliceCipher.Encrypt(testDistributionID, []byte("test"))
@@ -155,6 +157,7 @@ func TestGroupCipherDecrypt_StoreError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 	aliceCipher := NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
 	// Bob stores the session successfully but then fails on subsequent stores.
@@ -162,6 +165,7 @@ func TestGroupCipherDecrypt_StoreError(t *testing.T) {
 	bobBuilder := NewGroupSessionBuilder(bobRealStore, serializer)
 	skdmBytes, _ := skdm.Serialize()
 	receivedSkdm, _ := protocol.NewSenderKeyDistributionMessageFromBytes(skdmBytes, serializer.SenderKeyDistributionMessage)
+	defer receivedSkdm.Release()
 	if err := bobBuilder.Process(senderKeyName, receivedSkdm); err != nil {
 		t.Fatalf("Process() error: %v", err)
 	}
@@ -237,6 +241,7 @@ func TestGroupSessionBuilderProcess_LoadError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 
 	// Now use a failing store for Process.
 	failStore := &errSenderKeyStore{loadErr: errStoreFailure}
@@ -264,6 +269,7 @@ func TestGroupSessionBuilderProcess_StoreError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 
 	// Use a store that succeeds on load but fails on store.
 	failStore := &errSenderKeyStore{storeErr: errStoreFailure}
@@ -324,6 +330,7 @@ func TestGroupSessionBuilderCreate_WithExistingRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("First Create() error: %v", err)
 	}
+	defer skdm1.Release()
 	if skdm1 == nil {
 		t.Fatal("First Create() returned nil SKDM")
 	}
@@ -333,6 +340,7 @@ func TestGroupSessionBuilderCreate_WithExistingRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Second Create() error: %v", err)
 	}
+	defer skdm2.Release()
 	if skdm2 == nil {
 		t.Fatal("Second Create() returned nil SKDM")
 	}
@@ -386,6 +394,7 @@ func TestGroupSessionBuilderProcess_NilRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 
 	// Bob starts with an empty store (LoadSenderKey returns nil)
 	bobStore := newInMemorySenderKeyStore()
@@ -396,6 +405,7 @@ func TestGroupSessionBuilderProcess_NilRecord(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Deserialize SKDM error: %v", err)
 	}
+	defer receivedSkdm.Release()
 
 	// Process should create a new record even when none exists in the store
 	err = bobBuilder.Process(senderKeyName, receivedSkdm)
@@ -474,10 +484,11 @@ func TestSenderKeyState_MessageVersion_Zero(t *testing.T) {
 	senderKeyName := protocol.NewSenderKeyName("group-x", address)
 
 	// Create a session to get a populated state
-	_, err := builder.Create([16]byte{}, senderKeyName)
+	created, err := builder.Create([16]byte{}, senderKeyName)
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer created.Release()
 	rec, err := store.LoadSenderKey(senderKeyName)
 	if err != nil {
 		t.Fatalf("LoadSenderKey() error: %v", err)
@@ -513,6 +524,7 @@ func TestSenderKeyState_MessageVersion_NonZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 
 	// Verify the SKDM version is set
 	if skdm.Version() < 3 {
@@ -525,6 +537,7 @@ func TestSenderKeyState_MessageVersion_NonZero(t *testing.T) {
 	bobBuilder := NewGroupSessionBuilder(bobStore, serializer)
 	skdmBytes, _ := skdm.Serialize()
 	receivedSkdm, _ := protocol.NewSenderKeyDistributionMessageFromBytes(skdmBytes, serializer.SenderKeyDistributionMessage)
+	defer receivedSkdm.Release()
 	_ = bobBuilder.Process(senderKeyName, receivedSkdm)
 	bobCipher := NewGroupCipher(bobBuilder, senderKeyName, bobStore)
 

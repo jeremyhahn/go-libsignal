@@ -3,6 +3,8 @@ package mlkembraid
 import (
 	"bytes"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 func TestSerializeBraidAlice_RoundTrip(t *testing.T) {
@@ -40,7 +42,7 @@ func TestSerializeBraidAlice_RoundTrip(t *testing.T) {
 	}
 
 	// Authenticator root keys should match.
-	if !bytes.Equal(restored.state.auth.rootKey.Bytes(), alice.state.auth.rootKey.Bytes()) {
+	if !secrettest.Same(t, restored.state.auth.rootKey, alice.state.auth.rootKey) {
 		t.Error("authenticator rootKey mismatch after round trip")
 	}
 }
@@ -237,9 +239,8 @@ func TestSerializeBraid_ProtocolContinuesAfterDeserialize(t *testing.T) {
 	}
 
 	// The output keys from both parties must agree.
-	if !bytes.Equal(aliceKey.Key.Bytes(), bobKey.Key.Bytes()) {
-		t.Errorf("output keys do not match after deserialization:\n  Alice: %x\n  Bob:   %x",
-			aliceKey.Key.Bytes(), bobKey.Key.Bytes())
+	if !secrettest.Same(t, aliceKey.Key, bobKey.Key) {
+		t.Errorf("output keys do not match after deserialization")
 	}
 
 	t.Logf("Protocol completed after deserialization: Alice state=%s epoch=%d, Bob state=%s epoch=%d",

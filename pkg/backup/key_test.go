@@ -7,6 +7,8 @@ import (
 
 	"github.com/jeremyhahn/go-libsignal/pkg/accountkeys"
 	"github.com/jeremyhahn/go-libsignal/pkg/protocol"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 const fakeAccountEntropyPool = "dtjs858asj6tv0jzsqrsmj0ubp335pisj98e9ssnss8myoc08drhtcktyawvx45l"
@@ -34,8 +36,8 @@ func TestDeriveBackupKey(t *testing.T) {
 	defer bk.Zeroize()
 
 	expected := mustDecodeHex("ea26a2ddb5dba5ef9e34e1b8dea1f5ae7f255306a6d2d883e542306eaa9fe985")
-	if hex.EncodeToString(bk.key.Bytes()) != hex.EncodeToString(expected) {
-		t.Errorf("backup key mismatch:\n  got  %x\n  want %x", bk.key.Bytes(), expected)
+	if !secrettest.Matches(t, bk.key, expected) {
+		t.Errorf("backup key mismatch")
 	}
 }
 
@@ -80,11 +82,11 @@ func TestDeriveMessageBackupKeyLegacy(t *testing.T) {
 	expectedHMAC := mustDecodeHex("f425e22a607c529717e1e1b29f9fe139f9d1c7e7d01e371c7753c544a3026649")
 	expectedAES := mustDecodeHex("e143f4ad5668d8bfed2f88562f0693f53bda2c0e55c9d71730f30e24695fd6df")
 
-	if hex.EncodeToString(mk.HMACKey.Bytes()) != hex.EncodeToString(expectedHMAC) {
-		t.Errorf("HMAC key mismatch:\n  got  %x\n  want %x", mk.HMACKey.Bytes(), expectedHMAC)
+	if !secrettest.Matches(t, mk.HMACKey, expectedHMAC) {
+		t.Errorf("HMAC key mismatch")
 	}
-	if hex.EncodeToString(mk.AESKey.Bytes()) != hex.EncodeToString(expectedAES) {
-		t.Errorf("AES key mismatch:\n  got  %x\n  want %x", mk.AESKey.Bytes(), expectedAES)
+	if !secrettest.Matches(t, mk.AESKey, expectedAES) {
+		t.Errorf("AES key mismatch")
 	}
 }
 
@@ -106,22 +108,14 @@ func TestNewMessageBackupKey(t *testing.T) {
 		}
 		defer mk.Zeroize()
 
-		if len(mk.HMACKey.Bytes()) != HMACKeyLen {
-			t.Errorf("HMACKey length = %d, want %d", len(mk.HMACKey.Bytes()), HMACKeyLen)
+		if secrettest.Len(t, mk.HMACKey) != HMACKeyLen {
+			t.Errorf("HMACKey length = %d, want %d", secrettest.Len(t, mk.HMACKey), HMACKeyLen)
 		}
-		if len(mk.AESKey.Bytes()) != AESKeyLen {
-			t.Errorf("AESKey length = %d, want %d", len(mk.AESKey.Bytes()), AESKeyLen)
+		if secrettest.Len(t, mk.AESKey) != AESKeyLen {
+			t.Errorf("AESKey length = %d, want %d", secrettest.Len(t, mk.AESKey), AESKeyLen)
 		}
-		for i, b := range mk.HMACKey.Bytes() {
-			if b != hmacKey[i] {
-				t.Errorf("HMACKey[%d] = %d, want %d", i, b, hmacKey[i])
-			}
-		}
-		for i, b := range mk.AESKey.Bytes() {
-			if b != aesKey[i] {
-				t.Errorf("AESKey[%d] = %d, want %d", i, b, aesKey[i])
-			}
-		}
+		secrettest.Equal(t, mk.HMACKey, hmacKey[:])
+		secrettest.Equal(t, mk.AESKey, aesKey[:])
 	})
 
 	t.Run("hmac key wrong length", func(t *testing.T) {
@@ -213,10 +207,10 @@ func TestDeriveMessageBackupKeyWithForwardSecrecy(t *testing.T) {
 	expectedHMAC := mustDecodeHex("20e6ab57b87e051f3e695e953cf8a261dd307e4f92ae2921673f1d397e07887b")
 	expectedAES := mustDecodeHex("602af6ecfc09d695a8d58da9f18225e967979c5e03543ca0224a03cca3d9735e")
 
-	if hex.EncodeToString(mk.HMACKey.Bytes()) != hex.EncodeToString(expectedHMAC) {
-		t.Errorf("HMAC key mismatch:\n  got  %x\n  want %x", mk.HMACKey.Bytes(), expectedHMAC)
+	if !secrettest.Matches(t, mk.HMACKey, expectedHMAC) {
+		t.Errorf("HMAC key mismatch")
 	}
-	if hex.EncodeToString(mk.AESKey.Bytes()) != hex.EncodeToString(expectedAES) {
-		t.Errorf("AES key mismatch:\n  got  %x\n  want %x", mk.AESKey.Bytes(), expectedAES)
+	if !secrettest.Matches(t, mk.AESKey, expectedAES) {
+		t.Errorf("AES key mismatch")
 	}
 }

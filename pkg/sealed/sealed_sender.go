@@ -156,7 +156,7 @@ func SealedSenderEncryptFromUSMC(
 
 	theirPubRaw := theirPublicKey.PublicKey()
 	var ephPriv [32]byte
-	copy(ephPriv[:], ephPrivSecret.Bytes())
+	copyFromSecret(ephPriv[:], ephPrivSecret)
 	defer crypto.ZeroizeArray32(&ephPriv)
 	sharedSecret1, dhErr := kdf.CalculateSharedSecret(theirPubRaw, ephPriv)
 	if dhErr != nil {
@@ -169,7 +169,7 @@ func SealedSenderEncryptFromUSMC(
 	}
 	defer sharedSecret1Secret.Destroy()
 
-	keys1, err := kdf.DeriveSecrets(sharedSecret1Secret.Bytes(), salt1, nil, hkdfOutputLen)
+	keys1, err := deriveSaltedFromSecret(sharedSecret1Secret, salt1, hkdfOutputLen)
 	if err != nil {
 		return nil, err
 	}
@@ -179,25 +179,29 @@ func SealedSenderEncryptFromUSMC(
 	}
 	defer keys1Secret.Destroy()
 
-	chainKey1 := keys1Secret.Bytes()[:32]
-	cipherKey1 := keys1Secret.Bytes()[32:64]
-	macKey1 := keys1Secret.Bytes()[64:96]
-
 	// Step 3: Encrypt our identity public key with AES-CTR, append truncated HMAC.
+	// The keys are used inside the borrow; chain_key is copied out for salt2.
 	ourIdentityPub := ourIdentity.PublicKey().Serialize()
-	encryptedStatic, err := signalcipher.AESCTREncrypt(cipherKey1, ourIdentityPub)
+	var encryptedStaticWithMAC []byte
+	chainKey1Copy := make([]byte, 32)
+	defer crypto.Zeroize(chainKey1Copy)
+	err = keys1Secret.WithBytes(func(keys1 []byte) error {
+		chainKey1, cipherKey1, macKey1 := keys1[:32], keys1[32:64], keys1[64:96]
+		encryptedStatic, encErr := signalcipher.AESCTREncrypt(cipherKey1, ourIdentityPub)
+		if encErr != nil {
+			return encErr
+		}
+		staticMAC := truncatedHMAC(macKey1, encryptedStatic)
+		encryptedStaticWithMAC = slices.Concat(encryptedStatic, staticMAC)
+		copy(chainKey1Copy, chainKey1)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	staticMAC := truncatedHMAC(macKey1, encryptedStatic)
-	encryptedStaticWithMAC := slices.Concat(encryptedStatic, staticMAC)
 
 	// Step 4: Second ECDH - our identity key to their identity key.
 	// salt = chain_key || encrypted_static_with_mac
-	// Copy chainKey1 since it references guarded memory.
-	chainKey1Copy := make([]byte, 32)
-	defer crypto.Zeroize(chainKey1Copy)
-	copy(chainKey1Copy, chainKey1)
 	salt2 := slices.Concat(chainKey1Copy, encryptedStaticWithMAC)
 
 	ourPrivArr := ourIdentity.PrivateKey().Serialize()
@@ -208,7 +212,7 @@ func SealedSenderEncryptFromUSMC(
 	defer ourPrivSecret.Destroy()
 
 	var ourPriv [32]byte
-	copy(ourPriv[:], ourPrivSecret.Bytes())
+	copyFromSecret(ourPriv[:], ourPrivSecret)
 	defer crypto.ZeroizeArray32(&ourPriv)
 	sharedSecret2, dhErr := kdf.CalculateSharedSecret(theirPubRaw, ourPriv)
 	if dhErr != nil {
@@ -221,7 +225,7 @@ func SealedSenderEncryptFromUSMC(
 	}
 	defer sharedSecret2Secret.Destroy()
 
-	keys2, err := kdf.DeriveSecrets(sharedSecret2Secret.Bytes(), salt2, nil, hkdfOutputLen)
+	keys2, err := deriveSaltedFromSecret(sharedSecret2Secret, salt2, hkdfOutputLen)
 	if err != nil {
 		return nil, err
 	}
@@ -232,16 +236,21 @@ func SealedSenderEncryptFromUSMC(
 	defer keys2Secret.Destroy()
 
 	// keys2[:32] is chain_key2 (unused)
-	cipherKey2 := keys2Secret.Bytes()[32:64]
-	macKey2 := keys2Secret.Bytes()[64:96]
-
 	// Step 5: Encrypt the USMC serialized with AES-CTR, append truncated HMAC.
-	encryptedMessage, err := signalcipher.AESCTREncrypt(cipherKey2, usmc.Serialize())
+	var encryptedMessageWithMAC []byte
+	err = keys2Secret.WithBytes(func(keys2 []byte) error {
+		cipherKey2, macKey2 := keys2[32:64], keys2[64:96]
+		encryptedMessage, encErr := signalcipher.AESCTREncrypt(cipherKey2, usmc.Serialize())
+		if encErr != nil {
+			return encErr
+		}
+		messageMAC := truncatedHMAC(macKey2, encryptedMessage)
+		encryptedMessageWithMAC = slices.Concat(encryptedMessage, messageMAC)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	messageMAC := truncatedHMAC(macKey2, encryptedMessage)
-	encryptedMessageWithMAC := slices.Concat(encryptedMessage, messageMAC)
 
 	// Step 6: Build the protobuf envelope.
 	envelope := &sealedpb.UnidentifiedSenderMessage{
@@ -336,7 +345,7 @@ func SealedSenderDecryptToUSMC(
 
 	ephPubRaw := ephPubKey.PublicKey()
 	var ourPriv [32]byte
-	copy(ourPriv[:], ourPrivSecret.Bytes())
+	copyFromSecret(ourPriv[:], ourPrivSecret)
 	defer crypto.ZeroizeArray32(&ourPriv)
 	sharedSecret1, dhErr := kdf.CalculateSharedSecret(ephPubRaw, ourPriv)
 	if dhErr != nil {
@@ -349,7 +358,7 @@ func SealedSenderDecryptToUSMC(
 	}
 	defer sharedSecret1Secret.Destroy()
 
-	keys1, err := kdf.DeriveSecrets(sharedSecret1Secret.Bytes(), salt1, nil, hkdfOutputLen)
+	keys1, err := deriveSaltedFromSecret(sharedSecret1Secret, salt1, hkdfOutputLen)
 	if err != nil {
 		return nil, err
 	}
@@ -359,20 +368,27 @@ func SealedSenderDecryptToUSMC(
 	}
 	defer keys1Secret.Destroy()
 
-	chainKey1 := keys1Secret.Bytes()[:32]
-	cipherKey1 := keys1Secret.Bytes()[32:64]
-	macKey1 := keys1Secret.Bytes()[64:96]
-
 	// Step 2: Verify and decrypt the static key (sender's identity public key).
+	// The keys are used inside the borrow; chain_key is copied out for salt2.
 	encryptedStatic := encryptedStaticWithMAC[:len(encryptedStaticWithMAC)-macTruncateLen]
 	theirStaticMAC := encryptedStaticWithMAC[len(encryptedStaticWithMAC)-macTruncateLen:]
 
-	ourStaticMAC := truncatedHMAC(macKey1, encryptedStatic)
-	if subtle.ConstantTimeCompare(ourStaticMAC, theirStaticMAC) != 1 {
-		return nil, &V1StructureError{Detail: "static key MAC verification failed"}
-	}
-
-	staticKeyBytes, err := signalcipher.AESCTRDecrypt(cipherKey1, encryptedStatic)
+	var staticKeyBytes []byte
+	chainKey1Copy := make([]byte, 32)
+	defer crypto.Zeroize(chainKey1Copy)
+	err = keys1Secret.WithBytes(func(keys1 []byte) error {
+		chainKey1, cipherKey1, macKey1 := keys1[:32], keys1[32:64], keys1[64:96]
+		ourStaticMAC := truncatedHMAC(macKey1, encryptedStatic)
+		if subtle.ConstantTimeCompare(ourStaticMAC, theirStaticMAC) != 1 {
+			return &V1StructureError{Detail: "static key MAC verification failed"}
+		}
+		var decErr error
+		if staticKeyBytes, decErr = signalcipher.AESCTRDecrypt(cipherKey1, encryptedStatic); decErr != nil {
+			return decErr
+		}
+		copy(chainKey1Copy, chainKey1)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -383,14 +399,10 @@ func SealedSenderDecryptToUSMC(
 	}
 
 	// Step 3: Second ECDH - their identity key to our identity key.
-	// Copy chainKey1 since it references guarded memory.
-	chainKey1Copy := make([]byte, 32)
-	defer crypto.Zeroize(chainKey1Copy)
-	copy(chainKey1Copy, chainKey1)
 	salt2 := slices.Concat(chainKey1Copy, encryptedStaticWithMAC)
 
 	theirPubRaw := theirPubKey.PublicKey()
-	copy(ourPriv[:], ourPrivSecret.Bytes())
+	copyFromSecret(ourPriv[:], ourPrivSecret)
 	sharedSecret2, dhErr := kdf.CalculateSharedSecret(theirPubRaw, ourPriv)
 	if dhErr != nil {
 		return nil, dhErr
@@ -402,7 +414,7 @@ func SealedSenderDecryptToUSMC(
 	}
 	defer sharedSecret2Secret.Destroy()
 
-	keys2, err := kdf.DeriveSecrets(sharedSecret2Secret.Bytes(), salt2, nil, hkdfOutputLen)
+	keys2, err := deriveSaltedFromSecret(sharedSecret2Secret, salt2, hkdfOutputLen)
 	if err != nil {
 		return nil, err
 	}
@@ -412,19 +424,21 @@ func SealedSenderDecryptToUSMC(
 	}
 	defer keys2Secret.Destroy()
 
-	cipherKey2 := keys2Secret.Bytes()[32:64]
-	macKey2 := keys2Secret.Bytes()[64:96]
-
 	// Step 4: Verify and decrypt the message.
 	encryptedMessage := encryptedMessageWithMAC[:len(encryptedMessageWithMAC)-macTruncateLen]
 	theirMessageMAC := encryptedMessageWithMAC[len(encryptedMessageWithMAC)-macTruncateLen:]
 
-	ourMessageMAC := truncatedHMAC(macKey2, encryptedMessage)
-	if subtle.ConstantTimeCompare(ourMessageMAC, theirMessageMAC) != 1 {
-		return nil, &V1StructureError{Detail: "message MAC verification failed"}
-	}
-
-	messageBytes, err := signalcipher.AESCTRDecrypt(cipherKey2, encryptedMessage)
+	var messageBytes []byte
+	err = keys2Secret.WithBytes(func(keys2 []byte) error {
+		cipherKey2, macKey2 := keys2[32:64], keys2[64:96]
+		ourMessageMAC := truncatedHMAC(macKey2, encryptedMessage)
+		if subtle.ConstantTimeCompare(ourMessageMAC, theirMessageMAC) != 1 {
+			return &V1StructureError{Detail: "message MAC verification failed"}
+		}
+		var decErr error
+		messageBytes, decErr = signalcipher.AESCTRDecrypt(cipherKey2, encryptedMessage)
+		return decErr
+	})
 	if err != nil {
 		return nil, err
 	}

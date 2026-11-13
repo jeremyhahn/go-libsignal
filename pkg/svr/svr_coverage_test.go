@@ -9,6 +9,8 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/svr/svrpb"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // --- RestoreFull tests ---
@@ -506,7 +508,7 @@ func TestAuthSecret_Deterministic(t *testing.T) {
 	defer a.Destroy()
 	b := authSecret(&input, pt)
 	defer b.Destroy()
-	if !bytes.Equal(a.Bytes(), b.Bytes()) {
+	if !secrettest.Same(t, a, b) {
 		t.Error("authSecret should be deterministic")
 	}
 }

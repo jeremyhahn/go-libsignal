@@ -1,8 +1,9 @@
 package mlkembraid
 
 import (
-	"bytes"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 // ================== bobCompleteEncapsulationDeferred: no ek_vector path ==================
@@ -171,7 +172,7 @@ func TestReceiveCt1ReceivedCompleteCt2(t *testing.T) {
 	if aliceKey == nil || bobKey == nil {
 		t.Fatal("both parties should produce output keys")
 	}
-	if !bytes.Equal(aliceKey.Key.Bytes(), bobKey.Key.Bytes()) {
+	if !secrettest.Same(t, aliceKey.Key, bobKey.Key) {
 		t.Error("output keys should match")
 	}
 	aliceKey.Key.Destroy()

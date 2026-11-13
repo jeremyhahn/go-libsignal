@@ -3,6 +3,8 @@
 package root
 
 import (
+	"errors"
+
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 	"github.com/jeremyhahn/go-libsignal/pkg/kdf"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/chain"
@@ -50,11 +52,26 @@ type Key struct {
 	key *secret.Secret
 }
 
-// Bytes returns the RootKey bytes as a view into guarded memory.
-// The returned slice must not be retained beyond the lifetime of this Key.
+// Bytes returns a copy of the RootKey bytes, made inside a WithBytes borrow
+// of the guarded memory, or nil if the key is destroyed. The caller should
+// wipe the copy after use.
 func (k *Key) Bytes() []byte {
-	return k.key.Bytes()
+	var out []byte
+	if err := k.key.WithBytes(func(b []byte) error {
+		if b != nil {
+			out = append([]byte(nil), b...)
+		}
+		return nil
+	}); err != nil {
+		return nil
+	}
+	return out
 }
+
+// ErrEmptyRootKey is returned when a root key has no key material.
+// Using it as the HKDF salt would derive the next root and chain keys
+// from the DH output alone.
+var ErrEmptyRootKey = errors.New("root: root key is empty")
 
 // CreateChain creates a new RootKey and ChainKey from the recipient's ratchet key and our private key.
 func (k *Key) CreateChain(theirRatchetKey ecc.ECPublicKeyable, ourRatchetKey *ecc.ECKeyPair) (*session.KeyPair, error) {
@@ -70,7 +87,16 @@ func (k *Key) CreateChain(theirRatchetKey ecc.ECPublicKeyable, ourRatchetKey *ec
 	defer crypto.ZeroizeArray32(&sharedSecret)
 	defer crypto.ZeroizeArray32(&ourPrivateKey)
 	copy(keyMaterial, sharedSecret[:])
-	derivedSecretBytes, err := kdf.DeriveSecrets(keyMaterial, k.key.Bytes(), []byte(KdfInfo), ChainDerivedSecretsSize)
+	var derivedSecretBytes []byte
+	err := k.key.WithBytes(func(rootKey []byte) error {
+		// WithBytes borrows a nil or zero Secret as nil; refuse it.
+		if len(rootKey) == 0 {
+			return ErrEmptyRootKey
+		}
+		var dErr error
+		derivedSecretBytes, dErr = kdf.DeriveSecrets(keyMaterial, rootKey, []byte(KdfInfo), ChainDerivedSecretsSize)
+		return dErr
+	})
 	crypto.Zeroize(keyMaterial)
 	if err != nil {
 		return nil, err
@@ -83,9 +109,17 @@ func (k *Key) CreateChain(theirRatchetKey ecc.ECPublicKeyable, ourRatchetKey *ec
 	// since NewKey/chain.NewKey will move data into new guarded memory
 	// and zeroize the source (which cannot be done on locked-memory views).
 	rootKeyBytes := make([]byte, 32)
-	copy(rootKeyBytes, derivedSecrets.RootKey())
+	// The accessor returns an owned copy; wipe it once copied.
+	if src := derivedSecrets.RootKey(); src != nil {
+		copy(rootKeyBytes, src)
+		crypto.Zeroize(src)
+	}
 	chainKeyBytes := make([]byte, 32)
-	copy(chainKeyBytes, derivedSecrets.ChainKey())
+	// The accessor returns an owned copy; wipe it once copied.
+	if src := derivedSecrets.ChainKey(); src != nil {
+		copy(chainKeyBytes, src)
+		crypto.Zeroize(src)
+	}
 	derivedSecrets.Zeroize()
 
 	// Create new root and chain key structures from the derived secrets.

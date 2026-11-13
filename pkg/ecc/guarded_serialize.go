@@ -22,7 +22,10 @@ func GuardPrivateKey(key ECPrivateKeyable) (secret.Secret, error) {
 	if key == nil {
 		return secret.Secret{}, nil
 	}
-	raw := key.Serialize()
+	raw, err := privateKeyArray(key)
+	if err != nil {
+		return secret.Secret{}, err
+	}
 	defer crypto.Zeroize(raw[:])
 	return secret.NewValue(bytehelper.ArrayToSlice(raw))
 }

@@ -6,6 +6,7 @@ package backup
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/hex"
 	"errors"
 	"io"
 	"math"
@@ -123,6 +124,53 @@ func TestVerifyHMAC_ValidInput(t *testing.T) {
 	var tooLarge *ErrBackupTooLarge
 	if errors.As(err, &tooLarge) {
 		t.Fatalf("VerifyHMAC returned ErrBackupTooLarge for in-budget corrupted input")
+	}
+}
+
+// TestVerifyHMAC_MissingKeyRejectsForgery checks that a MessageBackupKey with
+// no HMAC key does not verify data tagged under the empty key. Secret.WithBytes
+// hands fn a nil view for a nil Secret, so without the length check the HMAC
+// was keyed with nothing and anyone could forge a tag.
+func TestVerifyHMAC_MissingKeyRejectsForgery(t *testing.T) {
+	// HMAC-SHA256 under the empty key over the 32 zero content bytes,
+	// precomputed: hmac.New with an empty key panics in the FIPS suite.
+	const emptyKeyTag = "33ad0a1c607ec03b09e6cd9893680ce210adf300aa1f2660e1b22e10f170f92a"
+	tag, err := hex.DecodeString(emptyKeyTag)
+	if err != nil {
+		t.Fatalf("decode fixture: %v", err)
+	}
+	forged := append(make([]byte, AESIVSize+AESBlockSize), tag...)
+
+	err = VerifyHMAC(&MessageBackupKey{}, bytes.NewReader(forged))
+	if err == nil {
+		t.Fatal("VerifyHMAC accepted data tagged under an empty key")
+	}
+	var lenErr *ErrInvalidKeyLength
+	if !errors.As(err, &lenErr) {
+		t.Fatalf("VerifyHMAC error = %v (%T), want *ErrInvalidKeyLength", err, err)
+	}
+	if lenErr.Got != 0 || lenErr.Want != HMACKeyLen {
+		t.Fatalf("ErrInvalidKeyLength = %+v, want Got 0 Want %d", lenErr, HMACKeyLen)
+	}
+}
+
+// TestEncryptFrames_MissingHMACKeyFails checks that encryption refuses a key
+// whose HMAC half is missing instead of tagging output under an empty key.
+func TestEncryptFrames_MissingHMACKeyFails(t *testing.T) {
+	key := testKey()
+	defer key.Zeroize()
+	hmacKey := key.HMACKey
+	key.HMACKey = nil
+	defer hmacKey.Destroy()
+
+	var buf bytes.Buffer
+	err := NewFrameEncryptor(key).EncryptFrames(&buf, [][]byte{[]byte("frame")})
+	if err == nil {
+		t.Fatal("EncryptFrames succeeded without an HMAC key")
+	}
+	var lenErr *ErrInvalidKeyLength
+	if !errors.As(err, &lenErr) {
+		t.Fatalf("EncryptFrames error = %v (%T), want *ErrInvalidKeyLength", err, err)
 	}
 }
 

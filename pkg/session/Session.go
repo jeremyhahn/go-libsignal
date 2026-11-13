@@ -349,12 +349,19 @@ func (b *Builder) processV3(sessionRecord *record.Session,
 	// Self-sessions (where local and remote identity keys match) use
 	// math.MaxUint32 as the max forward jump to match Rust's u32::MAX.
 	if derivedKeys.InitialPQRKey != nil && !derivedKeys.InitialPQRKey.IsDestroyed() {
-		pqrBytes := derivedKeys.InitialPQRKey.Bytes()
+		// spqr keeps no reference to the key; it is copied out of the
+		// read-only view and the copy is wiped once the state is built.
+		var pqrBytes []byte
+		_ = derivedKeys.InitialPQRKey.WithBytes(func(b []byte) error {
+			pqrBytes = append([]byte(nil), b...)
+			return nil
+		})
 		selfSession := bytes.Equal(
 			parameters.OurIdentityKeyPair().PublicKey().Serialize(),
 			parameters.TheirIdentityKey().PublicKey().Serialize(),
 		)
 		pqrState, pqrErr := spqr.InitialState(pqrBytes, spqr.DirectionB2A, selfSession)
+		clear(pqrBytes)
 		derivedKeys.Zeroize()
 		if pqrErr != nil {
 			return nil, nil, pqrErr
@@ -510,12 +517,19 @@ func (b *Builder) ProcessBundle(preKey *prekey.Bundle) error {
 	// Self-sessions (where local and remote identity keys match) use
 	// math.MaxUint32 as the max forward jump to match Rust's u32::MAX.
 	if derivedKeys.InitialPQRKey != nil && !derivedKeys.InitialPQRKey.IsDestroyed() {
-		pqrBytes := derivedKeys.InitialPQRKey.Bytes()
+		// spqr keeps no reference to the key; it is copied out of the
+		// read-only view and the copy is wiped once the state is built.
+		var pqrBytes []byte
+		_ = derivedKeys.InitialPQRKey.WithBytes(func(b []byte) error {
+			pqrBytes = append([]byte(nil), b...)
+			return nil
+		})
 		selfSession := bytes.Equal(
 			parameters.OurIdentityKey().PublicKey().Serialize(),
 			parameters.TheirIdentityKey().PublicKey().Serialize(),
 		)
 		pqrState, pqrErr := spqr.InitialState(pqrBytes, spqr.DirectionA2B, selfSession)
+		clear(pqrBytes)
 		derivedKeys.Zeroize()
 		if pqrErr != nil {
 			return pqrErr

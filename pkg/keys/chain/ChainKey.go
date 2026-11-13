@@ -4,6 +4,7 @@ package chain
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"errors"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/kdf"
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/message"
@@ -97,10 +98,17 @@ func (c *Key) Current() *Key {
 	return c
 }
 
-// Key returns the ChainKey's key material as a view into guarded memory.
-// The returned slice must not be retained beyond the lifetime of this Key.
+// Key returns a copy of the ChainKey's key material, made inside the enclave
+// borrow. The caller owns the copy and should zeroize it after use.
 func (c *Key) Key() []byte {
-	return c.key.Bytes()
+	var out []byte
+	if err := c.key.WithBytes(func(b []byte) error {
+		out = append([]byte(nil), b...)
+		return nil
+	}); err != nil {
+		panic("chain: attempt to access destroyed chain key")
+	}
+	return out
 }
 
 // SetKey replaces the ChainKey's key material. The old key is destroyed and the
@@ -148,7 +156,10 @@ func (c *Key) MessageKeys() (*message.Keys, error) {
 // MessageKeysWithSalt derives message keys using an optional HKDF salt (PQR key).
 // When pqrSalt is nil, this produces identical output to MessageKeys().
 func (c *Key) MessageKeysWithSalt(pqrSalt []byte) (*message.Keys, error) {
-	inputKeyMaterial := c.BaseMaterial(messageKeySeed)
+	inputKeyMaterial, err := c.baseMaterial(messageKeySeed)
+	if err != nil {
+		return nil, err
+	}
 	defer crypto.Zeroize(inputKeyMaterial)
 	return deriveMessageKeysFromSeed(c.kdf, inputKeyMaterial, pqrSalt, c.Index())
 }
@@ -157,7 +168,10 @@ func (c *Key) MessageKeysWithSalt(pqrSalt []byte) (*message.Keys, error) {
 // result, enabling later re-derivation with a different HKDF salt (e.g., SPQR).
 // This is used for skipped message keys in SPQR sessions.
 func (c *Key) MessageKeysWithSeed() (*message.Keys, error) {
-	inputKeyMaterial := c.BaseMaterial(messageKeySeed)
+	inputKeyMaterial, err := c.baseMaterial(messageKeySeed)
+	if err != nil {
+		return nil, err
+	}
 	defer crypto.Zeroize(inputKeyMaterial)
 	// Save a copy of the seed before it gets consumed by deriveMessageKeysFromSeed.
 	seedCopy := make([]byte, len(inputKeyMaterial))
@@ -189,7 +203,17 @@ func deriveMessageKeysFromSeed(kdfFunc kdf.HKDF, inputKeyMaterial []byte, pqrSal
 	}
 	defer inputKeySecret.Destroy()
 
-	keyMaterialBytes, err := kdfFunc(inputKeySecret.Bytes(), pqrSalt, []byte(message.KdfInfo), message.DerivedSecretsSize)
+	var keyMaterialBytes []byte
+	err = inputKeySecret.WithBytes(func(input []byte) error {
+		// An empty seed gives a zero Secret, which WithBytes borrows as
+		// nil; HKDF over it would give predictable message keys.
+		if len(input) == 0 {
+			return ErrEmptySeed
+		}
+		var kdfErr error
+		keyMaterialBytes, kdfErr = kdfFunc(input, pqrSalt, []byte(message.KdfInfo), message.DerivedSecretsSize)
+		return kdfErr
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -199,15 +223,24 @@ func deriveMessageKeysFromSeed(kdfFunc kdf.HKDF, inputKeyMaterial []byte, pqrSal
 	}
 	defer keyMaterialSecret.Destroy()
 
-	keyMaterial := newKeyMaterial(keyMaterialSecret.Bytes())
-
-	// Use the key material returned from the key derivation function for our cipherkey, mac, and iv.
-	messageKeys := message.NewKeys(
-		keyMaterial.CipherKey, // Use the first 32 bytes of the key material for the CipherKey
-		keyMaterial.MacKey,    // Use bytes 32-64 of the key material for the MacKey
-		keyMaterial.IV,        // Use the last 16 bytes for the IV.
-		index,                 // Attach the chain key's index to the message keys.
-	)
+	// NewKeys moves (and wipes) the slices it is given, so the material is
+	// copied out of the read-only enclave inside the borrow first.
+	var messageKeys *message.Keys
+	if err := keyMaterialSecret.WithBytes(func(b []byte) error {
+		buf := append([]byte(nil), b...)
+		defer crypto.Zeroize(buf)
+		keyMaterial := newKeyMaterial(buf)
+		// Use the key material returned from the key derivation function for our cipherkey, mac, and iv.
+		messageKeys = message.NewKeys(
+			keyMaterial.CipherKey, // Use the first 32 bytes of the key material for the CipherKey
+			keyMaterial.MacKey,    // Use bytes 32-64 of the key material for the MacKey
+			keyMaterial.IV,        // Use the last 16 bytes for the IV.
+			index,                 // Attach the chain key's index to the message keys.
+		)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
 
 	return messageKeys, nil
 }
@@ -222,10 +255,47 @@ func (c *Key) Zeroize() {
 
 // BaseMaterial uses hmac to derive the base material used in the key derivation function for a new key.
 func (c *Key) BaseMaterial(seed []byte) []byte {
-	mac := hmac.New(sha256.New, c.key.Bytes())
-	mac.Write(seed)
+	sum, err := c.baseMaterial(seed)
+	if err != nil {
+		panic(err)
+	}
+	return sum
+}
 
-	return mac.Sum(nil)
+// ErrEmptyChainKey is returned when a chain key has no key material.
+// Deriving from it would key HMAC with an empty key and give predictable
+// message keys and chain keys.
+var ErrEmptyChainKey = errors.New("chain: chain key is empty")
+
+// ErrEmptySeed is returned when message keys are derived from an empty
+// seed.
+var ErrEmptySeed = errors.New("chain: message key seed is empty")
+
+// ErrDestroyedChainKey is returned when a chain key has been destroyed.
+var ErrDestroyedChainKey = errors.New("chain: attempt to access destroyed chain key")
+
+// baseMaterial is BaseMaterial with the failures returned as errors.
+func (c *Key) baseMaterial(seed []byte) ([]byte, error) {
+	if c == nil {
+		return nil, ErrEmptyChainKey
+	}
+	var sum []byte
+	if err := c.key.WithBytes(func(key []byte) error {
+		// WithBytes borrows a nil or zero Secret as nil; refuse it.
+		if len(key) == 0 {
+			return ErrEmptyChainKey
+		}
+		mac := hmac.New(sha256.New, key)
+		mac.Write(seed)
+		sum = mac.Sum(nil)
+		return nil
+	}); err != nil {
+		if errors.Is(err, ErrEmptyChainKey) {
+			return nil, err
+		}
+		return nil, ErrDestroyedChainKey
+	}
+	return sum, nil
 }
 
 // NewKeyMaterial takes an 80-byte slice derived from a key derivation function and splits

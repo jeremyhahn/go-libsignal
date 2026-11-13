@@ -30,6 +30,8 @@ import (
 
 	"github.com/jeremyhahn/go-libsignal/pkg/accountkeys"
 	"github.com/jeremyhahn/go-libsignal/tests/interop/loader"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 type pinHashCase struct {
@@ -93,8 +95,8 @@ func TestAccountKeys_PinHash_AccessKey_KAT(t *testing.T) {
 			}
 			defer ph.Zeroize()
 
-			if !bytes.Equal(ph.AccessKey.Bytes(), want) {
-				t.Fatalf("access key mismatch:\n  got  %x\n  want %x", ph.AccessKey.Bytes(), want)
+			if !secrettest.Matches(t, ph.AccessKey, want) {
+				t.Fatalf("access key mismatch")
 			}
 		})
 	}

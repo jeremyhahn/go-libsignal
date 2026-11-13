@@ -667,9 +667,6 @@ func TestAuthenticator_Update_Valid(t *testing.T) {
 	}
 	defer auth.Zeroize()
 
-	oldMAC := make([]byte, len(auth.macKey.Bytes()))
-	copy(oldMAC, auth.macKey.Bytes())
-
 	newKey := make([]byte, 32)
 	for i := range newKey {
 		newKey[i] = byte(i + 5)

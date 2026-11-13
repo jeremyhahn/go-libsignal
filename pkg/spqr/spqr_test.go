@@ -1,7 +1,6 @@
 package spqr
 
 import (
-	"bytes"
 	"crypto/rand"
 	"errors"
 	"math"
@@ -9,6 +8,8 @@ import (
 
 	"github.com/jeremyhahn/go-libsignal/pkg/kdf"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 func randomBytes(t *testing.T, n int) []byte {
@@ -57,13 +58,13 @@ func TestKdfSckaInit(t *testing.T) {
 	}
 
 	// All three outputs must be different from each other.
-	if bytes.Equal(rk.Bytes(), cks.Bytes()) {
+	if secrettest.Same(t, rk, cks) {
 		t.Error("rk should differ from cks")
 	}
-	if bytes.Equal(rk.Bytes(), ckr.Bytes()) {
+	if secrettest.Same(t, rk, ckr) {
 		t.Error("rk should differ from ckr")
 	}
-	if bytes.Equal(cks.Bytes(), ckr.Bytes()) {
+	if secrettest.Same(t, cks, ckr) {
 		t.Error("cks should differ from ckr")
 	}
 
@@ -76,7 +77,7 @@ func TestKdfSckaInit(t *testing.T) {
 	defer cks2.Destroy()
 	defer ckr2.Destroy()
 
-	if !bytes.Equal(rk.Bytes(), rk2.Bytes()) || !bytes.Equal(cks.Bytes(), cks2.Bytes()) || !bytes.Equal(ckr.Bytes(), ckr2.Bytes()) {
+	if !secrettest.Same(t, rk, rk2) || !secrettest.Same(t, cks, cks2) || !secrettest.Same(t, ckr, ckr2) {
 		t.Error("KdfSckaInit is not deterministic")
 	}
 }
@@ -101,8 +102,7 @@ func TestKdfSckaRK(t *testing.T) {
 	defer rkSecret.Destroy()
 	sckaOutput := randomBytes(t, 32)
 
-	rkBytes := make([]byte, 32)
-	copy(rkBytes, rkSecret.Bytes())
+	rkDigest := secrettest.Digest(t, rkSecret)
 
 	newRK, newCKs, newCKr, err := KdfSckaRK(rkSecret, sckaOutput)
 	if err != nil {
@@ -117,7 +117,7 @@ func TestKdfSckaRK(t *testing.T) {
 	}
 
 	// Output should differ from input.
-	if bytes.Equal(rkBytes, newRK.Bytes()) {
+	if secrettest.Digest(t, newRK) == rkDigest {
 		t.Error("new RK should differ from old RK")
 	}
 }
@@ -164,7 +164,7 @@ func TestKdfSckaCK(t *testing.T) {
 	if nextCK.Size() != 32 {
 		t.Errorf("nextCK size = %d, want 32", nextCK.Size())
 	}
-	if bytes.Equal(mk.Bytes(), nextCK.Bytes()) {
+	if secrettest.Same(t, mk, nextCK) {
 		t.Error("mk and nextCK should differ")
 	}
 
@@ -175,10 +175,10 @@ func TestKdfSckaCK(t *testing.T) {
 		t.Fatalf("DeriveSecrets: %v", err)
 	}
 	// Split: nextCK(first 32) || mk(last 32)
-	if !bytes.Equal(nextCK.Bytes(), expectedOutput[:32]) {
+	if !secrettest.Matches(t, nextCK, expectedOutput[:32]) {
 		t.Error("nextCK does not match expected HKDF output")
 	}
-	if !bytes.Equal(mk.Bytes(), expectedOutput[32:64]) {
+	if !secrettest.Matches(t, mk, expectedOutput[32:64]) {
 		t.Error("mk does not match expected HKDF output")
 	}
 
@@ -198,10 +198,10 @@ func TestKdfSckaCK(t *testing.T) {
 	defer mk2.Destroy()
 	defer nextCK2.Destroy()
 
-	if bytes.Equal(mk.Bytes(), mk2.Bytes()) {
+	if secrettest.Same(t, mk, mk2) {
 		t.Error("different counters should produce different mk")
 	}
-	if bytes.Equal(nextCK.Bytes(), nextCK2.Bytes()) {
+	if secrettest.Same(t, nextCK, nextCK2) {
 		t.Error("different counters should produce different nextCK")
 	}
 }
@@ -325,15 +325,15 @@ func TestSPQRDirectionSwap(t *testing.T) {
 	defer b.Zeroize()
 
 	// A's send key should be B's recv key and vice versa.
-	if !bytes.Equal(a.chains[0].sendKey.Bytes(), b.chains[0].recvKey.Bytes()) {
+	if !secrettest.Same(t, a.chains[0].sendKey, b.chains[0].recvKey) {
 		t.Error("A's sendKey should equal B's recvKey")
 	}
-	if !bytes.Equal(a.chains[0].recvKey.Bytes(), b.chains[0].sendKey.Bytes()) {
+	if !secrettest.Same(t, a.chains[0].recvKey, b.chains[0].sendKey) {
 		t.Error("A's recvKey should equal B's sendKey")
 	}
 
 	// Root keys should be identical.
-	if !bytes.Equal(a.rootKey.Bytes(), b.rootKey.Bytes()) {
+	if !secrettest.Same(t, a.rootKey, b.rootKey) {
 		t.Error("root keys should be identical regardless of direction")
 	}
 }
@@ -382,7 +382,7 @@ func TestSPQREncryptDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decrypt: %v", err)
 	}
-	if !bytes.Equal(mk1.Bytes(), mk1d.Bytes()) {
+	if !secrettest.Same(t, mk1, mk1d) {
 		t.Error("decrypted message key does not match encrypted message key")
 	}
 	mk1.Destroy()
@@ -401,7 +401,7 @@ func TestSPQREncryptDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decrypt 2: %v", err)
 	}
-	if !bytes.Equal(mk2.Bytes(), mk2d.Bytes()) {
+	if !secrettest.Same(t, mk2, mk2d) {
 		t.Error("second message key mismatch")
 	}
 	mk2.Destroy()
@@ -488,7 +488,7 @@ func TestSPQRMultipleEpochs(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Decrypt epoch %d: %v", epoch, err)
 		}
-		if !bytes.Equal(mk.Bytes(), mkd.Bytes()) {
+		if !secrettest.Same(t, mk, mkd) {
 			t.Errorf("epoch %d message key mismatch", epoch)
 		}
 		mk.Destroy()
@@ -564,7 +564,7 @@ func TestSPQROutOfOrderDecrypt(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Decrypt msg %d: %v", idx, err)
 		}
-		if !bytes.Equal(msgs[idx].mk.Bytes(), mkd.Bytes()) {
+		if !secrettest.Same(t, msgs[idx].mk, mkd) {
 			t.Errorf("message key mismatch for msg %d", idx)
 		}
 		mkd.Destroy()
@@ -609,7 +609,7 @@ func TestSPQRSkippedKeys(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decrypt counter 3: %v", err)
 	}
-	if !bytes.Equal(mks[2].Bytes(), mkd.Bytes()) {
+	if !secrettest.Same(t, mks[2], mkd) {
 		t.Error("message key mismatch for counter 3")
 	}
 	mkd.Destroy()
@@ -624,7 +624,7 @@ func TestSPQRSkippedKeys(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Decrypt skipped counter %d: %v", i+1, err)
 		}
-		if !bytes.Equal(mks[i].Bytes(), mkd.Bytes()) {
+		if !secrettest.Same(t, mks[i], mkd) {
 			t.Errorf("skipped message key mismatch for counter %d", i+1)
 		}
 		mkd.Destroy()
@@ -1045,7 +1045,7 @@ func TestSPQRBidirectionalCommunication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Bob Decrypt: %v", err)
 	}
-	if !bytes.Equal(mkA.Bytes(), mkAd.Bytes()) {
+	if !secrettest.Same(t, mkA, mkAd) {
 		t.Error("A->B message key mismatch")
 	}
 	mkA.Destroy()
@@ -1060,7 +1060,7 @@ func TestSPQRBidirectionalCommunication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Alice Decrypt: %v", err)
 	}
-	if !bytes.Equal(mkB.Bytes(), mkBd.Bytes()) {
+	if !secrettest.Same(t, mkB, mkBd) {
 		t.Error("B->A message key mismatch")
 	}
 	mkB.Destroy()

@@ -113,15 +113,24 @@ func CalculateSenderSession(parameters *SenderParameters) (*session.KeyPair, *ke
 	// Copy bytes out of guarded memory before passing to constructors,
 	// since constructors move data into new guarded memory and zeroize the source.
 	rootKeyBytes := make([]byte, 32)
-	copy(rootKeyBytes, derivedKeys.RootKey())
+	// The accessor returns an owned copy; wipe it once copied.
+	if src := derivedKeys.RootKey(); src != nil {
+		copy(rootKeyBytes, src)
+		crypto.Zeroize(src)
+	}
 	chainKeyBytes := make([]byte, 32)
-	copy(chainKeyBytes, derivedKeys.ChainKey())
+	// The accessor returns an owned copy; wipe it once copied.
+	if src := derivedKeys.ChainKey(); src != nil {
+		copy(chainKeyBytes, src)
+		crypto.Zeroize(src)
+	}
 
 	// Extract the InitialPQRKey for SPQR initialization.
 	var pqrKeyBytes []byte
 	if pqrBytes := derivedKeys.InitialPQRKey(); pqrBytes != nil {
 		pqrKeyBytes = make([]byte, 32)
 		copy(pqrKeyBytes, pqrBytes)
+		crypto.Zeroize(pqrBytes)
 	}
 	derivedKeys.Zeroize()
 
@@ -249,15 +258,24 @@ func CalculateReceiverSession(parameters *ReceiverParameters) (*session.KeyPair,
 	// Copy bytes out of guarded memory before passing to constructors,
 	// since constructors move data into new guarded memory and zeroize the source.
 	rootKeyBytes := make([]byte, 32)
-	copy(rootKeyBytes, derivedKeys.RootKey())
+	// The accessor returns an owned copy; wipe it once copied.
+	if src := derivedKeys.RootKey(); src != nil {
+		copy(rootKeyBytes, src)
+		crypto.Zeroize(src)
+	}
 	chainKeyBytes := make([]byte, 32)
-	copy(chainKeyBytes, derivedKeys.ChainKey())
+	// The accessor returns an owned copy; wipe it once copied.
+	if src := derivedKeys.ChainKey(); src != nil {
+		copy(chainKeyBytes, src)
+		crypto.Zeroize(src)
+	}
 
 	// Extract the InitialPQRKey for SPQR initialization.
 	var pqrKeyBytes []byte
 	if pqrBytes := derivedKeys.InitialPQRKey(); pqrBytes != nil {
 		pqrKeyBytes = make([]byte, 32)
 		copy(pqrKeyBytes, pqrBytes)
+		crypto.Zeroize(pqrBytes)
 	}
 	derivedKeys.Zeroize()
 

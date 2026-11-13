@@ -36,6 +36,7 @@ func TestSenderKeyDistributionMessage_DistributionID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	defer msg.Release()
 
 	got := msg.DistributionID()
 	if got != distID {

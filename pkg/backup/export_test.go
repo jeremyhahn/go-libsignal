@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	libcipher "github.com/jeremyhahn/go-libsignal/pkg/cipher"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 func TestGzipCompress(t *testing.T) {
@@ -298,19 +300,22 @@ func TestExportFullPipeline(t *testing.T) {
 	for i := range iv {
 		iv[i] = byte(i)
 	}
-	ciphertext, err := AESCBCEncryptExport(key.AESKey.Bytes(), iv, padded)
+	ciphertext, err := []byte(nil), error(nil)
+	secrettest.With(t, key.AESKey, func(k []byte) { ciphertext, err = AESCBCEncryptExport(k, iv, padded) })
 	if err != nil {
 		t.Fatalf("AESCBCEncryptExport: %v", err)
 	}
 
 	// Step 4: Compute HMAC.
-	checksum := HMACChecksum(key.HMACKey.Bytes(), iv, ciphertext)
+	var checksum []byte
+	secrettest.With(t, key.HMACKey, func(k []byte) { checksum = HMACChecksum(k, iv, ciphertext) })
 	if len(checksum) != HMACLen {
 		t.Fatalf("HMAC length = %d, want %d", len(checksum), HMACLen)
 	}
 
 	// Verify: decrypt and decompress should recover original.
-	decrypted, err := libcipher.AESCBCDecrypt(key.AESKey.Bytes(), iv, ciphertext)
+	decrypted, err := []byte(nil), error(nil)
+	secrettest.With(t, key.AESKey, func(k []byte) { decrypted, err = libcipher.AESCBCDecrypt(k, iv, ciphertext) })
 	if err != nil {
 		t.Fatalf("AESCBCDecrypt: %v", err)
 	}

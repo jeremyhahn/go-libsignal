@@ -2,6 +2,8 @@ package secret
 
 import (
 	"crypto/rand"
+	"errors"
+	"fmt"
 	"io"
 
 	"github.com/jeremyhahn/go-enclave"
@@ -10,8 +12,8 @@ import (
 // Secret holds sensitive key material in mlock'd, guard-page protected memory.
 // The underlying region is zeroized on destruction and protected from swap.
 //
-// The backing store is go-enclave's MemoryEnclave, the portfolio locked-memory
-// primitive: reaching RLIMIT_MEMLOCK returns a typed error from construction
+// The backing store is go-enclave's locked memory, read only through
+// ByteAccess.WithBytes: reaching RLIMIT_MEMLOCK returns a typed error from construction
 // rather than purging every live buffer in the process the way memguard did.
 //
 // A zero-length input holds no material: the returned Secret reports Size()==0
@@ -20,7 +22,7 @@ import (
 // the serialization helpers route empty input to the zero Secret before
 // reaching New.
 type Secret struct {
-	enc *enclave.MemoryEnclave
+	enc enclave.ByteAccess
 }
 
 // New creates a Secret from the given byte slice. The source slice is zeroized
@@ -54,7 +56,7 @@ func New(data []byte) (*Secret, error) {
 // if the underlying locked-memory allocation or the random read fails. Under a
 // budget (see SetAllocator) the call briefly holds two reservations, the
 // scratch region and the frozen one, and needs room for both.
-func NewRandom(size int) (*Secret, error) {
+func NewRandom(size int) (out *Secret, retErr error) {
 	if size == 0 {
 		return &Secret{}, nil
 	}
@@ -65,7 +67,17 @@ func NewRandom(size int) (*Secret, error) {
 	if err != nil {
 		return nil, newAllocError(err)
 	}
-	defer scratch.Destroy()
+	// A failed scratch release is reported, and the fresh secret is not
+	// handed out alongside an error.
+	defer func() {
+		if destroyErr := scratch.Destroy(); destroyErr != nil {
+			if out != nil {
+				out.Destroy()
+				out = nil
+			}
+			retErr = errors.Join(retErr, destroyErr)
+		}
+	}()
 
 	var s *Secret
 	if err := scratch.WithBytes(func(b []byte) error {
@@ -85,8 +97,8 @@ func NewRandom(size int) (*Secret, error) {
 }
 
 // NewEmpty creates a Secret of the given size, initialized to zero, whose
-// locked pages stay writable so the caller can fill them in place through
-// Bytes.
+// locked pages stay writable so the caller can fill them in place inside
+// WithBytes.
 //
 // A size of zero yields a Secret that holds no material. Returns ErrSecretAlloc
 // if the underlying locked-memory allocation fails.
@@ -101,28 +113,37 @@ func NewEmpty(size int) (*Secret, error) {
 	return &Secret{enc: enc}, nil
 }
 
-// Bytes returns a view into the locked memory. The returned slice must not be
-// retained beyond the lifetime of the Secret, and a concurrent Destroy can
-// unmap the pages beneath it — the same contract the previous memguard-backed
-// view carried.
+// WithBytes calls fn with a view of the secret's locked memory and returns
+// fn's error. The view is valid only while fn runs: fn must not retain it
+// (or any sub-slice of it) and must not call a method on the same Secret,
+// which would deadlock against the enclave's borrow lock. A value that must
+// outlive fn is copied inside fn, and the caller wipes the copy when done.
 //
-// Panics if the secret has been destroyed. Callers should check IsDestroyed
-// first in contexts where destruction is possible.
-func (s *Secret) Bytes() []byte {
-	if s.IsDestroyed() {
-		panic("secret: attempt to access destroyed secret")
+// A nil Secret, or one that holds no material (size zero), calls fn with a
+// nil slice. A destroyed Secret does not call fn and returns
+// ErrSecretDestroyed; a nil fn returns ErrNilInput.
+func (s *Secret) WithBytes(fn func([]byte) error) error {
+	if fn == nil {
+		return &Error{kind: errNilInput}
 	}
-	b, err := s.enc.Open()
-	if err != nil {
-		panic("secret: attempt to access destroyed secret")
+	if s == nil || s.enc == nil {
+		return fn(nil)
 	}
-	return b
+	called := false
+	err := s.enc.WithBytes(func(b []byte) error {
+		called = true
+		return fn(b)
+	})
+	if !called && errors.Is(err, enclave.ErrEnclaveDestroyed) {
+		return &Error{kind: errSecretDestroyed}
+	}
+	return err
 }
 
 // Size returns the size of the secret in bytes.
 // Returns 0 if the secret has been destroyed or holds no material.
 func (s *Secret) Size() int {
-	if s == nil {
+	if s == nil || s.enc == nil {
 		return 0
 	}
 	return s.enc.Size()
@@ -130,17 +151,23 @@ func (s *Secret) Size() int {
 
 // Destroy zeroizes and frees the locked memory. This method is idempotent
 // and safe to call multiple times, including on a nil Secret.
+//
+// Destroy panics if the enclave reports that the release failed (a
+// corrupted canary, or a refused munlock or munmap): the material may
+// still be held, and such a failure must never pass silently.
 func (s *Secret) Destroy() {
-	if s == nil {
+	if s == nil || s.enc == nil {
 		return
 	}
-	s.enc.Destroy()
+	if err := s.enc.Destroy(); err != nil {
+		panic(fmt.Errorf("secret: destroy failed: %w", err))
+	}
 }
 
 // IsDestroyed reports whether the secret holds no live material. A nil Secret,
 // the zero Secret, and a destroyed Secret all report true.
 func (s *Secret) IsDestroyed() bool {
-	return s == nil || !s.enc.IsAlive()
+	return s == nil || s.enc == nil || !s.enc.IsAlive()
 }
 
 // Clone creates an independent deep copy of the secret in new locked memory.
@@ -158,7 +185,7 @@ func (s *Secret) Clone() (*Secret, error) {
 	if s.IsDestroyed() {
 		return nil, &Error{kind: errSecretDestroyed}
 	}
-	var cloned *enclave.MemoryEnclave
+	var cloned enclave.ByteAccess
 	err := s.enc.WithBytes(func(src []byte) error {
 		dst, allocErr := newLockedSized(len(src))
 		if allocErr != nil {
@@ -169,8 +196,7 @@ func (s *Secret) Clone() (*Secret, error) {
 			return nil
 		})
 		if copyErr != nil {
-			dst.Destroy()
-			return copyErr
+			return errors.Join(copyErr, dst.Destroy())
 		}
 		cloned = dst
 		return nil
@@ -187,5 +213,6 @@ func (s *Secret) EqualTo(other []byte) bool {
 	if s.IsDestroyed() {
 		return false
 	}
-	return s.enc.EqualTo(other)
+	ok, err := s.enc.EqualTo(other)
+	return err == nil && ok
 }

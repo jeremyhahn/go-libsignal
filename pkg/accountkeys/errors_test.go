@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
 func TestErrInvalidACILength_Error(t *testing.T) {
@@ -193,7 +195,7 @@ func TestErrorsAsTypes(t *testing.T) {
 
 	// Use the backup_forward_secrecy BackupKey to trigger ErrInvalidACILength.
 	rawKey := [BackupKeyLength]byte{}
-	copy(rawKey[:], bk.Bytes())
+	secrettest.With(t, bk, func(b []byte) { copy(rawKey[:], b) })
 	backupKey := NewBackupKey(rawKey)
 	defer backupKey.Zeroize()
 

@@ -306,6 +306,7 @@ func TestRust_GroupNoRecvSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 	_ = skdm // Bob intentionally does NOT process this SKDM.
 
 	aliceCipher := groups.NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
@@ -356,6 +357,7 @@ func TestRust_GroupBasicEncryptDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 
 	aliceCipher := groups.NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 
@@ -367,6 +369,7 @@ func TestRust_GroupBasicEncryptDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse SKDM: %v", err)
 	}
+	defer receivedSkdm.Release()
 	if err := bobBuilder.Process(senderKeyName, receivedSkdm); err != nil {
 		t.Fatalf("Process() error: %v", err)
 	}
@@ -414,11 +417,13 @@ func TestRust_GroupMultipleSenders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error: %v", err)
 	}
+	defer skdm.Release()
 	skdmBytes, _ := skdm.Serialize()
 	parsedSkdm, err := protocol.NewSenderKeyDistributionMessageFromBytes(skdmBytes, serializer.SenderKeyDistributionMessage)
 	if err != nil {
 		t.Fatalf("parse SKDM: %v", err)
 	}
+	defer parsedSkdm.Release()
 
 	aliceCipher := groups.NewGroupCipher(aliceBuilder, senderKeyName, aliceStore)
 

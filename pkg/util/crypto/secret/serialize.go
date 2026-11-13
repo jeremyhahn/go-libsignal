@@ -54,21 +54,6 @@ func FromSecret(s *Secret) Secret {
 	return *s
 }
 
-// BytesOrNil returns a view into the guarded memory, or nil if the secret is
-// nil or has been destroyed. Unlike Bytes it never panics, which makes it the
-// accessor of choice on serialization paths where the material is optional.
-// The returned slice must not be retained beyond the lifetime of the Secret.
-func (s *Secret) BytesOrNil() []byte {
-	if s == nil || s.IsDestroyed() {
-		return nil
-	}
-	b, err := s.enc.Open()
-	if err != nil {
-		return nil
-	}
-	return b
-}
-
 // IsZero reports whether the secret holds no material, which is what the
 // `json:",omitzero"` tag option consults to decide whether to write the field
 // at all.
@@ -84,7 +69,7 @@ func (s *Secret) BytesOrNil() []byte {
 // The receiver is a value for the same reason MarshalJSON's is: the field is
 // held by value and is not addressable when its struct is marshaled.
 func (s Secret) IsZero() bool {
-	return len(s.BytesOrNil()) == 0
+	return s.Size() == 0
 }
 
 // MarshalJSON encodes the secret exactly as encoding/json encodes a []byte:
@@ -100,12 +85,24 @@ func (s Secret) IsZero() bool {
 // whose whole purpose is to cross the storage boundary; the plaintext window
 // is bounded by the caller destroying the structure after serialization.
 func (s Secret) MarshalJSON() ([]byte, error) {
-	return json.Marshal(s.BytesOrNil())
+	if s.IsDestroyed() {
+		return []byte("null"), nil
+	}
+	var out []byte
+	err := s.WithBytes(func(b []byte) error {
+		var marshalErr error
+		out, marshalErr = json.Marshal(b)
+		return marshalErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // UnmarshalJSON decodes a base64 string (or null) into freshly allocated
 // guarded memory. A null or empty value yields a secret holding no material,
-// for which BytesOrNil reports nil.
+// whose WithBytes view is nil.
 //
 // Decoding over a secret that already holds material destroys that material:
 // encoding/json reuses an existing pointer field, so abandoning the old buffer

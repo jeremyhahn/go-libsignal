@@ -9,7 +9,12 @@ import (
 
 // unbudgeted marks a package that allocated before any budget was installed.
 // It is compared by address only and never allocates.
-var unbudgeted = new(enclave.Allocator)
+var unbudgeted = new(allocSlot)
+
+// allocSlot boxes an enclave.Allocator, an interface since go-enclave v0.9, so
+// admission can hold it in an atomic.Pointer and unbudgeted can be a sentinel
+// no installed Allocator can equal.
+type allocSlot struct{ a enclave.Allocator }
 
 var (
 	allocatorOnce sync.Once
@@ -20,7 +25,7 @@ var (
 	// compare-and-swap therefore decides the race between the two: no
 	// allocation can run unbudgeted once SetAllocator has returned nil, and
 	// SetAllocator cannot succeed once any allocation has run without it.
-	admission atomic.Pointer[enclave.Allocator]
+	admission atomic.Pointer[allocSlot]
 )
 
 // SetAllocator bounds the locked memory held by every Secret and Secret32 the
@@ -48,7 +53,7 @@ func SetAllocator(maxBytes int64) error {
 	}
 	err = &Error{kind: errAllocatorAlreadySet}
 	allocatorOnce.Do(func() {
-		if admission.CompareAndSwap(nil, a) {
+		if admission.CompareAndSwap(nil, &allocSlot{a: a}) {
 			err = nil
 			return
 		}
@@ -60,7 +65,7 @@ func SetAllocator(maxBytes int64) error {
 // allocator returns the installed Allocator, or nil when the package runs
 // unbudgeted. The first call on an unconfigured package seals it unbudgeted,
 // so a later SetAllocator fails rather than budgeting only some live secrets.
-func allocator() *enclave.Allocator {
+func allocator() enclave.Allocator {
 	a := admission.Load()
 	if a == nil {
 		if admission.CompareAndSwap(nil, unbudgeted) {
@@ -72,25 +77,25 @@ func allocator() *enclave.Allocator {
 	if a == unbudgeted {
 		return nil
 	}
-	return a
+	return a.a
 }
 
 // newLocked moves data into a new frozen enclave, admitted against the budget
 // when one is installed. data is wiped on every path.
-func newLocked(data []byte) (*enclave.MemoryEnclave, error) {
+func newLocked(data []byte) (enclave.ByteAccess, error) {
 	if a := allocator(); a != nil {
 		return a.New(data)
 	}
-	return enclave.NewMemoryEnclave(data)
+	return enclave.NewMemory(data)
 }
 
 // newLockedSized returns a writable, zeroed enclave of n bytes, admitted
 // against the budget when one is installed.
-func newLockedSized(n int) (*enclave.MemoryEnclave, error) {
+func newLockedSized(n int) (enclave.ByteAccess, error) {
 	if a := allocator(); a != nil {
 		return a.NewSized(n)
 	}
-	return enclave.NewMemoryEnclaveSized(n)
+	return enclave.NewMemorySized(n)
 }
 
 // resetAllocator returns the package to its unconfigured state. It exists for
