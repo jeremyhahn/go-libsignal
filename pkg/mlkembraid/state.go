@@ -275,10 +275,15 @@ func (s *State) sendKeysUnsampled(kemImpl IncrementalKEM) (*Message, uint64, *Ou
 	// IncrementalMLKEM768KEM uses pk1 directly as the header (it IS pk1).
 	// Detect via headerAwareKEM so the legacy wire format is unchanged.
 	var header []byte
-	if ha, ok := kemImpl.(headerAwareKEM); ok {
-		header = ha.BuildHeader(s.ekSeed.Bytes(), s.ekVector.Bytes())
-	} else {
-		header = Header(s.ekSeed.Bytes(), s.ekVector.Bytes())
+	if err := withBytes2(s.ekSeed, s.ekVector, func(ekSeed, ekVector []byte) error {
+		if ha, ok := kemImpl.(headerAwareKEM); ok {
+			header = ha.BuildHeader(ekSeed, ekVector)
+		} else {
+			header = Header(ekSeed, ekVector)
+		}
+		return nil
+	}); err != nil {
+		return nil, 0, nil, err
 	}
 
 	// MAC the header at auth's current epoch.
@@ -318,7 +323,7 @@ func (s *State) sendKeysSampled(_ IncrementalKEM) (*Message, uint64, *OutputKey,
 
 	// Header complete. Initialize ek encoder and transition to HeaderSent.
 	if s.ekEncoder == nil {
-		enc, err := NewEncoder(s.ekVector.Bytes(), s.chunkSize)
+		enc, err := NewEncoder(copySecret(s.ekVector), s.chunkSize)
 		if err != nil {
 			return nil, 0, nil, err
 		}
@@ -510,8 +515,12 @@ func (s *State) aliceCompleteCt2(_ *Message, kemImpl IncrementalKEM) (uint64, *O
 	mac := data[MLKEM768CT2Size:]
 
 	// Use the KEM instance provided by the caller for decapsulation.
-	ss, err := kemImpl.Decaps(s.dk.Bytes(), s.receivedCt1.Bytes(), ct2)
-	if err != nil {
+	var ss []byte
+	if err := withBytes2(s.dk, s.receivedCt1, func(dk, ct1 []byte) error {
+		var dErr error
+		ss, dErr = kemImpl.Decaps(dk, ct1, ct2)
+		return dErr
+	}); err != nil {
 		return 0, nil, err
 	}
 	defer crypto.Zeroize(ss)
@@ -543,7 +552,7 @@ func (s *State) aliceCompleteCt2(_ *Message, kemImpl IncrementalKEM) (uint64, *O
 	}
 
 	// VfyCt(epoch, ct1||ct2, mac) using the post-Update mac_key.
-	receivedCt1Bytes := s.receivedCt1.Bytes()
+	receivedCt1Bytes := copySecret(s.receivedCt1)
 	fullCT := make([]byte, 0, len(receivedCt1Bytes)+len(ct2))
 	fullCT = append(fullCT, receivedCt1Bytes...)
 	fullCT = append(fullCT, ct2...)
@@ -616,13 +625,18 @@ func (s *State) sendHeaderReceived(kemImpl IncrementalKEM) (*Message, uint64, *O
 
 	// Perform Encaps1 on first Send in this state (idempotent guard).
 	if s.bobEncapSecret == nil && s.bobEkSeed != nil && s.bobHek != nil {
-		encapsSecret, _, _, err := kemImpl.Encaps1(s.bobEkSeed.Bytes(), s.bobHek.Bytes())
-		if err != nil {
+		var encapsSecret []byte
+		if err := withBytes2(s.bobEkSeed, s.bobHek, func(ekSeed, hek []byte) error {
+			var eErr error
+			encapsSecret, _, _, eErr = kemImpl.Encaps1(ekSeed, hek)
+			return eErr
+		}); err != nil {
 			return nil, 0, nil, err
 		}
-		s.bobEncapSecret, err = secret.New(encapsSecret)
-		if err != nil {
-			return nil, 0, nil, &ErrKEMOperation{Op: "sendHeaderReceived bobEncapSecret", Err: err}
+		var nErr error
+		s.bobEncapSecret, nErr = secret.New(encapsSecret)
+		if nErr != nil {
+			return nil, 0, nil, &ErrKEMOperation{Op: "sendHeaderReceived bobEncapSecret", Err: nErr}
 		}
 	}
 
@@ -1056,19 +1070,20 @@ func (s *State) verifyEkVector(ekVector []byte) error {
 
 	// If bobEkSeed is 64 bytes (pk1 format), use IncrementalVerifyEKVector.
 	// If bobEkSeed is 32 bytes (legacy format), use the legacy SHA3-256 check.
-	pk1 := s.bobEkSeed.Bytes()
-	if len(pk1) == imlkem.PublicKey1Size {
-		if err := IncrementalVerifyEKVector(pk1, ekVector); err != nil {
-			return &ErrHeaderFormat{Reason: "pk2 does not match pk1 for incremental KEM"}
+	return withBytes2(s.bobEkSeed, s.bobHek, func(pk1, hek []byte) error {
+		if len(pk1) == imlkem.PublicKey1Size {
+			if err := IncrementalVerifyEKVector(pk1, ekVector); err != nil {
+				return &ErrHeaderFormat{Reason: "pk2 does not match pk1 for incremental KEM"}
+			}
+			return nil
+		}
+
+		computedHEK := computeHEK(pk1, ekVector)
+		if subtle.ConstantTimeCompare(computedHEK, hek) != 1 {
+			return &ErrHeaderFormat{Reason: "hek does not match received ek_vector"}
 		}
 		return nil
-	}
-
-	computedHEK := computeHEK(pk1, ekVector)
-	if subtle.ConstantTimeCompare(computedHEK, s.bobHek.Bytes()) != 1 {
-		return &ErrHeaderFormat{Reason: "hek does not match received ek_vector"}
-	}
-	return nil
+	})
 }
 
 // bobCompleteEncapsulationDeferred performs full encapsulation when Bob has both
@@ -1082,7 +1097,7 @@ func (s *State) bobCompleteEncapsulationDeferred(kemImpl IncrementalKEM, chunkSi
 	// Retrieve ek_vector from stored field or from decoder.
 	var ekVector []byte
 	if s.bobEkVector != nil {
-		ekVector = s.bobEkVector.Bytes()
+		ekVector = copySecret(s.bobEkVector)
 	}
 	if len(ekVector) == 0 && s.ekDecoder != nil && s.ekDecoder.HasMessage() {
 		var err error
@@ -1118,14 +1133,22 @@ func (s *State) bobCompleteEncapsulationDeferred(kemImpl IncrementalKEM, chunkSi
 
 	if s.bobEncapSecret != nil {
 		// Two-phase path: Encaps1 was called in sendHeaderReceived.
-		ct1, ct2, ss, err = completer.CompleteEncaps2(s.bobEncapSecret.Bytes(), s.bobEkSeed.Bytes(), ekVector)
+		err = withBytes2(s.bobEncapSecret, s.bobEkSeed, func(encapSecret, ekSeed []byte) error {
+			var cErr error
+			ct1, ct2, ss, cErr = completer.CompleteEncaps2(encapSecret, ekSeed, ekVector)
+			return cErr
+		})
 		if err != nil {
 			return 0, nil, err
 		}
 		destroySecret(&s.bobEncapSecret)
 	} else {
 		// Single-phase path: encapsulate directly (ekVector verified above).
-		ct1, ct2, ss, err = completer.FullEncaps(s.bobEkSeed.Bytes(), ekVector)
+		err = s.bobEkSeed.WithBytes(func(ekSeed []byte) error {
+			var fErr error
+			ct1, ct2, ss, fErr = completer.FullEncaps(ekSeed, ekVector)
+			return fErr
+		})
 		if err != nil {
 			return 0, nil, err
 		}
@@ -1168,7 +1191,7 @@ func (s *State) bobCompleteEncapsulationDeferred(kemImpl IncrementalKEM, chunkSi
 
 	// Encode ct1 if not already encoded.
 	if s.ct1Encoder == nil {
-		ct1Enc, err := NewEncoder(s.bobCt1.Bytes(), chunkSize)
+		ct1Enc, err := NewEncoder(copySecret(s.bobCt1), chunkSize)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -1176,7 +1199,7 @@ func (s *State) bobCompleteEncapsulationDeferred(kemImpl IncrementalKEM, chunkSi
 	}
 
 	// Encode ct2 || MAC.
-	ct2Bytes := s.bobCt2.Bytes()
+	ct2Bytes := copySecret(s.bobCt2)
 	ct2WithMAC := make([]byte, 0, len(ct2Bytes)+MacSize)
 	ct2WithMAC = append(ct2WithMAC, ct2Bytes...)
 	ct2WithMAC = append(ct2WithMAC, ctMAC...)
@@ -1275,7 +1298,7 @@ func (s *State) bobCompleteEncapsulation(kemImpl IncrementalKEM, chunkSize int) 
 	// This applies to both the two-phase path (bobEncapSecret != nil) and the
 	// single-phase path, preventing a tampered ek_vector from producing a
 	// shared secret that Alice can never replicate.
-	if err := s.verifyEkVector(s.bobEkVector.Bytes()); err != nil {
+	if err := s.bobEkVector.WithBytes(s.verifyEkVector); err != nil {
 		return nil, err
 	}
 
@@ -1283,14 +1306,22 @@ func (s *State) bobCompleteEncapsulation(kemImpl IncrementalKEM, chunkSize int) 
 
 	if s.bobEncapSecret != nil {
 		// Two-phase path: Encaps1 was called in sendHeaderReceived.
-		ct1, ct2, ss, err = completer.CompleteEncaps2(s.bobEncapSecret.Bytes(), s.bobEkSeed.Bytes(), s.bobEkVector.Bytes())
+		err = withBytes3(s.bobEncapSecret, s.bobEkSeed, s.bobEkVector, func(encapSecret, ekSeed, ekVector []byte) error {
+			var cErr error
+			ct1, ct2, ss, cErr = completer.CompleteEncaps2(encapSecret, ekSeed, ekVector)
+			return cErr
+		})
 		if err != nil {
 			return nil, err
 		}
 		destroySecret(&s.bobEncapSecret)
 	} else {
 		// Single-phase path: ekVector was available from the start.
-		ct1, ct2, ss, err = completer.FullEncaps(s.bobEkSeed.Bytes(), s.bobEkVector.Bytes())
+		err = withBytes2(s.bobEkSeed, s.bobEkVector, func(ekSeed, ekVector []byte) error {
+			var fErr error
+			ct1, ct2, ss, fErr = completer.FullEncaps(ekSeed, ekVector)
+			return fErr
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -1334,14 +1365,14 @@ func (s *State) bobCompleteEncapsulation(kemImpl IncrementalKEM, chunkSize int) 
 	}
 
 	// Encode ct1 for sending.
-	ct1Enc, err := NewEncoder(s.bobCt1.Bytes(), chunkSize)
+	ct1Enc, err := NewEncoder(copySecret(s.bobCt1), chunkSize)
 	if err != nil {
 		return nil, err
 	}
 	s.ct1Encoder = ct1Enc
 
 	// Encode ct2 || MAC for sending.
-	ct2Bytes := s.bobCt2.Bytes()
+	ct2Bytes := copySecret(s.bobCt2)
 	ct2WithMAC := make([]byte, 0, len(ct2Bytes)+MacSize)
 	ct2WithMAC = append(ct2WithMAC, ct2Bytes...)
 	ct2WithMAC = append(ct2WithMAC, ctMAC...)

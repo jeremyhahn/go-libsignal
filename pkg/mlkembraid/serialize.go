@@ -271,14 +271,24 @@ func serializeAuthenticator(a *Authenticator) ([]byte, error) {
 		return nil, &ErrSerialize{Reason: "authenticator rootKey is nil or destroyed"}
 	}
 
-	rootBytes := a.rootKey.Bytes()
 	buf := make([]byte, 0, 32+8+1+32)
-	buf = append(buf, rootBytes...)
+	if err := a.rootKey.WithBytes(func(rootBytes []byte) error {
+		buf = append(buf, rootBytes...)
+		return nil
+	}); err != nil {
+		return nil, &ErrSerialize{Reason: "authenticator rootKey is nil or destroyed"}
+	}
 	buf = appendU64BE(buf, a.epoch)
 
 	if a.macKey != nil && !a.macKey.IsDestroyed() {
 		buf = append(buf, 0x01)
-		buf = append(buf, a.macKey.Bytes()...)
+		if err := a.macKey.WithBytes(func(macBytes []byte) error {
+			buf = append(buf, macBytes...)
+			return nil
+		}); err != nil {
+			clear(buf)
+			return nil, &ErrSerialize{Reason: "authenticator macKey destroyed during serialization"}
+		}
 	} else {
 		buf = append(buf, 0x00)
 	}
@@ -341,12 +351,19 @@ func deserializeAuthenticator(data []byte) (*Authenticator, int, error) {
 //
 //	hasField(1) + [dataLen(4, BE) + data(N)]
 func appendOptionalSecret(buf []byte, s *secret.Secret) []byte {
+	present := false
 	if s != nil && !s.IsDestroyed() {
-		data := s.Bytes()
-		buf = append(buf, 0x01)
-		buf = appendU32BE(buf, uint32(len(data)))
-		buf = append(buf, data...)
-	} else {
+		// The bytes are appended inside the borrow; a secret destroyed
+		// concurrently is written as absent.
+		_ = s.WithBytes(func(data []byte) error {
+			buf = append(buf, 0x01)
+			buf = appendU32BE(buf, uint32(len(data)))
+			buf = append(buf, data...)
+			present = true
+			return nil
+		})
+	}
+	if !present {
 		buf = append(buf, 0x00)
 	}
 	return buf
