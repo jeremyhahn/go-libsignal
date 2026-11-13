@@ -2,6 +2,7 @@ package spqr
 
 import (
 	"bytes"
+	"errors"
 	"testing"
 
 	"github.com/jeremyhahn/go-libsignal/pkg/proto/pqratchetpb"
@@ -31,4 +32,39 @@ func TestWipeChainProto_ZeroizesOwnedCopies(t *testing.T) {
 		}
 	}
 	wipeChainProto(nil) // nil-safe
+}
+
+// TestMarshalStateProto_WipesChainCopies checks, through MarshalStateProto,
+// that the root and epoch key copies the chain message carries are zeroed
+// after a successful marshal and after an encoding failure, while the live
+// chain and the returned bytes stay intact.
+func TestMarshalStateProto_WipesChainCopies(t *testing.T) {
+	s, err := Init(sharedSecretForTest(62), DirectionA2B, maxJump)
+	if err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+	defer s.Zeroize()
+
+	_, chain := captureStateMessage(t, nil)
+	out, err := MarshalStateProto(s)
+	if err != nil {
+		t.Fatalf("MarshalStateProto: %v", err)
+	}
+	assertWiped(t, "success: chain", *chain)
+	again, err := MarshalStateProto(s)
+	if err != nil || !bytes.Equal(out, again) {
+		t.Fatalf("returned bytes or live chain changed: equal=%v err=%v", bytes.Equal(out, again), err)
+	}
+
+	_, chain = captureStateMessage(t, errors.New("injected encode failure"))
+	if _, err := MarshalStateProto(s); err == nil {
+		t.Fatal("want the injected failure")
+	}
+	assertWiped(t, "failure: chain", *chain)
+
+	_, _ = captureStateMessage(t, nil)
+	after, err := MarshalStateProto(s)
+	if err != nil || !bytes.Equal(out, after) {
+		t.Fatalf("the failure path changed the live chain: equal=%v err=%v", bytes.Equal(out, after), err)
+	}
 }

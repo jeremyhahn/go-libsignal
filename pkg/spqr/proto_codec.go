@@ -124,6 +124,12 @@ func MarshalStateProto(s *SPQR) ([]byte, error) {
 	// once marshaled, whether or not Marshal succeeds. AuthKey aliases
 	// s.authKey and is left alone.
 	defer wipeChainProto(pb.Chain)
+	return marshalStateMessage(pb)
+}
+
+// marshalStateMessage encodes the state message. Tests replace it to observe
+// the heap copies the message carries and to inject an encoding failure.
+var marshalStateMessage = func(pb *pqratchetpb.PqRatchetState) ([]byte, error) {
 	return proto.Marshal(pb)
 }
 

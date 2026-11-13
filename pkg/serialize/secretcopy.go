@@ -3,6 +3,7 @@ package serialize
 import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
+	"google.golang.org/protobuf/proto"
 )
 
 // ownedCopies records the heap buffers a serializer owns while it builds a
@@ -18,6 +19,14 @@ import (
 type ownedCopies struct {
 	bufs [][]byte
 }
+
+// newOwnedCopies and marshalRecord are the tracker constructor and encoder
+// the record serializers use. Tests replace them to observe the owned
+// copies and to inject an encoding failure.
+var (
+	newOwnedCopies = func() *ownedCopies { return &ownedCopies{} }
+	marshalRecord  = proto.Marshal
+)
 
 // copyOut copies a secret's material out of locked memory for a protobuf
 // field, inside the secret's WithBytes borrow, and records the copy. A secret

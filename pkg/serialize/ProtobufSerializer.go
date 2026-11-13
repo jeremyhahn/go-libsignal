@@ -428,11 +428,11 @@ type ProtobufStateSerializer struct{}
 // Serialize will take a session state structure and convert it to protobuf bytes.
 func (s *ProtobufStateSerializer) Serialize(state *record.StateStructure) ([]byte, error) {
 	// Wipe the heap copies of secret material once marshaled.
-	o := &ownedCopies{}
+	o := newOwnedCopies()
 	defer o.wipe()
 
 	pb := stateStructureToProto(state, o)
-	serialized, err := proto.Marshal(pb)
+	serialized, err := marshalRecord(pb)
 	if err != nil {
 		return nil, err
 	}
@@ -463,7 +463,7 @@ type ProtobufSessionSerializer struct{}
 // Serialize will take a session structure and convert it to protobuf bytes.
 func (s *ProtobufSessionSerializer) Serialize(session *record.SessionStructure) ([]byte, error) {
 	// Wipe the heap copies of secret material once marshaled.
-	o := &ownedCopies{}
+	o := newOwnedCopies()
 	defer o.wipe()
 
 	// Serialize each previous state independently so they can be stored
@@ -471,7 +471,7 @@ func (s *ProtobufSessionSerializer) Serialize(session *record.SessionStructure) 
 	previousSessions := make([][]byte, len(session.PreviousStates))
 	for i, prevState := range session.PreviousStates {
 		prevPb := stateStructureToProto(prevState, o)
-		prevBytes, err := proto.Marshal(prevPb)
+		prevBytes, err := marshalRecord(prevPb)
 		if err != nil {
 			return nil, err
 		}
@@ -484,7 +484,7 @@ func (s *ProtobufSessionSerializer) Serialize(session *record.SessionStructure) 
 		PreviousSessions: previousSessions,
 	}
 
-	serialized, err := proto.Marshal(pb)
+	serialized, err := marshalRecord(pb)
 	if err != nil {
 		return nil, err
 	}
@@ -557,7 +557,7 @@ type ProtobufPreKeyRecordSerializer struct{}
 // Serialize will take a prekey record structure and convert it to protobuf bytes.
 func (s *ProtobufPreKeyRecordSerializer) Serialize(preKey *record.PreKeyStructure) ([]byte, error) {
 	// Wipe the heap copies of secret material once marshaled.
-	o := &ownedCopies{}
+	o := newOwnedCopies()
 	defer o.wipe()
 
 	pb := &storagepb.PreKeyRecordStructure{
@@ -565,7 +565,7 @@ func (s *ProtobufPreKeyRecordSerializer) Serialize(preKey *record.PreKeyStructur
 		PublicKey:  preKey.PublicKey,
 		PrivateKey: o.copyOut(&preKey.PrivateKey),
 	}
-	serialized, err := proto.Marshal(pb)
+	serialized, err := marshalRecord(pb)
 	if err != nil {
 		return nil, err
 	}
@@ -605,7 +605,7 @@ type ProtobufSignedPreKeyRecordSerializer struct{}
 // Serialize will take a signed prekey record structure and convert it to protobuf bytes.
 func (s *ProtobufSignedPreKeyRecordSerializer) Serialize(signedPreKey *record.SignedPreKeyStructure) ([]byte, error) {
 	// Wipe the heap copies of secret material once marshaled.
-	o := &ownedCopies{}
+	o := newOwnedCopies()
 	defer o.wipe()
 
 	pb := &storagepb.SignedPreKeyRecordStructure{
@@ -615,7 +615,7 @@ func (s *ProtobufSignedPreKeyRecordSerializer) Serialize(signedPreKey *record.Si
 		Signature:  signedPreKey.Signature,
 		Timestamp:  uint64(signedPreKey.Timestamp),
 	}
-	serialized, err := proto.Marshal(pb)
+	serialized, err := marshalRecord(pb)
 	if err != nil {
 		return nil, err
 	}
@@ -657,11 +657,11 @@ type ProtobufSenderKeyStateSerializer struct{}
 // Serialize will take a senderkey state structure and convert it to protobuf bytes.
 func (s *ProtobufSenderKeyStateSerializer) Serialize(state *groupRecord.SenderKeyStateStructure) ([]byte, error) {
 	// Wipe the heap copies of secret material once marshaled.
-	o := &ownedCopies{}
+	o := newOwnedCopies()
 	defer o.wipe()
 
 	pb := senderKeyStateStructureToProto(state, o)
-	serialized, err := proto.Marshal(pb)
+	serialized, err := marshalRecord(pb)
 	if err != nil {
 		return nil, err
 	}
@@ -692,7 +692,7 @@ type ProtobufSenderKeyRecordSerializer struct{}
 // Serialize will take a senderkey structure and convert it to protobuf bytes.
 func (s *ProtobufSenderKeyRecordSerializer) Serialize(senderKey *groupRecord.SenderKeyStructure) ([]byte, error) {
 	// Wipe the heap copies of secret material once marshaled.
-	o := &ownedCopies{}
+	o := newOwnedCopies()
 	defer o.wipe()
 
 	states := make([]*storagepb.SenderKeyStateStructure, len(senderKey.SenderKeyStates))
@@ -704,7 +704,7 @@ func (s *ProtobufSenderKeyRecordSerializer) Serialize(senderKey *groupRecord.Sen
 		SenderKeyStates: states,
 	}
 
-	serialized, err := proto.Marshal(pb)
+	serialized, err := marshalRecord(pb)
 	if err != nil {
 		return nil, err
 	}
