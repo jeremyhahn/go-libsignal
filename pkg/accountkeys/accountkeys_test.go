@@ -728,12 +728,3 @@ func bytesEqual(a, b []byte) bool {
 	}
 	return true
 }
-
-func isAllZero(b []byte) bool {
-	for _, v := range b {
-		if v != 0 {
-			return false
-		}
-	}
-	return true
-}

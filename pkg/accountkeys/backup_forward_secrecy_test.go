@@ -719,13 +719,3 @@ func TestBackupKey_DeriveFromRawBytes(t *testing.T) {
 		t.Fatalf("backup ID mismatch\ngot:  %x\nwant: %x", id.data, expected)
 	}
 }
-
-// isAllZeroBuf checks if all bytes in a slice are zero.
-func isAllZeroBuf(b []byte) bool {
-	for _, v := range b {
-		if v != 0 {
-			return false
-		}
-	}
-	return true
-}
