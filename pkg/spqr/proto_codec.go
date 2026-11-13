@@ -269,9 +269,17 @@ func spqrChainToProto(s *SPQR) (*pqratchetpb.Chain, error) {
 	for _, ep := range epochs {
 		chain := s.chains[ep]
 		skipped := skippedRecvKeysForEpoch(s.skippedKeys, ep)
+		send := chainSendDirToProto(chain)
+		recv, err := chainRecvDirToProto(chain, skipped)
+		if err != nil {
+			links = append(links, &pqratchetpb.Chain_Epoch{Send: send})
+			pb.Links = links
+			wipeChainProto(pb)
+			return nil, err
+		}
 		link := &pqratchetpb.Chain_Epoch{
-			Send: chainSendDirToProto(chain),
-			Recv: chainRecvDirToProto(chain, skipped),
+			Send: send,
+			Recv: recv,
 		}
 		links = append(links, link)
 	}
@@ -373,7 +381,7 @@ func chainSendDirToProto(chain *EpochChain) *pqratchetpb.Chain_Epoch_EpochDirect
 //	chain.rs KeyHistory::add → data.extend(&k.0.to_be_bytes()); data.extend(&k.1)
 //
 // KEY_SIZE = 36 bytes per record (4-byte BE index + 32-byte key).
-func chainRecvDirToProto(chain *EpochChain, skipped []skippedRecvRecord) *pqratchetpb.Chain_Epoch_EpochDirection {
+func chainRecvDirToProto(chain *EpochChain, skipped []skippedRecvRecord) (*pqratchetpb.Chain_Epoch_EpochDirection, error) {
 	var next []byte
 	if chain.recvKey != nil && !chain.recvKey.IsDestroyed() {
 		next = copySecret(chain.recvKey)
@@ -389,10 +397,19 @@ func chainRecvDirToProto(chain *EpochChain, skipped []skippedRecvRecord) *pqratc
 			prev[off+1] = byte(rec.counter >> 16)
 			prev[off+2] = byte(rec.counter >> 8)
 			prev[off+3] = byte(rec.counter)
-			_ = rec.key.WithBytes(func(k []byte) error {
+			// A key that cannot be borrowed must not be written as zeros:
+			// it would restore as a predictable message key.
+			if err := rec.key.WithBytes(func(k []byte) error {
+				if len(k) != keyLen {
+					return &ErrProtoInvalidState{Reason: fmt.Sprintf("skipped key: want %d bytes, got %d", keyLen, len(k))}
+				}
 				copy(prev[off+4:off+recSize], k)
 				return nil
-			})
+			}); err != nil {
+				crypto.Zeroize(next)
+				crypto.Zeroize(prev)
+				return nil, err
+			}
 		}
 	}
 
@@ -400,7 +417,7 @@ func chainRecvDirToProto(chain *EpochChain, skipped []skippedRecvRecord) *pqratc
 		Ctr:  chain.recvCounter,
 		Next: next,
 		Prev: prev,
-	}
+	}, nil
 }
 
 // sortedEpochs returns the epoch keys from chains in ascending order.

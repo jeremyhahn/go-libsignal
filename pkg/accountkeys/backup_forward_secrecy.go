@@ -64,16 +64,28 @@ func NewBackupKey(data [BackupKeyLength]byte) BackupKey {
 }
 
 // Bytes returns the raw bytes of the BackupKey as a fixed-size array.
-// The returned value is a copy; modifying it does not affect the secret.
-func (k *BackupKey) Bytes() [BackupKeyLength]byte {
+// The returned value is a copy; modifying it does not affect the secret,
+// and the caller wipes it. It returns an error, and a zero array, if the
+// key cannot be borrowed (for example because it was destroyed) or does
+// not hold BackupKeyLength bytes; the zero array must not be used as a key.
+func (k *BackupKey) Bytes() ([BackupKeyLength]byte, error) {
 	var out [BackupKeyLength]byte
-	if k.data != nil && !k.data.IsDestroyed() {
-		_ = k.data.WithBytes(func(b []byte) error {
-			copy(out[:], b)
-			return nil
-		})
+	var data *secret.Secret
+	if k != nil {
+		data = k.data
 	}
-	return out
+	err := data.WithBytes(func(b []byte) error {
+		if len(b) != BackupKeyLength {
+			return &ErrInvalidBackupKey{Expected: BackupKeyLength, Got: len(b)}
+		}
+		copy(out[:], b)
+		return nil
+	})
+	if err != nil {
+		crypto.ZeroizeArray32(&out)
+		return [BackupKeyLength]byte{}, err
+	}
+	return out, nil
 }
 
 // expandInto fills out with HKDF-SHA256 output keyed by the backup key, read

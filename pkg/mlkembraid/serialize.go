@@ -353,15 +353,21 @@ func deserializeAuthenticator(data []byte) (*Authenticator, int, error) {
 func appendOptionalSecret(buf []byte, s *secret.Secret) []byte {
 	present := false
 	if s != nil && !s.IsDestroyed() {
-		// The bytes are appended inside the borrow; a secret destroyed
-		// concurrently is written as absent.
-		_ = s.WithBytes(func(data []byte) error {
+		// The bytes are appended inside the borrow. A failed borrow (for
+		// example a secret destroyed concurrently) is written as absent,
+		// never as zero-filled material; anything already appended is wiped.
+		start := len(buf)
+		if err := s.WithBytes(func(data []byte) error {
 			buf = append(buf, 0x01)
 			buf = appendU32BE(buf, uint32(len(data)))
 			buf = append(buf, data...)
 			present = true
 			return nil
-		})
+		}); err != nil {
+			clear(buf[start:])
+			buf = buf[:start]
+			present = false
+		}
 	}
 	if !present {
 		buf = append(buf, 0x00)

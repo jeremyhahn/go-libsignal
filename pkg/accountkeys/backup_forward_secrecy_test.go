@@ -124,7 +124,10 @@ func TestNewBackupKey(t *testing.T) {
 	}
 	key := NewBackupKey(data)
 	defer key.Zeroize()
-	got := key.Bytes()
+	got, err := key.Bytes()
+	if err != nil {
+		t.Fatalf("BackupKey.Bytes: %v", err)
+	}
 	if got != data {
 		t.Fatalf("NewBackupKey round-trip failed")
 	}

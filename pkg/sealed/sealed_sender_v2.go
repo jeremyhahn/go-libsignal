@@ -193,7 +193,9 @@ func SealedSenderMultiRecipientEncrypt(
 
 	// Step 4: Create ephemeral key pair E from r (clamp and compute public).
 	var ephPriv [32]byte
-	copyFromSecret(ephPriv[:], rSecret)
+	if err := copyFromSecret(ephPriv[:], rSecret); err != nil {
+		return nil, err
+	}
 	ephPriv[0] &= 248
 	ephPriv[31] &= 127
 	ephPriv[31] |= 64
@@ -206,7 +208,9 @@ func SealedSenderMultiRecipientEncrypt(
 
 	// Recover ephPriv from guarded memory for ScalarBaseMult.
 	var ephPrivForMult [32]byte
-	copyFromSecret(ephPrivForMult[:], ephPrivSecret)
+	if err := copyFromSecret(ephPrivForMult[:], ephPrivSecret); err != nil {
+		return nil, err
+	}
 	defer crypto.ZeroizeArray32(&ephPrivForMult)
 	var ephPub [32]byte
 	curve25519.ScalarBaseMult(&ephPub, &ephPrivForMult)
@@ -303,7 +307,9 @@ func SealedSenderMultiRecipientEncrypt(
 		ri := grp.devices[0]
 
 		// shared = ECDH(ephPriv, recipientIdentityKey)
-		copyFromSecret(ephPrivForMult[:], ephPrivSecret)
+		if err := copyFromSecret(ephPrivForMult[:], ephPrivSecret); err != nil {
+			return nil, err
+		}
 		shared, dhErr := kdf.CalculateSharedSecret(ri.identityPubRaw, ephPrivForMult)
 		if dhErr != nil {
 			return nil, dhErr
@@ -340,18 +346,27 @@ func SealedSenderMultiRecipientEncrypt(
 
 		// C_i = dhKey XOR M
 		ci := make([]byte, v2EncryptedMKeySize)
-		_ = dhKeySecret.WithBytes(func(dhKey []byte) error {
+		xorErr := dhKeySecret.WithBytes(func(dhKey []byte) error {
 			return mSecret.WithBytes(func(m []byte) error {
+				if len(dhKey) != v2EncryptedMKeySize || len(m) != v2EncryptedMKeySize {
+					return ErrKeyMaterialLength
+				}
 				subtle.XORBytes(ci, dhKey, m)
 				return nil
 			})
 		})
 		dhKeySecret.Destroy()
+		if xorErr != nil {
+			crypto.Zeroize(ci)
+			return nil, xorErr
+		}
 
 		// Sender authentication tag:
 		// senderShared = ECDH(ourPriv, recipientPub)
 		var ourPrivForDH [32]byte
-		copyFromSecret(ourPrivForDH[:], ourPrivSecret)
+		if err := copyFromSecret(ourPrivForDH[:], ourPrivSecret); err != nil {
+			return nil, err
+		}
 		senderShared, sdhErr := kdf.CalculateSharedSecret(ri.identityPubRaw, ourPrivForDH)
 		crypto.ZeroizeArray32(&ourPrivForDH)
 		if sdhErr != nil {
@@ -564,7 +579,9 @@ func SealedSenderV2DecryptToUSMC(
 
 	// Step 1: shared = ECDH(ephPub, ourPriv)
 	var ourPriv [32]byte
-	copyFromSecret(ourPriv[:], ourPrivSecret)
+	if err := copyFromSecret(ourPriv[:], ourPrivSecret); err != nil {
+		return nil, err
+	}
 	defer crypto.ZeroizeArray32(&ourPriv)
 	shared, dhErr := kdf.CalculateSharedSecret(ephPub, ourPriv)
 	if dhErr != nil {
@@ -582,7 +599,9 @@ func SealedSenderV2DecryptToUSMC(
 	ephPubSerialized := v2SerializePublicKey(ephPub)
 	ourPubSerialized := v2SerializePublicKey(ourPub)
 	ikmBytes := make([]byte, 32+33+33)
-	copyFromSecret(ikmBytes[0:32], sharedSecret)
+	if err := copyFromSecret(ikmBytes[0:32], sharedSecret); err != nil {
+		return nil, err
+	}
 	copy(ikmBytes[32:65], ephPubSerialized)
 	copy(ikmBytes[65:98], ourPubSerialized)
 	ikmSecret, err := secret.New(ikmBytes)
@@ -601,12 +620,18 @@ func SealedSenderV2DecryptToUSMC(
 	}
 
 	var mRecovered [v2MSize]byte
-	_ = dhKeySecret.WithBytes(func(dhKey []byte) error {
+	xorErr := dhKeySecret.WithBytes(func(dhKey []byte) error {
+		if len(dhKey) != v2MSize || len(ci) != v2MSize {
+			return ErrKeyMaterialLength
+		}
 		subtle.XORBytes(mRecovered[:], dhKey, ci)
 		return nil
 	})
 	dhKeySecret.Destroy()
 	defer crypto.ZeroizeArray32(&mRecovered)
+	if xorErr != nil {
+		return nil, xorErr
+	}
 
 	mRecoveredSecret, err := secret.New(mRecovered[:])
 	if err != nil {
@@ -638,7 +663,9 @@ func SealedSenderV2DecryptToUSMC(
 
 	// Step 5: Validate ephemeral key: derive E' from r, verify E'.public == E.public.
 	var ephPrivCheck [32]byte
-	copyFromSecret(ephPrivCheck[:], rSecret)
+	if err := copyFromSecret(ephPrivCheck[:], rSecret); err != nil {
+		return nil, err
+	}
 	ephPrivCheck[0] &= 248
 	ephPrivCheck[31] &= 127
 	ephPrivCheck[31] |= 64
@@ -649,8 +676,11 @@ func SealedSenderV2DecryptToUSMC(
 	}
 
 	var ephPrivForMult [32]byte
-	copyFromSecret(ephPrivForMult[:], ephPrivCheckSecret)
+	copyErr := copyFromSecret(ephPrivForMult[:], ephPrivCheckSecret)
 	ephPrivCheckSecret.Destroy()
+	if copyErr != nil {
+		return nil, copyErr
+	}
 	defer crypto.ZeroizeArray32(&ephPrivForMult)
 
 	var ephPubCheck [32]byte
@@ -695,7 +725,9 @@ func SealedSenderV2DecryptToUSMC(
 	senderPubRaw := senderKey.PublicKey() // [32]byte
 
 	// senderShared = ECDH(ourPriv, senderPub)
-	copyFromSecret(ourPriv[:], ourPrivSecret)
+	if err := copyFromSecret(ourPriv[:], ourPrivSecret); err != nil {
+		return nil, err
+	}
 	senderShared, sdhErr := kdf.CalculateSharedSecret(senderPubRaw, ourPriv)
 	if sdhErr != nil {
 		return nil, sdhErr
@@ -859,7 +891,9 @@ func SealedSenderV2DecryptReceivedToUSMC(
 
 	// Step 1: shared = ECDH(ephPub, ourPriv)
 	var ourPriv [32]byte
-	copyFromSecret(ourPriv[:], ourPrivSecret)
+	if err := copyFromSecret(ourPriv[:], ourPrivSecret); err != nil {
+		return nil, err
+	}
 	defer crypto.ZeroizeArray32(&ourPriv)
 	shared, dhErr := kdf.CalculateSharedSecret(ephPub, ourPriv)
 	if dhErr != nil {
@@ -876,7 +910,9 @@ func SealedSenderV2DecryptReceivedToUSMC(
 	ephPubSerialized := v2SerializePublicKey(ephPub)
 	ourPubSerialized := v2SerializePublicKey(ourPub)
 	ikmBytes := make([]byte, 32+33+33)
-	copyFromSecret(ikmBytes[0:32], sharedSecret)
+	if err := copyFromSecret(ikmBytes[0:32], sharedSecret); err != nil {
+		return nil, err
+	}
 	copy(ikmBytes[32:65], ephPubSerialized)
 	copy(ikmBytes[65:98], ourPubSerialized)
 	ikmSecret, err := secret.New(ikmBytes)
@@ -895,12 +931,18 @@ func SealedSenderV2DecryptReceivedToUSMC(
 	}
 
 	var mRecovered [v2MSize]byte
-	_ = dhKeySecret.WithBytes(func(dhKey []byte) error {
+	xorErr := dhKeySecret.WithBytes(func(dhKey []byte) error {
+		if len(dhKey) != v2MSize || len(ci) != v2MSize {
+			return ErrKeyMaterialLength
+		}
 		subtle.XORBytes(mRecovered[:], dhKey, ci)
 		return nil
 	})
 	dhKeySecret.Destroy()
 	defer crypto.ZeroizeArray32(&mRecovered)
+	if xorErr != nil {
+		return nil, xorErr
+	}
 
 	mRecoveredSecret, err := secret.New(mRecovered[:])
 	if err != nil {
@@ -932,7 +974,9 @@ func SealedSenderV2DecryptReceivedToUSMC(
 
 	// Step 5: Validate ephemeral key: derive E' from r, verify E'.public == E.public.
 	var ephPrivCheck [32]byte
-	copyFromSecret(ephPrivCheck[:], rSecret)
+	if err := copyFromSecret(ephPrivCheck[:], rSecret); err != nil {
+		return nil, err
+	}
 	ephPrivCheck[0] &= 248
 	ephPrivCheck[31] &= 127
 	ephPrivCheck[31] |= 64
@@ -943,8 +987,11 @@ func SealedSenderV2DecryptReceivedToUSMC(
 	}
 
 	var ephPrivForMult [32]byte
-	copyFromSecret(ephPrivForMult[:], ephPrivCheckSecret)
+	copyErr := copyFromSecret(ephPrivForMult[:], ephPrivCheckSecret)
 	ephPrivCheckSecret.Destroy()
+	if copyErr != nil {
+		return nil, copyErr
+	}
 	defer crypto.ZeroizeArray32(&ephPrivForMult)
 
 	var ephPubCheck [32]byte
@@ -991,7 +1038,9 @@ func SealedSenderV2DecryptReceivedToUSMC(
 	senderKey := usmcContent.Sender().Key()
 	senderPubRaw := senderKey.PublicKey() // [32]byte
 
-	copyFromSecret(ourPriv[:], ourPrivSecret)
+	if err := copyFromSecret(ourPriv[:], ourPrivSecret); err != nil {
+		return nil, err
+	}
 	senderShared, sdhErr := kdf.CalculateSharedSecret(senderPubRaw, ourPriv)
 	if sdhErr != nil {
 		return nil, sdhErr

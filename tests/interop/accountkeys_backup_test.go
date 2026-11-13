@@ -66,7 +66,10 @@ func TestAccountKeys_BackupKey_FromEntropy_Known(t *testing.T) {
 	}
 	defer key.Zeroize()
 
-	got := key.Bytes()
+	got, err := key.Bytes()
+	if err != nil {
+		t.Fatalf("BackupKey.Bytes: %v", err)
+	}
 	if !bytes.Equal(got[:], want) {
 		t.Fatalf("BackupKey mismatch:\n  got  %x\n  want %x", got, want)
 	}

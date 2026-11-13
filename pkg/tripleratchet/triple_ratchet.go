@@ -264,11 +264,15 @@ func (tr *TripleRatchet) Encrypt(plaintext []byte) ([]byte, error) {
 	// Zeroing a locked-memory-protected page via a raw pointer causes a segfault.
 	if outputKey != nil { // coverage-exempt: braid.Send never produces OutputKey in current protocol
 		epochSecretBytes := []byte{}
-		_ = outputKey.Key.WithBytes(func(b []byte) error {
+		borrowErr := outputKey.Key.WithBytes(func(b []byte) error {
 			epochSecretBytes = append(epochSecretBytes, b...)
 			return nil
 		})
 		outputKey.Key.Destroy()
+		if borrowErr != nil {
+			clear(epochSecretBytes)
+			return nil, borrowErr
+		}
 		if epochErr := tr.advancePQEpoch(epochSecretBytes); epochErr != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 			return nil, epochErr
 		}
@@ -425,11 +429,15 @@ func (tr *TripleRatchet) decryptWithSnapshot(
 	// Zeroing a locked-memory-protected page via a raw pointer causes a segfault.
 	if outputKey != nil { // coverage-exempt: reachable only in a synchronized bidirectional TripleRatchet session after the full ML-KEM Braid SCKA handshake completes; requires both parties to exchange braid messages in both directions, which is not achievable in unit tests using a simple symmetric EC cipher without a full session-layer implementation
 		epochSecretBytes := []byte{}
-		_ = outputKey.Key.WithBytes(func(b []byte) error {
+		borrowErr := outputKey.Key.WithBytes(func(b []byte) error {
 			epochSecretBytes = append(epochSecretBytes, b...)
 			return nil
 		})
 		outputKey.Key.Destroy()
+		if borrowErr != nil {
+			clear(epochSecretBytes)
+			return nil, borrowErr
+		}
 		if epochErr := tr.advancePQEpoch(epochSecretBytes); epochErr != nil { // coverage-exempt: only reachable on locked-memory allocation failure
 			return nil, epochErr
 		}

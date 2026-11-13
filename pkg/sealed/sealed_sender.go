@@ -156,7 +156,9 @@ func SealedSenderEncryptFromUSMC(
 
 	theirPubRaw := theirPublicKey.PublicKey()
 	var ephPriv [32]byte
-	copyFromSecret(ephPriv[:], ephPrivSecret)
+	if err := copyFromSecret(ephPriv[:], ephPrivSecret); err != nil {
+		return nil, err
+	}
 	defer crypto.ZeroizeArray32(&ephPriv)
 	sharedSecret1, dhErr := kdf.CalculateSharedSecret(theirPubRaw, ephPriv)
 	if dhErr != nil {
@@ -212,7 +214,9 @@ func SealedSenderEncryptFromUSMC(
 	defer ourPrivSecret.Destroy()
 
 	var ourPriv [32]byte
-	copyFromSecret(ourPriv[:], ourPrivSecret)
+	if err := copyFromSecret(ourPriv[:], ourPrivSecret); err != nil {
+		return nil, err
+	}
 	defer crypto.ZeroizeArray32(&ourPriv)
 	sharedSecret2, dhErr := kdf.CalculateSharedSecret(theirPubRaw, ourPriv)
 	if dhErr != nil {
@@ -345,7 +349,9 @@ func SealedSenderDecryptToUSMC(
 
 	ephPubRaw := ephPubKey.PublicKey()
 	var ourPriv [32]byte
-	copyFromSecret(ourPriv[:], ourPrivSecret)
+	if err := copyFromSecret(ourPriv[:], ourPrivSecret); err != nil {
+		return nil, err
+	}
 	defer crypto.ZeroizeArray32(&ourPriv)
 	sharedSecret1, dhErr := kdf.CalculateSharedSecret(ephPubRaw, ourPriv)
 	if dhErr != nil {
@@ -402,7 +408,9 @@ func SealedSenderDecryptToUSMC(
 	salt2 := slices.Concat(chainKey1Copy, encryptedStaticWithMAC)
 
 	theirPubRaw := theirPubKey.PublicKey()
-	copyFromSecret(ourPriv[:], ourPrivSecret)
+	if err := copyFromSecret(ourPriv[:], ourPrivSecret); err != nil {
+		return nil, err
+	}
 	sharedSecret2, dhErr := kdf.CalculateSharedSecret(theirPubRaw, ourPriv)
 	if dhErr != nil {
 		return nil, dhErr

@@ -352,10 +352,14 @@ func (b *Builder) processV3(sessionRecord *record.Session,
 		// spqr keeps no reference to the key; it is copied out of the
 		// read-only view and the copy is wiped once the state is built.
 		var pqrBytes []byte
-		_ = derivedKeys.InitialPQRKey.WithBytes(func(b []byte) error {
+		if err := derivedKeys.InitialPQRKey.WithBytes(func(b []byte) error {
 			pqrBytes = append([]byte(nil), b...)
 			return nil
-		})
+		}); err != nil {
+			clear(pqrBytes)
+			derivedKeys.Zeroize()
+			return nil, nil, err
+		}
 		selfSession := bytes.Equal(
 			parameters.OurIdentityKeyPair().PublicKey().Serialize(),
 			parameters.TheirIdentityKey().PublicKey().Serialize(),
@@ -520,10 +524,14 @@ func (b *Builder) ProcessBundle(preKey *prekey.Bundle) error {
 		// spqr keeps no reference to the key; it is copied out of the
 		// read-only view and the copy is wiped once the state is built.
 		var pqrBytes []byte
-		_ = derivedKeys.InitialPQRKey.WithBytes(func(b []byte) error {
+		if err := derivedKeys.InitialPQRKey.WithBytes(func(b []byte) error {
 			pqrBytes = append([]byte(nil), b...)
 			return nil
-		})
+		}); err != nil {
+			clear(pqrBytes)
+			derivedKeys.Zeroize()
+			return err
+		}
 		selfSession := bytes.Equal(
 			parameters.OurIdentityKey().PublicKey().Serialize(),
 			parameters.TheirIdentityKey().PublicKey().Serialize(),
