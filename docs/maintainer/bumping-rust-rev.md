@@ -8,8 +8,8 @@ byte-level test depends on `RUST_REV`. Follow this checklist exactly. Do not ski
 steps; each gate protects the one after it.
 
 The value currently pinned is recorded in `/RUST_REV` (first line: SHA, second line: tag,
-followed by an explanatory comment). The canonical Rust upstream lives at
-`/mnt/vm-host-1/libsignal/` on the build host.
+followed by an explanatory comment). The canonical Rust upstream is
+https://github.com/signalapp/libsignal; `LIBSIGNAL_SRC` names your local checkout of it.
 
 ---
 
@@ -19,8 +19,14 @@ Before starting, confirm all of the following are true:
 
 - **Clean working tree.** No uncommitted changes outside this bump. Stash or commit everything
   else first.
-- **Local Rust libsignal checkout** at `/mnt/vm-host-1/libsignal/` (or adjust
-  `LIBSIGNAL_UPSTREAM` to wherever yours lives).
+- **Local Rust libsignal checkout** at `LIBSIGNAL_SRC`, defaulting to a sibling
+  `../libsignal` clone of the upstream repository (where `tests/interop/rust/Cargo.toml`
+  expects it). Run these from the go-libsignal root:
+
+  ```sh
+  export LIBSIGNAL_SRC="${LIBSIGNAL_SRC:-$(cd .. && pwd)/libsignal}"
+  [ -d "$LIBSIGNAL_SRC" ] || git clone https://github.com/signalapp/libsignal "$LIBSIGNAL_SRC"
+  ```
 - **Toolchain present:** `cargo`, `rustc`, `protoc`, and `protoc-gen-go` are on `PATH`.
 - **Target commit known.** You have a specific upstream SHA you want to pin to. Write it down
   before you begin:
@@ -30,9 +36,8 @@ Before starting, confirm all of the following are true:
   NEW_TAG=<paste tag, e.g. v0.93.0, or "unreleased" if none>
   ```
 
-- **`GOWORK=off` set** for every `go` command in this repo (the parent workspace at
-  `/mnt/vm-host-1/go.work` requires Go 1.26.3 but this repo pins 1.26.2; see
-  `memory/env_gowork_mismatch.md`).
+- **`GOWORK=off` set** for every `go` command in this repo (a parent `go.work` workspace above
+  your clone may require a different Go toolchain than the one this repo pins).
 
 ---
 
@@ -42,12 +47,10 @@ Check out the target commit in the Rust upstream and run the drift check against
 currently-committed fixtures. This tells you what actually changed before you touch anything.
 
 ```sh
-cd /mnt/vm-host-1/libsignal
-git checkout <new-sha>
+git -C "$LIBSIGNAL_SRC" checkout <new-sha>
 
-cd /mnt/vm-host-1/go-libsignal
-LIBSIGNAL_UPSTREAM=/mnt/vm-host-1/libsignal \
-  tests/interop/scripts/check_fixtures.sh
+# From go-libsignal root
+tests/interop/scripts/check_fixtures.sh
 ```
 
 Expected output: a drift report listing every fixture whose upstream source byte-hash no longer
@@ -86,8 +89,7 @@ regenerated:
 Re-run the drift check to confirm it is now clean:
 
 ```sh
-LIBSIGNAL_UPSTREAM=/mnt/vm-host-1/libsignal \
-  tests/interop/scripts/check_fixtures.sh
+tests/interop/scripts/check_fixtures.sh
 ```
 
 The output must be empty (no drift). Do not proceed to Step 3 until it is.
@@ -96,13 +98,14 @@ The output must be empty (no drift). Do not proceed to Step 3 until it is.
 
 ## Step 3 — Update RUST_REV
 
-Overwrite `/mnt/vm-host-1/go-libsignal/RUST_REV` with the new commit hash and tag, preserving
+Overwrite `RUST_REV` at the go-libsignal root with the new commit hash and tag, preserving
 the existing comment block format:
 
 ```
 <new-sha>
 <new-tag>
-# Upstream Rust libsignal pinned at /mnt/vm-host-1/libsignal
+# Upstream Rust libsignal (https://github.com/signalapp/libsignal) pinned at
+# this commit; point LIBSIGNAL_SRC at your local checkout of it.
 # This commit is the source of truth for every byte-wire format,
 # constant, DST, KDF info string, and serialization layout in this repo.
 # Bump only after regenerating tests/interop/ vectors and confirming
@@ -271,6 +274,4 @@ re-running any interop builds.
 | `tests/interop/fixtures/MANIFEST.toml` | Fixture registry; updated in Step 2 |
 | `CHANGELOG.md` | Release history; updated in Step 8 |
 | `CLAUDE.md` | Project-level AI context; `# Pinned upstream` line updated in Step 3 |
-| `memory/env_gowork_mismatch.md` | Explains why `GOWORK=off` is required |
-| `memory/wire_emitter_workflow.md` | Details on `make interop-wire-emit` internals |
 | `tests/interop/scripts/check_fixtures.sh` | Drift detection script used in Steps 1 and 2 |

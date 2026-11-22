@@ -423,8 +423,13 @@ lint-pin-selftest:
 test-interop:
 	GOWORK=off $(GOTEST) -race -v ./tests/interop/...
 
+# Path to a local checkout of upstream Rust libsignal
+# (https://github.com/signalapp/libsignal). LIBSIGNAL_UPSTREAM is the older
+# name and is still honoured.
+LIBSIGNAL_SRC ?= $(LIBSIGNAL_UPSTREAM)
+
 # Verify every fixture under tests/interop/fixtures/ matches its sha256 in
-# MANIFEST.toml. With LIBSIGNAL_UPSTREAM=/path/to/libsignal-checkout the
+# MANIFEST.toml. With LIBSIGNAL_SRC=/path/to/libsignal-checkout the
 # script additionally diffs each fixture against the upstream tree at the
 # commit pinned in /RUST_REV. CI sets LIBSIGNAL_UPSTREAM.
 interop-fixtures-check:
@@ -434,11 +439,11 @@ interop-fixtures-check:
 # This is the only sanctioned way to update fixture bytes; after running it,
 # regenerate the sha256 entries in MANIFEST.toml and bump /RUST_REV.
 interop-fixtures-refresh:
-	@if [ -z "$(LIBSIGNAL_UPSTREAM)" ]; then \
-		echo "LIBSIGNAL_UPSTREAM must point at a Rust libsignal checkout" >&2; \
+	@if [ -z "$(LIBSIGNAL_SRC)" ]; then \
+		echo "LIBSIGNAL_SRC must point at a Rust libsignal checkout" >&2; \
 		exit 2; \
 	fi
-	tests/interop/scripts/refresh_fixtures.sh "$(LIBSIGNAL_UPSTREAM)"
+	tests/interop/scripts/refresh_fixtures.sh "$(LIBSIGNAL_SRC)"
 
 # Phase 3b live interop targets: build and run the Rust CLI, then test with Go.
 interop-live-build:

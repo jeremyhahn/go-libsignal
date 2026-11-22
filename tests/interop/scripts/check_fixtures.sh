@@ -9,14 +9,19 @@
 #   1  a manifest hash check failed (drift between fixture bytes and manifest)
 #   2  a fixture is missing from disk
 #   3  upstream-bytes check failed (drift between fixture and upstream tree;
-#      run when LIBSIGNAL_UPSTREAM is set, otherwise skipped)
+#      run when LIBSIGNAL_SRC is set, otherwise skipped)
 #
 # Usage:
 #   tests/interop/scripts/check_fixtures.sh                 # manifest only
-#   LIBSIGNAL_UPSTREAM=/path/to/libsignal \
+#   LIBSIGNAL_SRC=/path/to/libsignal \
 #       tests/interop/scripts/check_fixtures.sh             # full check
+#
+# LIBSIGNAL_SRC is a local checkout of https://github.com/signalapp/libsignal.
+# LIBSIGNAL_UPSTREAM is the older name and is still honoured.
 
 set -euo pipefail
+
+LIBSIGNAL_UPSTREAM="${LIBSIGNAL_SRC:-${LIBSIGNAL_UPSTREAM:-}}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INTEROP_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -178,5 +183,5 @@ fi
 if [[ -n "${LIBSIGNAL_UPSTREAM:-}" ]]; then
     echo "OK ${checked} fixture(s) match manifest AND upstream rev ${RUST_REV}"
 else
-    echo "OK ${checked} fixture(s) match manifest (upstream check skipped; set LIBSIGNAL_UPSTREAM to enable)"
+    echo "OK ${checked} fixture(s) match manifest (upstream check skipped; set LIBSIGNAL_SRC to enable)"
 fi
