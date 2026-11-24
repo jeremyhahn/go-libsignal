@@ -3,7 +3,7 @@
 // implementation. These fixtures are used by interop tests to verify that the Go
 // port deserializes byte sequences byte-for-byte identically to the Rust source.
 //
-// Source file: /mnt/vm-host-1/libsignal/rust/zkgroup/tests/integration_tests.rs
+// Source file: libsignal rust/zkgroup/tests/integration_tests.rs
 package zkgroup
 
 import "encoding/hex"

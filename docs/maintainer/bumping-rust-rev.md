@@ -8,8 +8,8 @@ byte-level test depends on `RUST_REV`. Follow this checklist exactly. Do not ski
 steps; each gate protects the one after it.
 
 The value currently pinned is recorded in `/RUST_REV` (first line: SHA, second line: tag,
-followed by an explanatory comment). The canonical Rust upstream lives at
-`/mnt/vm-host-1/libsignal/` on the build host.
+followed by an explanatory comment). The canonical Rust upstream is a local checkout of
+`github.com/signalapp/libsignal`.
 
 ---
 
@@ -19,7 +19,7 @@ Before starting, confirm all of the following are true:
 
 - **Clean working tree.** No uncommitted changes outside this bump. Stash or commit everything
   else first.
-- **Local Rust libsignal checkout** at `/mnt/vm-host-1/libsignal/` (or adjust
+- **Local Rust libsignal checkout** at `../libsignal/` (or adjust
   `LIBSIGNAL_UPSTREAM` to wherever yours lives).
 - **Toolchain present:** `cargo`, `rustc`, `protoc`, and `protoc-gen-go` are on `PATH`.
 - **Target commit known.** You have a specific upstream SHA you want to pin to. Write it down
@@ -30,9 +30,8 @@ Before starting, confirm all of the following are true:
   NEW_TAG=<paste tag, e.g. v0.93.0, or "unreleased" if none>
   ```
 
-- **`GOWORK=off` set** for every `go` command in this repo (the parent workspace at
-  `/mnt/vm-host-1/go.work` requires Go 1.26.3 but this repo pins 1.26.2; see
-  `memory/env_gowork_mismatch.md`).
+- **`GOWORK=off` set** for every `go` command in this repo (a parent `go.work` workspace
+  may pin a different toolchain).
 
 ---
 
@@ -42,11 +41,11 @@ Check out the target commit in the Rust upstream and run the drift check against
 currently-committed fixtures. This tells you what actually changed before you touch anything.
 
 ```sh
-cd /mnt/vm-host-1/libsignal
+cd ../libsignal
 git checkout <new-sha>
 
-cd /mnt/vm-host-1/go-libsignal
-LIBSIGNAL_UPSTREAM=/mnt/vm-host-1/libsignal \
+cd ../go-libsignal
+LIBSIGNAL_UPSTREAM=../libsignal \
   tests/interop/scripts/check_fixtures.sh
 ```
 
@@ -86,7 +85,7 @@ regenerated:
 Re-run the drift check to confirm it is now clean:
 
 ```sh
-LIBSIGNAL_UPSTREAM=/mnt/vm-host-1/libsignal \
+LIBSIGNAL_UPSTREAM=../libsignal \
   tests/interop/scripts/check_fixtures.sh
 ```
 
@@ -96,13 +95,13 @@ The output must be empty (no drift). Do not proceed to Step 3 until it is.
 
 ## Step 3 — Update RUST_REV
 
-Overwrite `/mnt/vm-host-1/go-libsignal/RUST_REV` with the new commit hash and tag, preserving
+Overwrite `RUST_REV` with the new commit hash and tag, preserving
 the existing comment block format:
 
 ```
 <new-sha>
 <new-tag>
-# Upstream Rust libsignal pinned at /mnt/vm-host-1/libsignal
+# Upstream Rust libsignal (github.com/signalapp/libsignal) pin.
 # This commit is the source of truth for every byte-wire format,
 # constant, DST, KDF info string, and serialization layout in this repo.
 # Bump only after regenerating tests/interop/ vectors and confirming
