@@ -1,4 +1,23 @@
-// Package incremental_mlkem768 implements libcrux ML-KEM-768 incremental encapsulation (Encaps1/Encaps2) in pure Go per FIPS 203, wire-compatible with Rust spqr.
+// Package incremental_mlkem768 implements the libcrux ML-KEM-768 incremental
+// encapsulation API in pure Go.
+//
+// This is a port of the libcrux-ml-kem crate's `incremental` feature
+// (libcrux-ml-kem v0.0.8, src/ind_cca/incremental.rs) targeting the
+// sparsepostquantumratchet v1.5.1 crate's incremental_mlkem768.rs API.
+//
+// Rust upstream paths:
+//   - libcrux-ml-kem/src/ind_cca/incremental.rs
+//   - libcrux-ml-kem/src/ind_cca/incremental/types.rs
+//   - libcrux-ml-kem/src/mlkem768.rs (impl_incr_key_size macro instantiations)
+//   - sparsepostquantumratchet/src/incremental_mlkem768.rs
+//
+// The Go stdlib crypto/mlkem does not expose a split encaps1/encaps2 API.
+// This package re-implements the ML-KEM-768 K-PKE layer in pure Go following
+// NIST FIPS 203, which is required to produce a wire-compatible 2080-byte
+// EncapsulationState that Rust's spqr crate can deserialize.
+//
+// KeyGen, Encaps1, Encaps2, and Decaps (in mlkem768.go) are fully implemented,
+// along with the underlying field arithmetic, NTT, sampling, and encoding.
 package incremental_mlkem768
 
 import (
@@ -45,7 +64,19 @@ const (
 	// SharedSecretSize is the size of the shared secret.
 	SharedSecretSize = 32
 
-	// EncapsStateSize is 1536 (r_as_ntt) + 512 (error2) + 32 (randomness) = 2080, coefficients stored as raw LE i16.
+	// EncapsStateSize is the serialized size of EncapsState:
+	//   r_as_ntt: k polynomials × encodingSize12 = 1152 bytes
+	//   error2:   1 polynomial  × encodingSize12 = 384 bytes (stored as i16 LE)
+	//   randomness: 32 bytes
+	// Total: 1152 + 384 + 32 = 1568... wait, libcrux uses LE i16 for NTT elements.
+	//
+	// Per libcrux types.rs EncapsState::num_bytes():
+	//   vec_len_bytes::<K, Vector>() = K * BITS_PER_RING_ELEMENT / 8 = 3 * 256 * 2 = 1536
+	//   PolynomialRingElement::num_bytes()                             = 256 * 2     = 512
+	//   randomness: 32
+	// Total: 1536 + 512 + 32 = 2080.
+	//
+	// NB: libcrux stores NTT coefficients as raw i16 little-endian (not ByteEncode12).
 	EncapsStateSize = k*n*2 + n*2 + 32 // 2080
 )
 

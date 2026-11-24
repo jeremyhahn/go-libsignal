@@ -6,7 +6,10 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/kem"
 )
 
-// ErrKyberPreKeyTypeMismatch is returned when a KyberPreKeyStructure's public and secret key types differ.
+// ErrKyberPreKeyTypeMismatch is returned when the serialized public-key type
+// tag in a KyberPreKeyStructure does not match the type tag of the secret key.
+// This prevents silently loading a key pair where the public and secret key
+// were generated with different KEM algorithms.
 type ErrKyberPreKeyTypeMismatch struct {
 	PublicKeyType kem.KeyType
 	SecretKeyType kem.KeyType

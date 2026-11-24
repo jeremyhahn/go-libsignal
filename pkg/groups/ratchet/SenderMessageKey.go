@@ -67,7 +67,15 @@ func NewSenderMessageKey(iteration uint32, seed []byte) (*SenderMessageKey, erro
 	}, nil
 }
 
-// NewSenderMessageKeyFromStruct clones each present field guarded-to-guarded, leaving the structure intact; partial clones are released on failure.
+// NewSenderMessageKeyFromStruct will return a new message key object from the
+// given serializeable structure. Each field present is cloned from the
+// structure's guarded memory straight into the key's own, so the material never
+// lands on the Go heap and the source structure is left intact for its owner to
+// Zeroize.
+//
+// All three fields are optional: a stored key may carry only its seed, with the
+// IV and cipher key re-derived later. An absent field stays absent. If a later
+// clone fails, the ones already made are released before returning.
 func NewSenderMessageKeyFromStruct(structure *SenderMessageKeyStructure) (_ *SenderMessageKey, err error) {
 	if structure == nil {
 		return nil, &MissingKeyError{Field: "structure"}
@@ -102,7 +110,11 @@ func cloneOptional(field *secret.Secret) (*secret.Secret, error) {
 	return field.Clone()
 }
 
-// NewStructFromSenderMessageKey clones the keys guarded-to-guarded into a structure the caller must Zeroize.
+// NewStructFromSenderMessageKey returns a serializeable structure of message
+// keys. Each field present is cloned guarded-to-guarded, so serialization no
+// longer stages message key material on the heap. Callers must Zeroize the
+// returned structure once the serializer has consumed it; on failure everything
+// cloned so far is released before returning.
 func NewStructFromSenderMessageKey(key *SenderMessageKey) (_ *SenderMessageKeyStructure, err error) {
 	structure := &SenderMessageKeyStructure{Iteration: key.iteration}
 	defer func() {
@@ -135,7 +147,10 @@ func cloneLiveOptional(live *secret.Secret) (secret.Secret, error) {
 	return secret.FromSecret(cloned), nil
 }
 
-// SenderMessageKeyStructure is the serializable form of a SenderMessageKey, held in guarded memory.
+// SenderMessageKeyStructure is a serializeable structure of SenderMessageKeys.
+// Every field is held in guarded memory: these structures cross the storage
+// boundary, and an IV, cipher key or seed on the plain heap can be swapped out
+// or captured in a core dump, which zeroizing it afterwards does not undo.
 type SenderMessageKeyStructure struct {
 	Iteration uint32
 	IV        secret.Secret

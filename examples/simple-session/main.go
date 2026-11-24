@@ -1,4 +1,14 @@
-// Package main exchanges one X3DH and Double Ratchet message from Alice to Bob; run with GOWORK=off go run ./examples/simple-session/.
+// Package main demonstrates a minimal Alice-to-Bob single-message exchange
+// using the Signal Protocol X3DH key agreement and Double Ratchet encryption.
+//
+// Flow:
+//  1. Generate identity key pairs and pre-key bundles for Alice and Bob.
+//  2. Alice builds a session by processing Bob's pre-key bundle (X3DH).
+//  3. Alice encrypts "Hello, Bob!" producing a PreKeySignalMessage.
+//  4. Bob processes the PreKeySignalMessage to establish his side of the session.
+//  5. Bob decrypts and recovers the plaintext.
+//
+// Run: GOWORK=off go run ./examples/simple-session/
 package main
 
 import (

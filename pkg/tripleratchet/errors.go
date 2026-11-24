@@ -1,4 +1,8 @@
-// Package tripleratchet implements the Triple Ratchet, combining the Double Ratchet, the ML-KEM Braid and SPQR chain keys (rust/protocol/src/triple_ratchet.rs).
+// Package tripleratchet implements the Triple Ratchet: a hybrid EC + PQ
+// encrypt/decrypt interface combining the Double Ratchet (via ECCipher) and
+// the ML-KEM Braid SCKA (via mlkembraid) with SPQR chain key derivation.
+//
+// Rust source: rust/protocol/src/triple_ratchet.rs
 package tripleratchet
 
 import "fmt"

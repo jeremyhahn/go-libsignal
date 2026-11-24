@@ -2,7 +2,10 @@ package keyops
 
 import "github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 
-// Decapsulator abstracts KEM secret key operations (Kyber-1024) over software or hardware-held keys.
+// Decapsulator abstracts KEM secret key operations, typically backed by
+// Kyber-1024 in the Signal protocol. Software implementations hold the
+// secret key in locked memory. Hardware implementations
+// delegate decapsulation to the secure element.
 type Decapsulator interface {
 	// Decapsulate recovers the shared secret from the given ciphertext
 	// using the secret key. Returns the shared secret in a guarded Secret32.

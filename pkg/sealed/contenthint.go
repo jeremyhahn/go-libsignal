@@ -3,7 +3,14 @@
 // to the server.
 package sealed
 
-// ContentHint tells the recipient how to handle content errors; unknown raw values are kept (Rust ContentHint).
+// ContentHint indicates how the recipient should handle errors when
+// processing the sealed sender message content.
+//
+// Mirrors Rust libsignal's ContentHint at
+// rust/protocol/src/sealed_sender.rs. The Unknown variant carries any
+// raw u32 value that does not map to a known proto enum, preserving
+// forward-compatibility: callers can inspect the raw value and gate
+// behaviour on it without discarding the hint.
 type ContentHint uint32
 
 const (
@@ -20,7 +27,12 @@ const (
 	ContentHintImplicit ContentHint = 2
 )
 
-// ContentHintFromRaw converts a wire value to a ContentHint, keeping unknown values (Rust From<u32>).
+// ContentHintFromRaw converts a raw uint32 wire value to a ContentHint.
+// Known values map to their named constants; any other value is returned
+// as-is (matching Rust's ContentHint::Unknown(u32) forward-compat branch).
+//
+// Mirrors Rust libsignal's From<u32> for ContentHint at
+// rust/protocol/src/sealed_sender.rs.
 func ContentHintFromRaw(raw uint32) ContentHint {
 	return ContentHint(raw)
 }

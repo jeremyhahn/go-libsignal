@@ -14,7 +14,8 @@ const (
 	authKeySize = 32
 )
 
-// Authenticator is the SCKA ratcheted MAC authenticator: a root_key deriving mac_keys via KDF_AUTH (spec §2.4).
+// Authenticator provides a ratcheted MAC-based authenticator for the SCKA protocol.
+// Per spec Section 2.4, it maintains a root_key and derives mac_keys via KDF_AUTH.
 type Authenticator struct {
 	rootKey *secret.Secret
 	macKey  *secret.Secret
@@ -203,7 +204,8 @@ func (a *Authenticator) macWith(label []byte, epoch uint64, data []byte) ([]byte
 	return mac, nil
 }
 
-// KDFOK implements KDF_OK (spec §2.2): HKDF(zeros, shared_secret, PROTOCOL_INFO+":SCKA Key"+epoch, 32).
+// KDFOK implements KDF_OK per spec Section 2.2:
+// HKDF(salt=zeros(32), ikm=shared_secret, info=PROTOCOL_INFO+":SCKA Key"+ToBytes(epoch), length=32)
 func KDFOK(sharedSecret []byte, epoch uint64) ([]byte, error) {
 	salt := make([]byte, 32)
 	info := buildInfo(ProtocolInfo+":SCKA Key", epoch)

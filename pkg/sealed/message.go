@@ -17,7 +17,8 @@ type UnidentifiedSenderMessageContent struct {
 	groupID     []byte
 }
 
-// NewUnidentifiedSenderMessageContent creates and serializes a USMC.
+// NewUnidentifiedSenderMessageContent creates a new USMC and serializes
+// it to protobuf.
 func NewUnidentifiedSenderMessageContent(
 	msgType uint32,
 	sender *SenderCertificate,
@@ -59,7 +60,8 @@ func NewUnidentifiedSenderMessageContent(
 	}, nil
 }
 
-// DeserializeUnidentifiedSenderMessageContent parses a USMC from protobuf bytes.
+// DeserializeUnidentifiedSenderMessageContent reconstructs a USMC from
+// protobuf-encoded bytes.
 func DeserializeUnidentifiedSenderMessageContent(data []byte) (*UnidentifiedSenderMessageContent, error) {
 	pbMsg := &sealedpb.UnidentifiedSenderMessage_Message{}
 	if err := proto.Unmarshal(data, pbMsg); err != nil {

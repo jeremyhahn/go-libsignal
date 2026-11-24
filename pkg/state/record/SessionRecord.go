@@ -45,7 +45,13 @@ func NewSession(serializer SessionSerializer, stateSerializer StateSerializer) *
 	return &record
 }
 
-// NewSessionFromStructure returns a Session from structure; on failure it releases every state it built.
+// NewSessionFromStructure will return a new Signal Session from the given
+// session structure and serializer.
+//
+// Each state decoded here moves key material into guarded memory. A record
+// whose later states are malformed would otherwise strand the buffers of the
+// earlier, well formed ones, so a failed call releases every state it managed
+// to build.
 func NewSessionFromStructure(structure *SessionStructure, serializer SessionSerializer,
 	stateSerializer StateSerializer) (*Session, error) {
 
@@ -140,7 +146,10 @@ func (r *Session) IsFresh() bool {
 	return r.fresh
 }
 
-// MarkEstablished marks the record not fresh, so later sessions archive the current state.
+// MarkEstablished marks this session record as no longer fresh, indicating
+// that a session state has been established on it. This must be called after
+// the first session setup so that subsequent sessions on the same record
+// correctly archive the current state before replacing it.
 func (r *Session) MarkEstablished() {
 	r.fresh = false
 }
@@ -157,7 +166,12 @@ func (r *Session) PreviousSessionStates() []*State {
 	return r.previousStates
 }
 
-// HasSessionState reports whether a state with version and base key exists, promoting it to current (Rust promote_matching_session); keys compare in constant time.
+// HasSessionState checks this record for a session state matching the given
+// version and sender base key, and promotes it to the current session if found
+// in the previous states. This matches Rust's promote_matching_session which
+// ensures the matching session is always the current session after the call.
+// Uses constant-time comparison for base key matching to prevent timing side
+// channels.
 func (r *Session) HasSessionState(version int, senderBaseKey []byte) bool {
 	// Check the current session state: version must match AND base key
 	// must match (constant-time).
@@ -183,14 +197,21 @@ func (r *Session) HasSessionState(version int, senderBaseKey []byte) bool {
 	return false
 }
 
-// ArchiveCurrentState moves the current state, minus its pending prekey, to previous states and starts a fresh one (Rust archive_current_state_inner).
+// ArchiveCurrentState moves the current session state into the list
+// of "previous" session states, and replaces the current session state
+// with a fresh reset instance. Matches Rust archive_current_state_inner:
+// the pending pre-key state is cleared from the archived state to prevent
+// stale pre-key info from leaking into previous sessions.
 func (r *Session) ArchiveCurrentState() {
 	// DR-W1: PromoteState handles clearing the pending pre-key state
 	// before archiving, matching Rust's archive_current_state_inner.
 	r.PromoteState(NewState(r.sessionState.serializer))
 }
 
-// PromoteState makes promoteState current and archives the old current state without its pending prekey.
+// PromoteState takes the given session state and replaces it with the
+// current state, pushing the previous current state to "previousStates".
+// The current state's pending pre-key is cleared before archiving, matching
+// Rust's archive_current_state_inner behavior.
 func (r *Session) PromoteState(promotedState *State) {
 	// DR-W1: Clear pending pre-key state before archiving the current state.
 	r.sessionState.ClearUnackPreKeyMessage()

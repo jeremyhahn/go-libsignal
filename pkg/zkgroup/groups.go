@@ -95,7 +95,8 @@ func (g *GroupSecretParams) GetPublicParams() *GroupPublicParams {
 	}
 }
 
-// Zeroize overwrites the secret key material; defer it.
+// Zeroize overwrites all secret key material in GroupSecretParams with zeros.
+// Call this (via defer) when the params are no longer needed.
 func (g *GroupSecretParams) Zeroize() {
 	crypto.Zeroize(g.MasterKey.Bytes[:])
 	crypto.Zeroize(g.BlobKey[:])
@@ -105,7 +106,11 @@ func (g *GroupSecretParams) Zeroize() {
 // encrypted blobs (4 bytes, big-endian u32).
 const encryptedBlobPaddingLenSize = 4
 
-// EncryptBlob encrypts plaintext with AES-256-GCM-SIV under the blob key as ciphertext || tag || nonce(12) || 0x00.
+// EncryptBlob encrypts plaintext using the group's blob key with AES-256-GCM-SIV.
+// The nonce is derived from randomness via SHO, and the output format is:
+// ciphertext || tag || nonce (12 bytes) || reserved byte (0x00).
+//
+// This matches Rust GroupSecretParams::encrypt_blob.
 func (g *GroupSecretParams) EncryptBlob(randomness [32]byte, plaintext []byte) ([]byte, error) {
 	sho := zkcredential.NewShoHmacSha256Ext(
 		"Signal_ZKGroup_20200424_Random_GroupSecretParams_EncryptBlob",
@@ -126,7 +131,11 @@ func (g *GroupSecretParams) EncryptBlob(randomness [32]byte, plaintext []byte) (
 	return out, nil
 }
 
-// EncryptBlobWithPadding encrypts a 4-byte big-endian paddingLen, plaintext and paddingLen zero bytes.
+// EncryptBlobWithPadding encrypts plaintext with zero-padding using the group's
+// blob key. The plaintext is prefixed with a 4-byte big-endian padding length,
+// then zero-padded to (4 + len(plaintext) + paddingLen) bytes before encryption.
+//
+// This matches Rust GroupSecretParams::encrypt_blob_with_padding.
 func (g *GroupSecretParams) EncryptBlobWithPadding(randomness [32]byte, plaintext []byte, paddingLen int) ([]byte, error) {
 	if paddingLen < 0 {
 		return nil, &ZkGroupVerificationFailure{Context: "blob encrypt: negative padding length"}
@@ -141,7 +150,10 @@ func (g *GroupSecretParams) EncryptBlobWithPadding(randomness [32]byte, plaintex
 	return g.EncryptBlob(randomness, padded)
 }
 
-// DecryptBlob decrypts EncryptBlob output.
+// DecryptBlob decrypts ciphertext encrypted with EncryptBlob.
+// The input format is: ciphertext || tag || nonce (12 bytes) || reserved byte.
+//
+// This matches Rust GroupSecretParams::decrypt_blob.
 func (g *GroupSecretParams) DecryptBlob(ciphertext []byte) ([]byte, error) {
 	// Minimum: AES-GCM nonce (12) + reserved byte (1)
 	minLen := AESGCMNonceLen + 1
@@ -169,7 +181,12 @@ func (g *GroupSecretParams) DecryptBlob(ciphertext []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-// DecryptBlobWithPadding decrypts EncryptBlobWithPadding output and strips the padding.
+// DecryptBlobWithPadding decrypts ciphertext and strips the padding that was
+// added by EncryptBlobWithPadding. The first 4 bytes of the decrypted plaintext
+// are a big-endian u32 indicating the padding length, which is stripped along
+// with the trailing zero-padding bytes.
+//
+// This matches Rust GroupSecretParams::decrypt_blob_with_padding.
 func (g *GroupSecretParams) DecryptBlobWithPadding(ciphertext []byte) ([]byte, error) {
 	decrypted, err := g.DecryptBlob(ciphertext)
 	if err != nil {
@@ -199,7 +216,15 @@ func (g *GroupSecretParams) EncryptServiceID(sid ServiceID) *UUIDCiphertext {
 	return &UUIDCiphertext{Ciphertext: ct}
 }
 
-// DecryptServiceID decrypts a UUIDCiphertext, Lizard-decoding M2 and matching M1 to tell ACI from PNI.
+// DecryptServiceID decrypts a UUIDCiphertext back to a ServiceID.
+//
+// The ciphertext is decrypted using the group's UID encryption key pair:
+//  1. Decrypt to recover M2 via DecryptToSecondPoint
+//  2. LizardDecode M2 to recover the raw UUID bytes
+//  3. Compute M1 for both ACI and PNI candidates
+//  4. Compare decrypted M1 against both to determine the ServiceID type
+//
+// This matches Rust UidEncryptionDomain::decrypt.
 func (g *GroupSecretParams) DecryptServiceID(ct *UUIDCiphertext) (ServiceID, error) {
 	m2, err := g.UIDEncKeyPair.DecryptToSecondPoint(ct.Ciphertext)
 	if err != nil {
@@ -265,7 +290,14 @@ func (g *GroupSecretParams) EncryptProfileKeyBytes(
 	return &ProfileKeyCiphertext{Ciphertext: ct}
 }
 
-// DecryptProfileKey decrypts a ProfileKeyCiphertext by trying each Decode253Bits candidate with the 8 cleared-bit combinations until M3 matches.
+// DecryptProfileKey decrypts a ProfileKeyCiphertext back to a ProfileKey.
+//
+// The algorithm matches Rust ProfileKeyEncryptionDomain::decrypt:
+//  1. Decrypt to recover M4 via DecryptToSecondPoint
+//  2. Use Decode253Bits on M4 to get up to 8 candidate 32-byte field elements
+//  3. For each valid candidate, try all 8 combinations of the 3 cleared bits
+//  4. Compute M3 for each and compare against the decrypted M1 (target_M3)
+//  5. Return the matching profile key
 func (g *GroupSecretParams) DecryptProfileKey(
 	ct *ProfileKeyCiphertext,
 	userID ServiceID,

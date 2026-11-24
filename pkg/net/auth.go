@@ -12,7 +12,12 @@ import (
 	"time"
 )
 
-// Auth is a Signal service username (hex uid) and password (timestamp:hex otp).
+// Auth represents a username/password combination for Signal service
+// authentication.
+//
+// When returned by the chat server's /auth endpoints:
+//   - username is "hex(uid)"
+//   - password is "timestamp:hex(otp(uid, timestamp, secret))"
 type Auth struct {
 	Username string
 	Password string

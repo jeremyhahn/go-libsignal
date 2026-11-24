@@ -44,7 +44,11 @@ func (d *DjbECPublicKey) Type() int {
 	return DjbType
 }
 
-// Equal compares the 32 key bytes in constant time, as Rust libsignal PublicKey (rust/core/src/curve.rs).
+// Equal reports whether this public key equals other using a constant-time
+// byte comparison.  Mirrors the subtle::ConstantTimeEq / PartialEq
+// implementation on Rust libsignal's PublicKey (rust/core/src/curve.rs:201-218).
+// The type byte is not compared separately; only the 32 key bytes are compared
+// because two DjbECPublicKey values with the same 32-byte payload are identical.
 func (d *DjbECPublicKey) Equal(other *DjbECPublicKey) bool {
 	if other == nil {
 		return false
@@ -52,7 +56,10 @@ func (d *DjbECPublicKey) Equal(other *DjbECPublicKey) bool {
 	return subtle.ConstantTimeCompare(d.publicKey[:], other.publicKey[:]) == 1
 }
 
-// IsCanonical reports whether the key is torsion-free with sign 0 and encoded below 2^255 - 19, as Rust PublicKey::is_canonical.
+// IsCanonical returns true if the Curve25519 public key is canonical:
+// the Montgomery point can be converted to an Edwards point that is torsion-free,
+// and the scalar encoding is in the reduced range [0, p) where p = 2^255 - 19.
+// This matches the Rust libsignal PublicKey::is_canonical() implementation.
 func (d *DjbECPublicKey) IsCanonical() bool {
 	return d.isTorsionFree() && d.scalarIsInRange()
 }

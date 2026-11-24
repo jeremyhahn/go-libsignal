@@ -16,7 +16,15 @@ const (
 	PubKeySize = 32
 )
 
-// HSMClientConnectionEstablishment wraps a handshake to an HSM enclave: send InitialRequest, then Complete with the response.
+// HSMClientConnectionEstablishment wraps a connection handshake to an HSM-resident enclave.
+//
+// Usage:
+//
+//	establishment, err := NewHSMClientConnectionEstablishment(trustedPubKey, trustedCodeHashes)
+//	// open websocket
+//	websocket.Send(establishment.InitialRequest())
+//	initialResponse := websocket.Recv()
+//	conn, err := establishment.Complete(initialResponse)
 type HSMClientConnectionEstablishment struct {
 	hs                *noise.HandshakeState
 	initialMessage    []byte

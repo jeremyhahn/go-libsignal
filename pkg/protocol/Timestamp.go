@@ -2,7 +2,17 @@ package protocol
 
 import "time"
 
-// Timestamp is milliseconds since the Unix epoch, as Rust timestamp.rs and the DecryptionErrorMessage and certificate expiry fields.
+// Timestamp is a millisecond-precision Unix epoch timestamp. It wraps a uint64
+// and provides helpers for converting to and from Go's time.Time.
+//
+// Rust libsignal defines an equivalent newtype at rust/protocol/src/timestamp.rs
+// with from_epoch_millis / epoch_millis / add_millis / sub_millis and a
+// From<Timestamp> for SystemTime conversion. This Go type mirrors those semantics.
+//
+// Wire encoding: uint64 milliseconds since 1970-01-01T00:00:00Z (UTC).
+// This matches the DecryptionErrorMessage.timestamp field
+// (rust/protocol/src/protocol.rs:904-905) and all sealed-sender certificate
+// expiry fields.
 type Timestamp uint64
 
 // TimestampFromEpochMillis creates a Timestamp from raw milliseconds since

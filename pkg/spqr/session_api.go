@@ -1,4 +1,26 @@
-// Package spqr implements the Sparse Post-Quantum Ratchet: chain-only Send and Recv on serialized state, and SendBraid and RecvBraid with ML-KEM Braid SCKA.
+// Package spqr implements the Sparse Post-Quantum Ratchet (SPQR) protocol.
+//
+// # session_api.go: Chain + SCKA API
+//
+// This file provides two layers of API:
+//
+// ## Stateless Chain-Only API (legacy)
+//
+// The package-level functions Send() and Recv() operate on serialized SPQR state
+// bytes. They derive per-message PQ keys from the current epoch's chain key and
+// counter but do NOT perform epoch advancement.
+//
+// ## Braid-Integrated API
+//
+// The methods SendBraid() and RecvBraid() on the SPQR struct bundle chain key
+// derivation with ML-KEM Braid SCKA. On each call they:
+//  1. Derive the per-message key from the chain
+//  2. Call the braid to get an outbound chunk (or process an inbound chunk)
+//  3. If the braid produces an OutputKey, advance the epoch via KdfSckaRK
+//  4. Build a variable-length wire message with chain info + SCKA chunk
+//
+// This matches the Rust reference where a single spqr crate bundles both
+// chain key management and SCKA state machine.
 package spqr
 
 import (
@@ -23,7 +45,20 @@ func (e *ErrPQRMessage) Error() string {
 	return fmt.Sprintf("spqr: invalid PQR message: %s", e.Reason)
 }
 
-// InitialState returns a serialized SPQR state pending negotiation, with MinVersion V1 (Rust ratchet.rs:88); selfSession sets maxJump to math.MaxUint32.
+// InitialState creates and serializes a new SPQR state from initial parameters.
+// When selfSession is true, the max forward jump limit is set to math.MaxUint32
+// to match the Rust reference behavior for sessions where local and remote
+// identity keys are identical. Otherwise the default maxJump (25000) is used.
+//
+// This function creates a state with version negotiation pending. The chain is
+// NOT initialized immediately; instead, it defers chain creation until the first
+// Recv() call resolves the version negotiation. During the pending state, Send()
+// returns empty PQR messages and nil message keys.
+//
+// MinVersion is set to VersionV1, matching the Rust libsignal policy of
+// "Require that all clients speak SPQR" (ratchet.rs:88, 152). Pass
+// InitialStateWithParams with MinVersion: VersionV0 only when V0 downgrade is
+// explicitly required after a security audit.
 func InitialState(sharedSecret []byte, direction Direction, selfSession bool) (serializedState []byte, err error) {
 	maxJumpLimit := uint32(maxJump)
 	if selfSession {
@@ -40,7 +75,9 @@ func InitialState(sharedSecret []byte, direction Direction, selfSession bool) (s
 	})
 }
 
-// InitialStateWithParams returns a serialized SPQR state with the given negotiation parameters, resolved on the first Recv.
+// InitialStateWithParams creates and serializes a new SPQR state with explicit
+// version negotiation parameters. The chain is not initialized immediately;
+// negotiation is deferred until the first Recv() call.
 func InitialStateWithParams(params Params) (serializedState []byte, err error) {
 	if len(params.AuthKey) == 0 {
 		return nil, &ErrInvalidInput{
@@ -80,7 +117,16 @@ func InitialStateWithParams(params Params) (serializedState []byte, err error) {
 	return s.Serialize()
 }
 
-// InitialStateWithBraid returns a serialized SPQR state with braid attached for SCKA epoch advancement.
+// InitialStateWithBraid creates and serializes a new SPQR state with an
+// attached ML-KEM Braid for SCKA-integrated epoch advancement. The braid state
+// is serialized alongside the chain state in V4 format, so that subsequent
+// Send()/Recv() calls transparently handle both chain keys and SCKA.
+//
+// Parameters:
+//   - sharedSecret: initial shared secret for chain key derivation
+//   - direction: A2B or B2A, determines send/recv key assignment
+//   - selfSession: if true, sets maxJump to math.MaxUint32
+//   - braid: initialized ML-KEM Braid instance (Alice or Bob)
 func InitialStateWithBraid(sharedSecret []byte, direction Direction, selfSession bool, braid *mlkembraid.Braid) ([]byte, error) {
 	if braid == nil {
 		return nil, &ErrInvalidInput{
@@ -121,7 +167,10 @@ func InitialStateWithBraid(sharedSecret []byte, direction Direction, selfSession
 	return s.Serialize()
 }
 
-// InitialStateWithBraidResolved returns a serialized V1 SPQR state with braid and an initialized chain.
+// InitialStateWithBraidResolved creates and serializes a pre-resolved V1 SPQR
+// state with an attached ML-KEM Braid. Unlike InitialStateWithBraid, this
+// immediately initializes the chain (no version negotiation), suitable for
+// cases where PQR support is known a priori.
 func InitialStateWithBraidResolved(sharedSecret []byte, direction Direction, selfSession bool, braid *mlkembraid.Braid) ([]byte, error) {
 	if braid == nil {
 		return nil, &ErrInvalidInput{
@@ -189,7 +238,23 @@ func (s *SPQR) resolveNegotiation(pqrData []byte) error {
 	return nil
 }
 
-// Send returns the new state, the SCKA wire message and the message key (HKDF salt); while pending or at V0 the message is empty and the key nil.
+// Send derives the next PQR message key for encryption and returns the
+// updated serialized state, the PQR message bytes, and the message key to use
+// as HKDF salt.
+//
+// Both the braid-integrated and chain-only paths produce a Rust-compatible SCKA
+// variable-length wire format: version(0x01) + varint(epoch) + varint(counter)
+// + msgType(1) + [chunk_data]. The epoch in wire messages is 1-indexed (SCKA
+// convention); chainToSckaEpoch handles the 0→1 offset for the chain-only path.
+//
+// During version negotiation (pending state), Send returns an empty PQR message
+// ([]byte{}) and nil message key. The caller should include the empty PQR
+// message on the wire so the remote peer can detect PQR support.
+//
+// After negotiation resolves to V0 (disabled), Send returns an empty PQR message
+// and nil message key for all subsequent calls.
+//
+// After negotiation resolves to V1, Send derives keys normally.
 func Send(serializedState []byte) (newState []byte, pqrMsg []byte, messageKey MessageKey, err error) {
 	s, err := Deserialize(serializedState)
 	if err != nil {
@@ -258,7 +323,8 @@ func Send(serializedState []byte) (newState []byte, pqrMsg []byte, messageKey Me
 	return newState, pqrMsg, messageKey, nil
 }
 
-// ErrNoBraid is returned by braid operations on an SPQR without a braid.
+// ErrNoBraid is returned when a braid-integrated operation is called on
+// an SPQR instance that has no attached braid.
 type ErrNoBraid struct{}
 
 func (e *ErrNoBraid) Error() string {
@@ -304,7 +370,17 @@ func (e *ErrEpochAdvance) Unwrap() error {
 	return e.Err
 }
 
-// SendBraid gets the braid's chunk, advances the epoch on an output key, derives the message key and returns the SCKA message and key, as Rust orders it.
+// SendBraid derives the next PQR message key for encryption with braid
+// integration. Following the Rust reference ordering, it:
+//  1. Calls the braid to produce an outbound SCKA chunk
+//  2. If the braid produces an OutputKey, advances to a new epoch FIRST
+//  3. Derives the per-message key from the (potentially new) epoch's send chain
+//  4. Builds a variable-length wire message using the braid's SerializeSCKA
+//     format: version(1) + varint(braidEpoch) + varint(chainCounter) +
+//     msg_type(1) + [chunk_data]
+//
+// Returns the wire message bytes and the message key to use as HKDF salt.
+// The caller must hold the SPQR instance in memory across calls.
 func (s *SPQR) SendBraid() (pqrMsg []byte, messageKey MessageKey, err error) {
 	if s.braid == nil {
 		return nil, nil, &ErrNoBraid{}
@@ -364,7 +440,24 @@ func (s *SPQR) SendBraid() (pqrMsg []byte, messageKey MessageKey, err error) {
 	return pqrMsg, messageKey, nil
 }
 
-// RecvBraid parses the SCKA message, feeds the braid first, advances on an output key and derives the key for chain epoch braid epoch - 1; epoch 0 counter 0 and 12-byte legacy messages yield no key.
+// RecvBraid processes a received PQR message with braid integration. Following
+// the Rust reference ordering, it:
+//  1. Parses the variable-length wire message using DeserializeSCKA to extract
+//     the braid message and chain counter
+//  2. Feeds the braid message to the braid's Receive method FIRST
+//  3. If the braid produces an OutputKey, advances to a new epoch
+//  4. Derives the per-message key using the braid epoch mapping:
+//     chain_epoch = braidMsg.Epoch - 1 (braid epochs are 1-indexed)
+//
+// Special case: when chain_epoch == 0 and chainCounter == 0, returns nil
+// message key (no chain derivation). This represents the initial state before
+// any chain key advancement has occurred.
+//
+// For backward compatibility, 12-byte legacy messages are parsed as
+// epoch(8 BE) + counter(4 BE) with no SCKA data.
+//
+// Returns the message key to use as HKDF salt for decryption.
+// The caller must hold the SPQR instance in memory across calls.
 func (s *SPQR) RecvBraid(pqrMsg []byte) (messageKey MessageKey, err error) {
 	if s.braid == nil {
 		return nil, &ErrNoBraid{}
@@ -431,7 +524,21 @@ func (s *SPQR) RecvBraid(pqrMsg []byte) (messageKey MessageKey, err error) {
 	return messageKey, nil
 }
 
-// Recv returns the new state and message key for an SCKA message; while pending an empty message resolves V0 and a non-empty one V1; at V0 the key is nil.
+// Recv processes a received PQR message and returns the updated serialized state
+// and the message key to use as HKDF salt for decryption.
+//
+// Both the braid-integrated and chain-only paths use the Rust-compatible SCKA
+// variable-length wire format: version(0x01) + varint(epoch) + varint(counter)
+// + msgType(1) + [chunk_data]. The epoch in wire messages is 1-indexed (SCKA
+// convention); Go's chain epochs are 0-indexed. sckaToChainEpoch handles
+// the conversion.
+//
+// If version negotiation is pending:
+//   - Empty pqrMsg (len 0): resolves to V0 (disabled), returns nil key
+//   - Non-empty pqrMsg: resolves to V1, initializes chain, decrypts
+//
+// After negotiation resolves to V0: returns nil key regardless of pqrMsg.
+// After negotiation resolves to V1: decrypts normally.
 func Recv(serializedState []byte, pqrMsg []byte) (newState []byte, messageKey MessageKey, err error) {
 	s, err := Deserialize(serializedState)
 	if err != nil {

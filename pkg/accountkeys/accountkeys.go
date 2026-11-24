@@ -152,7 +152,8 @@ func (p AccountEntropyPool) Validate() error {
 	return nil
 }
 
-// DeriveSVRKey derives a 32-byte SVR key from the entropy pool with HKDF-SHA256; the caller destroys the Secret.
+// DeriveSVRKey derives a 32-byte SVR key from the entropy pool using HKDF-SHA256.
+// The returned Secret must be destroyed by the caller when no longer needed.
 func (p AccountEntropyPool) DeriveSVRKey() (*secret.Secret, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
@@ -168,7 +169,8 @@ func (p AccountEntropyPool) DeriveSVRKey() (*secret.Secret, error) {
 	return s, nil
 }
 
-// DeriveBackupKey derives a 32-byte backup key from the entropy pool with HKDF-SHA256; the caller destroys the Secret.
+// DeriveBackupKey derives a 32-byte backup key from the entropy pool using HKDF-SHA256.
+// The returned Secret must be destroyed by the caller when no longer needed.
 func (p AccountEntropyPool) DeriveBackupKey() (*secret.Secret, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
@@ -184,7 +186,10 @@ func (p AccountEntropyPool) DeriveBackupKey() (*secret.Secret, error) {
 	return s, nil
 }
 
-// PinHash holds the encryption key (first 32 bytes) and access key (last 32) of the Argon2id output; call Zeroize when done.
+// PinHash holds the derived keys from a PIN hash operation.
+// The 64-byte Argon2id output is split: first 32 bytes are the encryption key,
+// last 32 bytes are the access key, matching the Rust libsignal implementation.
+// Call Zeroize when the PinHash is no longer needed.
 type PinHash struct {
 	EncryptionKey *secret.Secret // For local encryption (bytes 0-31 of Argon2id output).
 	AccessKey     *secret.Secret // For SVR authentication (bytes 32-63 of Argon2id output).
@@ -260,7 +265,8 @@ func HashPin(pin string, salt []byte) (*PinHash, error) {
 	}, nil
 }
 
-// VerifyPin hashes the PIN with the same salt and compares it to the access key in constant time.
+// VerifyPin checks if a PIN matches a previously derived access key by hashing
+// the PIN with the same salt and performing a constant-time comparison.
 func VerifyPin(pin string, salt []byte, expectedAccessKey []byte) (bool, error) {
 	h, err := HashPin(pin, salt)
 	if err != nil {
@@ -270,7 +276,11 @@ func VerifyPin(pin string, salt []byte, expectedAccessKey []byte) (bool, error) 
 	return h.AccessKey.EqualTo(expectedAccessKey), nil
 }
 
-// LocalPinHash returns a PHC-encoded Argon2i hash (m=512KiB, t=64, p=1, 16-byte random salt) for local screen lock, as Rust local_pin_hash.
+// LocalPinHash creates a PHC-string encoded Argon2i hash of the PIN for local
+// screen lock verification. Uses a random 16-byte salt and Argon2i with
+// memory=512KiB, time=64, parallelism=1, output=32 bytes.
+// Returns a PHC-string like "$argon2i$v=19$m=512,t=64,p=1$<salt>$<hash>".
+// This matches the Rust libsignal local_pin_hash implementation.
 func LocalPinHash(pin string) (string, error) {
 	normalized := normalizePin(pin)
 	if len(normalized) == 0 {

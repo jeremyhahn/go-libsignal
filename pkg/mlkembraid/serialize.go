@@ -38,9 +38,18 @@ func (e *ErrDeserialize) Error() string {
 	return fmt.Sprintf("mlkembraid: deserialize failed: %s", e.Reason)
 }
 
-// Serialize encodes a Braid in the Go-only 0x01 binary format.
+// Serialize encodes a Braid into a versioned binary format:
 //
-// Deprecated: not Rust-compatible; use pkg/spqr MarshalStateProto.
+//	version(1) = 0x01
+//	kemType(1) = 0x00 for MLKEM768
+//	chunkSize(4, big-endian)
+//	stateLen(4, big-endian) + stateBytes(N)
+//
+// Deprecated: This method emits a Go-only binary format (version byte 0x01)
+// that is NOT byte-compatible with the Rust sparsepostquantumratchet crate.
+// For Rust-interop serialization, use pkg/spqr proto_codec.go MarshalStateProto /
+// UnmarshalStateProto, which encodes state as a prost-compatible PqRatchetState
+// protobuf message. This method is retained for existing callers only.
 func (b *Braid) Serialize() ([]byte, error) {
 	if b.state == nil {
 		return nil, &ErrSerialize{Reason: "nil state"}
@@ -62,9 +71,13 @@ func (b *Braid) Serialize() ([]byte, error) {
 	return buf, nil
 }
 
-// DeserializeBraid reconstructs a Braid from Serialize output.
+// DeserializeBraid reconstructs a Braid from binary data produced by Serialize.
 //
-// Deprecated: not Rust-compatible; use pkg/spqr UnmarshalStateProto.
+// Deprecated: This function reads the Go-only binary format (version byte 0x01)
+// that is NOT byte-compatible with the Rust sparsepostquantumratchet crate.
+// For Rust-interop deserialization, use pkg/spqr proto_codec.go UnmarshalStateProto,
+// which decodes a prost-compatible PqRatchetState protobuf message. This function
+// is retained for existing callers only.
 func DeserializeBraid(data []byte) (*Braid, error) {
 	if len(data) < 10 { // version(1) + kemType(1) + chunkSize(4) + stateLen(4)
 		return nil, &ErrDeserialize{Reason: "data too short for braid header"}

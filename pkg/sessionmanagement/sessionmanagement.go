@@ -1,4 +1,30 @@
-// Package sessionmanagement provides MessageEncrypt and the MessageDecrypt functions over pkg/session, as Rust session_management.rs does; address binding is on when both addresses are canonical ServiceIds, otherwise the unbound path is used.
+// Package sessionmanagement provides the high-level encrypt/decrypt
+// facade for the Signal Protocol session, mirroring the Rust libsignal
+// module rust/protocol/src/session_management.rs.
+//
+// Rust exposes four public functions on the protocol crate's top-level
+// re-exports: message_encrypt, message_decrypt, message_decrypt_signal,
+// message_decrypt_prekey. Each one composes lower-level session and
+// session-cipher operations into a single call that is the canonical
+// entry point client code is expected to use.
+//
+// The Go counterparts in this package have the same names (camel-cased
+// per Go conventions) and the same compositional semantics. They wrap
+// pkg/session.Builder and pkg/session.Cipher, taking the four storage
+// interfaces explicitly so the facade is testable without a top-level
+// SignalProtocol store.
+//
+// Layering: this package depends on pkg/session, pkg/protocol,
+// pkg/state/store, and pkg/serialize. Nothing in pkg/protocol or
+// pkg/session depends on it, so it can be added without a cycle.
+//
+// Address binding: address binding is automatically enabled when BOTH the
+// local and remote addresses are canonical ServiceIds (bare UUID → ACI,
+// "PNI:<uuid>", or legacy "ACI:<uuid>"). When either endpoint is nil or
+// carries a non-canonical name (phone number, username, etc.) the legacy
+// unbound path is used automatically — the cipher is constructed with nil
+// for both addresses. This preserves backward compatibility for callers
+// that use phone numbers or other opaque names as SignalAddress.Name().
 package sessionmanagement
 
 import (
@@ -16,7 +42,11 @@ func effectiveLocalAddress(local, remote *protocol.SignalAddress) *protocol.Sign
 	return nil
 }
 
-// InvalidCiphertextTypeError is returned by MessageDecrypt for a message that is neither a SignalMessage nor a PreKeySignalMessage.
+// InvalidCiphertextTypeError is returned by MessageDecrypt when the caller
+// passes a CiphertextMessage that is neither a SignalMessage nor a
+// PreKeySignalMessage. Mirrors Rust's
+// SignalProtocolError::InvalidArgument("message_decrypt cannot be used to
+// decrypt {kind} messages") at session_management.rs:181.
 type InvalidCiphertextTypeError struct {
 	// Kind is the message-type label that was rejected. Empty when the
 	// caller passed nil.
@@ -30,7 +60,17 @@ func (e *InvalidCiphertextTypeError) Error() string {
 	return "sessionmanagement: cannot decrypt message of kind " + e.Kind
 }
 
-// MessageEncrypt encrypts plaintext for remoteAddress, as a PreKeySignalMessage while the session is unacknowledged and a SignalMessage after.
+// MessageEncrypt encrypts plaintext for remoteAddress using the session
+// stored under remoteAddress in sessionStore. If the session is unack'd
+// (locally initiated, no inbound response yet), the result is wrapped as
+// a PreKeySignalMessage; otherwise it is returned as a SignalMessage.
+//
+// Mirrors Rust session_management::message_encrypt at
+// rust/protocol/src/session_management.rs:43.
+//
+// localAddress is the caller's own SignalAddress. Address binding is enabled
+// automatically when both endpoints are canonical ServiceIds; otherwise the
+// legacy unbound path is used (see package doc comment).
 func MessageEncrypt(
 	plaintext []byte,
 	remoteAddress *protocol.SignalAddress,
@@ -52,7 +92,11 @@ func MessageEncrypt(
 	return cipher.Encrypt(plaintext)
 }
 
-// MessageDecrypt dispatches to MessageDecryptSignal or MessageDecryptPreKey by type.
+// MessageDecrypt routes the ciphertext to MessageDecryptSignal or
+// MessageDecryptPreKey based on its concrete type.
+//
+// Mirrors Rust session_management::message_decrypt at
+// rust/protocol/src/session_management.rs:152.
 func MessageDecrypt(
 	ciphertext protocol.CiphertextMessage,
 	remoteAddress *protocol.SignalAddress,
@@ -86,7 +130,17 @@ func MessageDecrypt(
 	}
 }
 
-// MessageDecryptSignal decrypts a SignalMessage from remoteAddress and persists the session.
+// MessageDecryptSignal decrypts an inbound SignalMessage from remoteAddress,
+// looks up the matching session in sessionStore, runs the ratchet, and persists
+// state.
+//
+// localAddress is the caller's own SignalAddress. Address binding is enabled
+// automatically when both endpoints are canonical ServiceIds; otherwise the
+// legacy unbound path is used (see package doc comment).
+//
+// Mirrors Rust session_management::message_decrypt_signal at
+// rust/protocol/src/session_management.rs:282 and the address-binding check at
+// rust/protocol/src/session_management.rs:242.
 func MessageDecryptSignal(
 	ciphertext *protocol.SignalMessage,
 	remoteAddress *protocol.SignalAddress,
@@ -108,7 +162,19 @@ func MessageDecryptSignal(
 	return cipher.Decrypt(ciphertext)
 }
 
-// MessageDecryptPreKey establishes the session from the pre-key message, decrypts the inner message and then commits the pre-key and session changes.
+// MessageDecryptPreKey processes the inbound pre-key material to
+// establish (or fast-forward) a session, then decrypts the inner
+// SignalMessage. On success, it commits deferred side effects:
+// MarkKyberPreKeyUsed (if a Kyber pre-key was consumed), pre-key removal
+// (if a one-time pre-key was consumed), and session-record store.
+//
+// Mirrors Rust session_management::message_decrypt_prekey at
+// rust/protocol/src/session_management.rs:193.
+//
+// Address binding is enabled automatically when both endpoints are canonical
+// ServiceIds; otherwise the legacy unbound path is used (see package doc
+// comment). Mirrors the address-binding check at
+// rust/protocol/src/session_management.rs:242.
 func MessageDecryptPreKey(
 	ciphertext *protocol.PreKeySignalMessage,
 	remoteAddress *protocol.SignalAddress,

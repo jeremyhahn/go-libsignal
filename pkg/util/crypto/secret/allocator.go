@@ -23,7 +23,23 @@ var (
 	admission atomic.Pointer[allocSlot]
 )
 
-// SetAllocator caps locked memory for new secrets at maxBytes, before the first allocation and once per process; it returns ErrInvalidBudget, ErrAllocatorAfterAllocation or ErrAllocatorAlreadySet.
+// SetAllocator bounds the locked memory held by every Secret and Secret32 the
+// package creates from now on to maxBytes, via an enclave.Allocator. Without it
+// the package allocates unbudgeted, limited only by RLIMIT_MEMLOCK.
+//
+// The budget is in locked bytes and every secret costs at least one whole page;
+// see enclave.NewAllocator for how to size it. An allocation the budget cannot
+// admit fails with ErrSecretAlloc wrapping enclave.ErrBudgetExhausted, and
+// Destroy returns a secret's reservation to the budget.
+//
+// SetAllocator takes effect once per process and must run before the package's
+// first locked allocation. It returns ErrInvalidBudget for a non-positive
+// maxBytes, ErrAllocatorAfterAllocation if a secret was already allocated
+// unbudgeted, and ErrAllocatorAlreadySet on any call after the first valid one.
+// The last two fail closed: the package stays as it was.
+//
+// Upstream: no Rust libsignal counterpart; Rust libsignal does not lock key
+// memory, and this budget belongs to the go-enclave backing store.
 func SetAllocator(maxBytes int64) error {
 	a, err := enclave.NewAllocator(maxBytes)
 	if err != nil {

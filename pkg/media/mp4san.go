@@ -110,9 +110,27 @@ func checkMP4BoxDepth(input []byte) error {
 	return nil
 }
 
-// SanitizedMetadata is ftyp+moov such that Metadata || input[DataOffset:DataOffset+DataLength] is a valid MP4; nil Metadata means already faststart (Java SanitizedMetadata).
+// SanitizedMetadata is the result of MP4 sanitization, mirroring the Java
+// SanitizedMetadata class (libsignal/java/.../media/SanitizedMetadata.java).
+//
+// Metadata is the self-contained, contiguous presentation metadata
+// (ftyp + moov bytes) such that:
+//
+//	Metadata || input[DataOffset : DataOffset+DataLength]
+//
+// is a valid MP4 file.  Metadata is nil when the original input already has
+// moov preceding mdat (faststart layout) and no rewrite is needed — the caller
+// may use the original bytes directly.
+//
+// DataOffset and DataLength point at the contiguous mdat span in the
+// ORIGINAL input, not in the rewritten output.
+//
+// Java oracle: SanitizedMetadata.java:L8–L46
 type SanitizedMetadata struct {
-	// Metadata is ftyp+moov, or nil when no rewrite was needed.
+	// Metadata is the sanitized presentation metadata (ftyp+moov), or nil when
+	// the input needed no rewrite.
+	//
+	// Java oracle: Mp4Sanitizer.java:L68–L71 (nil when sanitizedMetadata.length == 0)
 	Metadata []byte
 
 	// DataOffset is the byte offset of the media data (mdat) in the original input.
@@ -126,28 +144,40 @@ type SanitizedMetadata struct {
 	DataLength int64
 }
 
-// ErrFragmentedMP4 is returned for fragmented MP4 (moof boxes).
+// ErrFragmentedMP4 is returned when the input is a fragmented MP4 (contains
+// moof boxes).  Fragmented MP4 is not supported by mp4san.
+//
+// Java oracle: Mp4Sanitizer.java:L38
 type ErrFragmentedMP4 struct{}
 
 func (e *ErrFragmentedMP4) Error() string {
 	return "media: fragmented MP4 is not supported"
 }
 
-// ErrDiscontiguousMdat is returned when mdat boxes are not contiguous.
+// ErrDiscontiguousMdat is returned when mdat boxes are discontiguous (more
+// than one mdat box not handled by the compounded-mdat variant).
+//
+// Java oracle: Mp4Sanitizer.java:L39
 type ErrDiscontiguousMdat struct{}
 
 func (e *ErrDiscontiguousMdat) Error() string {
 	return "media: discontiguous mdat boxes are not supported"
 }
 
-// ErrExternalDataReference is returned when a dref entry points outside the file.
+// ErrExternalDataReference is returned when a dref box points to an external
+// file rather than the current file.
+//
+// Java oracle: Mp4Sanitizer.java:L40
 type ErrExternalDataReference struct{}
 
 func (e *ErrExternalDataReference) Error() string {
 	return "media: external data reference (dref) is not supported"
 }
 
-// ErrUnsupportedBrand is returned when ftyp lacks the "isom" compatible brand.
+// ErrUnsupportedBrand is returned when the ftyp box does not contain "isom"
+// in its compatible-brands list, i.e. the file is MOV or legacy MP4 v1.
+//
+// Java oracle: Mp4Sanitizer.java:L41–L43
 type ErrUnsupportedBrand struct {
 	Brand string
 }
@@ -163,12 +193,36 @@ func (e *ErrMissingMdat) Error() string {
 	return "media: MP4 missing mdat box"
 }
 
-// SanitizeMP4 returns the ftyp+moov metadata (nil if already faststart) and the original mdat span, failing closed on unsupported input (Java Mp4Sanitizer).
+// SanitizeMP4 sanitizes an MP4 input and returns a SanitizedMetadata value
+// containing the presentation metadata and the mdat span in the original input.
+//
+// Metadata is nil when the input is already in faststart layout (moov before
+// mdat) and needs no rewrite.  When non-nil, Metadata is the self-contained
+// ftyp+moov block; the caller reconstructs the playable file as:
+//
+//	Metadata || input[DataOffset : DataOffset+DataLength]
+//
+// Fail-closed: returns a typed parse error for empty/truncated input, missing
+// ftyp, missing "isom" compatible brand, fragmented MP4 (moof), discontiguous
+// mdat, external dref, and missing moov.
+//
+// Java oracle: Mp4Sanitizer.java:L49–L78
+// Java oracle: Mp4Sanitizer.java:L46 (class contract)
 func SanitizeMP4(input []byte) (*SanitizedMetadata, error) {
 	return sanitizeMP4Internal(input, -1)
 }
 
-// SanitizeMP4WithCompoundedMdat sanitizes an MP4 whose size=0 mdat region spans cumulativeMdatBoxSize bytes (Java Mp4Sanitizer:83-115).
+// SanitizeMP4WithCompoundedMdat sanitizes an MP4 that has multiple mdat boxes
+// compounded into a single contiguous region whose total byte length is
+// cumulativeMdatBoxSize.  The mdat region in such a file uses size=0 (meaning
+// "extends to end of file") in the box header, which is not supported by the
+// normal parser path.
+//
+// The cumulativeMdatBoxSize parameter must equal the total byte length of the
+// mdat region in the original file (i.e. the span from the start of the first
+// mdat box header to the end of the last media-data byte).
+//
+// Java oracle: Mp4Sanitizer.java:L83–L115
 func SanitizeMP4WithCompoundedMdat(input []byte, cumulativeMdatBoxSize int) (*SanitizedMetadata, error) {
 	// Finding #2: reject cumulativeMdatBoxSize < 8 (too small for a valid mdat
 	// box header) to prevent the infinite-loop / DoS path.

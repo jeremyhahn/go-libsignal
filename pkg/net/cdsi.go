@@ -56,7 +56,10 @@ type AciAndAccessKey struct {
 	AccessKey [16]byte
 }
 
-// Bytes returns the 32-byte wire encoding: ACI then the 16-byte access key.
+// Bytes returns the ACI+AccessKey pair as a 32-byte wire encoding: ACI bytes
+// followed by the 16-byte access key.
+// This matches the Rust FixedLengthSerializable for AciAndAccessKey
+// in rust/net/src/cdsi.rs.
 func (a *AciAndAccessKey) Bytes() [AciAndAccessKeySerializedLen]byte {
 	var b [AciAndAccessKeySerializedLen]byte
 	copy(b[:UUIDSerializedLen], a.ACI[:])
@@ -74,7 +77,8 @@ type CdsiLookupRequest struct {
 	PrevE164s []E164
 	// AcisAndAccessKeys are ACI/access key pairs for profile key verification.
 	AcisAndAccessKeys []AciAndAccessKey
-	// Token is a continuation token from a previous request; empty at first.
+	// Token is a continuation token from a previous CDSI request.
+	// Empty for initial requests.
 	Token []byte
 }
 
@@ -110,7 +114,12 @@ func (e *CdsiLookupResponseEntry) HasPNI() bool {
 	return e.PNI != zero
 }
 
-// Bytes returns the 40-byte wire encoding E164(8, big-endian) || PNI(16) || ACI(16); zero UUIDs mean absent.
+// Bytes serializes the response entry to its 40-byte wire encoding:
+// 8 bytes E164 (big-endian) || 16 bytes PNI UUID || 16 bytes ACI UUID.
+// All-zero UUID bytes indicate an absent optional field.
+//
+// This matches the Rust FixedLengthSerializable for LookupResponseEntry
+// in rust/net/src/cdsi.rs (SERIALIZED_LEN = 8 + 16 + 16 = 40).
 func (e *CdsiLookupResponseEntry) Bytes() [LookupResponseEntrySerializedLen]byte {
 	var b [LookupResponseEntrySerializedLen]byte
 	e164b := e.E164.Bytes()
@@ -120,7 +129,10 @@ func (e *CdsiLookupResponseEntry) Bytes() [LookupResponseEntrySerializedLen]byte
 	return b
 }
 
-// LookupResponseEntryFromBytes decodes a 40-byte entry; a zero E164 is an error; use HasACI and HasPNI for presence.
+// LookupResponseEntryFromBytes deserializes a response entry from its 40-byte
+// wire encoding. It mirrors LookupResponseEntry::try_parse_from in Rust:
+// a zero E164 returns an error; all-zero UUID bytes decode to the zero [16]byte
+// (callers should use HasACI/HasPNI to distinguish absent from present).
 func LookupResponseEntryFromBytes(b [LookupResponseEntrySerializedLen]byte) (CdsiLookupResponseEntry, error) {
 	var e164b [E164SerializedLen]byte
 	copy(e164b[:], b[:E164SerializedLen])
@@ -142,7 +154,9 @@ func LookupResponseEntryFromBytes(b [LookupResponseEntrySerializedLen]byte) (Cds
 	}, nil
 }
 
-// SerializeE164s packs E.164 numbers big-endian, 8 bytes each.
+// SerializeE164s encodes a slice of E.164 numbers into a packed big-endian
+// byte slice suitable for sending in a CDSI client request.
+// The returned length is always len(e164s)*8.
 func SerializeE164s(e164s []E164) []byte {
 	out := make([]byte, len(e164s)*E164SerializedLen)
 	for i, e := range e164s {
@@ -152,7 +166,9 @@ func SerializeE164s(e164s []E164) []byte {
 	return out
 }
 
-// SerializeAciAndAccessKeys packs ACI and access-key pairs, 32 bytes each.
+// SerializeAciAndAccessKeys encodes a slice of ACI+access-key pairs into a
+// packed byte slice suitable for sending in a CDSI client request.
+// The returned length is always len(pairs)*32.
 func SerializeAciAndAccessKeys(pairs []AciAndAccessKey) []byte {
 	out := make([]byte, len(pairs)*AciAndAccessKeySerializedLen)
 	for i := range pairs {
@@ -162,7 +178,10 @@ func SerializeAciAndAccessKeys(pairs []AciAndAccessKey) []byte {
 	return out
 }
 
-// DeserializeLookupResponseEntries splits a response into entries; a ragged length or a zero E164 is an error.
+// DeserializeLookupResponseEntries decodes a packed byte slice from a CDSI
+// server response into individual response entries.
+// It returns an error if the byte slice length is not a multiple of
+// LookupResponseEntrySerializedLen, or if any entry has a zero E164.
 func DeserializeLookupResponseEntries(data []byte) ([]CdsiLookupResponseEntry, error) {
 	if len(data)%LookupResponseEntrySerializedLen != 0 {
 		return nil, &CdsiSerializeError{
@@ -185,7 +204,8 @@ func DeserializeLookupResponseEntries(data []byte) ([]CdsiLookupResponseEntry, e
 	return entries, nil
 }
 
-// CdsiToken is a continuation token that spares resending numbers already looked up.
+// CdsiToken is a continuation token from a CDSI lookup that can be reused
+// in subsequent requests to avoid re-sending previously looked-up numbers.
 type CdsiToken []byte
 
 // CdsiLookupError represents an error that can occur during a CDSI lookup.
@@ -268,11 +288,15 @@ const (
 	CdsiCloseCodeInvalidToken CdsiCloseCode = 4101
 )
 
-// CdsiService performs CDSI lookups over attested enclave connections.
+// CdsiService defines the interface for performing CDSI lookups.
+// Implementations establish attested connections to the CDSI enclave,
+// send lookup requests, and collect responses.
 type CdsiService interface {
-	// Lookup connects, sends the request, acknowledges the token and collects the results.
+	// Lookup performs a complete CDSI lookup: connect, send request,
+	// receive token, acknowledge, and collect results.
 	Lookup(ctx context.Context, auth *Auth, request *CdsiLookupRequest) (*CdsiToken, *CdsiLookupResponse, error)
 }
 
-// ErrCdsiNoTokenInResponse is returned when the first response carries no token.
+// ErrCdsiNoTokenInResponse is returned when the CDSI server does not
+// include a token in the initial response.
 var ErrCdsiNoTokenInResponse error = &ErrCdsiNoTokenInResponseType{}

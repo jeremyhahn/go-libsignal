@@ -2,7 +2,11 @@ package keyops
 
 import "io"
 
-// Signer abstracts EC private key signing over software locked-memory keys or hardware signers.
+// Signer abstracts EC private key signing operations.
+// Software implementations use locked-memory-backed keys and perform XEdDSA
+// signing in protected memory. Hardware implementations delegate to
+// crypto.Signer, HSM, or secure enclave APIs without exposing raw key
+// material.
 type Signer interface {
 	// Sign performs XEdDSA signing over the message.
 	// The rand parameter provides randomness (64 bytes needed for XEdDSA).

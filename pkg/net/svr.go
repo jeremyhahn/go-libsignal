@@ -78,6 +78,7 @@ type SvrService interface {
 	// ConnectSVR2 establishes an attested connection to the SVR2 enclave.
 	ConnectSVR2(ctx context.Context, auth *Auth) (*SvrConnection, error)
 
-	// ConnectSVRB connects to the current SVRB enclave endpoints with attestation.
+	// ConnectSVRB establishes attested connections to the current SVRB
+	// enclave endpoints.
 	ConnectSVRB(ctx context.Context, auth *Auth) ([]*SvrConnection, error)
 }

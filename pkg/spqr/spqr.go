@@ -39,7 +39,17 @@ const (
 	negotiationResolved
 )
 
-// SPQR is the Sparse Post-Quantum Ratchet: epoch chain keys from SCKA outputs, advanced by an attached Braid; it is not safe for concurrent use.
+// SPQR is the Sparse Post-Quantum Ratchet state machine. It manages epoch-based
+// chain keys derived from SCKA outputs, providing forward secrecy and
+// post-compromise security through periodic post-quantum key agreement.
+//
+// When a Braid (ML-KEM SCKA) is attached, SPQR piggybacks braid chunks on
+// each message and advances the chain epoch when the braid completes a key
+// agreement round.
+//
+// SPQR is NOT safe for concurrent use by multiple goroutines.
+// The session-level serialization (load -> mutate -> store) provides
+// implicit synchronization when used through the session cipher.
 type SPQR struct {
 	rootKey     *secret.Secret
 	epoch       uint64
@@ -66,7 +76,17 @@ type SPQR struct {
 	skippedKeysFIFOHead int
 }
 
-// Init creates an SPQR from sharedSecret, direction and maxJumpLimit (maxJump normally, MaxUint32 for self-sessions); MinVersion is V1, and V0 needs InitialStateWithParams.
+// Init creates a new SPQR instance from a shared secret, direction, and max
+// forward jump limit. The shared secret is used to derive the initial root key
+// and chain keys for epoch 0. Direction determines the assignment of
+// send/receive chains. The maxJumpLimit controls the maximum forward jump
+// allowed in the receive counter; use the package-level maxJump constant
+// (25000) for normal sessions and math.MaxUint32 for self-sessions.
+//
+// MinVersion is set to VersionV1, matching the Rust libsignal policy of
+// "Require that all clients speak SPQR" (ratchet.rs:88, 152). V0 (opt-in
+// downgrade) requires explicit use of InitialStateWithParams and warrants an
+// audit note before deployment.
 func Init(sharedSecret []byte, direction Direction, maxJumpLimit uint32) (*SPQR, error) {
 	rk, cks, ckr, err := KdfSckaInit(sharedSecret)
 	if err != nil {
@@ -95,7 +115,15 @@ func Init(sharedSecret []byte, direction Direction, maxJumpLimit uint32) (*SPQR,
 	}, nil
 }
 
-// InitWithBraid creates an SPQR like Init with braid attached for SendBraid and RecvBraid.
+// InitWithBraid creates a new SPQR instance with an attached ML-KEM Braid for
+// SCKA-integrated epoch advancement. The braid is used by SendBraid/RecvBraid
+// to piggyback key agreement chunks on each message.
+//
+// Parameters:
+//   - sharedSecret: initial shared secret for chain key derivation
+//   - direction: A2B or B2A, determines send/recv key assignment
+//   - maxJumpLimit: max forward jump for the receive counter
+//   - braid: initialized ML-KEM Braid instance (Alice or Bob)
 func InitWithBraid(sharedSecret []byte, direction Direction, maxJumpLimit uint32, braid *mlkembraid.Braid) (*SPQR, error) {
 	s, err := Init(sharedSecret, direction, maxJumpLimit)
 	if err != nil {
@@ -105,7 +133,9 @@ func InitWithBraid(sharedSecret []byte, direction Direction, maxJumpLimit uint32
 	return s, nil
 }
 
-// ReceiveKey derives new chain keys and root key from an SCKA output for an epoch above the current one.
+// ReceiveKey processes an SCKA output for a new epoch, deriving fresh chain
+// keys and updating the root key. The new epoch must be strictly greater
+// than the current epoch.
 func (s *SPQR) ReceiveKey(sckaOutput []byte, newEpoch uint64) error {
 	if newEpoch <= s.epoch {
 		return &ErrOldEpoch{Current: s.epoch, Received: newEpoch}
@@ -134,7 +164,10 @@ func (s *SPQR) ReceiveKey(sckaOutput []byte, newEpoch uint64) error {
 	return nil
 }
 
-// Encrypt returns the next message key and counter from epoch's send chain; counters start at 1.
+// Encrypt derives the next message key from the send chain of the given epoch,
+// returning the message key and the counter for this message.
+// The counter is incremented before use, so the first message key is at index 1,
+// matching the Rust reference implementation.
 func (s *SPQR) Encrypt(epoch uint64) (messageKey *secret.Secret, counter uint32, err error) {
 	if epoch < s.sendEpoch {
 		return nil, 0, &ErrSendEpochDecreased{Current: s.sendEpoch, Requested: epoch}
@@ -174,7 +207,16 @@ func (s *SPQR) Encrypt(epoch uint64) (messageKey *secret.Secret, counter uint32,
 	return mk, counter, nil
 }
 
-// Decrypt returns the message key for epoch and counter, storing skipped keys for out-of-order messages; counters start at 1, and maxSkippedKeys applies across all epochs.
+// Decrypt derives the message key for the given epoch and counter. If the
+// message arrived out of order, intermediate keys are stored as skipped keys.
+// Previously skipped keys are returned directly.
+// Counters are 1-based (first message key is at index 1), matching the Rust
+// reference implementation where the counter is incremented before use.
+//
+// Note: The maxSkippedKeys limit is enforced globally across all epochs,
+// matching Rust's per-epoch KeyHistory::gc behavior. Skipped keys from
+// older epochs are only garbage-collected when the total count exceeds
+// trimSize, which means keys from multiple epochs may coexist in the map.
 func (s *SPQR) Decrypt(epoch uint64, counter uint32) (messageKey *secret.Secret, err error) {
 	// Check skipped keys first (out-of-order message retrieval).
 	skID := SkippedKeyID{Epoch: epoch, Counter: counter}
@@ -312,7 +354,8 @@ func (s *SPQR) Braid() *mlkembraid.Braid {
 	return s.braid
 }
 
-// SetBraid attaches an ML-KEM Braid for braid-integrated Send and Recv.
+// SetBraid attaches an ML-KEM Braid SCKA instance to the SPQR state.
+// This enables braid-integrated Send/Recv with epoch advancement.
 func (s *SPQR) SetBraid(braid *mlkembraid.Braid) {
 	s.braid = braid
 }

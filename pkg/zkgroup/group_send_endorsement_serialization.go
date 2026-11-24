@@ -6,7 +6,23 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/zkcredential"
 )
 
-// SerializeGroupSendEndorsementsResponse encodes r as Rust bincode: reserved byte, points, proof, u64 LE expiration.
+// SerializeGroupSendEndorsementsResponse encodes a
+// [GroupSendEndorsementsResponse] to the Rust bincode wire format, producing
+// byte-for-byte identical output to zkgroup::serialize on the same value.
+//
+// Wire layout (matches Rust GroupSendEndorsementsResponse at
+// rust/zkgroup/src/api/groups/group_send_endorsement.rs, serialized by bincode
+// with with_fixint_encoding + with_little_endian + reject_trailing_bytes):
+//
+//	[0x00]       reserved byte (ReservedByte)
+//	[8 LE u64]   len(R)               — number of compressed ristretto255 points
+//	[32*len(R)]  R bytes              — each compressed point is 32 bytes
+//	[8 LE u64]   len(proof)           — proof byte count
+//	[len(proof)] proof bytes
+//	[8 LE u64]   expiration           — Timestamp (u64 epoch seconds)
+//
+// Rust source: rust/zkgroup/src/api/groups/group_send_endorsement.rs
+// (GroupSendEndorsementsResponse struct fields: reserved, endorsements, expiration)
 func SerializeGroupSendEndorsementsResponse(r *GroupSendEndorsementsResponse) []byte {
 	inner := zkcredential.SerializeEndorsementResponse(r.Endorsements)
 	out := make([]byte, 0, 1+len(inner)+8)
@@ -22,7 +38,12 @@ func SerializeGroupSendEndorsementsResponse(r *GroupSendEndorsementsResponse) []
 	return out
 }
 
-// DeserializeGroupSendEndorsementsResponse decodes Rust bincode, returning [ErrUnexpectedReservedByte] or [ZkGroupDeserializationFailure].
+// DeserializeGroupSendEndorsementsResponse decodes a
+// [GroupSendEndorsementsResponse] from the Rust bincode wire format produced
+// by [SerializeGroupSendEndorsementsResponse].
+//
+// Returns [ErrUnexpectedReservedByte] if the first byte is not 0x00,
+// or [ZkGroupDeserializationFailure] for structural errors.
 func DeserializeGroupSendEndorsementsResponse(data []byte) (*GroupSendEndorsementsResponse, error) {
 	const typeName = "GroupSendEndorsementsResponse"
 

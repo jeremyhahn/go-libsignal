@@ -1,4 +1,7 @@
-// Package cipher provides the Signal protocol's symmetric primitives; this file is AES-256-CBC with PKCS7 padding.
+// Package cipher provides symmetric encryption primitives used by the Signal
+// protocol. This file implements AES-CBC encrypt/decrypt with PKCS7 padding,
+// matching the Rust libsignal cbc module used for message backup frame
+// encryption.
 package cipher
 
 import (
@@ -6,7 +9,15 @@ import (
 	"crypto/cipher"
 )
 
-// AESCBCEncrypt encrypts with AES-256-CBC and PKCS7 padding (32-byte key, 16-byte IV).
+// AESCBCEncrypt encrypts plaintext using AES-256-CBC with PKCS7 padding.
+//
+// The key must be exactly 32 bytes (AES-256), matching the Rust libsignal
+// reference which only supports AES-256 for this operation.
+// The iv must be exactly 16 bytes. Empty plaintext is valid and produces a
+// full block of PKCS#7 padding per the spec.
+//
+// Returns the encrypted ciphertext whose length is a multiple of the AES
+// block size (16 bytes).
 func AESCBCEncrypt(key, iv, plaintext []byte) ([]byte, error) {
 	if err := validateAESCBCParams(key, iv); err != nil {
 		return nil, err
@@ -29,7 +40,23 @@ func AESCBCEncrypt(key, iv, plaintext []byte) ([]byte, error) {
 	return ciphertext, nil
 }
 
-// AESCBCDecrypt decrypts AES-256-CBC and removes PKCS7 padding; callers must return one opaque error to peers to avoid a padding oracle.
+// AESCBCDecrypt decrypts ciphertext encrypted with AES-256-CBC and removes
+// PKCS7 padding.
+//
+// The key must be exactly 32 bytes (AES-256), matching the Rust libsignal
+// reference which only supports AES-256 for this operation.
+// The iv must be exactly 16 bytes. The ciphertext length must be a non-zero
+// multiple of the AES block size (16 bytes).
+//
+// Returns the decrypted plaintext with PKCS7 padding removed.
+//
+// IMPORTANT: Callers MUST collapse all decrypt errors into a single opaque
+// "decryption failed" result before returning to network peers. Returning
+// distinct errors (e.g. ErrInvalidPKCS7Padding vs. ErrAESCBCInvalidKey)
+// creates an oracle that can be exploited for chosen-ciphertext attacks.
+// The Rust reference deliberately maps both "bad key" and "bad padding" to
+// the single variant DecryptionError::BadCiphertext("failed to decrypt").
+// Rust source: rust/crypto/src/aes_cbc.rs:23,52
 func AESCBCDecrypt(key, iv, ciphertext []byte) ([]byte, error) {
 	if err := validateAESCBCParams(key, iv); err != nil {
 		return nil, err

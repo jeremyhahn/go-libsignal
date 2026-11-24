@@ -30,7 +30,10 @@ const (
 	maxDecompressedSize = maxBackupSize // 100 GiB
 )
 
-// HMACMismatchError reports an HMAC mismatch; the HMAC values stay unexported so they cannot leak.
+// HMACMismatchError indicates that the expected HMAC did not match the
+// computed HMAC over the backup ciphertext. The actual HMAC values are
+// kept unexported to prevent accidental leakage through logging or
+// error inspection.
 type HMACMismatchError struct {
 	expected [HMACLen]byte
 	found    [HMACLen]byte
@@ -52,7 +55,14 @@ func NewFrameEncryptor(key *MessageBackupKey) *FrameEncryptor {
 	return &FrameEncryptor{key: key}
 }
 
-// EncryptFrames writes a random IV, AES-256-CBC of the gzipped varint-delimited frames, and an HMAC-SHA256 over IV and ciphertext.
+// EncryptFrames encrypts a sequence of raw protobuf frame bytes and writes
+// the complete encrypted backup to w. The output consists of:
+//   - A random 16-byte IV
+//   - AES-256-CBC encrypted gzip-compressed frames (varint-delimited)
+//   - A 32-byte HMAC-SHA256 over the IV and ciphertext
+//
+// Each frame in the frames slice should be the raw serialized protobuf bytes
+// of a backup Frame message.
 func (fe *FrameEncryptor) EncryptFrames(w io.Writer, frames [][]byte) error {
 	// Compress frames with varint delimiters.
 	var plaintext bytes.Buffer
@@ -120,7 +130,27 @@ func NewFrameDecryptor(key *MessageBackupKey) *FrameDecryptor {
 	return &FrameDecryptor{key: key}
 }
 
-// DecryptFrames decrypts a legacy or modern (SBACKUP\x01 plus metadata) backup, reading at most maxBackupSize bytes.
+// DecryptFrames reads an encrypted backup from r and returns the decrypted
+// frames. The input may be in either the legacy format or the modern format:
+//
+// Legacy format:
+//   - A 16-byte IV
+//   - AES-256-CBC encrypted gzip-compressed varint-delimited frames
+//   - A 32-byte HMAC-SHA256 over the IV and ciphertext
+//
+// Modern format (Rust libsignal ref: rust/message-backup/src/frame.rs:92-117):
+//   - "SBACKUP\x01" magic (8 bytes)
+//   - varint-length-delimited MetadataPb protobuf
+//   - A 16-byte IV
+//   - AES-256-CBC encrypted gzip-compressed varint-delimited frames
+//   - A 32-byte HMAC-SHA256 over the IV and ciphertext only (not the magic or metadata)
+//
+// The format is detected by peeking the first 8 bytes. If they match
+// MagicNumber, the metadata is parsed and validated via ValidateMetadata
+// before the payload is decrypted using the standard CBC+HMAC path.
+//
+// Reads are bounded to maxBackupSize bytes; larger streams are rejected with
+// ErrBackupTooLarge to prevent memory exhaustion from malicious input.
 func (fd *FrameDecryptor) DecryptFrames(r io.Reader) (_ [][]byte, err error) {
 	// Read all data, bounded to prevent unbounded allocation.
 	// We read one byte beyond the limit so we can distinguish "exactly at
@@ -418,7 +448,19 @@ func skipProtoField(b []byte, wireType uint64) ([]byte, error) {
 	}
 }
 
-// EncryptFramesModern writes a modern backup: magic, validated metadata, IV, ciphertext and an HMAC over IV and ciphertext only.
+// EncryptFramesModern encrypts a sequence of raw protobuf frame bytes and
+// writes a modern-format backup to w. The output consists of:
+//   - "SBACKUP\x01" magic (8 bytes)
+//   - varint-length-delimited encoded BackupMetadata
+//   - A random 16-byte IV
+//   - AES-256-CBC encrypted gzip-compressed frames (varint-delimited)
+//   - A 32-byte HMAC-SHA256 over the IV and ciphertext only
+//
+// The metadata is validated by ValidateMetadata before encoding. The HMAC
+// covers only the post-metadata payload, matching the Rust libsignal
+// modern-format specification.
+//
+// Rust libsignal ref: rust/message-backup/src/frame.rs:92-117
 func (fe *FrameEncryptor) EncryptFramesModern(w io.Writer, frames [][]byte, meta *BackupMetadata) error {
 	if err := ValidateMetadata(meta); err != nil {
 		return &ErrMetadataValidation{Err: err}
@@ -523,7 +565,10 @@ func writeProtoLenField(buf *bytes.Buffer, fieldNum uint64, val []byte) {
 	buf.Write(val)
 }
 
-// VerifyHMAC checks the HMAC of an encrypted backup without decrypting it, reading at most maxBackupSize bytes.
+// VerifyHMAC checks the HMAC of encrypted backup data without decrypting it.
+// The input r should contain the full encrypted backup (IV + ciphertext + HMAC).
+// Reads are bounded to maxBackupSize to prevent an unauthenticated reader from
+// triggering unbounded memory allocation (OOM DoS).
 func VerifyHMAC(key *MessageBackupKey, r io.Reader) error {
 	limited := io.LimitReader(r, maxBackupSize+1)
 	data, err := io.ReadAll(limited)

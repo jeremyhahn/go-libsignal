@@ -72,7 +72,10 @@ func (e *Error) Is(target error) bool {
 	return e.kind == t.kind
 }
 
-// Unwrap returns the go-enclave error, such as enclave.ErrBudgetExhausted or enclave.ErrLockedMemoryUnavailable.
+// Unwrap returns the underlying go-enclave failure, if any, so callers can
+// match its sentinels — enclave.ErrBudgetExhausted for an allocation refused
+// by the installed Allocator, enclave.ErrLockedMemoryUnavailable for one
+// refused by the kernel.
 func (e *Error) Unwrap() error {
 	return e.cause
 }

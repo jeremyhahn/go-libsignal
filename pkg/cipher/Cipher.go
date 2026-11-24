@@ -7,7 +7,20 @@ import (
 	"crypto/subtle"
 )
 
-// Decrypt removes PKCS7 padding from AES-256-CBC ciphertext; callers must collapse all decrypt errors into one opaque failure to avoid a padding oracle.
+// Decrypt decrypts AES-256-CBC ciphertext using the given iv and key, removing
+// PKCS7 padding. The key must be exactly 32 bytes (AES-256). The ciphertext is
+// not mutated.
+//
+// This function is used by the Signal session and group ciphers. The argument
+// order (iv, key) differs from AESCBCDecrypt (key, iv); both delegate to the
+// same underlying implementation.
+//
+// IMPORTANT: Callers MUST collapse all decrypt errors into a single opaque
+// "decryption failed" result before returning to network peers. Returning
+// distinct errors (e.g. bad padding vs. wrong key) creates an oracle that can
+// be exploited for chosen-ciphertext attacks. This matches the Rust reference
+// which maps all failures to DecryptionError::BadCiphertext("failed to decrypt").
+// Rust source: rust/crypto/src/aes_cbc.rs:52
 func Decrypt(iv, key, ciphertext []byte) ([]byte, error) {
 	if len(key) != 32 {
 		return nil, &ErrCipherInvalidKeySize{Got: len(key)}
@@ -18,7 +31,11 @@ func Decrypt(iv, key, ciphertext []byte) ([]byte, error) {
 	return AESCBCDecrypt(key, iv, ciphertext)
 }
 
-// Encrypt encrypts with AES-256-CBC and PKCS7 padding; note the (iv, key) argument order.
+// Encrypt encrypts plaintext using AES-256-CBC with the given iv and key,
+// appending PKCS7 padding. The key must be exactly 32 bytes (AES-256).
+//
+// The argument order (iv, key) differs from AESCBCEncrypt (key, iv); both
+// delegate to the same underlying implementation.
 func Encrypt(iv, key, plaintext []byte) ([]byte, error) {
 	if len(key) != 32 {
 		return nil, &ErrCipherInvalidKeySize{Got: len(key)}

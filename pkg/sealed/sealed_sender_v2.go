@@ -61,7 +61,15 @@ const (
 	v2UUIDSize = 16
 )
 
-// SealedSenderV2SentMessageRecipient is one recipient of a v2 message; KeyMaterialOffset and KeyMaterialLength locate C_i || AT_i in the full message (zero for excluded recipients).
+// SealedSenderV2SentMessageRecipient holds per-recipient data in a v2 multi-recipient message.
+//
+// KeyMaterialOffset and KeyMaterialLength locate this recipient's encrypted-M
+// (C_i) ‖ auth-tag (AT_i) region within the full wire-format message, enabling
+// server-side multi-recipient delivery (MRM) to extract per-recipient views
+// without re-encoding the message. They are populated only when the message is
+// parsed via ParseSealedSenderV2SentMessage; v2ParseMessage callers that pass
+// only the body bytes will see offsets relative to the body. For excluded
+// recipients (no devices) the values are both zero.
 type SealedSenderV2SentMessageRecipient struct {
 	DeviceIDs       []uint32
 	RegistrationIDs []uint16
@@ -77,13 +85,23 @@ type SealedSenderV2SentMessageRecipient struct {
 	KeyMaterialLength int
 }
 
-// SealedSenderV2SentMessage is a parsed v2 multi-recipient message; when parsed from bytes it keeps the wire bytes and offsets for per-recipient views.
+// SealedSenderV2SentMessage represents a parsed v2 multi-recipient sent message.
+//
+// When the message is parsed via ParseSealedSenderV2SentMessage, fullMessage
+// retains the original wire-format bytes (including the leading version byte),
+// version records the format version, sharedBytesOffset records the start of
+// the shared (e_pub ‖ encrypted_payload) region, and RecipientOrder lists the
+// service-ID keys in their parse order. Together these enable server-side MRM
+// to compute per-recipient views.
 type SealedSenderV2SentMessage struct {
 	Recipients       map[string]*SealedSenderV2SentMessageRecipient // keyed by ServiceId string
 	EphemeralPublic  []byte
 	EncryptedPayload []byte
 
-	// RecipientOrder lists Recipients keys in parse order.
+	// RecipientOrder lists Recipients keys in their parse order. Mirrors
+	// the IndexMap iteration order in Rust libsignal so callers that iterate
+	// recipients deterministically can do so even though Go maps are
+	// unordered.
 	RecipientOrder []string
 
 	// fullMessage is the original wire-format buffer when the message was
@@ -115,7 +133,12 @@ type v2RecipientOutput struct {
 	authTag    []byte // 16 bytes (AT_i)
 }
 
-// SealedSenderMultiRecipientEncrypt encrypts a USMC with Sealed Sender v2; destinationSessions[i] belongs to destinations[i], and excludedRecipients are encoded without devices.
+// SealedSenderMultiRecipientEncrypt encrypts a USMC for multiple recipients using
+// the Sealed Sender v2 multi-recipient protocol.
+//
+// Each destination address must have a corresponding session at the same index in
+// destinationSessions. The excludedRecipients list contains ServiceIds whose
+// entries should be omitted from the output (e.g., the sender's own ServiceId).
 func SealedSenderMultiRecipientEncrypt(
 	destinations []*protocol.SignalAddress,
 	destinationSessions []*record.Session,
@@ -460,7 +483,11 @@ func v2BuildMessageWithExcluded(
 	return buf, nil
 }
 
-// SealedSenderV2DecryptToUSMC decrypts a v2 (0x22 or 0x23) sent message for the recipient's ServiceId.
+// SealedSenderV2DecryptToUSMC decrypts a sealed sender v2 message to extract
+// the UnidentifiedSenderMessageContent. The caller provides the recipient's
+// ServiceId so the correct per-recipient data can be located.
+//
+// This function handles both version 0x22 (UUID) and 0x23 (ServiceId).
 func SealedSenderV2DecryptToUSMC(
 	ciphertext []byte,
 	recipientServiceId protocol.ServiceId,
@@ -692,7 +719,11 @@ func SealedSenderV2DecryptToUSMC(
 // C(32) + AT(16) + E.pub(32) = 80 bytes, plus at least 1 byte of ciphertext.
 const v2ReceivedMinSize = v2EncryptedMKeySize + v2AuthTagSize + 32 + 1
 
-// V2ReceivedMessage is a parsed v2 single-recipient message: version(1) || C(32) || AT(16) || E.pub(32) || ciphertext.
+// V2ReceivedMessage represents a parsed v2 single-recipient received message.
+// This is the format that servers deliver to individual clients after extracting
+// the per-recipient data from the multi-recipient sent format.
+//
+// Wire format: version(1) || C(32) || AT(16) || E.pub(32) || ciphertext
 type V2ReceivedMessage struct {
 	Version          byte
 	EncryptedMKey    []byte // 32 bytes - C (per-recipient encrypted M)
@@ -744,7 +775,16 @@ func v2ParseReceivedMessage(data []byte) (*V2ReceivedMessage, error) {
 	}, nil
 }
 
-// V2BuildReceivedMessage builds a received message from one recipient's sent data, as the server does; version is ignored and 0x22 is always written, as in Rust.
+// V2BuildReceivedMessage constructs a v2 received (single-recipient) message
+// from the per-recipient data extracted from a sent format message.
+// This simulates what the server does when fanning out to individual clients.
+//
+// The Rust reference always uses SEALED_SENDER_V2_UUID_FULL_VERSION (0x22) for
+// the received message format because the ReceivedMessage format has not changed
+// since that version. The version parameter is accepted for API compatibility
+// but is ignored; 0x22 is always used.
+//
+// Wire format: version(1) || C(32) || AT(16) || E.pub(32) || ciphertext
 func V2BuildReceivedMessage(_ byte, encryptedMKey, authTag, ephPub, encryptedPayload []byte) []byte {
 	buf := make([]byte, 0, 1+len(encryptedMKey)+len(authTag)+len(ephPub)+len(encryptedPayload))
 	buf = append(buf, SealedSenderV2VersionUUID)
@@ -755,7 +795,15 @@ func V2BuildReceivedMessage(_ byte, encryptedMKey, authTag, ephPub, encryptedPay
 	return buf
 }
 
-// SealedSenderV2DecryptReceivedToUSMC decrypts a v2 received message, version(1) || C(32) || AT(16) || E.pub(32) || ciphertext, to its USMC.
+// SealedSenderV2DecryptReceivedToUSMC decrypts a v2 received (single-recipient)
+// message to extract the UnidentifiedSenderMessageContent.
+//
+// The received format is what servers deliver to individual clients:
+//
+//	version(1) || C(32) || AT(16) || E.pub(32) || ciphertext
+//
+// This performs the same cryptographic operations as SealedSenderV2DecryptToUSMC
+// but parses the received format instead of the multi-recipient sent format.
 func SealedSenderV2DecryptReceivedToUSMC(
 	ciphertext []byte,
 	identityStore store.IdentityKey,

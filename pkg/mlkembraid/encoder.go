@@ -13,7 +13,18 @@ const ChunkDataSize = polynomial.ChunkSize
 // MaxChunkIndex is the maximum chunk index supported (u16 range).
 const MaxChunkIndex = 65535
 
-// Encoder emits [varint(index)][32 bytes] chunks by Lagrange interpolation over GF(2^16), as Rust SPQR; chunks after the first N are redundancy.
+// Encoder encodes a message into an infinite stream of 32-byte polynomial chunks
+// using Lagrange interpolation over GF(2^16). Each chunk on the wire is formatted as:
+//
+//	[varint(index)] [data(32 bytes)]
+//
+// This matches the Rust SPQR reference implementation's wire format:
+//
+//	encode_chunk: encode_varint(c.index as u64) ++ c.data[..]
+//
+// The first N chunks reproduce the original data; subsequent chunks are
+// interpolated redundancy. Chunks beyond the first pass continue wrapping
+// via NextChunk for retransmission redundancy.
 type Encoder struct {
 	inner *polynomial.PolyEncoder
 
@@ -25,7 +36,17 @@ type Encoder struct {
 	sent int
 }
 
-// NewEncoder returns an Encoder for non-empty data, padding odd lengths by one byte; chunkSize is ignored, as the wire format fixes 32 bytes.
+// NewEncoder creates an Encoder for the given data.
+//
+// The chunkSize parameter is accepted for API compatibility but has no effect;
+// the Rust SPQR wire format mandates a fixed 32-byte payload per chunk. Passing
+// a value other than 32 (or DefaultChunkSize) is not an error — it is silently
+// treated as 32.
+//
+// The data slice must not be empty and must have an even byte length (required
+// by the GF(2^16) polynomial encoding). If the data length is odd, one byte of
+// zero padding is appended internally so the caller's original data is always
+// reconstructed faithfully.
 func NewEncoder(data []byte, _ int) (*Encoder, error) {
 	if len(data) == 0 {
 		return nil, &ErrInvalidInput{Field: "data", Reason: "must not be empty"}
@@ -59,7 +80,13 @@ func NewEncoder(data []byte, _ int) (*Encoder, error) {
 	}, nil
 }
 
-// NextChunk returns the next [varint(index)][32 bytes] chunk, continuing with redundancy after the first pass.
+// NextChunk returns the next chunk in Rust-compatible wire format:
+//
+//	[varint(index)] [data(32 bytes)]
+//
+// After the first pass (all total chunks sent), NextChunk wraps around for
+// retransmission redundancy. The polynomial encoding guarantees that any
+// ceil(len(data)/32) distinct chunks suffice for reconstruction.
 func (e *Encoder) NextChunk() []byte {
 	pc := e.inner.NextChunk()
 
@@ -132,7 +159,11 @@ func encoderMessage(e *polynomial.PolyEncoder) []byte {
 	return out
 }
 
-// NewEncoderFromInner wraps a PolyEncoder at chunk counter idx for the proto codec; msgLen is the unpadded message length.
+// NewEncoderFromInner creates an Encoder wrapping an already-constructed
+// PolyEncoder. The idx parameter is the current chunk counter (matching
+// PolyEncoder.Idx()), and msgLen is the original (un-padded) message length in
+// bytes. This is used exclusively by the proto codec (Phase D) to reconstruct
+// an Encoder from a deserialized protobuf.
 func NewEncoderFromInner(inner *polynomial.PolyEncoder, idx int, msgLen int) (*Encoder, error) {
 	if inner == nil {
 		return nil, &ErrInvalidInput{Field: "inner", Reason: "must not be nil"}
@@ -148,7 +179,9 @@ func NewEncoderFromInner(inner *polynomial.PolyEncoder, idx int, msgLen int) (*E
 	}, nil
 }
 
-// InnerEncoder returns the polynomial encoder for the proto codec only.
+// InnerEncoder returns the underlying polynomial encoder. It is used by the
+// proto marshaling layer (Phase D). Callers outside the SPQR state serializer
+// should not call this directly.
 func (e *Encoder) InnerEncoder() *polynomial.PolyEncoder {
 	return e.inner
 }

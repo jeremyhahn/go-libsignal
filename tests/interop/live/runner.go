@@ -1,4 +1,10 @@
-// Package live runs the interop_runner Rust binary once per test binary, exchanging newline-delimited JSON over stdin and stdout.
+// Package live provides a Go client harness for the interop_runner Rust binary.
+//
+// The harness spawns interop_runner once per test binary invocation, pipes
+// newline-delimited JSON commands to its stdin, and reads JSON responses from
+// stdout. A single process is cached across all tests via sync.Once; the
+// cleanup function registered with testing.M (or the first test's t.Cleanup)
+// shuts it down gracefully.
 //
 //go:build interop_live
 

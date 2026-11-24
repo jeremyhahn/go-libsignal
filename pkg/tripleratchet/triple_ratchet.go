@@ -1,6 +1,24 @@
-// Package tripleratchet implements a Triple Ratchet: each message key combines the EC Double Ratchet and the SPQR chain, whose epoch advances on each ML-KEM Braid output key.
+// Package tripleratchet implements the Triple Ratchet: a hybrid EC + PQ
+// encrypt/decrypt interface combining the Double Ratchet (via ECCipher) and
+// the ML-KEM Braid SCKA (via mlkembraid) with SPQR chain key derivation.
 //
-// NewAlice and NewBob create the two ends; Encrypt and Decrypt exchange composite messages. Unlike the internal Rust TripleRatchet (rust/protocol/src/triple_ratchet.rs), this is a standalone API.
+// Each message is encrypted using keys derived from both the EC ratchet and
+// the PQ ratchet via KDFHybrid. The PQ chain epoch advances when the ML-KEM
+// Braid SCKA produces an output key.
+//
+// Public API:
+//
+//	tr, err := tripleratchet.NewAlice(ecCipher, sharedSecret, kemImpl, chunkSize)
+//	tr, err := tripleratchet.NewBob(ecCipher, sharedSecret, kemImpl, chunkSize)
+//	msg, err := tr.Encrypt(plaintext)
+//	plaintext, err := tr.Decrypt(compositeMessage)
+//
+// Rust source: rust/protocol/src/triple_ratchet.rs
+// Note: This Go package is a higher-level standalone hybrid that wraps the
+// Braid SCKA + SPQR + EC ratchet, while the Rust TripleRatchet is an internal
+// (pub(crate)) session-management helper. The public Go API (NewAlice/NewBob)
+// is a Go-specific design matching the initialization semantics documented in
+// the Signal protocol specification.
 package tripleratchet
 
 import (
@@ -31,7 +49,14 @@ type pqSkippedKeyID struct {
 	counter uint32
 }
 
-// ECCipher is the EC Double Ratchet used by the Triple Ratchet: SendKey returns a message key and serialized header, and receiving derives the key from a header.
+// ECCipher abstracts the EC Double Ratchet operations needed by the Triple Ratchet.
+//
+// Implementations should return the EC message key and a serialized EC header
+// on send, and derive the EC message key from the header on receive.
+//
+// Rust source: the EC ratchet path in rust/protocol/src/triple_ratchet.rs,
+// where the DR sender chain key and receiver chain are managed by the session
+// state. This interface provides a Go-idiomatic abstraction for the same role.
 type ECCipher interface {
 	// SendKey returns the EC message key and serialized EC header for the next
 	// outgoing message without performing the actual encryption.
@@ -42,7 +67,10 @@ type ECCipher interface {
 	ReceiveKey(ecHeader []byte) (messageKey []byte, err error)
 }
 
-// ECCipherSnapshotable lets the Triple Ratchet snapshot EC state before ReceiveKey and restore it on failure.
+// ECCipherSnapshotable is an optional interface for atomic rollback of EC
+// ratchet state. When the ECCipher also implements ECCipherSnapshotable, the
+// Triple Ratchet snapshots EC state before ReceiveKey and restores it if MAC
+// verification or any subsequent step fails.
 type ECCipherSnapshotable interface {
 	// TakeECSnapshot serializes the current EC state for atomic rollback.
 	TakeECSnapshot() ([]byte, error)
@@ -70,7 +98,10 @@ type decryptSnapshot struct {
 	ecSnapshot []byte
 }
 
-// TripleRatchet is a hybrid EC and PQ session; it is not safe for concurrent use.
+// TripleRatchet is a hybrid EC + PQ encrypt/decrypt session.
+//
+// TripleRatchet is NOT safe for concurrent use by multiple goroutines.
+// Session-level serialization (load → mutate → store) provides synchronization.
 type TripleRatchet struct {
 	ecCipher  ECCipher
 	braid     *mlkembraid.Braid
@@ -98,12 +129,23 @@ type TripleRatchet struct {
 	skippedPQKeysFIFOHead int
 }
 
-// NewAlice creates the initiator: SPQR chain keys from spqr.KdfSckaInit and a braid from mlkembraid.InitAlice.
+// NewAlice initializes a Triple Ratchet for the initiator (Alice).
+// Derives initial SPQR chain keys from sharedSecret using spqr.KdfSckaInit and
+// initializes the Braid via mlkembraid.InitAlice.
+//
+// Rust source: session initialization path in rust/protocol/src/triple_ratchet.rs.
+// Alice is the session initiator whose Braid starts in KeysUnsampled state.
 func NewAlice(ecCipher ECCipher, sharedSecret []byte, kemImpl mlkembraid.IncrementalKEM, chunkSize int) (*TripleRatchet, error) {
 	return newTripleRatchet(ecCipher, sharedSecret, kemImpl, chunkSize, false)
 }
 
-// NewBob creates the responder with mlkembraid.InitBob and Alice's send and receive chain keys swapped.
+// NewBob initializes a Triple Ratchet for the responder (Bob).
+// Derives initial SPQR chain keys from sharedSecret using spqr.KdfSckaInit and
+// initializes the Braid via mlkembraid.InitBob. Bob's send and receive chain
+// keys are swapped relative to Alice's.
+//
+// Rust source: session initialization path in rust/protocol/src/triple_ratchet.rs.
+// Bob is the session responder whose Braid starts in NoHeaderReceived state.
 func NewBob(ecCipher ECCipher, sharedSecret []byte, kemImpl mlkembraid.IncrementalKEM, chunkSize int) (*TripleRatchet, error) {
 	return newTripleRatchet(ecCipher, sharedSecret, kemImpl, chunkSize, true)
 }
@@ -168,7 +210,17 @@ func newTripleRatchet(ecCipher ECCipher, sharedSecret []byte, kemImpl mlkembraid
 	}, nil
 }
 
-// Encrypt combines the EC message key with the next SPQR key through KDFHybrid, encrypts with AES-256-CBC and HMAC-SHA256, and returns the composite message with the braid's SCKA message.
+// Encrypt encrypts plaintext and returns the composite wire message.
+//
+// Steps:
+//  1. Calls ecCipher.SendKey() to get an EC message key and serialized EC header.
+//  2. Calls braid.Send() to advance the Braid SCKA and get an outbound SCKA message.
+//  3. If the Braid produces an OutputKey, advances the PQ epoch via advancePQEpoch.
+//  4. Increments sendCounter and derives a PQ message key via spqr.KdfSckaCK.
+//  5. Combines EC and PQ keys via KDFHybrid (or KDFHybridECOnly if PQ key is nil).
+//  6. Encrypts plaintext with AES-256-CBC.
+//  7. Computes HMAC-SHA256 over the encrypted payload.
+//  8. Builds and returns the composite message.
 func (tr *TripleRatchet) Encrypt(plaintext []byte) ([]byte, error) {
 	// Step 1: EC ratchet send key.
 	ecHeader, ecMKBytes, err := tr.ecCipher.SendKey()
@@ -262,7 +314,11 @@ func (tr *TripleRatchet) Encrypt(plaintext []byte) ([]byte, error) {
 	return marshalCompositeMessage(headerBytes, authenticated), nil
 }
 
-// Decrypt returns the plaintext of an Encrypt message, restoring the snapshot on any failure.
+// Decrypt decrypts a composite wire message produced by Encrypt and returns
+// the plaintext.
+//
+// On MAC failure or decryption failure, all state mutations are rolled back
+// via snapshot/restore so the TripleRatchet remains usable.
 func (tr *TripleRatchet) Decrypt(compositeMessage []byte) ([]byte, error) {
 	// Parse outer framing.
 	headerBytes, authenticatedCiphertext, parseErr := unmarshalCompositeMessage(compositeMessage)

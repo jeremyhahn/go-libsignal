@@ -7,7 +7,17 @@ import (
 	"github.com/gtank/ristretto255"
 )
 
-// Statement is a set of linear equations over Ristretto255 points with named scalars and points (point 0 is G), as in Rust poksho; its description is absorbed into the transcript.
+// Statement defines a zero-knowledge proof statement consisting of linear
+// equations over Ristretto255 points. Each equation asserts that a linear
+// combination of generators weighted by secret scalars equals a target point.
+//
+// Equations use named string identifiers for scalars and points, matching
+// the Rust poksho::Statement system. Point index 0 is pre-assigned to "G",
+// the Ristretto basepoint.
+//
+// The statement is serialized into a compact binary description that is
+// absorbed into the SHO transcript, ensuring that different statements
+// produce different challenges even with the same inputs.
 type Statement struct {
 	equations []equation
 	scalarMap map[string]uint8
@@ -36,7 +46,11 @@ func NewStatement() *Statement {
 	}
 }
 
-// Add adds lhs = sum of (scalar, point) terms; panics on an empty lhs or terms, or more than 255 equations or terms.
+// Add adds an equation to the statement. lhs is the name of the left-hand
+// side point. rhsPairs is a list of (scalar_name, point_name) pairs for
+// the right-hand side terms.
+//
+// Panics if input is invalid (empty lhs, empty pairs, >255 equations or terms).
 func (s *Statement) Add(lhs string, rhsPairs [][2]string) {
 	if lhs == "" || len(rhsPairs) == 0 || len(rhsPairs) > 255 || len(s.equations) >= 255 {
 		panic("poksho: unexpected input sizes to Add")
@@ -175,7 +189,17 @@ func (s *Statement) homomorphismWithSubtraction(
 	return result
 }
 
-// Prove creates a Schnorr-style proof with the POKSHO_Ristretto_SHOHMACSHA256 transcript and self-verifies it before returning.
+// Prove creates a Schnorr-style zero-knowledge proof for the given statement.
+//
+// The proof process:
+//  1. SHO absorbs label "POKSHO_Ristretto_SHOHMACSHA256"
+//  2. SHO absorbs statement description D and point arguments A, then ratchets
+//  3. A cloned SHO absorbs randomness Z and witness scalars a, then ratchets
+//  4. The clone absorbs message M, then ratchets and squeezes nonce scalars
+//  5. Nonce scalars are applied through the homomorphism to create commitments R
+//  6. The original SHO absorbs R and message M, then squeezes the challenge
+//  7. Responses are computed as nonce + challenge * witness
+//  8. The proof is self-verified before being returned
 func (s *Statement) Prove(
 	scalarArgs *ScalarArgs,
 	pointArgs *PointArgs,
@@ -266,7 +290,14 @@ func (s *Statement) Prove(
 	return proofBytes, nil
 }
 
-// VerifyProof recomputes the commitments R = F(response) - challenge*A and checks the recomputed challenge matches.
+// VerifyProof verifies a zero-knowledge proof against the statement.
+//
+// The verification process:
+//  1. Parse proof into challenge and response scalars
+//  2. Reconstruct the SHO transcript with label, statement, and points
+//  3. Reconstruct commitments: R = F(response) - challenge * A
+//  4. Recompute the challenge from the reconstructed commitments and message
+//  5. Check that the recomputed challenge equals the proof's challenge
 func (s *Statement) VerifyProof(
 	proofBytes []byte,
 	pointArgs *PointArgs,

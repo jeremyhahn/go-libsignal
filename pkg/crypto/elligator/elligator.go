@@ -1,4 +1,12 @@
-// Package elligator implements the inverse ristretto-flavored Elligator map (curve25519-dalek-signal Lizard) used by zkgroup to decode encrypted UUIDs and profile keys.
+// Package elligator implements the inverse of the ristretto-flavored Elligator
+// map, allowing recovery of field elements from ristretto255 points.
+//
+// This is a port of the curve25519-dalek-signal Lizard implementation, which
+// provides bidirectional encoding between small data payloads and ristretto255
+// points via the Elligator map and its inverse.
+//
+// The inverse is used by Signal's zkgroup to decode encrypted UUIDs and profile
+// keys back to their original byte representations.
 package elligator
 
 import (
@@ -291,7 +299,13 @@ func toJacobiQuarticRistretto(X, Y, Z, T *field.Element) [4]*jacobiPoint {
 	}
 }
 
-// ElligatorRistrettoFlavorInverse returns a validity bitmask and up to 8 field elements f with MAP(f) equal to the encoded point.
+// ElligatorRistrettoFlavorInverse computes the at most 8 positive field elements
+// f such that MAP(f) equals the ristretto point encoded by the given 32 bytes.
+//
+// Returns a bitmask indicating which of the 8 returned field elements are valid
+// preimages, and the 8 candidate field elements as 32-byte little-endian arrays.
+//
+// This is a direct port of the Rust elligator_ristretto_flavor_inverse method.
 func ElligatorRistrettoFlavorInverse(encoded []byte) (mask uint8, candidates [8][32]byte, ok bool) {
 	X, Y, Z, T, valid := decodeToExtended(encoded)
 	if !valid {

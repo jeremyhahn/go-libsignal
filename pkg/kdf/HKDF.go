@@ -16,7 +16,17 @@ import (
 // HKDF is a hashed key derivation function type that can be used to derive keys.
 type HKDF func(inputKeyMaterial, salt, info []byte, outputLength int) ([]byte, error)
 
-// Extract returns the 32-byte PRK = HMAC-SHA256(salt, ikm) (RFC 5869 §2.2); an empty salt is HashLen zero bytes.
+// Extract performs the HKDF extract step (RFC 5869 §2.2), computing the
+// pseudorandom key PRK = HMAC-SHA256(salt, ikm).
+//
+// If salt is nil or empty, HMAC-SHA256 is computed with a zero-valued key
+// of HashLen bytes, matching the RFC 5869 §2.2 default.
+//
+// The returned PRK is 32 bytes. Pass it to Expand or ExpandFromPRK for
+// multi-expansion use cases — this avoids re-running the extract step.
+//
+// Mirrors Rust Hkdf::<Sha256>::extract(salt, ikm).
+// Rust source: rust/crypto/src/hpke/provider.rs:55
 func Extract(ikm, salt []byte) []byte {
 	if len(salt) == 0 {
 		salt = make([]byte, sha256.Size)
@@ -26,7 +36,14 @@ func Extract(ikm, salt []byte) []byte {
 	return mac.Sum(nil)
 }
 
-// Expand derives outputLength bytes (at most 8160) from a PRK of at least 32 bytes and info (RFC 5869 §2.3).
+// Expand performs the HKDF expand step (RFC 5869 §2.3) using a PRK previously
+// returned by Extract. It derives outputLength bytes keyed by info.
+//
+// prk must be at least 32 bytes (one HMAC-SHA256 output block).
+// outputLength must not exceed 255 * 32 = 8160 bytes (HKDF-SHA256 limit).
+//
+// Mirrors Rust Hkdf::<Sha256>::from_prk(prk).expand(info, out).
+// Rust source: rust/crypto/src/hpke/provider.rs:69-72
 func Expand(prk, info []byte, outputLength int) ([]byte, error) {
 	if len(prk) < sha256.Size {
 		return nil, &ErrHKDFInvalidPRK{Got: len(prk)}
@@ -58,7 +75,11 @@ func DeriveSecrets(inputKeyMaterial, salt, info []byte, outputLength int) ([]byt
 	return secrets, nil
 }
 
-// CalculateSharedSecret returns the X25519 shared secret, rejecting low-order points; feed it to DeriveSecrets.
+// CalculateSharedSecret uses DH Curve25519 to find a shared secret. The result of this function
+// should be used in `DeriveSecrets` to output the Root and Chain keys.
+//
+// Uses curve25519.X25519 which validates inputs and rejects low-order points
+// that would produce an all-zero shared secret.
 func CalculateSharedSecret(theirKey, ourKey [32]byte) ([32]byte, error) {
 	// Zeroize the local copies of key material when done.
 	defer crypto.ZeroizeArray32(&ourKey)
@@ -94,7 +115,9 @@ type KeyMaterial struct {
 	IV        []byte
 }
 
-// Zeroize overwrites all key material with zeros.
+// Zeroize overwrites all key material fields with zeros to prevent sensitive
+// data from lingering in memory. Call this (via defer) when the key material
+// is no longer needed.
 func (k *KeyMaterial) Zeroize() {
 	crypto.Zeroize(k.CipherKey)
 	crypto.Zeroize(k.MacKey)

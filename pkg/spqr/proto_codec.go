@@ -1,4 +1,24 @@
-// MarshalStateProto and UnmarshalStateProto convert SPQR to Rust PqRatchetState bytes; proto epochs are 1-indexed, Go's 0-indexed; Ct1 states keep Rust's hdr and es only for round-trips.
+// Package spqr: proto_codec.go — Phase D marshaling bridge.
+//
+// MarshalStateProto / UnmarshalStateProto convert a Go SPQR into/from the
+// Rust PqRatchetState protobuf wire format. The goal is byte-level parity
+// with Rust's PqRatchetState::encode_to_vec().
+//
+// Epoch convention: Rust stores epochs 1-indexed in the protobuf; Go uses
+// 0-indexed epochs internally. Add 1 when writing to proto; subtract 1 when
+// reading.
+//
+// NOTE: Three states (Ct1Sampled, EkReceivedCt1Sampled, Ct1Acknowledged)
+// expose a semantic gap: Rust's Unchunked.Ct1Sent stores hdr (64 B) and es
+// (2080 B — the intermediate EncapsulationState), but Go destroys those
+// fields immediately after encapsulation completes in bobCompleteEncapsulation.
+// When unmarshaling from Rust-produced bytes for these states, the hdr and es
+// bytes are stored back in bobEkSeed/bobHek (for hdr) and bobEncapSecret (for
+// es) so that a subsequent marshal round-trips identically. Callers that
+// attempt live protocol operation on unmarshaled states in these three variants
+// should call Braid.Send/Recv only after the braid has been freshly
+// re-initialized, because the Go runtime may not be able to resume crypto
+// operations on fields that were already consumed by the Rust peer.
 package spqr
 
 import (
@@ -74,7 +94,18 @@ func (e *ErrProtoChainUnderflow) Error() string {
 
 // ────────────────────────── public codec functions ───────────────────────────
 
-// MarshalStateProto encodes s as Rust PqRatchetState bytes; without a braid only the envelope, and V0 states as empty bytes (Rust empty_state).
+// MarshalStateProto serializes a Go SPQR into Rust's PqRatchetState wire
+// format. Round-trips with Rust's spqr::initial_state / spqr::send /
+// spqr::recv byte-for-byte when braid state is present.
+//
+// When s has no attached braid (s.braid == nil), the returned bytes encode
+// only the outer PqRatchetState envelope with version_negotiation and chain
+// fields; the inner V1State is omitted.
+//
+// V0-disabled states (negotiated to V0 / PQR absent) are serialized as empty
+// bytes, matching Rust's empty_state() / recv() V0 path which returns vec![].
+// This eliminates the Go-only VersionNegotiation{AuthKey:nil} sentinel that
+// was not compatible with Rust's proto decoder (lib.rs:470-473).
 func MarshalStateProto(s *SPQR) ([]byte, error) {
 	// V0-disabled: return empty bytes matching Rust's empty_state() (lib.rs:45-47).
 	if s.IsDisabled() {
@@ -102,7 +133,12 @@ var marshalStateMessage = func(pb *pqratchetpb.PqRatchetState) ([]byte, error) {
 	return proto.Marshal(pb)
 }
 
-// UnmarshalStateProto decodes Rust PqRatchetState bytes into an SPQR; empty input is V0 (Rust decode_state).
+// UnmarshalStateProto deserializes Rust-produced state bytes into a Go SPQR.
+// It performs the inverse of MarshalStateProto.
+//
+// Empty input is treated as V0-disabled (Rust's empty_state()), matching
+// Rust's decode_state (lib.rs:470-473) which interprets empty bytes as
+// PqRatchetState{inner:None, chain:None, version_negotiation:None}.
 func UnmarshalStateProto(data []byte) (*SPQR, error) {
 	// Empty bytes → V0-disabled, matching Rust's empty_state() convention.
 	if len(data) == 0 {

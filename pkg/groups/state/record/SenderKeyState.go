@@ -142,7 +142,11 @@ func destroySenderKeyState(state *SenderKeyState) {
 	}
 }
 
-// SenderKeyStateStructure is the serializable form of a SenderKeyState, its long-lived signing key held in guarded memory.
+// SenderKeyStateStructure is a serializeable structure of SenderKeyState. The
+// signing private key is held in guarded memory. Unlike a chain or message key
+// it is long-lived — it authenticates every SenderKeyMessage in the group — so
+// a plain-heap copy of it is the worst of the three to leave swappable or
+// capturable in a core dump.
 type SenderKeyStateStructure struct {
 	Keys              []*ratchet.SenderMessageKeyStructure
 	KeyID             uint32

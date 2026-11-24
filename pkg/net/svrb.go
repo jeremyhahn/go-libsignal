@@ -13,7 +13,8 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
-// BackupConnectionDelay staggers parallel connections to SVRB backends.
+// BackupConnectionDelay is the stagger delay between initiating parallel
+// connections to multiple SVRB backends, avoiding a thundering herd.
 const BackupConnectionDelay = 50 * time.Millisecond
 
 // SvrBErrorKind categorizes SVRB-specific errors.
@@ -186,7 +187,12 @@ func svrBErrorFromSvrLogicError(err error) *SvrBError {
 	return &SvrBError{Kind: SvrBErrorProtocol, Err: e}
 }
 
-// SvrBTransport sends and receives Noise-encrypted messages to one SVRB server over a WebSocket.
+// SvrBTransport abstracts the network transport for a single SVRB server
+// connection. It combines the attested Noise-protocol encryption with the
+// underlying WebSocket transport to provide encrypted send/receive over
+// the network. Implementations are responsible for encrypting via the
+// Noise session before sending over the wire, and decrypting received
+// wire bytes through the Noise session.
 type SvrBTransport interface {
 	// SendBytes encrypts and sends a request to the server.
 	SendBytes(ctx context.Context, data []byte) error
@@ -200,7 +206,10 @@ type SvrBTransport interface {
 
 // SvrBPreparer prepares OPRF backup data for SVRB operations.
 type SvrBPreparer interface {
-	// Prepare builds OPRF backup requests and the output key for password; maxTries is the server-side restore limit.
+	// Prepare creates an OPRF backup request set for the given password.
+	// maxTries sets the server-side rate limit for restore attempts.
+	// The returned OPRFBackup4 contains serialized requests ready to send
+	// to each server and the derived output key.
 	Prepare(password []byte, maxTries uint32) (*svr.OPRFBackup4, error)
 }
 
@@ -213,7 +222,8 @@ type SvrBBackuper interface {
 
 // SvrBRestorer restores a secret from SVRB servers using a password.
 type SvrBRestorer interface {
-	// Restore runs a two-phase OPRF restore and returns the encryption key secret.
+	// Restore performs a two-phase OPRF restore, returning the encryption
+	// key secret.
 	Restore(ctx context.Context, password []byte) (*secret.Secret, error)
 }
 
@@ -243,11 +253,14 @@ type SvrBClient interface {
 
 // SvrBConnector establishes connections to SVRB enclave backends.
 type SvrBConnector interface {
-	// Connect returns one attested connection result per SVRB server.
+	// Connect establishes attested connections to the SVRB servers and
+	// returns connection results. Each result corresponds to one server.
 	Connect(ctx context.Context) ([]SvrBConnectionResult, error)
 }
 
-// SvrBConnectionResult holds Transport on success or Err on failure.
+// SvrBConnectionResult represents the outcome of a single SVRB server
+// connection attempt. Either Transport is set (on success) or Err is
+// set (on failure).
 type SvrBConnectionResult struct {
 	// ServerID is the numeric identifier for this server.
 	ServerID uint64
@@ -264,7 +277,9 @@ type SvrBNetClient struct {
 	serverIDs []uint64
 }
 
-// NewSvrBNetClient creates an SVRB client; serverIDs must match the enclave backends.
+// NewSvrBNetClient creates a new SVRB network client using the given
+// connector and server IDs. The server IDs must match the IDs expected
+// by the SVRB enclave backends.
 func NewSvrBNetClient(connector SvrBConnector, serverIDs []uint64) *SvrBNetClient {
 	ids := make([]uint64, len(serverIDs))
 	copy(ids, serverIDs)
@@ -274,7 +289,8 @@ func NewSvrBNetClient(connector SvrBConnector, serverIDs []uint64) *SvrBNetClien
 	}
 }
 
-// Prepare builds OPRF backup requests for password; maxTries must be positive.
+// Prepare creates an OPRF backup request set for the given password.
+// maxTries sets the server-side rate limit for restore attempts (must be > 0).
 func (c *SvrBNetClient) Prepare(password []byte, maxTries uint32) (*svr.OPRFBackup4, error) {
 	return svr.NewOPRFBackup4(c.serverIDs, password, maxTries)
 }

@@ -20,7 +20,9 @@ func (e *ErrDeserialize) Error() string {
 	return fmt.Sprintf("spqr: deserialization failed: %s", e.Reason)
 }
 
-// Serialize encodes the state as a PqRatchetState proto, byte-compatible with Rust spqr.
+// Serialize encodes the SPQR state in Rust-compatible PqRatchetState proto format.
+// Bytes produced by this method are byte-for-byte compatible with Rust libsignal's
+// spqr::initial_state / spqr::send / spqr::recv output.
 func (s *SPQR) Serialize() ([]byte, error) {
 	b, err := MarshalStateProto(s)
 	if err != nil {
@@ -29,7 +31,7 @@ func (s *SPQR) Serialize() ([]byte, error) {
 	return b, nil
 }
 
-// Deserialize decodes PqRatchetState proto bytes.
+// Deserialize decodes Rust-compatible PqRatchetState proto bytes into a Go SPQR.
 func Deserialize(data []byte) (*SPQR, error) {
 	s, err := UnmarshalStateProto(data)
 	if err != nil {

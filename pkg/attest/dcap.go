@@ -34,7 +34,14 @@ var intelQEVendorID = [16]byte{
 	0x94, 0x0a, 0x0d, 0xb3, 0x95, 0x7f, 0x06, 0x07,
 }
 
-// VerifyRemoteAttestation verifies DCAP evidence and endorsements against the expected MRENCLAVE and accepted advisories at currentTime, returning the claims.
+// VerifyRemoteAttestation verifies DCAP remote attestation and returns extracted claims.
+//
+// Parameters:
+//   - evidenceBytes: raw DCAP evidence
+//   - endorsementBytes: raw DCAP endorsements
+//   - expectedMREnclave: the expected MRENCLAVE value
+//   - acceptableSWAdvisories: SW advisory IDs known to be mitigated
+//   - currentTime: time for validity checking (should include skew adjustment)
 func VerifyRemoteAttestation(
 	evidenceBytes []byte,
 	endorsementBytes []byte,

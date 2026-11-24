@@ -1,4 +1,11 @@
-// Package groups sets up unidirectional SenderKey group sessions per (groupId, senderId, deviceId).
+// Package groups is responsible for setting up group SenderKey encrypted sessions.
+// Once a session has been established, GroupCipher can be used to encrypt/decrypt
+// messages in that session.
+//
+// The built sessions are unidirectional: they can be used either for sending or
+// for receiving, but not both. Sessions are constructed per (groupId + senderId +
+// deviceId) tuple. Remote logical users are identified by their senderId, and each
+// logical recipientId can have multiple physical devices.
 package groups
 
 import (
@@ -52,7 +59,11 @@ var distributionChainKey = func(msg *protocol.SenderKeyDistributionMessage) []by
 	return msg.ChainKey()
 }
 
-// Create creates a group session for name; the caller must Release the returned message once it is sent.
+// Create will create a new group session for the given name.
+// The distributionID identifies the SenderKey distribution for routing.
+// The returned message holds the chain key seed in locked memory, which the
+// garbage collector never frees; the caller must call its Release once it has
+// been serialized and sent.
 func (b *SessionBuilder) Create(distributionID [16]byte, senderKeyName *protocol.SenderKeyName) (*protocol.SenderKeyDistributionMessage, error) {
 	// Load the senderkey by name
 	senderKeyRecord, err := b.senderKeyStore.LoadSenderKey(senderKeyName)

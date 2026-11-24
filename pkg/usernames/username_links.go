@@ -14,7 +14,11 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
-// CreateForUsername encrypts username into a link, using random entropy if nil, and returns the entropy and the buffer.
+// CreateForUsername encrypts a username into a username link.
+//
+// If entropy is nil, random entropy is generated. The entropy used and the
+// encrypted buffer are returned. The encrypted buffer can be decrypted with
+// DecryptUsername using the same entropy.
 func CreateForUsername(username string, entropy []byte) ([UsernameLinkEntropySize]byte, []byte, error) {
 	const aesBlockSize = 16
 

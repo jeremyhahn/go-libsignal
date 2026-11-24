@@ -1,10 +1,18 @@
 // Copyright 2025 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package gf implements GF(2^16) arithmetic with POLY 0x1100b, byte-identical to the Rust sparsepostquantumratchet crate.
+// Package gf implements arithmetic in GF(2^16) with primitive polynomial
+// POLY = 0x1100b (x^16 + x^12 + x^3 + x + 1).
+//
+// This is an internal implementation detail of pkg/mlkembraid; the algorithm
+// is a direct port of the Rust sparsepostquantumratchet crate (commit f2589fef).
+// Byte-level parity with the Rust reference is a hard requirement.
 package gf
 
-// Poly is the primitive polynomial x^16 + x^12 + x^3 + x + 1 (Rust POLY = 0x1100b).
+// Poly is the primitive polynomial for GF(2^16): x^16 + x^12 + x^3 + x + 1.
+// Matches Rust's POLY = 0x1100b.
+//
+// Reference: https://web.eecs.utk.edu/~jplank/plank/papers/CS-07-593/primitive-polynomial-table.txt
 const Poly uint32 = 0x1100b
 
 // ErrInvalidInverse is returned when computing the multiplicative inverse of
@@ -16,7 +24,10 @@ func (ErrInvalidInverse) Error() string {
 	return "gf: zero has no multiplicative inverse"
 }
 
-// GF16 is a GF(2^16) element; bit i of Value is the coefficient of x^i.
+// GF16 is an element of GF(2^16) with primitive polynomial 0x1100b.
+// Representation is a uint16 where bit i corresponds to the coefficient of x^i.
+// The zero representation is GF16{Value: 0} and the multiplicative identity
+// is GF16{Value: 1}.
 type GF16 struct {
 	// Value is the underlying field element in polynomial representation.
 	Value uint16
@@ -122,7 +133,13 @@ func (g *GF16) MulAssign(other GF16) {
 	g.Value = rawMul(g.Value, other.Value)
 }
 
-// Inv returns g^(2^16-2), the inverse of g, or ErrInvalidInverse for zero.
+// Inv returns the multiplicative inverse of g in GF(2^16).
+// Uses Fermat's little theorem: inv(a) = a^(2^16 - 2).
+// Returns ErrInvalidInverse if g is zero (which has no inverse).
+//
+// Note: Rust's div_impl computes self / other = self * inv(other). The Go Inv
+// method implements the same exponentiation using the same squaring schedule,
+// but applied to a single element.
 func (g GF16) Inv() (GF16, error) {
 	if g.Value == 0 {
 		return Zero, ErrInvalidInverse{}
@@ -167,7 +184,13 @@ func mul2(a, b1, b2 uint16) (uint16, uint16) {
 	return rawMul(a, b1), rawMul(a, b2)
 }
 
-// ParallelMult multiplies each element of coeffs by m in place, two at a time (Rust parallel_mult).
+// ParallelMult multiplies each element of coeffs by m in place.
+// Processes elements in pairs for efficiency (mirrors Rust's parallel_mult
+// which uses mul2_u16 to process two elements at a time).
+//
+// Matches Rust's parallel_mult signature:
+//
+//	pub fn parallel_mult(a: GF16, into: &mut [GF16])
 func ParallelMult(m GF16, coeffs []GF16) {
 	i := 0
 	for i+2 <= len(coeffs) {

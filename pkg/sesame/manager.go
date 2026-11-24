@@ -38,7 +38,10 @@ type ServerResponse struct {
 // Returns the server's response about device list changes.
 type SendToServerFunc func(userID string, messages map[uint32][]byte) (*ServerResponse, error)
 
-// Manager runs the Sesame session management algorithm across users and devices.
+// Manager implements the Sesame session management algorithm as described in
+// the Sesame specification. It coordinates session lifecycle across multiple
+// users and devices, handling creation, expiration, and routing of encrypt
+// and decrypt operations.
 type Manager struct {
 	mu            sync.RWMutex
 	store         Store
@@ -49,7 +52,10 @@ type Manager struct {
 	localDeviceID uint32
 }
 
-// NewManager returns a Manager for the local device; a nil config means DefaultConfig.
+// NewManager creates a new Sesame Manager with the given store, configuration,
+// session creation callback, and local identity. If config is nil, DefaultConfig
+// is used. The localUserID and localDeviceID identify this device; per the Sesame
+// spec, a device must not store a DeviceRecord for its own DeviceID.
 func NewManager(store Store, config *Config, createSession CreateSessionFunc, opts ...ManagerOption) *Manager {
 	if config == nil {
 		config = DefaultConfig()
@@ -120,7 +126,16 @@ func (m *Manager) isSelfDevice(userID string, deviceID uint32) bool {
 	return m.localUserID != "" && m.localUserID == userID && m.localDeviceID == deviceID
 }
 
-// PrepForEncrypting ensures an unexpired active session for the device, creating one from a prekey bundle if needed (Sesame §3.2).
+// PrepForEncrypting implements section 3.2 of the Sesame specification.
+// It ensures a valid active session exists for the given user and device,
+// creating one from a prekey bundle if necessary.
+//
+// Steps:
+//  1. Delete any stale DeviceRecords unconditionally (for send path)
+//  2. Conditionally update records (create if needed, replace on identity key change)
+//  3. If no active session, create initiating session from prekey bundle
+//  4. Check MAXSEND on active session; deactivate and create new if expired
+//  5. Return active session
 func (m *Manager) PrepForEncrypting(userID string, deviceID uint32, identityKey *identity.Key) (*SessionWrapper, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -260,7 +275,19 @@ func (m *Manager) deleteStaleDevicesForSend(userRecord *UserRecord) {
 	}
 }
 
-// Send encrypts plaintext for each listed device and returns ciphertexts by device, restoring the UserRecord on any error (Sesame §3.3).
+// Send implements section 3.3 of the Sesame specification (8-step sending).
+// It encrypts plaintext for all specified devices of a user and returns
+// a map of deviceID to ciphertext.
+//
+// Per spec section 3.3: "If any error occurs in encrypting to a particular user...
+// then the sending device shall discard any changes to the relevant UserRecord."
+//
+// Steps:
+//  1. Snapshot UserRecord for rollback
+//  2. Look up UserRecord for recipient
+//  3. PrepForEncrypting for each device
+//  4. Encrypt plaintext with active session
+//  5. Restore snapshot on any error
 func (m *Manager) Send(userID string, deviceIDs []uint32, plaintext []byte, encrypt EncryptFunc) (map[uint32][]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -340,7 +367,24 @@ func (m *Manager) Send(userID string, deviceIDs []uint32, plaintext []byte, encr
 	return results, nil
 }
 
-// Receive decrypts with existing sessions, active first then inactive (Sesame §3.4); initiation messages go through ReceiveNewSession.
+// Receive implements section 3.4 of the Sesame specification (4-step receiving).
+// It attempts to decrypt the ciphertext from the given user and device using
+// only existing sessions -- it does NOT handle initiation messages that
+// establish new sessions.
+//
+// For messages that create a new session (initiation messages / PreKeySignalMessage),
+// callers must use ReceiveNewSession instead, which accepts the new session record
+// produced by processing the prekey message. The caller is responsible for
+// determining whether an incoming message is an initiation message before
+// choosing between Receive and ReceiveNewSession. This is a deliberate API
+// design choice that splits the Sesame spec's single receive entry point into
+// two methods for clarity, making the session-creation side effect explicit.
+//
+// Steps:
+//  1. Load existing user record; return error if no sessions exist to try
+//  2. Try active session
+//  3. Try inactive sessions (promote to active on success)
+//  4. If nothing works, return DecryptionFailedError
 func (m *Manager) Receive(userID string, deviceID uint32, ciphertext []byte, decrypt DecryptFunc) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -478,7 +522,10 @@ func (m *Manager) UpdateDeviceList(userID string, currentDevices []uint32) error
 	return m.store.StoreUserRecord(userID, userRecord)
 }
 
-// CleanupExpired removes expired sessions, then empty device and user records.
+// CleanupExpired removes expired sessions and stale records across all
+// stored users. This should be called periodically as part of maintenance.
+// Implements cascade deletion: when last session is deleted, the DeviceRecord
+// is removed; when last DeviceRecord is deleted, the UserRecord is removed.
 func (m *Manager) CleanupExpired() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -518,7 +565,22 @@ func (m *Manager) CleanupExpired() error {
 	return nil
 }
 
-// SendWithServerLoop encrypts for the user's devices, sends, and reconciles the server's device list with retries, restoring the record on error (Sesame §3.3).
+// SendWithServerLoop implements the 8-step iterative send process from
+// Sesame spec section 3.3. It encrypts plaintext for a user's devices,
+// sends to the server, and handles device list reconciliation with retries.
+//
+// Steps:
+//  1. Look up UserRecord for recipient
+//  2. For each non-stale DeviceRecord with active session, encrypt
+//  3. Send to server via sendToServer callback
+//  4. Server returns current device list (old + new devices)
+//  5. Mark old devices stale
+//  6. For each new device, PrepForEncrypting
+//  7. Encrypt for new devices
+//  8. Restart from step 1 if new devices were discovered (with retry limit)
+//
+// Per spec: "If any error occurs in encrypting to a particular user...
+// then the sending device shall discard any changes to the relevant UserRecord."
 func (m *Manager) SendWithServerLoop(
 	userID string,
 	plaintext []byte,

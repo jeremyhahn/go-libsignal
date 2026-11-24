@@ -33,7 +33,13 @@ func NewChain(senderRatchetKeyPair *ecc.ECKeyPair, chainKey *chain.Key,
 	}
 }
 
-// NewChainFromStructure returns a Chain whose private keys are in guarded memory; on failure it releases them.
+// NewChainFromStructure will return a new Chain with the given
+// chain structure.
+//
+// The ratchet private key, the chain key and every message key are moved into
+// guarded memory as they are decoded. If the chain cannot be completed, all of
+// them are released before returning, so a failed call leaves no locked memory
+// behind.
 func NewChainFromStructure(structure *ChainStructure) (*Chain, error) {
 	if structure == nil {
 		return nil, nil
@@ -131,7 +137,12 @@ func (c *Chain) ChainKey() *chain.Key {
 	return c.chainKey
 }
 
-// SetChainKey sets the chain key and destroys the old one, the last reference to that locked memory.
+// SetChainKey will set the chain state's chain key. The key being replaced is
+// destroyed rather than abandoned: callers ratchet forward from a copy —
+// State.SenderChainKey and State.ReceiverChainKey both hand out copies — so
+// the chain's own key is the last reference, and go-enclave reclaims nothing on
+// its own. Without this, every message sent or accepted would cost the process
+// a locked page it never gets back.
 func (c *Chain) SetChainKey(key *chain.Key) {
 	if c.chainKey != nil && c.chainKey != key {
 		c.chainKey.Zeroize()

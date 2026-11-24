@@ -11,7 +11,14 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
-// GuardedECKeyPair holds a public key and a locked-memory private key; use GuardedPrivateKey for the keyops.PrivateKey interface.
+// GuardedECKeyPair holds an EC public key and a locked-memory-protected private key.
+// It provides the same interface as ECKeyPair but with the private key stored
+// in mlock'd, guard-page protected memory.
+//
+// Note: GuardedECKeyPair does not directly implement keyops.PrivateKey because
+// its PublicKey() method returns ECPublicKeyable (for backward compatibility)
+// which conflicts with keyops.PrivateKey's PublicKey() [32]byte. Use
+// GuardedPrivateKey() to access the keyops.PrivateKey interface.
 type GuardedECKeyPair struct {
 	publicKey  ECPublicKeyable
 	privateKey *GuardedECPrivateKey
@@ -59,7 +66,14 @@ func (g *GuardedECKeyPair) ZeroizePrivateKey() {
 	}
 }
 
-// GenerateGuardedKeyPair generates a clamped Curve25519 key pair with the private key in locked memory.
+// GenerateGuardedKeyPair generates a random Curve25519 key pair with the
+// private key stored in locked memory.
+//
+// Uses the same clamping logic as GenerateKeyPair:
+//
+//	private[0] &= 248
+//	private[31] &= 127
+//	private[31] |= 64
 func GenerateGuardedKeyPair() (kp *GuardedECKeyPair, err error) {
 	defer func() {
 		if r := recover(); r != nil {

@@ -61,7 +61,17 @@ func (s ServiceId) UUIDString() string {
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
-// String returns the canonical service ID string: a bare UUID for an ACI, "PNI:<uuid>" for a PNI (Rust service_id_string).
+// String returns the canonical service ID string representation.
+// ACI prints as a bare hyphenated UUID (e.g. "abcd1234-…"). The "ACI:" prefix
+// is never emitted. PNI prints as "PNI:<hyphenated-uuid>".
+//
+// Note: the ACI format changed from the legacy "ACI:<uuid>" prefixed form.
+// Callers that persisted ServiceId strings under the old form must parse them
+// through ServiceIdFromServiceIdString, which accepts both the legacy
+// "ACI:<uuid>" prefix and the current bare-UUID form, before calling String().
+//
+// Mirrors Rust libsignal_core ServiceId::service_id_string at
+// rust/core/src/address.rs:220-226.
 func (s ServiceId) String() string {
 	if s.kind == ServiceIdKindACI {
 		return s.UUIDString()
@@ -69,7 +79,10 @@ func (s ServiceId) String() string {
 	return "PNI:" + s.UUIDString()
 }
 
-// FixedWidthBinary returns the 17-byte kind byte and UUID encoding (Rust service_id_fixed_width_binary).
+// FixedWidthBinary returns the 17-byte encoding: [kind_byte][16_uuid_bytes].
+//
+// Mirrors Rust libsignal_core's ServiceId::service_id_fixed_width_binary
+// at rust/core/src/address.rs.
 func (s ServiceId) FixedWidthBinary() [17]byte {
 	var out [17]byte
 	out[0] = byte(s.kind)
@@ -77,7 +90,12 @@ func (s ServiceId) FixedWidthBinary() [17]byte {
 	return out
 }
 
-// ServiceIdBinary returns 16 UUID bytes for an ACI or 0x01 plus 16 bytes for a PNI (Rust service_id_binary).
+// ServiceIdBinary returns the variable-width binary encoding used by
+// Rust libsignal_core's ServiceId::service_id_binary: 16 raw UUID bytes
+// for an ACI, or 17 bytes ([0x01][16 UUID bytes]) for a PNI. This is the
+// form HKDF info strings (e.g. backup_id derivation) concatenate.
+//
+// Mirrors rust/core/src/address.rs.
 func (s ServiceId) ServiceIdBinary() []byte {
 	if s.kind == ServiceIdKindACI {
 		out := make([]byte, 16)
@@ -90,7 +108,17 @@ func (s ServiceId) ServiceIdBinary() []byte {
 	return out
 }
 
-// ServiceIdFromBinary parses the ServiceIdBinary encoding, rejecting other lengths and a tagged ACI (Rust parse_from_service_id_binary).
+// ServiceIdFromBinary parses the variable-width binary encoding produced by
+// ServiceIdBinary: 16 bytes → ACI (no prefix); 17 bytes → PNI (0x01 tag ||
+// 16-byte UUID). A 17-byte buffer with kind byte 0x00 (ACI) is rejected
+// because ACI is always encoded without a tag in this format.
+//
+// Returns ErrInvalidServiceIdLength if the buffer length is not 16 or 17.
+// Returns a ServiceIdParseError if the kind byte is unknown or if a 17-byte
+// buffer carries the ACI kind (non-canonical).
+//
+// Mirrors Rust libsignal_core ServiceId::parse_from_service_id_binary at
+// rust/core/src/address.rs:230-245.
 func ServiceIdFromBinary(data []byte) (ServiceId, error) {
 	switch len(data) {
 	case 16:
@@ -126,7 +154,32 @@ func ServiceIdFromFixedWidthBinary(data [17]byte) (ServiceId, error) {
 	return NewServiceId(kind, uuid), nil
 }
 
-// ServiceIdFromServiceIdString parses a bare UUID (ACI), "PNI:<uuid>", or the legacy "ACI:<uuid>" that Rust rejects; others return ErrInvalidServiceIdString.
+// ServiceIdFromServiceIdString parses a Signal service ID string into a
+// ServiceId. Accepted formats:
+//   - Bare hyphenated UUID (8-4-4-4-12 form) → ACI (Rust canonical).
+//   - "PNI:<hyphenated-uuid>" → PNI (Rust canonical).
+//   - "ACI:<hyphenated-uuid>" → ACI (legacy Go form, accepted for backwards
+//     compatibility with persisted output from older releases).
+//
+// Postel's law: lenient on input, strict on output. String() always emits the
+// Rust-canonical bare UUID for ACI; the "ACI:" prefix is only accepted here,
+// never produced. The prefix match is case-sensitive: "aci:<uuid>" is rejected.
+//
+// Rejected forms: un-hyphenated (32-char hex) UUID, lowercase "aci:" prefix,
+// and any other unrecognised format. Returns ErrInvalidServiceIdString for all
+// unrecognised inputs.
+//
+// Intentional divergence from Rust: Rust libsignal_core rejects "ACI:<uuid>"
+// (rust/core/src/address.rs:263-279 only accepts bare UUID or "PNI:<uuid>").
+// Go accepts "ACI:<uuid>" as a documented back-compat extension for
+// effectiveLocalAddress in pkg/sessionmanagement and any persistent stores that
+// serialized addresses under the older "ACI:" prefix form. This cannot cause
+// cross-identity confusion because both "ACI:<uuid>" and the bare "<uuid>" form
+// parse to the same ACI ServiceId value; String() always re-emits the canonical
+// bare-UUID form, so no "ACI:"-prefixed ServiceId ever appears on the wire.
+//
+// Mirrors Rust libsignal_core ServiceId::parse_from_service_id_string at
+// rust/core/src/address.rs:263-279.
 func ServiceIdFromServiceIdString(s string) (ServiceId, error) {
 	// Intentional Go-only back-compat: "ACI:<uuid>" was emitted by older
 	// releases. Accept leniently; "aci:" (lowercase) is still rejected.

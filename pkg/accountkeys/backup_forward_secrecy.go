@@ -42,7 +42,9 @@ const (
 	forwardSecrecyEncryptionKeyInfo   = "Signal Message Backup 20250627:BackupForwardSecrecyToken Encryption Key"
 )
 
-// BackupKey is the primary backup key, derived from an AccountEntropyPool; call Zeroize when done.
+// BackupKey is the primary key for backups, used to derive other backup-related keys.
+// It is derived from an AccountEntropyPool.
+// Call Zeroize when the BackupKey is no longer needed.
 type BackupKey struct {
 	data *secret.Secret
 }
@@ -151,7 +153,9 @@ func (k *BackupKey) DeriveBackupId(aci []byte) (BackupId, error) {
 	return id, nil
 }
 
-// DeriveECKey derives a 32-byte EC private key from the BackupKey and a 16-byte raw ACI; the caller destroys the Secret.
+// DeriveECKey derives a 32-byte EC private key from the BackupKey and an ACI.
+// The ACI should be the 16-byte raw UUID bytes.
+// The returned Secret must be destroyed by the caller when no longer needed.
 func (k *BackupKey) DeriveECKey(aciServiceIdBinary []byte) (*secret.Secret, error) {
 	info := append([]byte(backupECKeyInfo), aciServiceIdBinary...)
 	buf := make([]byte, 32)
@@ -167,7 +171,8 @@ func (k *BackupKey) DeriveECKey(aciServiceIdBinary []byte) (*secret.Secret, erro
 	return s, nil
 }
 
-// DeriveLocalBackupMetadataKey derives a 32-byte local backup metadata key; the caller destroys the Secret.
+// DeriveLocalBackupMetadataKey derives a 32-byte metadata key for local backup encryption.
+// The returned Secret must be destroyed by the caller when no longer needed.
 func (k *BackupKey) DeriveLocalBackupMetadataKey() (*secret.Secret, error) {
 	buf := make([]byte, LocalBackupMetadataKeyLength)
 	if err := k.expandInto(buf, nil, []byte(localBackupMetadataKeyInfo)); err != nil {
@@ -191,7 +196,9 @@ func (k *BackupKey) DeriveMediaId(mediaName string) ([MediaIDLength]byte, error)
 	return id, nil
 }
 
-// DeriveMediaEncryptionKeyData derives a 64-byte HMAC and AES-CBC key for a media ID; the caller destroys the Secret.
+// DeriveMediaEncryptionKeyData derives a 64-byte encryption key (HMAC key + AES-CBC key)
+// from the BackupKey and a media ID.
+// The returned Secret must be destroyed by the caller when no longer needed.
 func (k *BackupKey) DeriveMediaEncryptionKeyData(mediaId [MediaIDLength]byte) (*secret.Secret, error) {
 	info := append([]byte(mediaEncryptionKeyInfo), mediaId[:]...)
 	buf := make([]byte, MediaEncryptionKeyLength)
@@ -206,7 +213,9 @@ func (k *BackupKey) DeriveMediaEncryptionKeyData(mediaId [MediaIDLength]byte) (*
 	return s, nil
 }
 
-// DeriveThumbnailTransitEncryptionKeyData derives a 64-byte thumbnail transit key for a media ID; the caller destroys the Secret.
+// DeriveThumbnailTransitEncryptionKeyData derives a 64-byte encryption key
+// for thumbnail transit from the BackupKey and a media ID.
+// The returned Secret must be destroyed by the caller when no longer needed.
 func (k *BackupKey) DeriveThumbnailTransitEncryptionKeyData(mediaId [MediaIDLength]byte) (*secret.Secret, error) {
 	info := append([]byte(thumbnailTransitEncryptionKeyInfo), mediaId[:]...)
 	buf := make([]byte, MediaEncryptionKeyLength)
@@ -249,7 +258,9 @@ func (k *BackupKey) DeriveForwardSecrecyPassword(salt []byte) (BackupForwardSecr
 	return pw, nil
 }
 
-// BackupForwardSecrecyEncryptionKey holds the cipher and HMAC keys for a forward secrecy token; call Zeroize when done.
+// BackupForwardSecrecyEncryptionKey holds the cipher key and HMAC key needed
+// to encrypt a forward secrecy token.
+// Call Zeroize when the key is no longer needed.
 type BackupForwardSecrecyEncryptionKey struct {
 	CipherKey *secret.Secret
 	HMACKey   *secret.Secret
@@ -265,7 +276,10 @@ func (k *BackupForwardSecrecyEncryptionKey) Zeroize() {
 	}
 }
 
-// DeriveForwardSecrecyEncryptionKey derives the 32-byte cipher and HMAC keys for a forward secrecy token with HKDF-SHA256.
+// DeriveForwardSecrecyEncryptionKey derives all values necessary to encrypt a
+// forward secrecy token based on the BackupKey and a salt. It produces a 32-byte
+// cipher key and a 32-byte HMAC key using HKDF-SHA256 with the info label
+// "Signal Message Backup 20250627:BackupForwardSecrecyToken Encryption Key".
 func (k *BackupKey) DeriveForwardSecrecyEncryptionKey(salt []byte) (BackupForwardSecrecyEncryptionKey, error) {
 	const totalLen = backupForwardSecrecyEncryptionKeyCipherKeySize + backupForwardSecrecyEncryptionKeyHMACKeySize
 

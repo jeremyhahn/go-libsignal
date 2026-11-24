@@ -29,7 +29,10 @@ const (
 	errInvalidRegistrationID
 )
 
-// ErrSenderKeyMismatch indicates the decrypted static key differs from the certificate's identity key.
+// ErrSenderKeyMismatch indicates the decrypted static key does not match
+// the sender's identity key in the certificate. This is a critical security
+// check that prevents an attacker from substituting a different sender
+// certificate inside a sealed sender message.
 var ErrSenderKeyMismatch = &Error{kind: errSenderKeyMismatch}
 
 // ErrServerCertificateRevoked indicates the server certificate's key ID
@@ -56,7 +59,8 @@ var ErrV2ReceivedDecryptFailed = &Error{kind: errV2ReceivedDecryptFailed}
 // received v2 message did not match the expected value.
 var ErrV2ReceivedAuthTagMismatch = &Error{kind: errV2ReceivedAuthTagMismatch}
 
-// ErrV2ReceivedDeserializeFailed indicates the decrypted v2 USMC payload could not be deserialized.
+// ErrV2ReceivedDeserializeFailed indicates the decrypted USMC payload in the
+// received v2 message could not be deserialized.
 var ErrV2ReceivedDeserializeFailed = &Error{kind: errV2ReceivedDeserializeFailed}
 
 // ErrUnknownServerCertificateID indicates the sender certificate references
@@ -76,14 +80,19 @@ var ErrUnsupportedVersion = &Error{kind: errUnsupportedVersion}
 // rejects zero at the type level.
 var ErrInvalidDeviceID = &Error{kind: errInvalidDeviceID}
 
-// ErrUnsupportedMessageType indicates a USMC type other than PREKEY_MESSAGE or MESSAGE in the decrypt path.
+// ErrUnsupportedMessageType indicates the USMC contains a message type that
+// is not handled in the sealed sender decrypt path. The Rust reference only
+// handles PREKEY_MESSAGE and MESSAGE types; SENDERKEY_MESSAGE and
+// PLAINTEXT_CONTENT are not valid in this context.
 var ErrUnsupportedMessageType = &Error{kind: errUnsupportedMessageType}
 
 // ErrDeviceIDOverflow indicates a device ID exceeds the maximum value (255)
 // that can be encoded in the v2 multi-recipient wire format.
 var ErrDeviceIDOverflow = &Error{kind: errDeviceIDOverflow}
 
-// ErrUnknownUSMCType indicates a USMC type value outside 1, 2, 7 and 8.
+// ErrUnknownUSMCType indicates the USMC contains a message type value that
+// does not correspond to any known protobuf enum variant (1=PreKey, 2=Message,
+// 7=SenderKey, 8=Plaintext).
 var ErrUnknownUSMCType = &Error{kind: errUnknownUSMCType}
 
 // ErrInvalidRegistrationID indicates the registration ID contains bits set
@@ -215,7 +224,13 @@ func (e *CertificateError) Error() string {
 	return fmt.Sprintf("sealed: %s", e.Detail)
 }
 
-// RecipientViewError is returned for a malformed recipient view; it matches ErrInvalidRecipientView through Unwrap.
+// RecipientViewError is returned by MessageForRecipient when the serialized
+// recipient view is malformed (wrong length, unsupported version, or offsets
+// outside the supplied data buffer). The Detail field carries a human-readable
+// description of the specific failure.
+//
+// errors.Is(err, ErrInvalidRecipientView) returns true for all values of this
+// type via the Unwrap method.
 type RecipientViewError struct {
 	Detail string
 }

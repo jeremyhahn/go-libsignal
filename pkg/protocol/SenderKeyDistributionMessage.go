@@ -16,7 +16,13 @@ type SenderKeyDistributionMessageSerializer interface {
 	Deserialize(serialized []byte) (*SenderKeyDistributionMessageStructure, error)
 }
 
-// NewSenderKeyDistributionMessageFromBytes decodes a message whose chain key is in locked memory; call Release when done.
+// NewSenderKeyDistributionMessageFromBytes will return a Signal Ciphertext message from the given
+// bytes using the given serializer.
+//
+// The message guards the chain key in locked memory, which the garbage
+// collector never frees. The caller must call Release on a returned message
+// once it is no longer needed. The decoder's own chain key buffer is wiped
+// before this function returns.
 func NewSenderKeyDistributionMessageFromBytes(serialized []byte,
 	serializer SenderKeyDistributionMessageSerializer) (*SenderKeyDistributionMessage, error) {
 
@@ -35,7 +41,12 @@ func NewSenderKeyDistributionMessageFromBytes(serialized []byte,
 	return NewSenderKeyDistributionMessageFromStruct(signalMessageStructure, serializer)
 }
 
-// NewSenderKeyDistributionMessageFromStruct returns a message with its own locked copy of the chain key; call Release when done.
+// NewSenderKeyDistributionMessageFromStruct returns a Signal Ciphertext message from the
+// given serializable structure.
+//
+// The message guards its own copy of the chain key in locked memory, which
+// the garbage collector never frees; the structure stays the caller's. The
+// caller must call Release on a returned message once it is no longer needed.
 func NewSenderKeyDistributionMessageFromStruct(structure *SenderKeyDistributionMessageStructure,
 	serializer SenderKeyDistributionMessageSerializer) (*SenderKeyDistributionMessage, error) {
 
@@ -98,7 +109,15 @@ func NewSenderKeyDistributionMessageFromStruct(structure *SenderKeyDistributionM
 	return message, nil
 }
 
-// NewSenderKeyDistributionMessage returns a message of messageVersion with a locked copy of chainKey; call Release when done; it panics if allocation fails.
+// NewSenderKeyDistributionMessage returns a Signal Ciphertext message.
+// The messageVersion parameter specifies the protocol version to use for this
+// distribution message, allowing it to match the version received from the
+// sender rather than always using the current version constant.
+//
+// The message guards its own copy of chainKey in locked memory; the caller
+// keeps (and wipes) chainKey. The garbage collector never frees the locked
+// memory, so the caller must call Release once the message is no longer
+// needed. It panics if the locked allocation fails.
 func NewSenderKeyDistributionMessage(distributionID [16]byte, id uint32, iteration uint32,
 	chainKey []byte, signatureKey ecc.ECPublicKeyable,
 	serializer SenderKeyDistributionMessageSerializer,
@@ -112,7 +131,10 @@ func NewSenderKeyDistributionMessage(distributionID [16]byte, id uint32, iterati
 		guarded, signatureKey, serializer, messageVersion)
 }
 
-// NewSenderKeyDistributionMessageFromSecret takes ownership of chainKey; Release destroys it.
+// NewSenderKeyDistributionMessageFromSecret returns a distribution message
+// that takes ownership of chainKey, which stays in locked memory. The garbage
+// collector never frees that memory, so the caller must call Release, which
+// destroys chainKey, once the message is no longer needed.
 func NewSenderKeyDistributionMessageFromSecret(distributionID [16]byte, id uint32, iteration uint32,
 	chainKey *secret.Secret, signatureKey ecc.ECPublicKeyable,
 	serializer SenderKeyDistributionMessageSerializer,

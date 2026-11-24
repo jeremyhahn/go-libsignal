@@ -6,7 +6,10 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/keys/identity"
 )
 
-// DeviceRecord holds a device's active session and inactive sessions, keyed by DeviceID in a UserRecord (Sesame §3.1).
+// DeviceRecord represents the session state for a single device. It contains
+// at most one active session and zero or more inactive (previous) sessions.
+// Per Sesame spec section 3.1, a DeviceRecord is keyed by DeviceID within
+// a UserRecord.
 type DeviceRecord struct {
 	deviceID         uint32
 	identityKey      *identity.Key
@@ -69,7 +72,10 @@ func (d *DeviceRecord) StaledAt() time.Time {
 	return d.staledAt
 }
 
-// InsertSession makes session active, moving any active one to the front of the inactive list, trimmed by config.
+// InsertSession unconditionally sets the given session as the active session.
+// Per Sesame spec, an inserted (new) session always becomes active. If there
+// is an existing active session, it is moved to the front of the inactive
+// sessions list. The inactive list is trimmed if config is provided.
 func (d *DeviceRecord) InsertSession(session *SessionWrapper, config *Config, now time.Time) {
 	if d.activeSession != nil {
 		d.inactiveSessions = append([]*SessionWrapper{d.activeSession}, d.inactiveSessions...)
@@ -78,7 +84,12 @@ func (d *DeviceRecord) InsertSession(session *SessionWrapper, config *Config, no
 	d.trimInactive(config)
 }
 
-// ActivateSession makes session active unless it is past MAXSEND (Sesame §4.2), and reports whether it did.
+// ActivateSession promotes an existing session to active. Per Sesame spec
+// section 4.2, a MAXSEND-expired session cannot be activated (only InsertSession
+// bypasses this check). If there is an existing active session, it is moved to
+// the front of the inactive sessions list.
+// Returns true if the session was activated, false if it was rejected
+// due to send expiration.
 func (d *DeviceRecord) ActivateSession(session *SessionWrapper, config *Config, now time.Time) bool {
 	if config != nil && session.IsSendExpired(config, now) {
 		return false
@@ -203,7 +214,12 @@ func (d *DeviceRecord) SessionCount() int {
 	return count
 }
 
-// PromoteInactiveSession activates inactive session index unless it is past MAXSEND, and reports whether it did.
+// PromoteInactiveSession moves the inactive session at the given index to
+// the active position. Per Sesame spec section 4.2, the session is checked
+// for MAXSEND expiration BEFORE removing from the inactive list. If the
+// session is expired, it remains in the inactive list and the method
+// returns false. The previously active session (if any) is moved to the
+// inactive list on success.
 func (d *DeviceRecord) PromoteInactiveSession(index int, config *Config, now time.Time) bool {
 	if index < 0 || index >= len(d.inactiveSessions) {
 		return false

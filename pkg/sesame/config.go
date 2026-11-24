@@ -6,7 +6,9 @@ import (
 )
 
 const (
-	// DefaultMaxSend is 30 days (Sesame spec §4.2).
+	// DefaultMaxSend is the default maximum duration since session creation
+	// before a session must no longer be used for encryption. Per Sesame spec
+	// section 4.2: 30 days.
 	DefaultMaxSend = 30 * 24 * time.Hour
 
 	// DefaultMaxRecv is the default maximum duration since session creation
@@ -42,7 +44,8 @@ const (
 // Per section 4.2 of the Sesame specification, these values control when
 // sessions expire and when stale records are cleaned up.
 type Config struct {
-	// MaxSend is the session age after which it is moved to inactive and no longer encrypts.
+	// MaxSend is the maximum duration since session creation. If exceeded, the
+	// session must no longer be used for encryption and shall be moved to inactive.
 	MaxSend time.Duration
 
 	// MaxRecv is the maximum duration since session creation. If exceeded,

@@ -1,4 +1,11 @@
-// Package session builds Signal sessions and encrypts and decrypts messages; use the WithLocalAddress constructors for address binding, as the others are deprecated.
+// Package session provides the methods necessary to build Signal Protocol
+// sessions and encrypt/decrypt messages. Callers should use the
+// ...WithLocalAddress constructor variants (NewCipherWithLocalAddress,
+// NewCipherFromSessionWithLocalAddress, NewCipherWithIdentityAndLocalAddress)
+// to enable address binding (SignalMessage field 6), which Rust libsignal
+// always populates and which prevents address-substitution downgrade attacks.
+// The legacy constructors without a local-address parameter leave field 6
+// unpopulated and are deprecated.
 package session
 
 import (
@@ -74,7 +81,19 @@ func NewBuilderFromSignal(signalStore store.SignalProtocol,
 	return &builder
 }
 
-// Builder sets up sessions per recipient and device from a PreKeyBundle, a PreKeySignalMessage or a KeyExchangeMessage.
+// Builder is responsible for setting up encrypted sessions.
+// Once a session has been established, SessionCipher can be
+// used to encrypt/decrypt messages in that session.
+//
+// Sessions are built from one of three different vectors:
+//   - PreKeyBundle retrieved from a server.
+//   - PreKeySignalMessage received from a client.
+//   - KeyExchangeMessage sent to or received from a client.
+//
+// Sessions are constructed per recipientId + deviceId tuple.
+// Remote logical users are identified by their recipientId,
+// and each logical recipientId can have multiple physical
+// devices.
 type Builder struct {
 	sessionStore      store.Session
 	preKeyStore       store.PreKey
@@ -85,7 +104,11 @@ type Builder struct {
 	serializer        *serialize.Serializer
 }
 
-// DeferredActions holds store changes committed only after the inner SignalMessage decrypts, as Rust message_decrypt_prekey defers them.
+// DeferredActions holds session state changes that must only be committed
+// after the inner SignalMessage is successfully decrypted. This matches
+// the Rust reference (session_cipher.rs:207-260 message_decrypt_prekey)
+// which defers save_identity, mark_kyber_pre_key_used, remove_pre_key,
+// and store_session until after decrypt succeeds.
 type DeferredActions struct {
 	// SessionRecord is the newly established session record.
 	SessionRecord *record.Session
@@ -107,7 +130,10 @@ type DeferredActions struct {
 	builder *Builder
 }
 
-// Complete stores the session and identity, marks the Kyber pre-key used and removes the one-time pre-key; call it only after decryption succeeds.
+// Complete commits the deferred side effects after successful decryption.
+// This stores the session, saves the identity key, marks the Kyber pre-key
+// as used, and removes the one-time pre-key. The caller must invoke this
+// only after the inner SignalMessage decryption succeeds.
 func (d *DeferredActions) Complete() error {
 	// Store the updated session record.
 	if err := d.builder.sessionStore.StoreSession(d.builder.remoteAddress, d.SessionRecord); err != nil {
@@ -139,7 +165,11 @@ func (d *DeferredActions) Complete() error {
 	return nil
 }
 
-// Process builds a session from a PreKeySignalMessage and returns DeferredActions; call Complete after decryption, or discard it to keep the pre-keys.
+// Process builds a new session from a session record and pre key signal
+// message. It returns a DeferredActions struct whose Complete() method
+// must be called after the inner SignalMessage is successfully decrypted.
+// If decryption fails, the caller discards the DeferredActions, preserving
+// pre-keys from being burned.
 func (b *Builder) Process(message *protocol.PreKeySignalMessage) (*DeferredActions, error) {
 
 	// Load or create session record for this session.

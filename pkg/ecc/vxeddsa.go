@@ -17,7 +17,10 @@ import (
 // VXEdDSASignatureSize is the size of a VXEdDSA signature in bytes (V || h || s).
 const VXEdDSASignatureSize = 96
 
-// VRFOutputSize is 32: v = hash_5(cV) truncated to the first 32 bytes of the SHA-512 digest.
+// VRFOutputSize is the size of the VRF output in bytes.
+// Per XEdDSA spec Section 4: v = hash_5(cV) (mod 2^b) where b=256, so
+// the output is truncated to the first 32 bytes of the SHA-512 digest.
+// The Rust reference implementation also truncates via first_chunk().
 const VRFOutputSize = 32
 
 // diversifier2 is the hash_2 diversifier (0xFD prefix) used for hash-to-point.

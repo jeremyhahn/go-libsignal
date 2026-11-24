@@ -28,14 +28,28 @@ const maxFutureMessages = 25000
 // match the Rust reference (MAX_UNACKNOWLEDGED_SESSION_AGE).
 const maxUnacknowledgedSessionAge = 30 * 24 * time.Hour
 
-// NewCipher constructs a session cipher without address binding.
+// NewCipher constructs a session cipher using the legacy unbound path
+// (no address binding). localAddress is set to nil, so SignalMessage
+// field 6 is not populated.
 //
-// Deprecated: use NewCipherWithLocalAddress.
+// Deprecated: NewCipher omits the address-binding proto field (SignalMessage
+// field 6) that Rust libsignal always includes when a local address is known.
+// Use NewCipherWithLocalAddress with a non-nil localAddress to match Rust
+// behavior and prevent address-substitution downgrade attacks.
 func NewCipher(builder *Builder, remoteAddress *protocol.SignalAddress) *Cipher {
 	return NewCipherWithLocalAddress(builder, nil, remoteAddress)
 }
 
-// NewCipherWithLocalAddress constructs a cipher for a session created by Builder; with canonical ServiceIds for both addresses it binds them in SignalMessage field 6, and a nil localAddress disables binding.
+// NewCipherWithLocalAddress constructs a session cipher for encrypt/decrypt
+// operations on a session. In order to use the session cipher, a session must
+// have already been created and stored using session.Builder.
+//
+// localAddress is the caller's own SignalAddress. When both localAddress and
+// remoteAddress are non-nil canonical ServiceIds, address binding is active
+// and SignalMessage field 6 is populated. Pass nil for localAddress to use
+// the legacy unbound path.
+//
+// Rust source: rust/protocol/src/session_cipher.rs SessionCipher::new.
 func NewCipherWithLocalAddress(builder *Builder, localAddress, remoteAddress *protocol.SignalAddress) *Cipher {
 	return &Cipher{
 		sessionStore:            builder.sessionStore,
@@ -48,9 +62,15 @@ func NewCipherWithLocalAddress(builder *Builder, localAddress, remoteAddress *pr
 	}
 }
 
-// NewCipherFromSession creates a cipher from a session record without address binding.
+// NewCipherFromSession creates a cipher from an existing session record
+// using the legacy unbound path (no address binding). localAddress is set
+// to nil, so SignalMessage field 6 is not populated.
 //
-// Deprecated: use NewCipherFromSessionWithLocalAddress.
+// Deprecated: NewCipherFromSession omits the address-binding proto field
+// (SignalMessage field 6) that Rust libsignal always includes when a local
+// address is known. Use NewCipherFromSessionWithLocalAddress with a non-nil
+// localAddress to match Rust behavior and prevent address-substitution
+// downgrade attacks.
 func NewCipherFromSession(sess *record.Session, remoteAddress *protocol.SignalAddress,
 	sessionStore store.Session, preKeyStore store.PreKey,
 	preKeyMessageSerializer protocol.PreKeySignalMessageSerializer,
@@ -59,7 +79,15 @@ func NewCipherFromSession(sess *record.Session, remoteAddress *protocol.SignalAd
 		sessionStore, preKeyStore, preKeyMessageSerializer, signalMessageSerializer)
 }
 
-// NewCipherFromSessionWithLocalAddress creates a cipher from a session record; address binding works as in NewCipherWithLocalAddress.
+// NewCipherFromSessionWithLocalAddress creates a cipher from an existing session record.
+//
+// localAddress is the caller's own SignalAddress. When both localAddress and
+// remoteAddress are non-nil canonical ServiceIds, address binding is active
+// and SignalMessage field 6 is populated. Pass nil for localAddress to use
+// the legacy unbound path.
+//
+// Rust source: rust/protocol/src/session_management.rs message_encrypt /
+// message_decrypt_signal.
 func NewCipherFromSessionWithLocalAddress(sess *record.Session, localAddress, remoteAddress *protocol.SignalAddress,
 	sessionStore store.Session, preKeyStore store.PreKey,
 	preKeyMessageSerializer protocol.PreKeySignalMessageSerializer,
@@ -74,15 +102,30 @@ func NewCipherFromSessionWithLocalAddress(sess *record.Session, localAddress, re
 	}
 }
 
-// NewCipherWithIdentity creates a cipher that checks identity trust, without address binding.
+// NewCipherWithIdentity creates a cipher with an identity key store for
+// trust verification on encrypt and decrypt, using the legacy unbound path
+// (no address binding). localAddress is set to nil.
 //
-// Deprecated: use NewCipherWithIdentityAndLocalAddress.
+// Deprecated: NewCipherWithIdentity omits the address-binding proto field
+// (SignalMessage field 6) that Rust libsignal always includes when a local
+// address is known. Use NewCipherWithIdentityAndLocalAddress with a non-nil
+// localAddress to match Rust behavior and prevent address-substitution
+// downgrade attacks.
 func NewCipherWithIdentity(builder *Builder, remoteAddress *protocol.SignalAddress,
 	identityStore store.IdentityKey) *Cipher {
 	return NewCipherWithIdentityAndLocalAddress(builder, nil, remoteAddress, identityStore)
 }
 
-// NewCipherWithIdentityAndLocalAddress creates a cipher that checks identity trust; address binding works as in NewCipherWithLocalAddress.
+// NewCipherWithIdentityAndLocalAddress creates a cipher with an identity key
+// store for trust verification on encrypt and decrypt.
+//
+// localAddress is the caller's own SignalAddress. When both localAddress and
+// remoteAddress are non-nil canonical ServiceIds, address binding is active
+// and SignalMessage field 6 is populated. Pass nil for localAddress to use
+// the legacy unbound path.
+//
+// Rust source: rust/protocol/src/session_cipher.rs SessionCipher::new with
+// identity-store composition at rust/protocol/src/session_management.rs.
 func NewCipherWithIdentityAndLocalAddress(builder *Builder, localAddress, remoteAddress *protocol.SignalAddress,
 	identityStore store.IdentityKey) *Cipher {
 	return &Cipher{
@@ -103,7 +146,16 @@ func (d *Cipher) SetIdentityStore(s store.IdentityKey) {
 	d.identityStore = s
 }
 
-// Cipher encrypts and decrypts within an established session; it is not safe for concurrent use, so callers or the session store must serialize access per address.
+// Cipher is the main entry point for Signal Protocol encrypt/decrypt operations.
+// Once a session has been established with session.Builder, this can be used for
+// all encrypt/decrypt operations within that session.
+//
+// A Cipher instance is NOT safe for concurrent use by multiple goroutines.
+// Callers must provide their own synchronization if encrypting or decrypting
+// messages for the same address from multiple goroutines. Alternatively,
+// the session store implementation can provide per-address locking.
+// This matches the Rust reference which enforces single-threaded access
+// via the borrow checker's &mut requirement.
 type Cipher struct {
 	sessionStore            store.Session
 	preKeyMessageSerializer protocol.PreKeySignalMessageSerializer
@@ -250,7 +302,10 @@ func (d *Cipher) Encrypt(plaintext []byte) (protocol.CiphertextMessage, error) {
 	return ciphertextMessage, nil
 }
 
-// Decrypt decrypts message with the stored session and zeroizes the message keys; use DecryptAndGetKey to keep them.
+// Decrypt decrypts the given message using an existing session that
+// is stored in the session store. Message keys are zeroized after use;
+// callers that need the keys should use DecryptAndGetKey instead and
+// call Zeroize() on the returned keys when done.
 func (d *Cipher) Decrypt(ciphertextMessage *protocol.SignalMessage) ([]byte, error) {
 	plaintext, messageKeys, err := d.DecryptAndGetKey(ciphertextMessage)
 	if messageKeys != nil {
@@ -259,7 +314,16 @@ func (d *Cipher) Decrypt(ciphertextMessage *protocol.SignalMessage) ([]byte, err
 	return plaintext, err
 }
 
-// DecryptPreKeyMessage builds the session, decrypts the inner message and only then commits the store changes, so a failure keeps the pre-keys.
+// DecryptPreKeyMessage handles the full PreKeySignalMessage decryption flow
+// with deferred side effects, matching the Rust reference implementation
+// (session_cipher.rs message_decrypt_prekey). It:
+//  1. Calls builder.Process() to establish the session (without storing)
+//  2. Decrypts the inner SignalMessage using the new session record
+//  3. Only on success: commits the deferred side effects (store session,
+//     save identity, mark Kyber pre-key used, remove one-time pre-key)
+//
+// If decryption fails, pre-keys are preserved because the deferred
+// operations are never committed.
 func (d *Cipher) DecryptPreKeyMessage(builder *Builder, preKeyMessage *protocol.PreKeySignalMessage) ([]byte, *DeferredActions, error) {
 	deferred, err := builder.Process(preKeyMessage)
 	if err != nil {
@@ -281,7 +345,10 @@ func (d *Cipher) DecryptPreKeyMessage(builder *Builder, preKeyMessage *protocol.
 	return plaintext, deferred, nil
 }
 
-// DecryptAndGetKey decrypts message and returns its message keys; the caller must Zeroize them.
+// DecryptAndGetKey decrypts the given message using an existing session that
+// is stored in the session store and returns the message keys used for encryption.
+// The caller is responsible for calling Zeroize() on the returned *message.Keys
+// when it is no longer needed to clear key material from heap memory.
 func (d *Cipher) DecryptAndGetKey(ciphertextMessage *protocol.SignalMessage) ([]byte, *message.Keys, error) {
 	hasSession, err := d.sessionStore.ContainsSession(d.remoteAddress)
 	if err != nil {
@@ -337,7 +404,10 @@ func (d *Cipher) DecryptWithKey(ciphertextMessage *protocol.SignalMessage, key *
 	return plaintext, nil
 }
 
-// DecryptWithRecord decrypts message with record; a duplicate returns at once and PreKey messages never fall back to previous sessions.
+// DecryptWithRecord decrypts the given message using the given session record.
+// It implements the short-circuit logic from the Rust reference:
+//   - DuplicateMessage errors are returned immediately (M1)
+//   - PreKey messages do not fall back to previous sessions (M2)
 func (d *Cipher) DecryptWithRecord(sessionRecord *record.Session, ciphertext *protocol.SignalMessage) ([]byte, *message.Keys, error) {
 	return d.decryptWithRecordAndType(sessionRecord, ciphertext, protocol.WHISPER_TYPE)
 }
@@ -408,7 +478,10 @@ func (d *Cipher) decryptWithRecordAndType(sessionRecord *record.Session, ciphert
 	return plaintext, messageKeys, nil
 }
 
-// DecryptWithState decrypts message on a clone of state and commits it only on success (spec §3.5).
+// DecryptWithState decrypts the given message with the given session state.
+// Per Signal spec section 3.5, if decryption fails, all mutations to the
+// session state are discarded. This is achieved by operating on a cloned
+// copy of the state and only committing changes on success.
 func (d *Cipher) DecryptWithState(sessionState *record.State, ciphertextMessage *protocol.SignalMessage) ([]byte, *message.Keys, error) {
 	if !sessionState.HasSenderChain() {
 		logger.Error("Unable to decrypt message with state: uninitialized session")

@@ -22,7 +22,12 @@ const (
 	ivSize        = 16
 )
 
-// HybridKeys holds CipherKey (32), MacKey (32) and IV (16) as locked-memory Secrets; destroy them after use.
+// HybridKeys holds the output of KDFHybrid or KDFHybridECOnly.
+// All fields are locked-memory-backed Secrets and must be destroyed after use.
+//
+// CipherKey: 32 bytes, AES-256 encryption key.
+// MacKey:    32 bytes, HMAC-SHA256 key.
+// IV:        16 bytes, AES initialization vector.
 type HybridKeys struct {
 	CipherKey *secret.Secret
 	MacKey    *secret.Secret
@@ -42,7 +47,19 @@ func (h *HybridKeys) Zeroize() {
 	}
 }
 
-// KDFHybrid derives CipherKey || MacKey || IV (80 bytes) by HKDF-SHA256 with pqMK as salt, ecMK as IKM and info "WhisperMessageKeys".
+// KDFHybrid combines an EC message key and a PQ message key into hybrid keys
+// using HKDF-SHA256.
+//
+// HKDF parameters:
+//   - salt:   pqMK (32 bytes) — the PQ message key
+//   - ikm:    ecMK           — the EC message key
+//   - info:   "WhisperMessageKeys"
+//   - length: 80 bytes
+//
+// Output split: CipherKey(32) || MacKey(32) || IV(16)
+//
+// The PQ key is the HKDF salt and the EC key is the IKM, so both contribute
+// to the output. Matches the Rust reference hybrid KDF path.
 func KDFHybrid(ecMK, pqMK *secret.Secret) (*HybridKeys, error) {
 	if ecMK == nil || ecMK.IsDestroyed() {
 		return nil, &ErrInvalidInput{Field: "ecMK", Reason: "must not be nil or destroyed"}
@@ -66,7 +83,17 @@ func KDFHybrid(ecMK, pqMK *secret.Secret) (*HybridKeys, error) {
 	return splitHybridOutput(output)
 }
 
-// KDFHybridECOnly derives HybridKeys from ecMK alone with a zero salt, before SPQR has a PQ key.
+// KDFHybridECOnly derives hybrid keys using only the EC message key.
+// Used before the SPQR has produced a PQ key (epoch 0, counter 0).
+//
+// HKDF parameters:
+//   - salt:   zeros(32)
+//   - ikm:    ecMK
+//   - info:   "WhisperMessageKeys"
+//   - length: 80 bytes
+//
+// Same output split as KDFHybrid. The Rust reference uses the same info string
+// for both paths; only the salt differs.
 func KDFHybridECOnly(ecMK *secret.Secret) (*HybridKeys, error) {
 	if ecMK == nil || ecMK.IsDestroyed() {
 		return nil, &ErrInvalidInput{Field: "ecMK", Reason: "must not be nil or destroyed"}

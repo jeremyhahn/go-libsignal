@@ -19,7 +19,13 @@ func NewPendingKeyExchange(sequence uint32, localBaseKeyPair, localRatchetKeyPai
 	}
 }
 
-// NewPendingKeyExchangeFromStruct returns a PendingKeyExchange with each private key in guarded memory; on failure it releases them.
+// NewPendingKeyExchangeFromStruct will return a PendingKeyExchange object from
+// the given structure. This is used to get a deserialized pending prekey exchange
+// fetched from persistent storage.
+//
+// Each private key is moved into its own guarded buffer as it is decoded. If a
+// later key cannot be built, the ones already built are released before
+// returning, so a failed call leaves no locked memory behind.
 func NewPendingKeyExchangeFromStruct(structure *PendingKeyExchangeStructure) (*PendingKeyExchange, error) {
 	// Return nil if no structure was provided.
 	if structure == nil {
@@ -72,7 +78,20 @@ func NewPendingKeyExchangeFromStruct(structure *PendingKeyExchangeStructure) (*P
 	return pendingKeyExchange, nil
 }
 
-// PendingKeyExchangeStructure is the stored form of a pending key exchange; private keys are guarded values, not pointers, so JSON null cannot orphan them.
+// PendingKeyExchangeStructure is a serializable structure for pending
+// key exchanges. This structure is used for persistent storage of the
+// key exchange state.
+//
+// The private keys — including the long-term identity private key — are held
+// in guarded memory rather than on the Go heap, so that the plaintext window
+// while state crosses the storage boundary is mlock'd, guard-paged and
+// excluded from core dumps, matching the protection the live session state
+// already has.
+//
+// The guarded fields are held by value, not by pointer: encoding/json replaces
+// a pointer field with nil for a JSON null without calling the codec, which
+// would abandon a guarded allocation made for an earlier occurrence of the
+// same field. See secret.NewValue.
 type PendingKeyExchangeStructure struct {
 	Sequence                uint32
 	LocalBaseKeyPublic      []byte

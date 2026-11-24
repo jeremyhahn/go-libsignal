@@ -9,7 +9,12 @@ import (
 	"time"
 )
 
-// CDS2NewHandshake starts a CDS v2 handshake from the expected 32-byte MRENCLAVE, a ClientHandshakeStart message and the current time.
+// CDS2NewHandshake creates a new handshake for Contact Discovery Service v2.
+//
+// Parameters:
+//   - mrenclave: expected MRENCLAVE value (32 bytes)
+//   - attestationMsg: protobuf-encoded ClientHandshakeStart message
+//   - currentTime: current system time for validity checks
 func CDS2NewHandshake(
 	mrenclave []byte,
 	attestationMsg []byte,

@@ -67,7 +67,10 @@ func NewSignalMessageFromBytes(serialized []byte, serializer SignalMessageSerial
 	return msg, nil
 }
 
-// NewSignalMessageFromStruct returns a message without version checks, as Rust SignalMessage::new; NewSignalMessageFromBytes checks them.
+// NewSignalMessageFromStruct returns a Signal Ciphertext message from the
+// given serializable structure. This is the constructor path and does not
+// enforce version bounds (matching Rust's SignalMessage::new behavior).
+// Version validation is applied in NewSignalMessageFromBytes (deserialization).
 func NewSignalMessageFromStruct(structure *SignalMessageStructure, serializer SignalMessageSerializer) (*SignalMessage, error) {
 	// Reject messages missing critical fields.
 	if structure.CipherText == nil || structure.RatchetKey == nil {
@@ -87,7 +90,13 @@ func NewSignalMessageFromStruct(structure *SignalMessageStructure, serializer Si
 	return whisperMessage, nil
 }
 
-// NewSignalMessage returns a message with optional SPQR ratchet key and optional address binding (field 6) (Rust SignalMessage::new).
+// NewSignalMessage returns a Signal Ciphertext message. The pqRatchetMsg parameter
+// carries the SPQR ratchet key for post-quantum forward secrecy; pass nil when SPQR
+// is not active. localAddress and remoteAddress bind sender/recipient ServiceIds
+// into the addresses field (proto field 6); pass nil for either to omit the field,
+// retaining backward compatibility with older clients.
+//
+// Mirrors Rust SignalMessage::new at rust/protocol/src/protocol.rs:79.
 func NewSignalMessage(messageVersion int, counter, previousCounter uint32, macKey []byte,
 	senderRatchetKey ecc.ECPublicKeyable, ciphertext []byte, senderIdentityKey,
 	receiverIdentityKey *identity.Key, serializer SignalMessageSerializer,
@@ -191,7 +200,16 @@ func (s *SignalMessage) Body() []byte {
 	return s.structure.CipherText
 }
 
-// VerifyMac verifies the MAC over the retained wire bytes (Rust protocol.rs:160-184).
+// VerifyMac will return an error if the message's message authentication code
+// is invalid. This should be used on SignalMessages that have been constructed
+// from a sent message.
+//
+// The MAC is verified over the retained wire bytes set at construction or
+// deserialization time (serializedBytes), not over a re-serialization of
+// the struct. This prevents byte-malleability attacks where re-encoding with
+// non-minimal varints or extra unknown proto fields changes the MAC input.
+// Mirrors Rust: rust/protocol/src/protocol.rs:160-184 which MACs
+// self.serialized[..self.serialized.len()-MAC_LENGTH].
 func (s *SignalMessage) VerifyMac(messageVersion int, senderIdentityKey,
 	receiverIdentityKey *identity.Key, macKey []byte) error {
 
@@ -227,7 +245,14 @@ func (s *SignalMessage) Addresses() []byte {
 	return s.structure.Addresses
 }
 
-// VerifyMacWithAddresses verifies the MAC and, if field 6 is present, that it matches (sender, recipient) (Rust verify_mac_with_addresses).
+// VerifyMacWithAddresses verifies the MAC and, if the message carries an
+// addresses field (proto field 6), asserts that it matches the
+// reserialization of (sender, recipient). Returns nil when the MAC is good
+// and either (a) no addresses are carried (backward compat), or (b) the
+// carried addresses match the expected reserialization.
+//
+// Mirrors Rust SignalMessage::verify_mac_with_addresses at
+// rust/protocol/src/protocol.rs:186.
 func (s *SignalMessage) VerifyMacWithAddresses(messageVersion int, senderIdentityKey,
 	receiverIdentityKey *identity.Key, macKey []byte,
 	sender, recipient *SignalAddress) error {

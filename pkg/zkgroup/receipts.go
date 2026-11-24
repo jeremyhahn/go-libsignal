@@ -140,7 +140,11 @@ func (p *ReceiptCredentialPresentation) GetReceiptStruct() *ReceiptStruct {
 	)
 }
 
-// CreateReceiptCredentialRequestContext returns a client request context for receiptSerial (Rust create_receipt_credential_request_context).
+// CreateReceiptCredentialRequestContext creates a receipt credential request
+// context from randomness and a receipt serial number. This is a client-side
+// operation.
+//
+// Matches Rust ServerPublicParams::create_receipt_credential_request_context.
 func (pub *ServerPublicParams) CreateReceiptCredentialRequestContext(
 	randomness RandomnessBytes,
 	receiptSerialBytes ReceiptSerialBytes,
@@ -175,7 +179,10 @@ func (pub *ServerPublicParams) CreateReceiptCredentialRequestContext(
 	}
 }
 
-// IssueReceiptCredential returns a server-side blinded receipt credential (Rust issue_receipt_credential).
+// IssueReceiptCredential creates a blinded receipt credential response.
+// This is a server-side operation.
+//
+// Matches Rust ServerSecretParams::issue_receipt_credential.
 func (s *ServerSecretParams) IssueReceiptCredential(
 	randomness RandomnessBytes,
 	request *ReceiptCredentialRequest,
@@ -249,7 +256,14 @@ func (s *ServerSecretParams) IssueReceiptCredential(
 	}, nil
 }
 
-// ReceiveReceiptCredential verifies and unblinds the credential, returning ErrVerificationFailure for a non-day-aligned expiration (Rust receive_receipt_credential).
+// ReceiveReceiptCredential verifies the server's response and unblinds the
+// credential. This is a client-side operation.
+//
+// Returns ErrVerificationFailure if the receipt expiration time is not
+// day-aligned, matching Rust's is_day_aligned() guard in
+// rust/zkgroup/src/api/server_params.rs.
+//
+// Matches Rust ServerPublicParams::receive_receipt_credential.
 func (pub *ServerPublicParams) ReceiveReceiptCredential(
 	ctx *ReceiptCredentialRequestContext,
 	response *ReceiptCredentialResponse,
@@ -296,7 +310,10 @@ func (pub *ServerPublicParams) ReceiveReceiptCredential(
 	}, nil
 }
 
-// CreateReceiptCredentialPresentation returns a client-side presentation (Rust create_receipt_credential_presentation).
+// CreateReceiptCredentialPresentation creates a zero-knowledge presentation
+// of a receipt credential. This is a client-side operation.
+//
+// Matches Rust ServerPublicParams::create_receipt_credential_presentation.
 func (pub *ServerPublicParams) CreateReceiptCredentialPresentation(
 	randomness RandomnessBytes,
 	receiptCredential *ReceiptCredential,
@@ -370,7 +387,10 @@ func (pub *ServerPublicParams) CreateReceiptCredentialPresentation(
 	}, nil
 }
 
-// VerifyReceiptCredentialPresentation verifies a presentation on the server (Rust verify_receipt_credential_presentation).
+// VerifyReceiptCredentialPresentation verifies a receipt credential
+// presentation. This is a server-side operation.
+//
+// Matches Rust ServerSecretParams::verify_receipt_credential_presentation.
 func (s *ServerSecretParams) VerifyReceiptCredentialPresentation(
 	presentation *ReceiptCredentialPresentation,
 ) error {

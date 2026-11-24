@@ -1,4 +1,13 @@
-// Package loader reads the Rust libsignal fixtures under tests/interop/fixtures/, whose sha256 and upstream paths MANIFEST.toml records and check_fixtures.sh enforces.
+// Package loader provides accessors for Rust-libsignal-sourced conformance
+// fixtures stored under tests/interop/fixtures/.
+//
+// All fixtures are verbatim copies of files in the upstream Rust libsignal
+// source tree at the commit recorded in /RUST_REV. The MANIFEST.toml file
+// records the sha256 and upstream path of every fixture; the
+// check_fixtures.sh script enforces that the bytes have not drifted.
+//
+// This package keeps fixture access discoverable and centrally rooted so
+// individual conformance tests do not hard-code repo-relative paths.
 package loader
 
 import (

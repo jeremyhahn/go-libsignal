@@ -62,13 +62,21 @@ func encodeRotateRollback(version uint32) []byte {
 	return protoFieldMessage(8, sub)
 }
 
-// RotateStart4 is an SVR4 rotation-start request set carrying deltas to each server.
+// RotateStart4 represents a v4 SVR rotation-start request set. It sends a
+// delta to each server to begin rotating the OPRF key and encryption shares.
+//
+// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateStart
 type RotateStart4 struct {
 	// Requests contains one serialized Request4 per server.
 	Requests [][]byte
 }
 
-// NewRotateStart4 returns n rotation-start requests with the given version and precomputed deltas.
+// NewRotateStart4 creates rotation-start requests for n servers. Each request
+// carries the same version, oprfDelta, and encDelta values. In a real
+// protocol flow the deltas would be computed per-server; this constructor
+// accepts pre-computed values for symmetry with NewOPRFBackup4.
+//
+// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateStart
 func NewRotateStart4(n int, version uint32, oprfDelta, encDelta []byte) (*RotateStart4, error) {
 	if n <= 0 {
 		return nil, ErrBadData
@@ -80,12 +88,18 @@ func NewRotateStart4(n int, version uint32, oprfDelta, encDelta []byte) (*Rotate
 	return &RotateStart4{Requests: requests}, nil
 }
 
-// FinalizeRotateStart4 checks every RotateStart response is OK.
+// FinalizeRotateStart4 processes server responses to RotateStart requests.
+// It verifies that all servers returned OK status.
+//
+// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.RotateStart
 func FinalizeRotateStart4(responses [][]byte) error {
 	return finalizeRotation(responses, decodeRotateStartStatus)
 }
 
-// RotateCommit4 is an SVR4 request set that makes the new OPRF key permanent.
+// RotateCommit4 represents a v4 SVR rotation-commit request set. Sending it
+// makes the new OPRF key permanent on all servers.
+//
+// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateCommit
 type RotateCommit4 struct {
 	// Requests contains one serialized Request4 per server.
 	Requests [][]byte
@@ -105,12 +119,18 @@ func NewRotateCommit4(n int, version uint32) (*RotateCommit4, error) {
 	return &RotateCommit4{Requests: requests}, nil
 }
 
-// FinalizeRotateCommit4 checks every RotateCommit response is OK.
+// FinalizeRotateCommit4 processes server responses to RotateCommit requests.
+// It verifies that all servers returned OK status.
+//
+// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.RotateCommit
 func FinalizeRotateCommit4(responses [][]byte) error {
 	return finalizeRotation(responses, decodeRotateCommitStatus)
 }
 
-// RotateRollback4 is an SVR4 request set that aborts a rotation.
+// RotateRollback4 represents a v4 SVR rotation-rollback request set. Sending
+// it aborts a previously started rotation and reverts to the prior OPRF key.
+//
+// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateRollback
 type RotateRollback4 struct {
 	// Requests contains one serialized Request4 per server.
 	Requests [][]byte
@@ -130,7 +150,10 @@ func NewRotateRollback4(n int, version uint32) (*RotateRollback4, error) {
 	return &RotateRollback4{Requests: requests}, nil
 }
 
-// FinalizeRotateRollback4 checks every RotateRollback response is OK.
+// FinalizeRotateRollback4 processes server responses to RotateRollback
+// requests. It verifies that all servers returned OK status.
+//
+// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.RotateRollback
 func FinalizeRotateRollback4(responses [][]byte) error {
 	return finalizeRotation(responses, decodeRotateRollbackStatus)
 }

@@ -5,7 +5,10 @@ import (
 	"encoding/binary"
 )
 
-// ErrScrambleInvalidBackup indicates a malformed backup stream that cannot be scrambled.
+// ErrScrambleInvalidBackup indicates the input backup stream is malformed
+// and cannot be scrambled.
+//
+// Rust libsignal ref: rust/message-backup/src/scramble.rs
 type ErrScrambleInvalidBackup struct {
 	Reason string
 }
@@ -34,7 +37,16 @@ const (
 	paymentFeeMob = "0.1"
 )
 
-// ScrambleBackup deterministically scrambles sensitive data in a varint-delimited backup (BackupInfo, then Frames), keeping frame order.
+// ScrambleBackup scrambles all sensitive data in a raw varint-delimited
+// backup stream. The first frame is treated as BackupInfo; all subsequent
+// frames are treated as Frame protos. The returned byte slices preserve
+// the original frame ordering.
+//
+// A Scrambler with seed 0 is used to produce deterministic, consistent
+// replacements across the entire backup (the same phone number / UUID always
+// maps to the same replacement).
+//
+// Rust libsignal ref: rust/message-backup/src/scramble.rs Scrambler
 func ScrambleBackup(frames [][]byte) ([][]byte, error) {
 	if len(frames) == 0 {
 		return nil, &ErrScrambleInvalidBackup{Reason: "no frames"}

@@ -66,7 +66,10 @@ func (u *UserRecord) GetDevice(deviceID uint32) *DeviceRecord {
 	return u.devices[deviceID]
 }
 
-// AddDevice returns the record for deviceID, adding it if absent; maxDevices 0 means no limit.
+// AddDevice creates and adds a new DeviceRecord for the given device ID.
+// If a record already exists for that device, it is returned unchanged.
+// The maxDevices parameter limits the total number of devices per user;
+// a value of 0 disables the limit.
 func (u *UserRecord) AddDevice(deviceID uint32, maxDevices int) (*DeviceRecord, error) {
 	if existing, ok := u.devices[deviceID]; ok {
 		return existing, nil
@@ -79,7 +82,10 @@ func (u *UserRecord) AddDevice(deviceID uint32, maxDevices int) (*DeviceRecord, 
 	return device, nil
 }
 
-// AddDeviceWithIdentity returns the record for deviceID, adding it with identityKey if absent; maxDevices 0 means no limit.
+// AddDeviceWithIdentity creates and adds a new DeviceRecord for the given
+// device ID and identity key. If a record already exists for that device,
+// it is returned unchanged. The maxDevices parameter limits the total number
+// of devices per user; a value of 0 disables the limit.
 func (u *UserRecord) AddDeviceWithIdentity(deviceID uint32, identityKey *identity.Key, maxDevices int) (*DeviceRecord, error) {
 	if existing, ok := u.devices[deviceID]; ok {
 		return existing, nil

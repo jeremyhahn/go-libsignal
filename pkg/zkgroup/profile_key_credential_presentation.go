@@ -178,7 +178,13 @@ func deserializeExpiringProfileKeyCredentialPresentation(data []byte) (*Expiring
 	}, nil
 }
 
-// ProfileKeyCredentialPresentationV1 is a legacy 0x00 presentation, readable but not verifiable, as in Rust.
+// ProfileKeyCredentialPresentationV1 is a legacy V1 profile key credential
+// presentation. V1 presentations are identified by a leading 0x00 version byte.
+//
+// No new V1 credentials are issued; this type exists for deserialization of
+// wire-format bytes sent by older clients. Proof verification is not supported
+// (the Rust reference also marks V1 verification as removed), but the
+// ciphertexts remain structurally accessible.
 type ProfileKeyCredentialPresentationV1 struct {
 	proof                   *profileKeyCredentialPresentationProofV1
 	UIDEncCiphertext        *UUIDCiphertext
@@ -195,7 +201,12 @@ func (p *ProfileKeyCredentialPresentationV1) GetProfileKeyCiphertext() *ProfileK
 	return p.ProfileKeyEncCiphertext
 }
 
-// ProfileKeyCredentialPresentationV2 is a legacy 0x01 presentation, readable but not verifiable.
+// ProfileKeyCredentialPresentationV2 is a legacy V2 profile key credential
+// presentation. V2 presentations are identified by a leading 0x01 version byte.
+//
+// V2 uses an optimized proof relative to V1 but shares the same wire-format
+// structure. Like V1, it is deserialization-only; no new V2 credentials are
+// issued.
 type ProfileKeyCredentialPresentationV2 struct {
 	proof                   *profileKeyCredentialPresentationProofV1
 	UIDEncCiphertext        *UUIDCiphertext
@@ -278,7 +289,12 @@ func deserializeProfileKeyCredentialPresentationV2(data []byte) (*ProfileKeyCred
 	}, nil
 }
 
-// SerializeExpiringProfileKeyCredentialPresentation encodes p as Rust bincode with version PresentationVersion3 or PresentationVersion4.
+// SerializeExpiringProfileKeyCredentialPresentation encodes an
+// ExpiringProfileKeyCredentialPresentation to the Rust bincode wire format.
+// The version argument must be PresentationVersion3 or PresentationVersion4.
+//
+// This is the inverse of deserializeExpiringProfileKeyCredentialPresentation
+// and is provided to support round-trip testing and wire-format interoperability.
 func SerializeExpiringProfileKeyCredentialPresentation(
 	version byte,
 	p *ExpiringProfileKeyCredentialPresentation,
@@ -310,7 +326,16 @@ func SerializeExpiringProfileKeyCredentialPresentation(
 	return out
 }
 
-// AnyProfileKeyCredentialPresentation holds exactly one of a V1 to V4 presentation, per Version.
+// AnyProfileKeyCredentialPresentation is a discriminated union that holds any
+// version of a profile key credential presentation (V1–V4). The Version field
+// reflects the first byte of the wire-format bytes and corresponds to the
+// PresentationVersion1..PresentationVersion4 constants.
+//
+// Exactly one of V1, V2, V3, or V4 is non-nil; the others are nil.
+//
+// V3 and V4 are ExpiringProfileKeyCredentialPresentation types (V4 uses an
+// updated proof). V1 and V2 are legacy non-expiring types retained for
+// backward compatibility with older client-produced presentations.
 type AnyProfileKeyCredentialPresentation struct {
 	// Version is the presentation version byte (PresentationVersion1..4).
 	Version byte
@@ -372,7 +397,10 @@ func (p *AnyProfileKeyCredentialPresentation) GetProfileKeyCiphertext() *Profile
 	return nil
 }
 
-// GetExpirationTime returns the V3 or V4 expiration and true, or false for V1 and V2.
+// GetExpirationTime returns the credential expiration time and whether the
+// presentation carries one. V1 and V2 presentations do not expire and return
+// a zero Timestamp with false. V3 and V4 presentations return the embedded
+// expiration time with true.
 func (p *AnyProfileKeyCredentialPresentation) GetExpirationTime() (Timestamp, bool) {
 	switch p.Version {
 	case PresentationVersion3:
@@ -387,7 +415,23 @@ func (p *AnyProfileKeyCredentialPresentation) GetExpirationTime() (Timestamp, bo
 	return Timestamp{}, false
 }
 
-// ToStructurallyValidV1PresentationBytes returns a 713-byte V1 frame with a dummy proof and the original ciphertexts (Rust to_structurally_valid_v1_presentation_bytes).
+// ToStructurallyValidV1PresentationBytes re-encodes any presentation version as
+// a V1 wire blob that passes structural parsing but carries an invalid proof.
+//
+// This matches Rust's AnyProfileKeyCredentialPresentation::to_structurally_valid_v1_presentation_bytes
+// (api/profiles/profile_key_credential_presentation.rs). The method is used to
+// confirm that V3/V4 ExpiringProfileKeyCredential presentations preserve their
+// ciphertexts when down-cast to a V1 structural frame, which is the semantic
+// tested by Rust's test_profile_key_credential_presentation_expiring_as_v1.
+//
+// Wire layout (713 bytes):
+//
+//	[0]         0x00  (V1 version byte)
+//	[1..257]    8 × 32-byte Ristretto255 basepoint bytes (invalid proof points)
+//	[257..265]  u64le = 320 (fake proof length)
+//	[265..585]  320 zero bytes (fake proof body)
+//	[585..649]  uid_enc_ciphertext (64 bytes)
+//	[649..713]  profile_key_enc_ciphertext (64 bytes)
 func (p *AnyProfileKeyCredentialPresentation) ToStructurallyValidV1PresentationBytes() []byte {
 	const fakeProofLen = 0x0140 // 320, the hardcoded length Rust uses
 	// Total: 1 + 8*32 + 8 + 320 + 64 + 64 = 713 bytes.
@@ -420,7 +464,28 @@ func (p *AnyProfileKeyCredentialPresentation) ToStructurallyValidV1PresentationB
 	return out
 }
 
-// DeserializeAnyProfileKeyCredentialPresentation parses a V1 (0x00) to V4 (0x03) presentation; only V3 and V4 can be verified, as in Rust.
+// DeserializeAnyProfileKeyCredentialPresentation parses a serialized profile
+// key credential presentation of any version (V1–V4) by dispatching on the
+// first byte of data.
+//
+// Version byte mapping (matches Rust PRESENTATION_VERSION_* constants):
+//
+//	0x00 → V1 (ProfileKeyCredentialPresentationV1, legacy non-expiring)
+//	0x01 → V2 (ProfileKeyCredentialPresentationV2, legacy non-expiring, optimized proof)
+//	0x02 → V3 (ExpiringProfileKeyCredentialPresentation, current)
+//	0x03 → V4 (ExpiringProfileKeyCredentialPresentation with V2 proof, current)
+//
+// Scope: V1 and V2 support deserialization and structural inspection only.
+// V1/V2 proof verification is deliberately absent here to maintain parity with
+// upstream: the Rust libsignal reference removed support for verifying V1/V2
+// profile-key-credential presentations (Signal no longer issues V1/V2
+// credentials), so this is an intentional upstream removal rather than
+// unfinished work. V3/V4 presentations can be verified via
+// VerifyExpiringProfileKeyCredentialPresentation.
+//
+// Returns ErrUnknownPresentationVersion for unrecognized version bytes,
+// ErrDataTooShort for empty or truncated input, and ZkGroupDeserializationFailure
+// for malformed point encodings.
 func DeserializeAnyProfileKeyCredentialPresentation(data []byte) (*AnyProfileKeyCredentialPresentation, error) {
 	if len(data) == 0 {
 		return nil, &ErrDataTooShort{}

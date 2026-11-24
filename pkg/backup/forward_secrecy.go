@@ -7,7 +7,9 @@ import (
 )
 
 const (
-	// MagicNumber identifies a forward secrecy backup: "SBACKUP" and version byte 0x01.
+	// MagicNumber is the 8-byte magic number that identifies a backup file
+	// using the forward secrecy format. It consists of "SBACKUP" followed
+	// by a version byte (0x01).
 	MagicNumber = "SBACKUP\x01"
 
 	// MagicNumberLen is the byte length of the magic number.
@@ -161,7 +163,8 @@ func ValidateMetadata(m *BackupMetadata) error {
 	return nil
 }
 
-// IsMagicNumber reports whether data starts with "SBACKUP\x01".
+// IsMagicNumber checks whether the given data starts with the forward
+// secrecy backup magic number ("SBACKUP\x01").
 func IsMagicNumber(data []byte) bool {
 	if len(data) < MagicNumberLen {
 		return false
@@ -169,7 +172,9 @@ func IsMagicNumber(data []byte) bool {
 	return bytes.Equal(data[:MagicNumberLen], []byte(MagicNumber))
 }
 
-// IsCloseToMagicNumber reports whether data starts with "SBACKUP" but a different version byte.
+// IsCloseToMagicNumber checks whether the given data starts with the
+// "SBACKUP" prefix but has a different version byte. This is used to
+// warn about potentially misidentified backup files.
 func IsCloseToMagicNumber(data []byte) bool {
 	if len(data) < MagicNumberLen {
 		return false
@@ -188,7 +193,11 @@ func ReadMagicNumber(r io.Reader) ([]byte, error) {
 	return magic, nil
 }
 
-// DetectFormat reads the magic number from r and reports whether the backup is modern (forward secrecy) or legacy.
+// DetectFormat reads the magic number from r and determines whether
+// the backup uses the forward secrecy format (modern) or the legacy
+// ciphertext-only format. It returns the magic number bytes and a
+// boolean indicating whether the format is modern (true) or legacy
+// (false).
 func DetectFormat(r io.Reader) (magic []byte, isModern bool, err error) {
 	magic, err = ReadMagicNumber(r)
 	if err != nil {

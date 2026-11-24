@@ -1,7 +1,13 @@
 // Copyright 2024 Signal Messenger, LLC.
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package embeddedcerts embeds the Signal and Google proxy root CAs, byte-identical to Rust rust/net/res/*.cer.
+// Package embeddedcerts provides the Signal and Google proxy root CA
+// certificates that Rust libsignal embeds at compile time via include_bytes!
+// in rust/net/src/certs.rs. The DER files are byte-identical copies from the
+// Rust source tree at rust/net/res/*.cer.
+//
+// Rust reference: rust/net/src/certs.rs SIGNAL_ROOT_CERTIFICATES and
+// PROXY_G_ROOT_CERTIFICATES.
 package embeddedcerts
 
 import (
@@ -61,7 +67,10 @@ func parseDER(name string, der []byte) (*x509.Certificate, error) {
 	return cert, nil
 }
 
-// SignalCAs returns the embedded Signal root CAs (Rust SIGNAL_ROOT_CERTIFICATES).
+// SignalCAs returns the Signal root CA certificates embedded at compile time.
+// These correspond to SIGNAL_ROOT_CERTIFICATES in the Rust crate.
+//
+// Rust reference: rust/net/src/certs.rs SIGNAL_ROOT_CERTIFICATES (signal.cer)
 func SignalCAs() ([]*x509.Certificate, error) {
 	cert, err := parseDER("signal.cer", signalCERBytes)
 	if err != nil {
@@ -70,7 +79,11 @@ func SignalCAs() ([]*x509.Certificate, error) {
 	return []*x509.Certificate{cert}, nil
 }
 
-// GoogleProxyCAs returns the embedded Google proxy root CAs (Rust PROXY_G_ROOT_CERTIFICATES).
+// GoogleProxyCAs returns the Google proxy root CA certificates embedded at
+// compile time (GIAG2 + pki.goog roots). These correspond to
+// PROXY_G_ROOT_CERTIFICATES in the Rust crate.
+//
+// Rust reference: rust/net/src/certs.rs PROXY_G_ROOT_CERTIFICATES
 func GoogleProxyCAs() ([]*x509.Certificate, error) {
 	entries := []struct {
 		name string

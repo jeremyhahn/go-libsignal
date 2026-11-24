@@ -13,7 +13,16 @@ import (
 // Layout: s_ntt(1152) || t_ntt(1152) || seed_for_A(32) || H(ek)(32) || z(32) = 2400.
 const DecapsKeySize = k*encodingSize12 + k*encodingSize12 + 32 + 32 + 32
 
-// GenerateKey returns pk1 (rho || H(ek)), pk2 (ByteEncode12(t)) and the 2400-byte libcrux compressed dk.
+// GenerateKey generates a new ML-KEM-768 key pair for incremental encapsulation.
+//
+// Returns:
+//   - pk1:  64-byte first public key part = seed_for_A(32) || H(ek)(32)
+//   - pk2:  1152-byte second public key part = ByteEncode12(t_as_ntt)
+//   - dk:   2400-byte compressed decapsulation key in libcrux KeyPairCompressedBytes layout:
+//     ByteEncode12(s)(1152) || ByteEncode12(t)(1152) || rho(32) || H(ek)(32) || z(32)
+//
+// Rust: sparsepostquantumratchet::incremental_mlkem768::generate
+// Libcrux: ind_cca/incremental/types.rs KeyPair::to_bytes_compressed (lines 417-433)
 func GenerateKey() (pk1 [PublicKey1Size]byte, pk2 [PublicKey2Size]byte, dk [DecapsKeySize]byte, err error) {
 	// Draw 64 random bytes: d (32B CPA seed) || z (32B implicit-rejection seed).
 	var seed [64]byte
@@ -107,7 +116,12 @@ func kemKeyGen(d, z []byte) (pk1 [PublicKey1Size]byte, pk2 [PublicKey2Size]byte,
 	return pk1, pk2, dk, nil
 }
 
-// Encaps1 runs the first phase of encapsulation from pk1 (64 bytes) and 32 bytes of uniform randomness.
+// Encaps1 performs the first phase of incremental ML-KEM-768 encapsulation.
+//
+// Input:
+//   - pk1:       64-byte first public key (seed_for_A || H(ek))
+//   - randomness: 32-byte randomness (must be uniformly random)
+//
 // Output:
 //   - ct1:  960-byte first ciphertext (Compress10(A^T·r + e1))
 //   - es:   2080-byte encapsulation state for Encaps2
@@ -192,7 +206,12 @@ func Encaps1(pk1 []byte, randomness [SharedSecretSize]byte) (ct1 [Ciphertext1Siz
 	return ct1, es, ss, nil
 }
 
-// Encaps2 runs the second phase of encapsulation from the 2080-byte state es and pk2 (1152 bytes).
+// Encaps2 performs the second phase of incremental ML-KEM-768 encapsulation.
+//
+// Input:
+//   - es:  2080-byte encapsulation state from Encaps1
+//   - pk2: 1152-byte second public key (ByteEncode12(t))
+//
 // Output:
 //   - ct2: 128-byte second ciphertext (Compress4(t^T·r + e2 + msg))
 //
@@ -247,7 +266,13 @@ func Encaps2(es []byte, pk2 []byte) (ct2 [Ciphertext2Size]byte, err error) {
 	return ct2, nil
 }
 
-// Decaps decapsulates ct1 (960 bytes) and ct2 (128 bytes) with the 2400-byte compressed dk.
+// Decaps decapsulates using the 2400-byte compressed decapsulation key dk.
+//
+// Input:
+//   - dk:  2400-byte compressed decapsulation key from GenerateKey
+//   - ct1: 960-byte first ciphertext
+//   - ct2: 128-byte second ciphertext
+//
 // Output:
 //   - ss: 32-byte shared secret
 //
@@ -353,7 +378,15 @@ func Decaps(dk []byte, ct1 []byte, ct2 []byte) (ss [SharedSecretSize]byte, err e
 	return ss, nil
 }
 
-// ValidatePKBytes checks pk1/pk2 lengths, SHA3-256(pk2 || pk1[:32]) == pk1[32:] and coefficients below q (libcrux validate_pk_bytes).
+// ValidatePKBytes checks that pk1 and pk2 are consistent.
+//
+// Checks performed (matching libcrux incremental.rs validate_pk_bytes):
+//  1. Length check: pk1 must be 64 bytes, pk2 must be 1152 bytes.
+//  2. Hash check: SHA3-256(pk2 || pk1[:32]) must equal pk1[32:64].
+//  3. Modulus check: each polynomial in pk2 must have all coefficients < q.
+//
+// Rust: libcrux_ml_kem::mlkem768::incremental::validate_pk_bytes
+// Libcrux: ind_cca/incremental.rs validate_pk_bytes / validate_pk_parts (lines 303-338)
 func ValidatePKBytes(pk1 []byte, pk2 []byte) error {
 	if len(pk1) != PublicKey1Size {
 		return &ErrInvalidInputLength{Name: "ValidatePKBytes/pk1", Expected: PublicKey1Size, Got: len(pk1)}

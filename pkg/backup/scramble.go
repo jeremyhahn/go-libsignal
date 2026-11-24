@@ -45,7 +45,13 @@ func (e *ScramblerError) Unwrap() error {
 	return e.Err
 }
 
-// Scrambler deterministically replaces sensitive backup data, keeping structure and consistent replacements across the backup.
+// Scrambler scrambles backup data for testing and anonymization purposes.
+// It replaces sensitive data (phone numbers, UUIDs, strings, byte slices)
+// with deterministic replacements that preserve structural properties.
+//
+// The Scrambler uses a seeded PRNG for deterministic output and maintains
+// maps of original-to-replacement values for consistent replacement across
+// the entire backup.
 type Scrambler struct {
 	seed      uint64
 	state     uint64
@@ -98,7 +104,13 @@ func (s *Scrambler) ReplaceE164(e164 uint64) uint64 {
 	return replacement
 }
 
-// ReplaceServiceID consistently replaces a serialized ServiceId or UUID, keeping a 17-byte type prefix and the original length.
+// ReplaceServiceID consistently replaces a serialized ServiceId (or other
+// UUID) across a backup. Empty fields and nil UUIDs are left unchanged.
+//
+// If the input is 17 bytes (non-ACI ServiceId), the first byte (type prefix)
+// is preserved. If the input is 16 bytes, a random v4 UUID replaces it.
+// For other lengths, the replacement is truncated or padded to preserve the
+// original length, including any structural mistakes.
 func (s *Scrambler) ReplaceServiceID(field []byte) []byte {
 	if len(field) == 0 {
 		return field
@@ -198,7 +210,10 @@ func (s *Scrambler) RandomUUID() []byte {
 	return uuid
 }
 
-// ScrambleContentType keeps the MIME major type and replaces the subtype with "unknown".
+// ScrambleContentType scrambles a MIME content type by preserving the
+// major type and replacing the subtype with "unknown". For example,
+// "image/jpeg" becomes "image/unknown". If there is no "/" separator,
+// the entire string is replaced with "unknown".
 func ScrambleContentType(contentType string) string {
 	idx := strings.Index(contentType, "/")
 	if idx < 0 {
@@ -225,7 +240,9 @@ func ReplacementURL() string {
 	return replacementURL
 }
 
-// CryptoRandomUUID returns a random v4 UUID from crypto/rand.
+// CryptoRandomUUID generates a cryptographically random v4 UUID using
+// crypto/rand. This is used when true randomness is required rather
+// than the deterministic PRNG of a Scrambler.
 func CryptoRandomUUID() ([]byte, error) {
 	uuid := make([]byte, uuidLen)
 	if _, err := rand.Read(uuid); err != nil {

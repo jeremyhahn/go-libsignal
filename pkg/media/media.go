@@ -52,7 +52,9 @@ func isGoExtensionsType(data []byte) bool {
 	return false
 }
 
-// MediaType is a supported media type: MP4 and WebP here; JPEG, PNG and GIF are in pkg/media/goextensions.
+// MediaType represents a supported media type.
+// Only MP4 and WebP are supported here; see pkg/media/goextensions for JPEG,
+// PNG, and GIF support.
 type MediaType int
 
 const (
@@ -67,17 +69,23 @@ const (
 
 	// MediaTypeJPEG indicates a JPEG image routed through goextensions.
 	//
-	// Deprecated: use pkg/media/goextensions.MediaTypeJPEG.
+	// Deprecated: use pkg/media/goextensions.MediaTypeJPEG. This constant
+	// exists so callers reading SanitizeResult.MediaType can still switch on
+	// it without an import change.
 	MediaTypeJPEG
 
 	// MediaTypePNG indicates a PNG image routed through goextensions.
 	//
-	// Deprecated: use pkg/media/goextensions.MediaTypePNG.
+	// Deprecated: use pkg/media/goextensions.MediaTypePNG. This constant
+	// exists so callers reading SanitizeResult.MediaType can still switch on
+	// it without an import change.
 	MediaTypePNG
 
 	// MediaTypeGIF indicates a GIF image routed through goextensions.
 	//
-	// Deprecated: use pkg/media/goextensions.MediaTypeGIF.
+	// Deprecated: use pkg/media/goextensions.MediaTypeGIF. This constant
+	// exists so callers reading SanitizeResult.MediaType can still switch on
+	// it without an import change.
 	MediaTypeGIF
 )
 
@@ -122,13 +130,18 @@ type ValidateResult struct {
 	// MediaType is the detected type of the input media.
 	MediaType MediaType
 
-	// Validated is the output: MP4 re-encoded with moov before mdat, WebP returned as-is after validation.
+	// Validated contains the validated media data. For MP4, the box tree is
+	// re-encoded with the moov box relocated before mdat (faststart layout).
+	// For WebP and other types, the data is returned as-is after structural
+	// validation.
 	Validated []byte
 
 	// OriginalSize is the size of the original input data in bytes.
 	OriginalSize int64
 
-	// MetadataStripped is true for MP4 when moov was relocated, false for WebP.
+	// MetadataStripped indicates whether metadata was removed or relocated.
+	// True for MP4 when the moov box was relocated (faststart normalization).
+	// False for WebP (structural validation only, no metadata removal).
 	MetadataStripped bool
 
 	// MoovOffset is the byte offset of the moov box in the output Validated
@@ -206,7 +219,10 @@ func (e *ErrMediaTooLarge) Error() string {
 	return "media: input exceeds maximum allowed size"
 }
 
-// ErrMP4MetadataTooLarge indicates the moov box exceeds maxMetadataSize (300 MiB), as mp4san MAX_METADATA_SIZE.
+// ErrMP4MetadataTooLarge indicates that the MP4 moov/metadata box exceeds
+// maxMetadataSize (300 MiB), matching mp4san's MAX_METADATA_SIZE limit.
+//
+// Rust source: libsignal/rust/media/src/sanitize/mp4.rs — MAX_METADATA_SIZE.
 type ErrMP4MetadataTooLarge struct {
 	// Size is the measured metadata byte count.
 	Size uint64
@@ -229,7 +245,19 @@ const minDetectionSize = 12
 // maxMediaSize is the maximum allowed input size for ValidateReader (100 MiB).
 const maxMediaSize = 100 * 1024 * 1024
 
-// DetectMediaType detects JPEG, PNG, GIF, WebP or MP4 by magic bytes, else MediaTypeUnknown; image types use the deprecated constants.
+// DetectMediaType detects the media type from the first bytes of data.
+//
+// Detection is based on magic byte sequences:
+//   - JPEG: 0xFF 0xD8 0xFF at offset 0
+//   - PNG: 8-byte PNG signature at offset 0
+//   - GIF: "GIF87a" or "GIF89a" at offset 0
+//   - WebP: "RIFF" at offset 0 and "WEBP" at offset 8
+//   - MP4: "ftyp" at offset 4 (ISO BMFF box structure)
+//
+// Returns MediaTypeUnknown if the type cannot be determined.
+// The deprecated MediaTypeJPEG, MediaTypePNG, and MediaTypeGIF constants are
+// returned for those image types so callers can switch on the result without
+// importing pkg/media/goextensions.
 func DetectMediaType(data []byte) MediaType {
 	// JPEG: 3-byte magic 0xFF 0xD8 0xFF
 	if len(data) >= 3 && bytes.HasPrefix(data, shimJPEGMagic) {
@@ -265,7 +293,22 @@ func DetectMediaType(data []byte) MediaType {
 	return MediaTypeUnknown
 }
 
-// Validate validates MP4 (moov re-encoded before mdat, 300 MiB metadata cap) or WebP (RIFF chunk walk); JPEG, PNG and GIF use goextensions.
+// Validate performs deep structural validation of MP4 or WebP data.
+//
+// For MP4, the entire ISO BMFF box tree is parsed using github.com/Eyevinn/mp4ff,
+// the moov box is validated and re-encoded before mdat (faststart), and
+// MAX_METADATA_SIZE (300 MiB) is enforced. MetadataStripped is set true when
+// the moov box was relocated to precede mdat.
+//
+// For WebP, a full RIFF chunk-structure walk validates every chunk length stays
+// within bounds and the container is well-formed. MetadataStripped is false
+// (structural validation only, no metadata removal).
+//
+// Rust source: libsignal/rust/media/src/sanitize/mp4.rs and
+// libsignal/rust/media/src/sanitize/webp.rs.
+//
+// Returns ErrUnsupportedMediaType if the media type cannot be detected.
+// For JPEG, PNG, and GIF, use pkg/media/goextensions.Sanitize instead.
 func Validate(data []byte) (*ValidateResult, error) {
 	if len(data) < 3 {
 		return nil, ErrDataTooShort
@@ -287,9 +330,14 @@ func Validate(data []byte) (*ValidateResult, error) {
 	}
 }
 
-// SanitizeResult is the result of Sanitize; Sanitized carries the same data as ValidateResult.Validated.
+// SanitizeResult contains the result of a Sanitize call.
 //
-// Deprecated: Use ValidateResult from Validate.
+// Deprecated: Use ValidateResult from Validate instead. This type exists for
+// backward compatibility with callers that used the old Sanitize API.
+//
+// Sanitized is the legacy field name for the output media bytes. New code
+// should use Validate, which returns ValidateResult with the renamed Validated
+// field. The two fields carry identical data; only the name differs.
 type SanitizeResult struct {
 	// MediaType is the detected type of the input media.
 	MediaType MediaType
@@ -301,7 +349,10 @@ type SanitizeResult struct {
 	// OriginalSize is the size of the original input data in bytes.
 	OriginalSize int64
 
-	// MetadataStripped is true for JPEG and PNG, and for MP4 when moov was relocated; false for WebP.
+	// MetadataStripped indicates whether metadata was actually removed.
+	// True for JPEG and PNG when routed through goextensions.
+	// True for MP4 when the moov box was relocated to precede mdat.
+	// False for WebP (structural validation only, no metadata removal).
 	MetadataStripped bool
 }
 
@@ -321,9 +372,18 @@ func goextToMediaType(ext goextensions.MediaType) MediaType {
 	}
 }
 
-// Sanitize routes JPEG, PNG and GIF to goextensions.Sanitize and MP4 and WebP to Validate; other types return ErrUnsupportedMediaType.
+// Sanitize is a backward-compatible shim that auto-routes by media type:
+//   - JPEG, PNG, GIF: delegates to pkg/media/goextensions.Sanitize; returns
+//     MetadataStripped=true for JPEG and PNG, false for GIF.  The MediaType
+//     field is set to the deprecated MediaTypeJPEG/MediaTypePNG/MediaTypeGIF
+//     constants so existing callers that switch on result.MediaType continue
+//     to work.  Migrate new code to pkg/media/goextensions directly.
+//   - MP4: delegates to Validate; MetadataStripped=true when moov was relocated.
+//   - WebP: delegates to Validate; MetadataStripped=false (validation only).
+//   - Unrecognized type: returns ErrUnsupportedMediaType.
 //
-// Deprecated: use pkg/media/goextensions for JPEG/PNG/GIF, or Validate for MP4/WebP.
+// Deprecated: use pkg/media/goextensions for JPEG/PNG/GIF, or
+// pkg/media.Validate for MP4/WebP. This wrapper auto-routes for back-compat.
 func Sanitize(data []byte) (*SanitizeResult, error) {
 	if isGoExtensionsType(data) {
 		ext, err := goextensions.Sanitize(data)
@@ -363,9 +423,13 @@ func ValidateReader(r io.Reader) (*ValidateResult, error) {
 	return Validate(data)
 }
 
-// SanitizeReader reads at most maxMediaSize (100 MiB) from r and calls Sanitize; larger input returns ErrMediaTooLarge.
+// SanitizeReader is a backward-compatible streaming shim. It reads all data
+// from r (capped at maxMediaSize, 100 MiB) and delegates to Sanitize, which
+// auto-routes JPEG/PNG/GIF through pkg/media/goextensions and MP4/WebP through
+// Validate.  Input exceeding maxMediaSize returns ErrMediaTooLarge.
 //
-// Deprecated: for JPEG/PNG/GIF call pkg/media/goextensions.Sanitize; for MP4/WebP call ValidateReader.
+// Deprecated: for JPEG/PNG/GIF call pkg/media/goextensions.Sanitize directly;
+// for MP4/WebP call ValidateReader. This wrapper auto-routes for back-compat.
 func SanitizeReader(r io.Reader) (*SanitizeResult, error) {
 	data, err := io.ReadAll(io.LimitReader(r, int64(maxMediaSize)+1))
 	if err != nil {
@@ -1123,18 +1187,37 @@ func validateALPHChunkData(data []byte, vp8x vp8xState) error {
 	return nil
 }
 
-// ValidateMP4 parses the ISO BMFF box tree with mp4ff, requires ftyp and moov, and caps moov at 300 MiB.
+// ValidateMP4 performs deep structural validation of an MP4 file using
+// github.com/Eyevinn/mp4ff. It parses the full ISO BMFF box tree, enforces
+// maxMetadataSize (300 MiB) on the moov box, and validates both ftyp and moov
+// are present.
+//
+// Rust source: libsignal crate mp4san — structural validation of ISO BMFF
+// containers.
 func ValidateMP4(data []byte) error {
 	_, err := sanitizeMP4(data)
 	return err
 }
 
-// ValidateWebP validates the RIFF header, WEBP fourcc and every chunk's type and bounds.
+// ValidateWebP performs full RIFF chunk-structure validation of a WebP file.
+// It validates the RIFF header, WEBP fourcc, and walks every chunk verifying
+// lengths stay within the declared RIFF payload boundary. Every chunk type
+// is validated against the known WebP chunk vocabulary.
+//
+// Rust source: libsignal crate webpsan — structural validation of WebP
+// containers.
 func ValidateWebP(data []byte) error {
 	return validateWebPStructure(data)
 }
 
-// SanitizeWebP returns a typed parse error if the WebP input is malformed (Java WebpSanitizer).
+// SanitizeWebP validates the structural integrity of a WebP input and returns
+// a typed parse error if the input is malformed.
+//
+// This matches the webpsan contract: the function simply checks validity; it
+// does not return any data because a valid WebP file is already in the correct
+// format.
+//
+// Java oracle: WebpSanitizer.java:L32–L37
 func SanitizeWebP(input []byte) error {
 	return validateWebPStructure(input)
 }

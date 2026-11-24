@@ -1,4 +1,20 @@
-// POLYVAL for AES-GCM-SIV (RFC 8452 §3), computed through GHASH with byte reversal.
+// Package cipher provides symmetric encryption primitives used by the Signal
+// protocol. This file implements POLYVAL, the universal hash function used by
+// AES-GCM-SIV (RFC 8452, Section 3).
+//
+// POLYVAL is defined in terms of GHASH with byte-order conversions. From
+// RFC 8452 Section 3:
+//
+//	POLYVAL(H, X_1, ..., X_s) =
+//	  ByteReverse(GHASH(mulX_GHASH(ByteReverse(H)),
+//	                     ByteReverse(X_1), ..., ByteReverse(X_s)))
+//
+// The GHASH field uses the polynomial x^128 + x^7 + x^2 + x + 1 with
+// big-endian bit ordering.
+//
+// For production use at scale, the carry-less multiplication should be
+// replaced with architecture-specific assembly (PCLMULQDQ on x86-64,
+// PMULL on ARM64).
 package cipher
 
 import (

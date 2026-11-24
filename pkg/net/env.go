@@ -72,7 +72,10 @@ const (
 	HTTPVersion2
 )
 
-// ConnectionConfig holds the parameters to connect to a Signal service endpoint (Rust env.rs ConnectionConfig).
+// ConnectionConfig contains the parameters needed to connect to a Signal
+// service endpoint.
+//
+// Rust ref: rust/net/src/env.rs — ConnectionConfig.
 type ConnectionConfig struct {
 	// Hostname is the domain name of the resource.
 	Hostname string
@@ -96,7 +99,10 @@ type ConnectionConfig struct {
 	Proxy *ConnectionProxyConfig
 }
 
-// KeyTransConfig holds the 32-byte Ed25519 keys of Signal's key-transparency tree (Rust env.rs KeyTransConfig).
+// KeyTransConfig holds the raw key material for Signal's key-transparency tree.
+// All values are 32-byte Ed25519 public key bytes.
+//
+// Rust ref: rust/net/src/env.rs — KeyTransConfig.
 type KeyTransConfig struct {
 	// SigningKeyMaterial is the Ed25519 signing key for the tree head signature.
 	SigningKeyMaterial [32]byte
@@ -152,7 +158,10 @@ func DefaultWSConfig() WSConfig {
 	}
 }
 
-// Env is the configuration for a Signal server environment (Rust env.rs Env).
+// Env contains the complete configuration for connecting to a Signal server
+// environment (production or staging).
+//
+// Rust ref: rust/net/src/env.rs — Env.
 type Env struct {
 	// CDSI is the Contact Discovery Service enclave endpoint.
 	CDSI EnclaveEndpoint
@@ -170,11 +179,13 @@ type Env struct {
 	KeyTrans KeyTransConfig
 }
 
-// SvrBEnv holds the current and previous SVRB enclave endpoints.
+// SvrBEnv contains the current and previous SVRB enclave endpoints.
+// Multiple endpoints support enclave rotation.
 type SvrBEnv struct {
 	// Current contains the currently active SVRB endpoints.
 	Current []*EnclaveEndpoint
-	// Previous holds earlier SVRB endpoints still used for restore.
+	// Previous contains previously active SVRB endpoints that are still
+	// used for migration/restore.
 	Previous []*EnclaveEndpoint
 }
 
@@ -196,7 +207,10 @@ func newHTTPVersion(v HTTPVersion) *HTTPVersion { return &v }
 // KeyTrans configuration constants — verbatim hex literals from Rust
 // rust/net/src/env.rs KEYTRANS_*_PROD / KEYTRANS_*_STAGING.
 
-// KeyTransConfigProduction holds the production key-transparency keys (Rust KEYTRANS_CONFIG_PROD).
+// KeyTransConfigProduction holds the key-transparency verification keys for
+// the Signal production environment.
+//
+// Rust ref: rust/net/src/env.rs — KEYTRANS_CONFIG_PROD.
 var KeyTransConfigProduction = KeyTransConfig{
 	SigningKeyMaterial: [32]byte{
 		0xa3, 0x97, 0x30, 0x67, 0x98, 0x43, 0x82, 0xcf,
@@ -232,7 +246,10 @@ var KeyTransConfigProduction = KeyTransConfig{
 	},
 }
 
-// KeyTransConfigStaging holds the staging key-transparency keys (Rust KEYTRANS_CONFIG_STAGING).
+// KeyTransConfigStaging holds the key-transparency verification keys for
+// the Signal staging environment.
+//
+// Rust ref: rust/net/src/env.rs — KEYTRANS_CONFIG_STAGING.
 var KeyTransConfigStaging = KeyTransConfig{
 	SigningKeyMaterial: [32]byte{
 		0xac, 0x0d, 0xe1, 0xfd, 0x7f, 0x33, 0x55, 0x2b,

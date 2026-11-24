@@ -1,7 +1,13 @@
 // Copyright 2025 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package polynomial implements GF(2^16) Lagrange interpolation for SPQR chunk redundancy, byte-identical to Rust sparsepostquantumratchet; internal to pkg/mlkembraid.
+// Package polynomial implements Lagrange interpolation over GF(2^16) for
+// Reed-Solomon-like chunk redundancy in the Signal SPQR (Sparse Post-Quantum
+// Ratchet) protocol. It is a direct port of the Rust sparsepostquantumratchet
+// crate at commit f2589fef, providing byte-level parity with the reference.
+//
+// This package is an internal implementation detail of pkg/mlkembraid and must
+// not be imported outside that module.
 package polynomial
 
 import (
@@ -325,7 +331,11 @@ const (
 	EncoderStatePolys
 )
 
-// PolyEncoder emits 32-byte chunks by GF(2^16) interpolation: the first N reproduce the data, later ones are redundancy (Rust PolyEncoder).
+// PolyEncoder encodes a message into an infinite stream of 32-byte chunks
+// using Lagrange interpolation over GF(2^16). The first N chunks reproduce
+// the original data; subsequent chunks are interpolated redundancy.
+//
+// PolyEncoder mirrors Rust's PolyEncoder { idx: u32, s: EncoderState }.
 type PolyEncoder struct {
 	idx    uint32
 	points [NumPolys]Point
@@ -333,7 +343,10 @@ type PolyEncoder struct {
 	state  EncoderStateKind
 }
 
-// NewPolyEncoder returns an encoder for a non-empty, even-length message of at most (1<<16)*NumPolys bytes (Rust Encoder::encode_bytes).
+// NewPolyEncoder creates a PolyEncoder for the given message.
+// The message length must be a non-zero even number not exceeding
+// (1<<16)*NumPolys bytes.
+// Mirrors Rust's Encoder::encode_bytes.
 func NewPolyEncoder(msg []byte) (*PolyEncoder, error) {
 	if len(msg)%2 != 0 {
 		return nil, ErrMessageLengthEven{}
@@ -435,7 +448,10 @@ func (e *PolyEncoder) Polys() *[NumPolys]Poly {
 	return &e.polys
 }
 
-// PolyDecoder reconstructs the message once each channel has enough points (Rust PolyDecoder).
+// PolyDecoder collects chunks and reconstructs the original message once
+// enough points have been gathered per polynomial channel.
+//
+// PolyDecoder mirrors Rust's PolyDecoder { pts_needed, pts: [SortedSet<Pt>; 16], is_complete }.
 type PolyDecoder struct {
 	// PtsNeeded is the total number of GF(2^16) elements in the message
 	// (= len_bytes / 2). Exported for proto marshaling.
@@ -520,7 +536,10 @@ func (d *PolyDecoder) necessaryPoints(poly int) int {
 	return pointsPerPoly
 }
 
-// AddChunk adds the chunk's points that are still needed (Rust Decoder::add_chunk).
+// AddChunk incorporates the data from c into the decoder.
+// Points are only accepted if they are needed (either within the polynomial
+// degree range or when we haven't reached the necessary count yet).
+// Mirrors Rust's Decoder::add_chunk.
 func (d *PolyDecoder) AddChunk(c Chunk) {
 	for i := 0; i < NumPolys; i++ {
 		totalIdx := int(c.Index)*NumPolys + i
@@ -539,7 +558,11 @@ func (d *PolyDecoder) AddChunk(c Chunk) {
 	}
 }
 
-// DecodedMessage returns the message once enough points are collected, else (nil, false) (Rust Decoder::decoded_message).
+// DecodedMessage attempts to reconstruct and return the original message.
+// Returns (msg, true) when sufficient points have been collected, or
+// (nil, false) otherwise. Once the decoder returns a message, subsequent
+// calls always return (nil, false) (is_complete semantics from Rust).
+// Mirrors Rust's Decoder::decoded_message.
 func (d *PolyDecoder) DecodedMessage() ([]byte, bool) {
 	if d.IsComplete {
 		return nil, false
@@ -629,7 +652,10 @@ func SerializePt(p Pt) [4]byte {
 	}
 }
 
-// NewPolyEncoderFromPolys returns an encoder in Polys state for the proto codec.
+// NewPolyEncoderFromPolys creates a PolyEncoder in Polys state with the given
+// interpolated polynomials and chunk index counter. Used by the proto codec
+// (Phase D) to reconstruct an encoder that has already transitioned past the
+// first-pass boundary.
 func NewPolyEncoderFromPolys(polys []Poly, idx uint32) (*PolyEncoder, error) {
 	if len(polys) != NumPolys {
 		return nil, ErrSerializationInvalid{}

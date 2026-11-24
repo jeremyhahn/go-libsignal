@@ -23,7 +23,14 @@ func genDiscontinuity() [32]byte {
 	return discontinuity
 }
 
-// CalculateSenderSession runs PQXDH as the sender and returns the session keys (with InitialPQRKey), the Kyber ciphertext, or ErrMissingKyberPreKey.
+// CalculateSenderSession calculates the PQXDH key agreement for a recipient.
+// This should be used when we are trying to send a message to someone for the
+// first time. Returns the session key pair (including InitialPQRKey for SPQR),
+// the Kyber ciphertext, and an error.
+//
+// S-C3: Kyber parameters are mandatory. The KDF label is always KdfInfoPQXDH,
+// matching the Rust derive_keys function which unconditionally uses the PQXDH
+// label. Returns ErrMissingKyberPreKey if the Kyber pre-key is nil.
 func CalculateSenderSession(parameters *SenderParameters) (*session.KeyPair, *kem.Ciphertext, error) {
 	var secret [32]byte
 	var publicKey [32]byte
@@ -139,7 +146,15 @@ func CalculateSenderSession(parameters *SenderParameters) (*session.KeyPair, *ke
 	return sessionKeys, kyberCiphertext, nil
 }
 
-// CalculateReceiverSession runs PQXDH as the receiver, rejecting a non-canonical base key and missing Kyber inputs (Rust initialize_bob_session).
+// CalculateReceiverSession calculates the PQXDH key agreement for a sender.
+// This should be used when we are receiving a message from someone for the first time.
+//
+// PQ-C3: Validates that TheirBaseKey is canonical before any DH operations,
+// matching the Rust initialize_bob_session check.
+//
+// S-C3: Kyber parameters are mandatory. Both OurKyberPreKeyPair and
+// TheirKyberCiphertext must be present. Returns ErrMissingKyberPreKey or
+// ErrMissingKyberCiphertext if either is nil.
 func CalculateReceiverSession(parameters *ReceiverParameters) (*session.KeyPair, error) {
 	// Guard: TheirBaseKey must be present before any further validation or DH
 	// operations. A nil interface value would panic at the IsCanonical call and

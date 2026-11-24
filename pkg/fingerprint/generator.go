@@ -40,7 +40,20 @@ func NewNumericFingerprintGenerator(iterations uint32) (*NumericFingerprintGener
 	return &NumericFingerprintGenerator{iterations: iterations}, nil
 }
 
-// CreateFor returns a 60-digit displayable and a versioned scannable fingerprint from iterated SHA-512 over each identity key.
+// CreateFor generates a Fingerprint containing both a displayable 60-digit
+// numeric string and a scannable protobuf-encoded fingerprint.
+//
+// The version parameter is encoded in the scannable fingerprint and used for
+// version matching during comparison. The display fingerprint is independent
+// of the version parameter.
+//
+// Each identity key is hashed through an iterative SHA-512 computation:
+//
+//	iteration 0: SHA-512(version_bytes || key || stable_id || key)
+//	iteration i: SHA-512(previous_hash || key)
+//
+// The full 64-byte hash is used for the displayable fingerprint encoding.
+// The first 32 bytes are used for the scannable fingerprint.
 func (g *NumericFingerprintGenerator) CreateFor(
 	version uint32,
 	localStableID []byte,

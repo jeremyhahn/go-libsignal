@@ -44,7 +44,15 @@ func NewSenderChainKey(iteration uint32, chainKey []byte) *SenderChainKey {
 	}
 }
 
-// NewSenderChainKeyFromStruct clones the chain key guarded-to-guarded; a missing key returns *MissingKeyError.
+// NewSenderChainKeyFromStruct will return a new chain key object from the
+// given serializeable structure. The key is cloned from the structure's
+// guarded memory straight into the returned key's own, so the material never
+// lands on the Go heap and the source structure is left intact for its owner
+// to Zeroize.
+//
+// Returns *MissingKeyError if the structure carries no chain key: a sender
+// chain key is mandatory, and decoding one that is absent or already destroyed
+// must fail rather than yield a key nothing can ratchet.
 func NewSenderChainKeyFromStruct(structure *SenderChainKeyStructure) (*SenderChainKey, error) {
 	if structure == nil || structure.ChainKey.IsZero() {
 		return nil, &MissingKeyError{Field: "sender chain key"}
@@ -59,7 +67,11 @@ func NewSenderChainKeyFromStruct(structure *SenderChainKeyStructure) (*SenderCha
 	}, nil
 }
 
-// NewStructFromSenderChainKey returns a serializable copy of the key in guarded memory; the caller Zeroizes it.
+// NewStructFromSenderChainKey returns a serializable structure of a SenderChainKey,
+// suitable for persistence and transmission. Mirrors NewSenderChainKeyFromStruct:
+// the key is cloned guarded-to-guarded, so serialization does not stage it on
+// the heap. Callers must Zeroize the returned structure once the serializer has
+// consumed it.
 func NewStructFromSenderChainKey(key *SenderChainKey) (*SenderChainKeyStructure, error) {
 	cloned, err := key.chainKey.Clone()
 	if err != nil {
@@ -71,7 +83,10 @@ func NewStructFromSenderChainKey(key *SenderChainKey) (*SenderChainKeyStructure,
 	}, nil
 }
 
-// SenderChainKeyStructure is the serializable form of a SenderChainKey, its key held in guarded memory.
+// SenderChainKeyStructure is a serializeable structure of SenderChainKeys. The
+// chain key is held in guarded memory: it crosses the storage boundary, and a
+// chain key on the plain heap can be swapped out or captured in a core dump,
+// which zeroizing it afterwards does not undo.
 type SenderChainKeyStructure struct {
 	Iteration uint32
 	ChainKey  secret.Secret

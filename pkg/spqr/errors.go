@@ -1,4 +1,7 @@
-// Package spqr implements the Sparse Post-Quantum Ratchet (Double Ratchet spec §5): epoch-based post-quantum keys from an SCKA over the ML-KEM Braid.
+// Package spqr implements the Sparse Post-Quantum Ratchet (SPQR) protocol
+// as defined in Section 5 of the Double Ratchet specification. SPQR provides
+// epoch-based post-quantum key derivation using an SCKA (Sparse Continuous
+// Key Agreement) protocol, layered on top of the ML-KEM Braid.
 package spqr
 
 import "fmt"
@@ -157,7 +160,12 @@ func (e *ErrVersionNegotiationFailed) Error() string {
 		e.MinVersion, e.GotVersion)
 }
 
-// ErrInvalidPrevEncoding is returned when recv.prev is not a multiple of 36-byte (4-byte BE index, 32-byte key) records.
+// ErrInvalidPrevEncoding is returned when the proto Chain.Epoch.recv.prev
+// field contains bytes whose length is not a multiple of 36 (the Rust
+// KeyHistory record size: 4-byte BE index + 32-byte key). This indicates a
+// corrupt or foreign-format state buffer.
+//
+// Rust reference: spqr/src/chain.rs KeyHistory::KEY_SIZE = 36.
 type ErrInvalidPrevEncoding struct {
 	Len int
 }

@@ -140,7 +140,10 @@ type ReceivedEndorsement struct {
 	Decompressed *GroupSendEndorsement
 }
 
-// ReceiveWithCiphertexts validates the endorsements and returns them in memberCiphertexts order.
+// ReceiveWithCiphertexts validates and returns the endorsements issued by the
+// server. Points are sorted in the same deterministic order used during
+// issuance, and results are un-permuted back to the original order of
+// memberCiphertexts.
 func (r *GroupSendEndorsementsResponse) ReceiveWithCiphertexts(
 	memberCiphertexts []*UUIDCiphertext,
 	now Timestamp,
@@ -180,7 +183,14 @@ func (r *GroupSendEndorsementsResponse) ReceiveWithCiphertexts(
 	return collectPermutation(sortedResult, perm), nil
 }
 
-// ReceiveWithServiceIDs validates the endorsements for serviceIDs and returns them in that order (Rust receive_with_service_ids).
+// ReceiveWithServiceIDs validates and returns the endorsements issued by the
+// server. Unlike ReceiveWithCiphertexts, this method takes ServiceIDs directly
+// and computes the first ciphertext point (a1 * M1) internally.
+//
+// Points are sorted in the same deterministic order used during issuance, and
+// results are un-permuted back to the original order of serviceIDs.
+//
+// This matches Rust GroupSendEndorsementsResponse::receive_with_service_ids.
 func (r *GroupSendEndorsementsResponse) ReceiveWithServiceIDs(
 	serviceIDs []ServiceID,
 	now Timestamp,

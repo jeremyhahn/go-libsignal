@@ -144,7 +144,14 @@ func decodeRaftGroupConfig(data []byte) (*RaftConfig, error) {
 	return config, nil
 }
 
-// Handshake runs a Noise NK handshake to an attested enclave key: InitialRequest, then Complete builds a ClientConnection.
+// Handshake is a noise handshaker that can be used to build a ClientConnection.
+//
+// Callers provide an attestation that must contain the remote enclave's public key.
+// If the attestation is valid, this public key will be used to generate a noise NK
+// handshake (with the caller acting as the initiator) via Handshake.InitialRequest().
+// When a handshake response is received the handshake can be completed with
+// Handshake.Complete() to build a ClientConnection that can be used to exchange
+// arbitrary encrypted payloads with the remote enclave.
 type Handshake struct {
 	// hs is set for pre-quantum (NK) handshakes.
 	hs *noise.HandshakeState

@@ -42,7 +42,9 @@ type SealedSenderDecryptionResult struct {
 	Message    []byte
 }
 
-// SealedSenderEncrypt encrypts with the session cipher, wraps the result in a USMC and seals it with sealed sender v1.
+// SealedSenderEncrypt encrypts a message using the sealed sender v1 protocol.
+// It first encrypts the plaintext using a session cipher, then wraps it in a
+// USMC structure, and finally applies the sealed sender encryption layer.
 func SealedSenderEncrypt(
 	destination *protocol.SignalAddress,
 	senderCert *SenderCertificate,
@@ -101,7 +103,12 @@ func SealedSenderEncrypt(
 	return SealedSenderEncryptFromUSMC(destination, usmc, identityStore)
 }
 
-// SealedSenderEncryptFromUSMC seals a USMC for one recipient with v1: one ECDH layer hides our identity key, a second encrypts the USMC.
+// SealedSenderEncryptFromUSMC encrypts a pre-built USMC for a single recipient
+// using the sealed sender v1 protocol.
+//
+// The protocol performs a two-layer encryption:
+//  1. Encrypt our identity public key using an ephemeral ECDH exchange.
+//  2. Encrypt the USMC payload using a second ECDH exchange with our identity key.
 func SealedSenderEncryptFromUSMC(
 	destination *protocol.SignalAddress,
 	usmc *UnidentifiedSenderMessageContent,
@@ -254,7 +261,13 @@ func SealedSenderEncryptFromUSMC(
 	return result, nil
 }
 
-// SealedSenderDecryptToUSMC unseals a message to its USMC without validating the sender certificate; a recipient ServiceId selects the v2 sent format.
+// SealedSenderDecryptToUSMC decrypts a sealed sender message to extract
+// the UnidentifiedSenderMessageContent. This performs the reverse of the
+// two-layer encryption without validating the sender certificate.
+//
+// For v2 messages (version 0x22 or 0x23), use SealedSenderV2DecryptToUSMC
+// instead, which requires the recipient's ServiceId. This function dispatches
+// to v2 when a recipientServiceId is provided via the optional parameter.
 func SealedSenderDecryptToUSMC(
 	ciphertext []byte,
 	identityStore store.IdentityKey,

@@ -13,7 +13,10 @@ var _ keyops.Decapsulator = (*GuardedSecretKey)(nil)
 
 var guardedKyber1024Scheme = kyber1024.Scheme()
 
-// GuardedKyber1024 implements Kyber-1024 with secret keys and shared secrets in locked memory.
+// GuardedKyber1024 implements Kyber-1024 KEM operations with key material
+// stored in locked memory. Generated secret keys and shared
+// secrets are wrapped in GuardedSecretKey and GuardedSharedSecret types
+// that use mlock'd, guard-page protected memory.
 type GuardedKyber1024 struct{}
 
 // NewGuardedKyber1024 returns a new GuardedKyber1024 instance.
@@ -140,7 +143,10 @@ func (g *GuardedKyber1024) Decapsulate(secretKey *GuardedSecretKey, ciphertext *
 	return guardedSS, nil
 }
 
-// Decapsulate returns the shared secret for a ciphertext in a guarded Secret32; implements keyops.Decapsulator.
+// Decapsulate recovers the shared secret from the given serialized ciphertext
+// using the guarded secret key. Returns the shared secret in a guarded Secret32.
+//
+// Implements keyops.Decapsulator.
 func (g *GuardedSecretKey) Decapsulate(ciphertext []byte) (ss *secret.Secret32, err error) {
 	guardedSS, decapErr := g.DecapsulateGuarded(ciphertext)
 	if decapErr != nil {

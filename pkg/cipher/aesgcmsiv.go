@@ -1,4 +1,15 @@
-// AES-256-GCM-SIV (RFC 8452), the nonce-misuse-resistant AEAD used by Sealed Sender v2 and SVR.
+// Package cipher provides symmetric encryption primitives used by the Signal
+// protocol. This file implements AES-256-GCM-SIV (RFC 8452), a nonce-misuse-
+// resistant AEAD cipher used by Sealed Sender v2 and SVR.
+//
+// AES-GCM-SIV provides nonce-misuse resistance: if the same nonce is
+// accidentally reused, the only information leaked is whether the same
+// plaintext was encrypted twice with the same nonce and key. The plaintext
+// itself remains confidential.
+//
+// This is a pure Go implementation. For production deployments handling high
+// throughput, consider replacing the POLYVAL carry-less multiplication with
+// architecture-specific assembly (PCLMULQDQ on x86, PMULL on ARM).
 package cipher
 
 import (
@@ -39,7 +50,12 @@ type aesGCMSIV struct {
 	key *secret.Secret
 }
 
-// NewAESGCMSIV returns an AES-256-GCM-SIV cipher.AEAD for a 32-byte key.
+// NewAESGCMSIV creates an AES-256-GCM-SIV AEAD cipher from a 32-byte key.
+// The returned value implements crypto/cipher.AEAD.
+//
+// AES-GCM-SIV provides nonce-misuse resistance, meaning accidental nonce
+// reuse only leaks whether the same plaintext was encrypted twice with the
+// same nonce and key, not the plaintext itself.
 func NewAESGCMSIV(key []byte) (gocipher.AEAD, error) {
 	if len(key) != aesGCMSIVKeySize {
 		return nil, &ErrAESGCMSIVKeySize{Expected: aesGCMSIVKeySize, Got: len(key)}
@@ -76,7 +92,10 @@ func (a *aesGCMSIV) Zeroize() {
 	}
 }
 
-// Seal encrypts and authenticates plaintext and additional data and appends the result to dst.
+// Seal encrypts and authenticates plaintext, authenticates the additional
+// data, and appends the result to dst, returning the updated slice. The
+// nonce must be NonceSize() bytes long and should be unique for each
+// key/plaintext pair for best security (though AES-GCM-SIV tolerates reuse).
 func (a *aesGCMSIV) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
 	if len(nonce) != aesGCMSIVNonceSize {
 		// panic: cryptographic invariant violation — caller violated the AEAD
@@ -103,7 +122,10 @@ func (a *aesGCMSIV) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
 	return append(dst, ct...)
 }
 
-// Open authenticates and decrypts ciphertext and appends the plaintext to dst.
+// Open decrypts and authenticates ciphertext, authenticates the additional
+// data, and if successful appends the resulting plaintext to dst, returning
+// the updated slice. The nonce must be NonceSize() bytes long. If the
+// ciphertext or additional data have been tampered with, Open returns an error.
 func (a *aesGCMSIV) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, error) {
 	if len(nonce) != aesGCMSIVNonceSize {
 		return nil, &ErrAESGCMSIVIncorrectNonce{}
@@ -125,7 +147,12 @@ func (a *aesGCMSIV) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte,
 	return append(dst, pt...), nil
 }
 
-// AESGCMSIVEncrypt encrypts with AES-256-GCM-SIV (32-byte key, 12-byte nonce) and appends the 16-byte tag.
+// AESGCMSIVEncrypt encrypts plaintext with the given key, nonce, and
+// additional authenticated data using AES-256-GCM-SIV.
+//
+// The key must be 32 bytes, the nonce must be 12 bytes. The plaintext must
+// not exceed aesGCMSIVMaxPlaintextLen (2^36 - 32) bytes per RFC 8452 §6.
+// Returns the ciphertext with the 16-byte authentication tag appended.
 func AESGCMSIVEncrypt(key, nonce, plaintext, aad []byte) ([]byte, error) {
 	if len(key) != aesGCMSIVKeySize {
 		return nil, &ErrAESGCMSIVKeySize{Expected: aesGCMSIVKeySize, Got: len(key)}
@@ -143,7 +170,11 @@ func AESGCMSIVEncrypt(key, nonce, plaintext, aad []byte) ([]byte, error) {
 	return aesGCMSIVEncryptInternal(key, nonce, plaintext, aad)
 }
 
-// AESGCMSIVDecrypt decrypts AES-256-GCM-SIV ciphertext with its 16-byte tag (32-byte key, 12-byte nonce).
+// AESGCMSIVDecrypt decrypts ciphertext with the given key, nonce, and
+// additional authenticated data using AES-256-GCM-SIV.
+//
+// The key must be 32 bytes, the nonce must be 12 bytes. The ciphertext
+// must include the 16-byte authentication tag (appended during encryption).
 func AESGCMSIVDecrypt(key, nonce, ciphertext, aad []byte) ([]byte, error) {
 	if len(key) != aesGCMSIVKeySize {
 		return nil, &ErrAESGCMSIVKeySize{Expected: aesGCMSIVKeySize, Got: len(key)}

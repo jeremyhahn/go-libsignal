@@ -82,7 +82,13 @@ type BackupAuthCredentialRequestContext struct {
 	KeyPair          *zkcredential.BlindingKeyPair
 }
 
-// NewBackupAuthCredentialRequestContext derives a request context from backupKey and an ACI (not a PNI) with SHO label "20231003_Signal_BackupAuthCredentialRequest".
+// NewBackupAuthCredentialRequestContext derives a BackupAuthCredentialRequestContext
+// deterministically from (backupKey, aci) using the canonical SHO label
+// "20231003_Signal_BackupAuthCredentialRequest". The ACI must have kind ACI
+// (not PNI); Rust enforces this structurally via the type system.
+//
+// Mirrors Rust BackupAuthCredentialRequestContext::new at
+// rust/zkgroup/src/api/backups/auth_credential.rs:118.
 func NewBackupAuthCredentialRequestContext(backupKey [32]byte, aci ServiceID) (*BackupAuthCredentialRequestContext, error) {
 	if aci.Type != ServiceIDTypeACI {
 		return nil, &ErrInvalidServiceIDKind{Got: aci.Type}

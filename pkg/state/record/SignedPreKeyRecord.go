@@ -29,7 +29,10 @@ func NewSignedPreKeyFromBytes(serialized []byte, serializer SignedPreKeySerializ
 	return NewSignedPreKeyFromStruct(signedPreKeyStructure, serializer)
 }
 
-// NewSignedPreKeyFromStruct returns a SignedPreKey with a guarded copy of the private key; the caller keeps and zeroizes structure.
+// NewSignedPreKeyFromStruct returns a SignedPreKey record using the given
+// serializable structure. The record copies the private key into its own
+// guarded memory; the caller keeps ownership of the structure and should
+// Zeroize it when done.
 func NewSignedPreKeyFromStruct(structure *SignedPreKeyStructure,
 	serializer SignedPreKeySerializer) (*SignedPreKey, error) {
 
@@ -70,7 +73,10 @@ func NewSignedPreKey(id uint32, timestamp int64, keyPair *ecc.ECKeyPair,
 	}
 }
 
-// SignedPreKeyStructure is the serializable form of a signed pre-key, with the private key in guarded memory.
+// SignedPreKeyStructure is a flat structure of a signed pre key, used
+// for serialization and deserialization. The private key is held in guarded
+// memory for the crossing of the storage boundary; see
+// PendingKeyExchangeStructure for the rationale.
 type SignedPreKeyStructure struct {
 	ID         uint32
 	PublicKey  []byte
@@ -85,7 +91,10 @@ func (s *SignedPreKeyStructure) Zeroize() {
 	s.PrivateKey.Destroy()
 }
 
-// SignedPreKey is a stored signed pre-key; its private key lives only in guarded memory.
+// SignedPreKey record is a structure for storing a signed
+// pre key in a SignedPreKey store. The private key lives only in the guarded
+// memory of the record's key pair; the serializable structure is built on
+// demand.
 type SignedPreKey struct {
 	id         uint32
 	timestamp  int64

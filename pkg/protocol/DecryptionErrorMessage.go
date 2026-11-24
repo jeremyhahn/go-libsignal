@@ -6,7 +6,17 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// DecryptionErrorMessageForOriginal builds a DecryptionErrorMessage for a Whisper, PreKey or SenderKey message (Rust for_original); plaintext is an error.
+// DecryptionErrorMessageForOriginal creates a DecryptionErrorMessage from the
+// serialized bytes and type of the original message that failed to decrypt.
+// It extracts the ratchet key from Whisper and PreKey messages so the sender
+// can advance the ratchet and re-encrypt the message.
+//
+// originalMsgType must be one of WHISPER_TYPE, PREKEY_TYPE, or SENDERKEY_TYPE.
+// Passing PLAINTEXT_TYPE is an error (returns ErrInvalidArgumentPlaintext) because
+// plaintext content is not encrypted and carries no ratchet key.
+//
+// Mirrors Rust libsignal_protocol DecryptionErrorMessage::for_original at
+// rust/protocol/src/protocol.rs:881-917.
 func DecryptionErrorMessageForOriginal(
 	originalBytes []byte,
 	originalMsgType uint32,
@@ -138,7 +148,15 @@ func (d *DecryptionErrorMessage) serialize() ([]byte, error) {
 	return proto.Marshal(pbMsg)
 }
 
-// ExtractDecryptionErrorMessageFromSerializedContent returns the DecryptionErrorMessage in a padded Content body (Rust function of the same name).
+// ExtractDecryptionErrorMessageFromSerializedContent parses a serialized Content
+// proto body (with PlaintextContent padding byte appended) and returns the embedded
+// DecryptionErrorMessage. This mirrors the Rust function of the same name in
+// protocol/src/protocol.rs and is intended for use in testing and diagnostic tooling.
+//
+// Errors:
+//   - ErrInvalidContentProto        — body is not a valid Content protobuf
+//   - ErrMissingDecryptionErrorMessage — Content has no decryption_error_message field
+//   - ErrDecryptionErrorMessageDeserialize — nested bytes could not be deserialized
 func ExtractDecryptionErrorMessageFromSerializedContent(body []byte) (*DecryptionErrorMessage, error) {
 	if len(body) == 0 || body[len(body)-1] != plaintextPaddingByte {
 		return nil, newInvalidContentProtoError()

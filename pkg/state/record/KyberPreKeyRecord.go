@@ -5,7 +5,13 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
-// KyberPreKeyID identifies a Kyber pre-key record; pkg/protocol has its own type for the same wire value.
+// KyberPreKeyID is a typed identifier for Kyber pre-key records at the storage
+// layer. It mirrors the Rust KyberPreKeyId newtype at
+// rust/protocol/src/state/kyber_prekey.rs:18.
+//
+// Note: the protocol layer (pkg/protocol) also defines a KyberPreKeyID over the
+// same underlying uint32. Both represent the same wire value; they are separate
+// declarations to avoid a circular import between the protocol and record packages.
 type KyberPreKeyID uint32
 
 // KyberPreKeySerializer is an interface for serializing and deserializing
@@ -33,7 +39,10 @@ func (k *KyberPreKeyStructure) Zeroize() {
 	k.PrivateKey.Destroy()
 }
 
-// KyberPreKey stores a Kyber pre-key whose secret key stays in locked memory; the serializable structure is built on demand.
+// KyberPreKey stores a Kyber pre-key with its associated metadata. The secret
+// key lives in locked memory for the whole lifetime of the record,
+// both when the record is generated and when it is read back from storage; the
+// serializable structure is built on demand and destroyed by the caller.
 type KyberPreKey struct {
 	id         uint32
 	timestamp  int64
@@ -58,7 +67,13 @@ func NewKyberPreKey(id uint32, timestamp int64, keyPair *kem.GuardedKeyPair, sig
 	}
 }
 
-// NewKyberPreKeyFromStructure rebuilds a KyberPreKey, checking the public and secret key types match and cloning the secret guarded to guarded; the caller keeps and zeroizes structure.
+// NewKyberPreKeyFromStructure reconstructs a KyberPreKey from a serializable structure.
+// It asserts that the public-key type tag in structure.PublicKey matches the
+// secret-key type, guarding against cross-type key pair loading.
+//
+// The secret key is cloned from the structure's guarded memory straight into
+// the record's own guarded memory, so it never reaches the Go heap. The caller
+// keeps ownership of the structure and should Zeroize it when done.
 func NewKyberPreKeyFromStructure(structure KyberPreKeyStructure, serializer KyberPreKeySerializer) (*KyberPreKey, error) {
 	publicKey, err := kem.DeserializePublicKey(structure.PublicKey)
 	if err != nil {
@@ -125,7 +140,10 @@ func (k *KyberPreKey) Signature() []byte {
 	return sig
 }
 
-// GuardedKeyPair returns an independent guarded copy of the key pair; the caller destroys it.
+// GuardedKeyPair returns an independent guarded copy of this record's key
+// material, cloned from guarded memory into guarded memory. The caller is
+// responsible for calling Destroy() on the returned GuardedKeyPair when it is
+// no longer needed; destroying it leaves the record's own key intact.
 func (k *KyberPreKey) GuardedKeyPair() (*kem.GuardedKeyPair, error) {
 	guardedSK, err := k.keyPair.Secret.Clone()
 	if err != nil {

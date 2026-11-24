@@ -1,4 +1,22 @@
-// Package incrementalmac computes and validates chunked HMACs over growing prefixes (HMAC-SHA256 by default), as rust/protocol/src/incremental_mac.rs.
+// Package incrementalmac provides streaming MAC computation and validation
+// for large data such as message backups. It splits data into fixed-size
+// chunks, computing HMAC over ever-growing prefixes of the input so that
+// each intermediate MAC covers all data from the beginning.
+//
+// The chaining semantics match the Rust libsignal reference:
+//
+//   - MAC_0 = HMAC(key, chunk_0)
+//   - MAC_1 = HMAC(key, chunk_0 || chunk_1)
+//   - MAC_2 = HMAC(key, chunk_0 || chunk_1 || chunk_2)
+//   - ...
+//   - MAC_final = HMAC(key, all_data)
+//
+// At each chunk boundary, the inner hash state is cloned and the HMAC is
+// completed for that prefix. The inner hash continues accumulating data.
+//
+// By default the package uses HMAC-SHA256. Pass crypto.SHA512 to
+// NewWithHash or NewValidatingWithHash to use HMAC-SHA512 instead.
+// Rust source: rust/protocol/src/incremental_mac.rs
 package incrementalmac
 
 import (
@@ -145,7 +163,14 @@ type Incremental struct {
 	finalized bool
 }
 
-// New returns an HMAC-SHA256 Incremental MAC; chunkSize must be in (0, MaxChunkSize], as Rust.
+// New creates a new Incremental MAC with the given HMAC key and chunk size
+// using HMAC-SHA256.
+//
+// The chunk size must be positive and at most MaxChunkSize. This matches the
+// Rust reference which asserts only chunk_size > 0 (incremental_mac.rs:50).
+// MinChunkSize is a recommended minimum for production use but is not
+// enforced, so callers and tests can use small chunk sizes such as the Rust
+// test constant of 32.
 func New(key []byte, chunkSize int) (*Incremental, error) {
 	return NewWithHash(key, chunkSize, gocrypto.SHA256)
 }
@@ -171,7 +196,10 @@ func NewWithHash(key []byte, chunkSize int, h gocrypto.Hash) (*Incremental, erro
 	}, nil
 }
 
-// Update feeds data and returns the number of MACs produced at chunk boundaries, or ErrAlreadyFinalized.
+// Update feeds data into the incremental MAC. When a chunk boundary is
+// reached, the HMAC state is cloned and finalized to produce an intermediate
+// MAC. Returns the number of MACs produced during this call.
+// Returns ErrAlreadyFinalized if called after Finalize.
 func (inc *Incremental) Update(data []byte) (int, error) {
 	if inc.finalized {
 		return 0, ErrAlreadyFinalized
@@ -197,7 +225,11 @@ func (inc *Incremental) Update(data []byte) (int, error) {
 	return produced, nil
 }
 
-// Finalize returns the chunk MACs followed by the MAC over all data, or ErrAlreadyFinalized.
+// Finalize completes the MAC computation. It always produces one final MAC
+// covering all data fed so far (including any partial trailing chunk).
+// Returns all accumulated MACs: intermediate MACs from chunk boundaries
+// followed by the final MAC.
+// Returns ErrAlreadyFinalized if called after a previous Finalize.
 func (inc *Incremental) Finalize() ([][]byte, error) {
 	if inc.finalized {
 		return nil, ErrAlreadyFinalized
@@ -223,14 +255,19 @@ func (inc *Incremental) Bytes() []byte {
 	return out
 }
 
-// Destroy zeroizes the HMAC outer key.
+// Destroy zeroizes the HMAC outer key to prevent sensitive key material
+// from lingering in memory. It should be called when the Incremental is
+// no longer needed.
 func (inc *Incremental) Destroy() {
 	if inc.hmac != nil {
 		utilcrypto.Zeroize(inc.hmac.outer)
 	}
 }
 
-// Validating checks data against pre-computed MACs in constant time at each chunk boundary.
+// Validating validates data against pre-computed MACs as the data is fed
+// in. It mirrors the accumulating HMAC logic of Incremental so that each
+// chunk boundary triggers a constant-time comparison with the next expected
+// MAC.
 type Validating struct {
 	inc  *Incremental
 	macs [][]byte // expected MACs in forward order
@@ -243,7 +280,10 @@ func NewValidating(key []byte, chunkSize int, macs [][]byte) (*Validating, error
 	return NewValidatingWithHash(key, chunkSize, macs, gocrypto.SHA256)
 }
 
-// NewValidatingWithHash returns a Validating for SHA-256 or SHA-512 MACs.
+// NewValidatingWithHash creates a new validating instance that checks data
+// against the given pre-computed MACs using the specified hash function.
+// Supported hashes: crypto.SHA256, crypto.SHA512.
+// Rust source: rust/protocol/src/incremental_mac.rs:58-76
 func NewValidatingWithHash(key []byte, chunkSize int, macs [][]byte, h gocrypto.Hash) (*Validating, error) {
 	inc, err := NewWithHash(key, chunkSize, h)
 	if err != nil {
@@ -255,15 +295,34 @@ func NewValidatingWithHash(key []byte, chunkSize int, macs [][]byte, h gocrypto.
 	}, nil
 }
 
-// Update validates MACs at each chunk boundary, processing all data before returning a mismatch.
+// Update feeds data and validates MACs at each chunk boundary. It
+// continues processing all chunks even after a mismatch is detected,
+// deferring the error return until all data in this call has been
+// consumed. This matches the Rust reference behavior where mismatches
+// are accumulated and returned after processing completes.
 //
-// Deprecated: Use UpdateValidated, which also returns the validated byte count.
+// ErrTooFewMACs is returned immediately if expected MACs are exhausted
+// since that indicates a structural error that prevents further
+// validation.
+//
+// Only bytes from chunks with matching MACs contribute to the
+// validated byte count.
+//
+// Deprecated: Use UpdateValidated which also returns the count of validated
+// bytes, matching Rust's Validating::update -> Result<usize, MacError>.
 func (v *Validating) Update(data []byte) error {
 	_, err := v.UpdateValidated(data)
 	return err
 }
 
-// UpdateValidated validates MACs at each chunk boundary and returns the bytes validated, as Rust Validating::update.
+// UpdateValidated feeds data and validates MACs at each chunk boundary,
+// returning the number of bytes validated by complete chunk MAC comparisons.
+// This mirrors Rust's Validating::update -> Result<usize, MacError>, where
+// the returned usize is whole_chunks * chunk_size.
+// Rust source: rust/protocol/src/incremental_mac.rs:110-127
+//
+// ErrTooFewMACs is returned immediately if expected MACs are exhausted.
+// ErrMACMismatch is returned (with validated=0) if any chunk MAC mismatches.
 func (v *Validating) UpdateValidated(data []byte) (validated int, err error) {
 	var mismatch bool
 	for len(data) > 0 {
@@ -296,9 +355,17 @@ func (v *Validating) UpdateValidated(data []byte) (validated int, err error) {
 	return validated, nil
 }
 
-// FinalizeValidated validates the final MAC and returns the pending byte count, as Rust Validating::finalize.
+// FinalizeValidated validates the final MAC and returns the count of pending
+// (not yet chunk-boundary-validated) bytes, matching Rust's
+// Validating::finalize -> Result<usize, MacError> which returns
+// pending_bytes_size on success.
+// Rust source: rust/protocol/src/incremental_mac.rs:130-138
 //
-// Deprecated: Use UpdateValidated and FinalizeValidated together.
+// Returns ErrMACMismatch if the final MAC does not match.
+// Returns ErrTooFewMACs or ErrUnconsumedMACs for structural errors.
+//
+// Deprecated: Use UpdateValidated/FinalizeValidated together for full parity
+// with Rust's byte-count return semantics.
 func (v *Validating) FinalizeValidated() (pending int, err error) {
 	remaining := len(v.macs) - v.idx
 	if remaining != 1 {
@@ -317,29 +384,48 @@ func (v *Validating) FinalizeValidated() (pending int, err error) {
 	return pending, nil
 }
 
-// Finalize validates the final MAC and that every expected MAC was consumed.
+// Finalize validates the final MAC and verifies that all expected MACs
+// have been consumed. Returns ErrMACMismatch if the final MAC does not
+// match. Returns ErrTooFewMACs or ErrUnconsumedMACs for structural errors.
 //
-// Deprecated: Use FinalizeValidated, which also returns the pending byte count.
+// Deprecated: Use FinalizeValidated which also returns the count of pending
+// bytes, matching Rust's Validating::finalize -> Result<usize, MacError>.
 func (v *Validating) Finalize() error {
 	_, err := v.FinalizeValidated()
 	return err
 }
 
-// Destroy zeroizes the HMAC outer key.
+// Destroy zeroizes the underlying HMAC outer key to prevent sensitive key
+// material from lingering in memory. It should be called when the
+// Validating instance is no longer needed.
 func (v *Validating) Destroy() {
 	if v.inc != nil {
 		v.inc.Destroy()
 	}
 }
 
-// CalculateChunkSize returns the SHA-256 chunk size for a data length, as Rust calculate_chunk_size.
+// CalculateChunkSize returns an appropriate chunk size for a given data
+// length using SHA-256. The algorithm matches the Rust libsignal reference:
 //
-// Deprecated: Use CalculateChunkSizeForHash(dataLength, crypto.SHA256).
+//   - target_chunk_count = TARGET_TOTAL_DIGEST_SIZE / DigestLength (= 256 for SHA-256)
+//   - If data_size < target_chunk_count * MINIMUM_CHUNK_SIZE: return MINIMUM_CHUNK_SIZE
+//   - If data_size < target_chunk_count * MAXIMUM_CHUNK_SIZE: return ceil(data_size / target_chunk_count)
+//   - Otherwise: return MAXIMUM_CHUNK_SIZE
+//
+// Deprecated: Use CalculateChunkSizeForHash(dataLength, crypto.SHA256) for
+// explicit hash selection. This wrapper exists for backwards compatibility.
+// Rust source: rust/protocol/src/incremental_mac.rs:29-46
 func CalculateChunkSize(dataLength int64) int {
 	return CalculateChunkSizeForHash(dataLength, gocrypto.SHA256)
 }
 
-// CalculateChunkSizeForHash returns the chunk size for a data length and SHA-256 or SHA-512, as Rust calculate_chunk_size.
+// CalculateChunkSizeForHash returns an appropriate chunk size for a given data
+// length and hash function. The algorithm is generic over the digest output
+// size, matching Rust's calculate_chunk_size::<D>(data_size) where D: FixedOutput.
+// Supported hashes: crypto.SHA256 (output 32 B → 256 target chunks),
+// crypto.SHA512 (output 64 B → 128 target chunks).
+//
+// Rust source: rust/protocol/src/incremental_mac.rs:29-46
 func CalculateChunkSizeForHash(dataLength int64, h gocrypto.Hash) int {
 	p, err := hashParamsFor(h)
 	if err != nil {

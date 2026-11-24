@@ -61,13 +61,28 @@ func (sk StateKind) String() string {
 	return fmt.Sprintf("Unknown(%d)", sk)
 }
 
-// OutputKey is a derived key and its epoch; Key is a locked-memory Secret, so copy bytes out before it is destroyed.
+// OutputKey represents a derived output key with its associated epoch.
+// The Key field is wrapped in a locked-memory-backed Secret for protection
+// against swap and core dumps. Callers must copy bytes out before the
+// Secret is destroyed.
 type OutputKey struct {
 	Epoch uint64
 	Key   *secret.Secret
 }
 
-// State is the ML-KEM Braid state machine: header and ek chunks one way, ct1 and ct2 with a MAC the other, then the output key.
+// State represents the current state of the ML-KEM Braid state machine.
+//
+// Protocol flow adapted for standard Kyber-1024 (which doesn't support
+// incremental encapsulation):
+//
+//  1. Alice generates keypair, sends Hdr chunks (ek_seed || hek || mac)
+//  2. Alice continues sending Ek chunks (ek_vector)
+//  3. Bob receives header, verifies MAC, collects ek_vector
+//  4. When Bob has full ek_vector: FullEncaps -> (ct1, ct2, ss), KDF_OK, auth.Update
+//  5. Bob sends Ct1 chunks
+//  6. Alice receives Ct1, sends EkCt1Ack for remaining ek chunks
+//  7. Bob receives ct1 ack + remaining ek, sends Ct2 || MAC
+//  8. Alice receives Ct2, Decaps -> ss, verifies MAC, derives output key
 type State struct {
 	kind  StateKind
 	epoch uint64
@@ -151,7 +166,11 @@ func (s *State) Zeroize() {
 	}
 }
 
-// Send returns the next message, the sending epoch and any output key (spec §1.1); the epoch advances only on transitions 5 and 13.
+// Send produces the next outbound message. Per spec Section 1.1, Send returns
+// (msg, sending_epoch, output_key) where sending_epoch is the identifier of
+// the latest epoch guaranteed to be known by the other party on receipt of msg.
+// The epoch is only incremented on specific state transitions (5 and 13),
+// not on every Send call.
 func (s *State) Send(kemImpl IncrementalKEM) (*Message, uint64, *OutputKey, error) {
 	handler, ok := sendHandlers[s.kind]
 	if !ok {
@@ -160,7 +179,10 @@ func (s *State) Send(kemImpl IncrementalKEM) (*Message, uint64, *OutputKey, erro
 	return handler(s, kemImpl)
 }
 
-// Receive processes msg and returns the peer's sending epoch and any output key (spec §1.1).
+// Receive processes an inbound message. Per spec Section 1.1, Receive returns
+// (receiving_epoch, output_key) where receiving_epoch is the epoch identifier
+// that was output by the other party as sending_epoch when they called Send()
+// to generate msg.
 func (s *State) Receive(msg *Message, kemImpl IncrementalKEM, chunkSize int) (uint64, *OutputKey, error) {
 	if msg == nil {
 		return 0, nil, &ErrInvalidInput{Field: "msg", Reason: "must not be nil"}

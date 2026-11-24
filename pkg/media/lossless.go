@@ -1,8 +1,27 @@
 package media
 
-// Pure-Go VP8L/ALPH lossless validator ported from webpsan 0.5.3, reproducing every accept and reject decision; bits are read LSB-first.
+// lossless.go — Pure-Go VP8L/ALPH lossless bitstream validator.
+//
+// This is an exact port of the webpsan 0.5.3 lossless decoder/validator:
+//
+//	webpsan/src/parse/bitstream.rs  — LSB-first BitReader, CanonicalHuffmanTree, buf_read_lz77
+//	webpsan/src/parse/lossless.rs   — LosslessImage::read (transforms, prefix codes, pixel loop)
+//	webpsan/src/parse/vp8l.rs       — Vp8lChunk header parsing + sanitize_image_data
+//	webpsan/src/parse/alph.rs       — AlphChunk::sanitize_image_data (COMPRESS_LOSSLESS path)
+//
+// The Go implementation reproduces every accept/reject decision from the Rust
+// oracle including: duplicate-transform rejection, color-cache bounds, LZ77
+// back-reference distance/length checks, code-length repetition bounds, invalid
+// predictor, invalid symbol count, and truncated-stream errors.
+//
+// Bit-reader fidelity: bitstream_io LE reads bits LSB-first within each byte,
+// exactly like the VP8L specification. Each byte is consumed from bit 0 (LSB)
+// to bit 7 (MSB), and consecutive bits span bytes in little-endian order.
+// lossless.rs uses BitBufReader<R, LE>; this file's leBitReader matches that.
 
-// Typed errors.
+// ---------------------------------------------------------------------------
+// Typed errors (project convention: NEVER fmt.Errorf inline)
+// ---------------------------------------------------------------------------
 
 // ErrLosslessTruncated indicates the VP8L bitstream ended before the image was complete.
 // Matches: webpsan/src/parse/bitstream.rs map_eof → ParseError::TruncatedChunk.

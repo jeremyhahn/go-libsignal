@@ -516,7 +516,19 @@ func EncodePresentationProof(p *PresentationProof) []byte {
 	return out
 }
 
-// EncodePresentationProofBincode encodes p as Rust bincode: Cx0, Cx1, CV, u64 LE count and Cy points, u64 LE proof length, proof.
+// EncodePresentationProofBincode encodes a PresentationProof to Rust bincode
+// wire format. This is the inverse of DecodePresentationProofBincode and produces
+// byte-identical output to Rust's bincode::serialize on a PresentationProof.
+//
+// Layout (matches Rust zkcredential PresentationProof serde/bincode):
+//
+//	[0..32]     Cx0 (compressed Ristretto255 point)
+//	[32..64]    Cx1
+//	[64..96]    CV
+//	[96..104]   Cy vec length (8-byte LE u64)
+//	[104..104+32*n] Cy[0..n] (n compressed Ristretto255 points)
+//	[104+32*n..112+32*n] poksho_proof vec length (8-byte LE u64)
+//	[112+32*n..]  poksho_proof bytes
 func EncodePresentationProofBincode(p *PresentationProof) []byte {
 	cyLen := len(p.Commitments.Cy)
 	proofLen := len(p.PokshoProof)
@@ -540,7 +552,22 @@ func EncodePresentationProofBincode(p *PresentationProof) []byte {
 	return out
 }
 
-// DecodePresentationProofBincode decodes a Rust bincode PresentationProof (u64 LE lengths) and returns the bytes consumed.
+// DecodePresentationProofBincode decodes a PresentationProof from Rust bincode
+// wire format. This differs from the Go-native encoding (EncodePresentationProof)
+// in that vec lengths are 8-byte little-endian u64 values rather than 4-byte
+// big-endian values.
+//
+// Layout (matches Rust zkcredential PresentationProof serde/bincode):
+//
+//	[0..32]     Cx0 (compressed Ristretto255 point)
+//	[32..64]    Cx1
+//	[64..96]    CV
+//	[96..104]   Cy vec length (8-byte LE u64)
+//	[104..104+32*n] Cy[0..n] (n compressed Ristretto255 points)
+//	[104+32*n..112+32*n] poksho_proof vec length (8-byte LE u64)
+//	[112+32*n..]  poksho_proof bytes
+//
+// Returns the decoded proof and the number of bytes consumed from data.
 func DecodePresentationProofBincode(data []byte) (*PresentationProof, int, error) {
 	const minLen = 32 + 32 + 32 + 8 // Cx0 + Cx1 + CV + Cy vec len
 	if len(data) < minLen {

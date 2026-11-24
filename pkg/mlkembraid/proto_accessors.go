@@ -7,7 +7,10 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
-// Proto accessors for pkg/spqr/proto_codec.go only; not public API.
+// Proto marshaling accessors — used exclusively by pkg/spqr/proto_codec.go
+// (Phase D). These expose internal State fields at the minimum visibility needed
+// for protobuf round-trips with the Rust reference implementation.  They are NOT
+// part of the public API and must not be used outside the serialization layer.
 
 // ProtoEpoch returns the protocol epoch stored in the state. The proto layer
 // adds 1 before writing to the protobuf field because Rust uses 1-indexed epochs.
@@ -98,7 +101,10 @@ func (s *State) ProtoBobHek() []byte {
 	return copySecret(s.bobHek)
 }
 
-// ProtoBobEncapSecret returns Bob's packed encapsulation secret (es || ct1 || ss), or nil if absent or destroyed.
+// ProtoBobEncapSecret returns Bob's packed encapsulation secret blob.
+// For IncrementalMLKEM768KEM this is 3072 bytes: es(2080) || ct1(960) || ss(32),
+// where es is the 2080-byte libcrux EncapsulationState wire format.
+// Returns nil if nil or destroyed.
 func (s *State) ProtoBobEncapSecret() []byte {
 	if s.bobEncapSecret == nil || s.bobEncapSecret.IsDestroyed() {
 		return nil
@@ -177,7 +183,11 @@ func (s *State) ProtoChunkSize() int {
 	return s.chunkSize
 }
 
-// ProtoSetFromFields builds a State from proto-decoded fields; absent optional fields are nil.
+// ProtoSetFromFields constructs a State from proto-decoded fields. This is used
+// by UnmarshalStateProto to rebuild the Go State from Rust wire data.
+//
+// Parameters mirror the fields written by MarshalStateProto; any optional field
+// that was absent in the proto is passed as nil.
 func ProtoSetFromFields(
 	kind StateKind,
 	epoch uint64,
@@ -471,7 +481,10 @@ func ProtoMarshalEncoder(enc *Encoder) (*ProtoEncoderFields, error) {
 	return out, nil
 }
 
-// ProtoUnmarshalEncoder rebuilds an Encoder from proto points or polys (big-endian GF values) and chunk counter idx.
+// ProtoUnmarshalEncoder reconstructs an Encoder from its proto field representation.
+// pts is indexed [channel][2*elemIdx .. 2*elemIdx+2] (big-endian GF values).
+// polys is indexed [channel][serialized coefficients] (big-endian).
+// idx is the current chunk counter from the proto.
 func ProtoUnmarshalEncoder(idx uint32, pts [][]byte, polys [][]byte) (*Encoder, error) {
 	inner, err := protoPolyEncoderFromFields(idx, pts, polys)
 	if err != nil {

@@ -48,7 +48,8 @@ type MrEnclave struct {
 type EndpointParams struct {
 	// MrEnclave is the expected MRENCLAVE measurement.
 	MrEnclave MrEnclave
-	// RaftConfig is the expected Raft configuration for SVR enclaves; nil for CDSI.
+	// RaftConfig is the expected Raft configuration for SVR enclaves.
+	// This is nil for CDSI enclaves.
 	RaftConfig *attest.RaftConfig
 }
 

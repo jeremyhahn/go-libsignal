@@ -177,7 +177,18 @@ func (p *SenderKeyMessage) Version() uint32 {
 	return p.version
 }
 
-// Serialize returns the bytes the signature covers: the received bytes when deserialized, else a fresh serialization.
+// Serialize will use the given serializer to return the message as bytes
+// excluding the signature. This should be used for signing and verifying
+// message signatures.
+//
+// When the message was deserialized from wire bytes (NewSenderKeyMessageFromBytes),
+// Serialize returns the retained original pre-signature bytes directly.
+// This prevents byte-malleability in signature verification: if the received
+// encoding uses non-minimal varints or carries unknown proto fields, re-serializing
+// from the struct would produce different bytes than what was signed.
+//
+// On the construction path (NewSenderKeyMessageWithVersion), serializedBytes is
+// nil and this method re-serializes from the struct as before.
 func (p *SenderKeyMessage) Serialize() ([]byte, error) {
 	if p.serializedBytes != nil {
 		out := make([]byte, len(p.serializedBytes))

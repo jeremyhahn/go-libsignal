@@ -19,13 +19,27 @@ const (
 	// KeyTypeKyber1024 identifies the Kyber-1024 KEM algorithm (round-3).
 	// Used by PQXDH (DST WhisperText_X25519_SHA-256_CRYSTALS-KYBER-1024).
 	KeyTypeKyber1024 KeyType = 0x08
-	// KeyTypeMLKEM768 identifies ML-KEM-768 (FIPS 203) for SPQR; 0x09 is a Go-only value that upstream does not allocate.
+	// KeyTypeMLKEM768 identifies the NIST ML-KEM-768 KEM algorithm (FIPS 203).
+	// Used by SPQR (Sparse Post-Quantum Ratchet).
+	//
+	// NOTE: 0x09 is a Go-only allocation. Upstream Rust libsignal v0.92.2
+	// (RUST_REV 98915c442d) does not define an MLKEM768 variant in its
+	// KeyType enum (rust/protocol/src/kem.rs:212-247 lists only 0x07
+	// Kyber768, 0x08 Kyber1024, 0x0A MLKEM1024). The reason is that Rust
+	// pulls SPQR from an external crate (signalapp/SparsePostQuantumRatchet
+	// v1.5.1) that vends its own ML-KEM-768 path, so the libsignal-protocol
+	// kem.rs never needs to expose the algorithm. Go embeds SPQR locally
+	// (pkg/spqr) and therefore needs a stable wire byte for the algorithm;
+	// 0x09 was chosen to avoid colliding with any upstream allocation.
 	KeyTypeMLKEM768 KeyType = 0x09
 	// KeyTypeMLKEM1024 identifies the ML-KEM-1024 KEM algorithm (FIPS 203).
 	KeyTypeMLKEM1024 KeyType = 0x0A
 )
 
-// ErrNoKeyTypeIdentifierError is returned for empty input (Rust SignalProtocolError::NoKeyTypeIdentifier).
+// ErrNoKeyTypeIdentifierError is returned when the input is completely empty
+// and no key-type byte can be read.
+//
+// Rust reference: SignalProtocolError::NoKeyTypeIdentifier (error.rs:37).
 type ErrNoKeyTypeIdentifierError struct{}
 
 func (e *ErrNoKeyTypeIdentifierError) Error() string {
@@ -47,14 +61,24 @@ func (e *ErrKeyTypeMismatchError) Error() string {
 	return "kem: key type mismatch"
 }
 
-// ErrKeyTypeKyber768UnsupportedError is returned for Round-3 Kyber-768 (0x07), which has no backend; ML-KEM-768 (0x09) is supported.
+// ErrKeyTypeKyber768UnsupportedError is returned when a caller attempts to use
+// Round-3 Kyber-768 (KeyType 0x07). go-libsignal has no Kyber-768 backend;
+// the guarded KEM dispatcher and key validation both reject this type.
+// Peers that have not yet migrated away from Kyber-768 are unsupported.
+//
+// NOTE: ML-KEM-768 (KeyType 0x09) is a distinct, fully supported algorithm.
+//
+// Rust reference: rust/protocol/src/kem.rs KeyType::Kyber768 (0x07).
 type ErrKeyTypeKyber768UnsupportedError struct{}
 
 func (e *ErrKeyTypeKyber768UnsupportedError) Error() string {
 	return "kem: Round-3 Kyber-768 (0x07) has no backend in go-libsignal; use Kyber-1024 (0x08) or ML-KEM-768 (0x09)"
 }
 
-// BadKEMKeyTypeError indicates an unknown KEM key type byte (Rust SignalProtocolError::BadKEMKeyType).
+// BadKEMKeyTypeError indicates that a key type byte was recognized syntactically
+// but does not correspond to any known KEM algorithm.
+//
+// Rust reference: SignalProtocolError::BadKEMKeyType(u8) (error.rs:99).
 type BadKEMKeyTypeError struct {
 	// Value is the unrecognized key type byte.
 	Value byte
@@ -99,7 +123,10 @@ func (e *UnsupportedKeyTypeError) Error() string {
 	return fmt.Sprintf("kem: unsupported key type: 0x%02x", e.KeyType)
 }
 
-// BadKeyLengthError indicates a serialized key of the wrong length (Rust SignalProtocolError::BadKEMKeyLength).
+// BadKeyLengthError indicates that a serialized key has the wrong length for
+// its algorithm.
+//
+// Rust reference: SignalProtocolError::BadKEMKeyLength(KeyType, usize) (error.rs:103).
 type BadKeyLengthError struct {
 	KeyType  KeyType
 	Expected int
@@ -111,7 +138,11 @@ func (e *BadKeyLengthError) Error() string {
 	return fmt.Sprintf("kem: bad key length for type 0x%02x: expected %d bytes, got %d", e.KeyType, e.Expected, e.Actual)
 }
 
-// BadCiphertextLengthError indicates a serialized ciphertext of the wrong length (Rust SignalProtocolError::BadKEMCiphertextLength).
+// BadCiphertextLengthError indicates that a serialized ciphertext has the wrong
+// length for its algorithm. Distinct from BadKeyLengthError so callers can
+// distinguish malformed keys from malformed ciphertexts via type assertion.
+//
+// Rust reference: SignalProtocolError::BadKEMCiphertextLength(KeyType, usize) (error.rs:105).
 type BadCiphertextLengthError struct {
 	KeyType  KeyType
 	Expected int
@@ -197,7 +228,15 @@ func NewPublicKey(keyType KeyType, data []byte) *PublicKey {
 	}
 }
 
-// DeserializePublicKey parses a type-prefixed public key, returning the same errors as Rust kem.rs.
+// DeserializePublicKey reconstructs a PublicKey from its serialized form.
+// The first byte is the type prefix.
+//
+// Error mapping (matches Rust kem.rs:319-330 and error.rs:37,99,103):
+//   - empty input → ErrNoKeyTypeIdentifier
+//   - only a type byte (length 1) → ErrEmptyInput
+//   - Kyber-768 tag (0x07) → ErrKeyTypeKyber768Unsupported
+//   - unknown tag → BadKEMKeyTypeError{Value}
+//   - wrong length → BadKeyLengthError
 func DeserializePublicKey(serialized []byte) (*PublicKey, error) {
 	if len(serialized) == 0 {
 		return nil, ErrNoKeyTypeIdentifier
@@ -248,7 +287,11 @@ type SecretKey struct {
 	data    []byte
 }
 
-// NewSecretKey returns a SecretKey for a known type and correctly sized data; Kyber-768 returns ErrKeyTypeKyber768Unsupported.
+// NewSecretKey creates a new SecretKey from the given key type and raw key data.
+// Returns an error if the key type is unrecognized or the data length does not
+// match the expected size for the algorithm.
+// Returns ErrKeyTypeKyber768Unsupported for Round-3 Kyber-768 (0x07), which
+// has no backend in go-libsignal.
 func NewSecretKey(keyType KeyType, data []byte) (*SecretKey, error) {
 	if err := validateSecretKeyMaterial(keyType, len(data)); err != nil {
 		return nil, err
@@ -285,7 +328,11 @@ type KeyPair struct {
 	Secret *SecretKey
 }
 
-// FromPublicAndPrivate builds a KeyPair from a public key and raw secret key of the same algorithm (Rust KeyPair::from_public_and_private).
+// FromPublicAndPrivate deserializes a public key and a raw secret key and
+// assembles them into a KeyPair, verifying that both carry the same algorithm
+// tag.
+//
+// Rust reference: KeyPair::from_public_and_private (kem.rs:463-477).
 func FromPublicAndPrivate(publicSerialized []byte, secretData []byte) (*KeyPair, error) {
 	pk, err := DeserializePublicKey(publicSerialized)
 	if err != nil {
@@ -314,7 +361,15 @@ func NewCiphertext(keyType KeyType, data []byte) *Ciphertext {
 	}
 }
 
-// DeserializeCiphertext parses a type-prefixed ciphertext, returning the same errors as Rust kem.rs.
+// DeserializeCiphertext reconstructs a Ciphertext from its serialized form.
+// The first byte is the type prefix.
+//
+// Error mapping (matches Rust kem.rs:490-502 and error.rs:37,99,105):
+//   - empty input → ErrNoKeyTypeIdentifier
+//   - only a type byte (length 1) → ErrEmptyInput
+//   - Kyber-768 tag (0x07) → ErrKeyTypeKyber768Unsupported
+//   - unknown tag → BadKEMKeyTypeError{Value}
+//   - wrong length → BadCiphertextLengthError
 func DeserializeCiphertext(serialized []byte) (*Ciphertext, error) {
 	if len(serialized) == 0 {
 		return nil, ErrNoKeyTypeIdentifier

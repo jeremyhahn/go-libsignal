@@ -9,7 +9,19 @@ import (
 // Wire-format sizes for [BackupAuthCredentialRequest] (fixed length).
 const backupAuthCredentialRequestSize = 1 + 64 + 32 // reserved + BlindedPoint + BlindingPublicKey
 
-// SerializeBackupAuthCredentialRequest encodes r as 97 bytes of Rust bincode: reserved byte, blinded backup ID, public key.
+// SerializeBackupAuthCredentialRequest serializes a
+// [BackupAuthCredentialRequest] to the Rust bincode wire format, producing
+// byte-for-byte identical output to Rust's bincode::serialize on the same
+// struct.
+//
+// Wire layout (matches Rust BackupAuthCredentialRequest at
+// rust/zkgroup/src/api/backups/auth_credential.rs:153-158):
+//
+//	[0x00]   reserved byte (ReservedByte)
+//	[64]     blinded_backup_id (BlindedPoint: D1 + D2, 32 bytes each)
+//	[32]     public_key (BlindingPublicKey: Ypoint, 32 bytes)
+//
+// Total: 97 bytes.
 func SerializeBackupAuthCredentialRequest(r *BackupAuthCredentialRequest) []byte {
 	out := make([]byte, 0, backupAuthCredentialRequestSize)
 	out = append(out, 0x00) // reserved
@@ -42,7 +54,21 @@ func DeserializeBackupAuthCredentialRequest(data []byte) (*BackupAuthCredentialR
 	}, nil
 }
 
-// SerializeBackupAuthCredentialResponse encodes r as Rust bincode: reserved byte, u64 LE time, level and type, credential, proof.
+// SerializeBackupAuthCredentialResponse serializes a
+// [BackupAuthCredentialResponse] to the Rust bincode wire format.
+//
+// Wire layout (matches Rust BackupAuthCredentialResponse at
+// rust/zkgroup/src/api/backups/auth_credential.rs:184-194):
+//
+//	[0x00]      reserved byte (ReservedByte)
+//	[8 LE u64]  redemption_time (Timestamp = u64 seconds since epoch)
+//	[8 LE u64]  backup_level (BackupLevel serialized as u64)
+//	[8 LE u64]  credential_type (BackupCredentialType serialized as u64)
+//	[128]       BlindedCredential (T + U + S1 + S2)
+//	[8 LE u64]  poksho_proof vec length
+//	[len]       poksho_proof bytes
+//
+// Total: 161 + len(poksho_proof) bytes.
 func SerializeBackupAuthCredentialResponse(r *BackupAuthCredentialResponse) []byte {
 	proof := zkcredential.EncodeBlindedIssuanceProofBincode(r.BlindedCredential)
 	out := make([]byte, 0, 1+8+8+8+len(proof))

@@ -27,7 +27,9 @@ func NewPlaintextContent(body []byte) *PlaintextContent {
 	}
 }
 
-// NewPlaintextContentFromBytes parses PlaintextContent bytes; without the 0xC0 prefix it returns UnrecognizedMessageVersionError.
+// NewPlaintextContentFromBytes parses a previously serialized PlaintextContent.
+// The bytes must begin with the 0xC0 identifier byte; otherwise an
+// UnrecognizedMessageVersionError is returned, matching Rust's TryFrom.
 func NewPlaintextContentFromBytes(serialized []byte) (*PlaintextContent, error) {
 	if len(serialized) < 1 {
 		return nil, &ContentTooShortError{MessageType: "plaintext content"}
@@ -60,7 +62,13 @@ func (p *PlaintextContent) Type() uint32 {
 	return PLAINTEXT_TYPE
 }
 
-// PlaintextContentFromDEM wraps a DecryptionErrorMessage as 0xC0 || Content proto || 0x80 padding.
+// PlaintextContentFromDEM wraps a DecryptionErrorMessage in a PlaintextContent
+// envelope. The resulting bytes are:
+//
+//	[0xC0 identifier] || proto.Marshal(Content{decryption_error_message: dem.Serialize()}) || [0x80 padding]
+//
+// Mirrors Rust's From<DecryptionErrorMessage> for PlaintextContent at
+// rust/protocol/src/protocol.rs:837-851.
 func PlaintextContentFromDEM(dem *DecryptionErrorMessage) (*PlaintextContent, error) {
 	demBytes, err := dem.Serialize()
 	if err != nil {

@@ -1,4 +1,10 @@
-// Package svr implements Secure Value Recovery v4: PIN-protected backup and restore of secrets with server-side rate limiting, master key derivation and AES-256-GCM-SIV encryption.
+// Package svr implements Secure Value Recovery (SVR) for the Signal protocol.
+// SVR allows users to back up and restore secrets (such as master keys) using
+// a PIN, with server-side rate limiting to prevent brute-force attacks.
+//
+// This package provides v4 backup/restore request construction, master key
+// derivation from PINs and SVR secrets, and encryption/decryption of secrets
+// using AES-256-GCM-SIV.
 package svr
 
 import (
@@ -41,7 +47,10 @@ type EvaluationResult struct {
 	TriesRemaining uint32
 }
 
-// Serialize encodes tries_remaining as a big-endian uint32 followed by the 32-byte value, as Rust does.
+// Serialize encodes the EvaluationResult as the Rust wire format:
+// big-endian uint32 tries_remaining (4 bytes) followed by the 32-byte value.
+//
+// Rust libsignal ref: rust/svrb/src/lib.rs EvaluationResult::serialize
 func (er *EvaluationResult) Serialize() []byte {
 	out := make([]byte, 4+secretSize)
 	binary.BigEndian.PutUint32(out[:4], er.TriesRemaining)
@@ -66,7 +75,13 @@ func (b *Backup4) Destroy() {
 	b.Secret.Destroy()
 }
 
-// NewBackup4 creates a v4 backup request for secret with maxTries PIN attempts; secret is copied into guarded memory, so zeroize your copy.
+// NewBackup4 creates a new v4 backup request with the given secret and maximum
+// number of allowed PIN attempts. It generates cryptographically random entropy
+// and a request identifier.
+//
+// The secret is copied into guarded memory and the request's copy is destroyed
+// by Destroy. Go passes the array by value, so the caller keeps its own copy
+// and should zeroize it once the request has been built.
 func NewBackup4(secret Secret, maxTries uint32) (*Backup4, error) {
 	if maxTries == 0 {
 		return nil, &Error{kind: errBadData}
@@ -158,7 +173,13 @@ func DecryptSecret(key [32]byte, encrypted []byte) (Secret, error) {
 	return result, nil
 }
 
-// MasterKey derives a key by HKDF-SHA256 with SHA-256(pin) as IKM, secret as salt and info "20221003_Signal_SVR_MasterKey"; zeroize the result, or use MasterKeyGuarded.
+// MasterKey derives a master key from a PIN and SVR secret using HKDF-SHA256.
+// The PIN is hashed with SHA-256 to produce input key material, and the secret
+// is used as the HKDF salt. The info string is "20221003_Signal_SVR_MasterKey".
+//
+// SECURITY: The returned [32]byte lives on the caller's stack. Callers should
+// defer ucrypto.ZeroizeArray32(&result) after receiving the value, or prefer
+// MasterKeyGuarded which returns the key in guarded memory.
 func MasterKey(pin string, secret Secret) ([32]byte, error) {
 	var result [32]byte
 
@@ -179,7 +200,9 @@ func MasterKey(pin string, secret Secret) ([32]byte, error) {
 	return result, nil
 }
 
-// MasterKeyGuarded derives the MasterKey value in guarded memory; the caller destroys it.
+// MasterKeyGuarded derives a master key from a PIN and SVR secret using
+// HKDF-SHA256, returning the result in guarded memory. The caller must call
+// Destroy() on the returned secret when it is no longer needed.
 func MasterKeyGuarded(pin string, svrSecret Secret) (*cryptosecret.Secret, error) {
 	raw, err := MasterKey(pin, svrSecret)
 	if err != nil {

@@ -430,7 +430,8 @@ func (e *ProtobufDecodeError) Error() string {
 	return fmt.Sprintf("attest: protobuf decode: %s", e.Detail)
 }
 
-// DcapOperationError wraps an error with the DCAP verification step that failed.
+// DcapOperationError wraps an underlying error with context about which
+// DCAP verification step failed.
 type DcapOperationError struct {
 	Operation string
 	Err       error
@@ -533,7 +534,8 @@ func (e *ClaimsError) Error() string {
 	return fmt.Sprintf("attest: %s", e.Detail)
 }
 
-// FMSPCMismatchError indicates the PCK extension FMSPC differs from the TCB info.
+// FMSPCMismatchError indicates the FMSPC from the PCK extension does not
+// match the FMSPC from the TCB info.
 type FMSPCMismatchError struct {
 	PCKExtension []byte
 	TCBInfo      []byte
@@ -544,7 +546,8 @@ func (e *FMSPCMismatchError) Error() string {
 		e.PCKExtension, e.TCBInfo)
 }
 
-// PCEIDMismatchError indicates the PCK extension PCEID differs from the TCB info.
+// PCEIDMismatchError indicates the PCEID from the PCK extension does not
+// match the PCEID from the TCB info.
 type PCEIDMismatchError struct {
 	PCKExtension []byte
 	TCBInfo      []byte

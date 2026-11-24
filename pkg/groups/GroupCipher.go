@@ -106,7 +106,10 @@ func (c *GroupCipher) Encrypt(distributionID [16]byte, plaintext []byte) (protoc
 	return senderKeyMessage, nil
 }
 
-// Decrypt decrypts a SenderKeyMessage, looking up the session by the message's distribution ID as Rust group_decrypt does.
+// Decrypt decrypts the given message using an existing session that
+// is stored in the senderKey store. The distribution ID embedded in the
+// incoming SenderKeyMessage is used for the store lookup, matching the
+// Rust reference implementation (group_decrypt).
 func (c *GroupCipher) Decrypt(senderKeyMessage *protocol.SenderKeyMessage) ([]byte, error) {
 	if c.senderKeyStore == nil {
 		return nil, ErrNilSenderKeyStore
@@ -228,7 +231,15 @@ func (c *GroupCipher) getSenderKey(senderKeyState *record.SenderKeyState, iterat
 	return senderChainKey.SenderMessageKey()
 }
 
-// DistributionIDToGroupID formats a 16-byte distribution UUID as a lowercase hyphenated string, identical to Rust's Uuid Display.
+// DistributionIDToGroupID formats a 16-byte distribution UUID as a standard
+// hyphenated UUID string (8-4-4-4-12 lowercase hex) for use as a
+// SenderKeyName group ID. The output is byte-identical to Rust's Uuid::Display
+// (std::fmt::Display for uuid::Uuid) applied to the same 16 bytes.
+//
+// Rust counterpart: uuid::Uuid formatted via Display in
+// rust/protocol/src/group_cipher.rs — the distribution_id field is a Uuid
+// and its string representation via {} in log statements and error types
+// uses this same hyphenated format.
 func DistributionIDToGroupID(id [16]byte) string {
 	h := hex.EncodeToString(id[:])
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]

@@ -30,7 +30,12 @@ func buildAltIdentityMessage(other *Key) []byte {
 	return msg
 }
 
-// SignAlternateIdentity signs the other identity's public key with 64 bytes of randomness (Rust sign_alternate_identity).
+// SignAlternateIdentity signs the other identity's serialized public key with
+// this keypair using the Signal_PNI_Signature DST. Mirrors Rust
+// IdentityKeyPair::sign_alternate_identity (rust/protocol/src/identity_key.rs:138).
+//
+// randomness must be 64 bytes of cryptographically secure random data.
+// Use SignAlternateIdentityRandom for automatic randomness.
 func (kp *KeyPair) SignAlternateIdentity(other *Key, randomness [64]byte) ([]byte, error) {
 	if other == nil {
 		return nil, ErrNilOtherKey
@@ -53,7 +58,10 @@ func (kp *KeyPair) SignAlternateIdentityRandom(other *Key) ([]byte, error) {
 	return kp.SignAlternateIdentity(other, randomness)
 }
 
-// VerifyAlternateIdentity verifies a SignAlternateIdentity signature (Rust verify_alternate_identity).
+// VerifyAlternateIdentity verifies a signature produced by SignAlternateIdentity.
+// Returns nil on a valid signature, a typed error on any mismatch.
+// Mirrors Rust IdentityKey::verify_alternate_identity
+// (rust/protocol/src/identity_key.rs:60).
 func (k *Key) VerifyAlternateIdentity(other *Key, signature []byte) error {
 	if other == nil {
 		return ErrNilOtherKey

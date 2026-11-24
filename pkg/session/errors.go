@@ -52,7 +52,9 @@ var ErrOldCounter = &Error{kind: errOldCounter}
 // ErrTooFarIntoFuture indicates a message counter is too far ahead of the chain index.
 var ErrTooFarIntoFuture = &Error{kind: errTooFarIntoFuture}
 
-// ErrMaxSkippedKeysExceeded is no longer returned; the cipher evicts the oldest skipped key per chain instead.
+// ErrMaxSkippedKeysExceeded is retained for API compatibility. The session cipher
+// no longer returns this error; per-chain FIFO eviction is used instead (matching
+// the Rust reference), so no error is returned when the per-chain limit is reached.
 var ErrMaxSkippedKeysExceeded = &Error{kind: errMaxSkippedKeysExceeded}
 
 // ErrDuplicateMessage indicates a message with an already-consumed counter was received.
@@ -71,7 +73,8 @@ var ErrMissingPQPreKeyID = &Error{kind: errMissingPQPreKeyID}
 // from process_prekey_impl in rust/protocol/src/session.rs.
 var ErrMissingPQCiphertext = &Error{kind: errMissingPQCiphertext}
 
-// ErrX3DHNoLongerSupported indicates a pre-Kyber (X3DH) PreKey message.
+// ErrX3DHNoLongerSupported indicates an X3DH (pre-Kyber version) PreKey message
+// was received, which is no longer supported.
 var ErrX3DHNoLongerSupported = &Error{kind: errX3DHNoLongerSupported}
 
 // ErrStaleSession indicates the session has an unacknowledged pre-key message
