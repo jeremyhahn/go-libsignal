@@ -23,7 +23,11 @@ jobs:
     name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
 
-    # CodeQL uploads to GitHub code scanning; the job-level guard skips it on other forges, so no gate needs it.
+    # CodeQL is a GitHub service: the init/analyze actions upload to the code
+    # scanning API, which Gitea does not serve. A job-level guard is evaluated
+    # after a runner picks the job up, so the job is skipped cleanly on Gitea
+    # rather than failing (devops.md §1). It is deliberately not in any gate's
+    # needs for that reason.
     if: github.server_url == 'https://github.com'
 
     strategy:
@@ -32,7 +36,10 @@ jobs:
         language: [go]
 
     steps:
-      # Tags, not commit SHAs: act_runner cannot resolve a bare SHA that is not a branch or tag tip.
+      # Tags, not commit SHAs. act_runner cannot resolve a bare SHA that is not
+      # a branch or tag tip ("reference not found"), which is what broke every
+      # SHA-pinned workflow in this repo; devops.md §9 wants latest majors here
+      # regardless.
       - name: Checkout repository
         uses: actions/checkout@v6
         with:
