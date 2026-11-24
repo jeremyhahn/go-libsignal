@@ -53,8 +53,8 @@ or to the documented standalone-crate equivalent:
 
 - **Go 1.27.1 exactly** — `go.mod` and `toolchain` directives are
   pinned; do not upgrade without a coordinated bump of `RUST_REV`.
-- **`GOWORK=off` is mandatory** for every `go` command. The parent
-  workspace at `/mnt/vm-host-1/go.work` pins a different toolchain
+- **`GOWORK=off` is mandatory** for every `go` command. A parent
+  `go.work` workspace may pin a different toolchain
   version and will break the build if the workspace is active.
 
   ```

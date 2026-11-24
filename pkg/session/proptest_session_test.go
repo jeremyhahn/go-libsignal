@@ -28,7 +28,7 @@ package session_test
 // proptest_session_test.go — property-based ports of the 4 Rust proptests in
 // rust/protocol/src/session_management.rs (commit 98915c44).
 //
-// Rust source: /mnt/vm-host-1/libsignal/rust/protocol/src/session_management.rs
+// Rust source: libsignal rust/protocol/src/session_management.rs
 //
 // Proptest mapping:
 //
