@@ -5,10 +5,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// plaintextContextIdentifierByte tags a serialized PlaintextContent. Mirrors
-// PlaintextContent::PLAINTEXT_CONTEXT_IDENTIFIER_BYTE in
-// rust/protocol/src/protocol.rs (RUST_REV 98915c4). Pinned at 0xC0 so callers
-// cannot pass an arbitrary Content proto off as PlaintextContent.
+// plaintextContextIdentifierByte (0xC0) tags a serialized PlaintextContent.
 const plaintextContextIdentifierByte byte = 0xC0
 
 // PlaintextContent is a message type for unencrypted content (type 8).

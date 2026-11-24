@@ -266,8 +266,7 @@ func TestFingerprintMatchingIdentifiers(t *testing.T) {
 	}
 }
 
-// TestFingerprintMismatchingFingerprints verifies that a MITM attack is
-// detected: Alice thinks she's talking to Bob, but has a MITM key.
+// TestFingerprintMismatchingFingerprints checks a man-in-the-middle key is detected.
 func TestFingerprintMismatchingFingerprints(t *testing.T) {
 	aKey := generateRandomIdentityKey(t)
 	bKey := generateRandomIdentityKey(t)

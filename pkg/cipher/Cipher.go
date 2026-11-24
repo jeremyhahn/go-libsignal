@@ -43,10 +43,7 @@ func Encrypt(iv, key, plaintext []byte) ([]byte, error) {
 	return AESCBCEncrypt(key, iv, plaintext)
 }
 
-// pkcs7Pad right-pads the given byte slice with 1 to n bytes, where
-// n is the block size. The size of the result is x times n, where x
-// is at least 1. Empty input is valid per PKCS#7: it produces a full
-// block of padding bytes (e.g., 16 bytes of 0x10 for a 16-byte block).
+// pkcs7Pad appends 1 to n bytes of padding; empty input yields a full block.
 func pkcs7Pad(b []byte, blocksize int) ([]byte, error) {
 	if blocksize <= 0 {
 		return nil, &ErrCipherInvalidBlockSize{Got: blocksize}
@@ -58,11 +55,7 @@ func pkcs7Pad(b []byte, blocksize int) ([]byte, error) {
 	return pb, nil
 }
 
-// pkcs7Unpad validates and removes PKCS#7 padding from the given byte slice.
-// The validation is constant-time: all padding bytes are checked without
-// early return to prevent timing side-channels. The returned value will be
-// 1 to n bytes smaller depending on the amount of padding, where n is the
-// block size.
+// pkcs7Unpad validates and removes PKCS#7 padding in constant time.
 func pkcs7Unpad(b []byte, blocksize int) ([]byte, error) {
 	if blocksize <= 0 {
 		return nil, &ErrCipherInvalidBlockSize{Got: blocksize}
@@ -81,11 +74,7 @@ func pkcs7Unpad(b []byte, blocksize int) ([]byte, error) {
 	good := subtle.ConstantTimeLessOrEq(1, padLen) &
 		subtle.ConstantTimeLessOrEq(padLen, blocksize)
 
-	// Check all padding bytes match padByte in constant time.
-	// We always iterate over the last blocksize bytes to avoid
-	// leaking padLen through loop count. For each position, we
-	// conditionally include its comparison based on whether it
-	// falls within the padding region.
+	// Check the last blocksize bytes in constant time, masking positions outside the padding.
 	for i := 0; i < blocksize; i++ {
 		// isPad is 1 if position (len(b)-1-i) is in the padding region.
 		isPad := subtle.ConstantTimeLessOrEq(i+1, padLen)

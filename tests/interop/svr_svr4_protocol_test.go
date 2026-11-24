@@ -1,31 +1,8 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 1 test in this file exercises HKDF-SHA256 under a key below 112 bits. FIPS
-// 140-3 does not approve that, but the Rust-emitted SVR4 fixture pinned by
-// /RUST_REV replays a 13-byte and an empty password as HKDF input key
-// material, so the fips140only build tag drops this file from the FIPS gate.
-// `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): the Rust SVR4 fixture uses short HKDF passwords, so the fips140only tag drops this file.
 
-// Conformance test: SVR4 OPRF protocol parity with Rust libsignal svrb crate.
-//
-// Mirrors rust/svrb/src/lib.rs::test::{output_to_encryption} and the KDF
-// label constants used throughout the OPRF backup/restore protocol.
-//
-// The only hardcoded KAT in the Rust svrb test module is:
-//
-//	fn output_to_encryption() {
-//	    assert_eq!(
-//	        encryption_key(&[0u8; 32], &[1u8; 32]),
-//	        hex!("fd8d53d811528ba9510759ec665dacf31b747f5a94a58f4b84f5d5f40458b9e8"),
-//	    );
-//	}
-//
-// The remaining tests use proptest randomness and a TestServer simulator for
-// full create/restore round-trips; those paths are covered by pkg/svr unit
-// tests. This file pins the deterministic KDF outputs and exercises the
-// exported EncryptSecret/DecryptSecret API to guard against label drift.
+// SVR4 KDF parity with Rust svrb output_to_encryption, plus EncryptSecret and DecryptSecret round-trips.
 
 package interop
 
@@ -57,15 +34,7 @@ type svr4ProtocolFixture struct {
 	Vectors []svr4ProtocolVector `json:"vectors"`
 }
 
-// svr4KDF implements the HKDF-SHA256 KDF used throughout the svrb crate:
-//
-//	fn make(info: &[u8], input1: &[u8], input2: &[u8]) -> [u8; N] {
-//	    let concat_input = [input1, input2].concat();
-//	    hkdf::Hkdf::<Sha256>::new(None, &concat_input).expand(info, &mut out)
-//	}
-//
-// This mirrors the Go pkg/svr/crypto.go kdf32/kdf64 functions exactly; we
-// re-implement here so the interop test has no dependency on unexported symbols.
+// svr4KDF is the svrb HKDF-SHA256 KDF: no salt, ikm input1||input2, expand info.
 func svr4KDF(info []byte, input1, input2 []byte, outLen int) []byte {
 	concat := append(append([]byte{}, input1...), input2...)
 	h := hkdf.New(sha256.New, concat, nil, info)
@@ -86,13 +55,7 @@ func mustDecodeHexSVR(t *testing.T, s string) []byte {
 	return b
 }
 
-// TestSVR4_EncryptionKeyKAT verifies that the Go encryption_key KDF produces
-// the byte-identical result to Rust svrb::test::output_to_encryption.
-//
-// Rust source: rust/svrb/src/lib.rs:581-586
-//
-//	encryption_key(&[0u8;32], &[1u8;32]) ==
-//	  hex!("fd8d53d811528ba9510759ec665dacf31b747f5a94a58f4b84f5d5f40458b9e8")
+// TestSVR4_EncryptionKeyKAT checks encryption_key(zeros, ones) matches Rust svrb lib.rs:581-586.
 func TestSVR4_EncryptionKeyKAT(t *testing.T) {
 	raw := loader.MustRead("svr/svr4_protocol.json")
 
@@ -189,10 +152,7 @@ func testPasswordToUniformInput(t *testing.T, vec svr4ProtocolVector, passwordHe
 	}
 }
 
-// testEncryptDecryptSecretRoundTrip verifies that the exported EncryptSecret
-// and DecryptSecret functions correctly round-trip a secret through
-// AES-256-GCM-SIV. This exercises the same encryption path that the svrb
-// protocol uses to protect the client's secret after the OPRF exchange.
+// testEncryptDecryptSecretRoundTrip checks EncryptSecret and DecryptSecret round-trip through AES-256-GCM-SIV.
 func testEncryptDecryptSecretRoundTrip(t *testing.T, vec svr4ProtocolVector) {
 	t.Helper()
 

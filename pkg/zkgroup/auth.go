@@ -6,16 +6,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/zkcredential"
 )
 
-// authCredentialWithPniZkcLen is the wire length of a serialized
-// AuthCredentialWithPniZkc in bincode format:
-// 1 (version) + 96 (Credential: t:32 ‖ U:32 ‖ V:32)
-// + 80 (UIDStruct ACI: bytes:16 ‖ M1:32 ‖ M2:32)
-// + 80 (UIDStruct PNI: bytes:16 ‖ M1:32 ‖ M2:32)
-// + 8 (redemption_time LE u64)
-// = 265 bytes.
-//
-// Matches Rust constant AUTH_CREDENTIAL_WITH_PNI_LEN = 265 in
-// zkgroup/src/common/constants.rs.
+// authCredentialWithPniZkcLen is the 265-byte bincode length of AuthCredentialWithPniZkc (Rust AUTH_CREDENTIAL_WITH_PNI_LEN).
 const authCredentialWithPniZkcLen = 265
 
 // authCredentialWithPniZkcLabel is the credential label for zkcredential-based

@@ -112,12 +112,9 @@ func TestProtoChainNoUnderflow(t *testing.T) {
 	}
 }
 
-// ============================================================================
-// Finding 7: FIFO eviction tests
-// ============================================================================
+// FIFO eviction tests.
 
-// TestFIFOEvictOldestSkippedKey verifies that evictOldestSkippedKey removes
-// the first key inserted into the FIFO, not an arbitrary map entry.
+// TestFIFOEvictOldestSkippedKey checks evictOldestSkippedKey removes the first key inserted.
 func TestFIFOEvictOldestSkippedKey(t *testing.T) {
 	rkBytes := make([]byte, keyLen)
 	rk, err := secret.New(rkBytes)
@@ -137,8 +134,7 @@ func TestFIFOEvictOldestSkippedKey(t *testing.T) {
 	}
 	defer s.Zeroize()
 
-	// Insert three keys in a specific order: counter 5, 3, 7.
-	// After eviction the FIFO-oldest (counter=5) must be removed.
+	// Insert counters 5, 3, 7; eviction must remove 5.
 	for _, counter := range []uint32{5, 3, 7} {
 		kb := make([]byte, keyLen)
 		kb[0] = byte(counter)
@@ -172,9 +168,7 @@ func TestFIFOEvictOldestSkippedKey(t *testing.T) {
 	}
 }
 
-// TestFIFOEvictSkipsStaleEntries verifies that when the first FIFO entry has
-// already been removed from the map (stale), evictOldestSkippedKey advances
-// past it and removes the next live entry.
+// TestFIFOEvictSkipsStaleEntries checks eviction skips FIFO entries already gone from the map.
 func TestFIFOEvictSkipsStaleEntries(t *testing.T) {
 	rkBytes := make([]byte, keyLen)
 	rk, err := secret.New(rkBytes)
@@ -207,8 +201,7 @@ func TestFIFOEvictSkipsStaleEntries(t *testing.T) {
 		s.skippedKeysFIFO = append(s.skippedKeysFIFO, id)
 	}
 
-	// Simulate counter=1 being consumed externally (e.g., by gcSkippedKeys).
-	// The FIFO still holds {1, 2} but the map has only {2}.
+	// Remove counter 1 from the map only, leaving the FIFO {1, 2} and the map {2}.
 	s.skippedKeys[SkippedKeyID{Epoch: 0, Counter: 1}].Destroy()
 	delete(s.skippedKeys, SkippedKeyID{Epoch: 0, Counter: 1})
 
@@ -326,9 +319,7 @@ func TestRebuildSkippedKeysFIFOSortsCorrectly(t *testing.T) {
 	}
 }
 
-// TestFIFOExhaustedTriggersRebuild verifies that when the FIFO is empty but
-// the skippedKeys map has entries, evictOldestSkippedKey rebuilds the FIFO
-// and correctly evicts an entry.
+// TestFIFOExhaustedTriggersRebuild checks an empty FIFO with map entries is rebuilt before eviction.
 func TestFIFOExhaustedTriggersRebuild(t *testing.T) {
 	rkBytes := make([]byte, keyLen)
 	rk, err := secret.New(rkBytes)
@@ -367,9 +358,7 @@ func TestFIFOExhaustedTriggersRebuild(t *testing.T) {
 	}
 }
 
-// TestDecryptSkipForwardPopulatesFIFO verifies that the FIFO is populated
-// during normal Decrypt with a forward jump, so that subsequent evictions
-// use FIFO order correctly.
+// TestDecryptSkipForwardPopulatesFIFO checks a forward jump in Decrypt fills the FIFO in order.
 func TestDecryptSkipForwardPopulatesFIFO(t *testing.T) {
 	ss := randomBytes(t, 32)
 	s, err := Init(ss, DirectionA2B, maxJump)
@@ -404,9 +393,7 @@ func TestDecryptSkipForwardPopulatesFIFO(t *testing.T) {
 	}
 }
 
-// TestProtoDeserializeRebuildsFIFO verifies that after UnmarshalStateProto,
-// the FIFO is rebuilt from the skippedKeys map so that eviction works
-// immediately without a prior Decrypt call.
+// TestProtoDeserializeRebuildsFIFO checks UnmarshalStateProto rebuilds the FIFO from skippedKeys.
 func TestProtoDeserializeRebuildsFIFO(t *testing.T) {
 	ss := randomBytes(t, 32)
 	s, err := Init(ss, DirectionA2B, maxJump)
@@ -447,16 +434,10 @@ func TestProtoDeserializeRebuildsFIFO(t *testing.T) {
 	}
 }
 
-// TestFIFOSubCapacityConsumeCyclesDoNotGrowUnboundedly verifies that the FIFO
-// backing slice does not grow proportional to the total number of skipped keys
-// ever created when a session repeatedly inserts and consumes skipped keys while
-// staying below the eviction capacity (maxSkippedKeys). Without the fix the
-// stale FIFO entries were never reclaimed on the consume path, causing unbounded
-// slice growth at 16 bytes per skipped key ever created.
+// TestFIFOSubCapacityConsumeCyclesDoNotGrowUnboundedly checks insert-and-consume cycles below maxSkippedKeys keep the FIFO bounded.
 func TestFIFOSubCapacityConsumeCyclesDoNotGrowUnboundedly(t *testing.T) {
 	ss := randomBytes(t, 32)
-	// Use math.MaxUint32 as the jump limit so the forward jumps in the test
-	// never hit the DoS guard, keeping the focus on FIFO memory behaviour.
+	// A math.MaxUint32 jump limit keeps the DoS guard out of the test.
 	s, err := Init(ss, DirectionA2B, maxJump)
 	if err != nil {
 		t.Fatalf("Init: %v", err)
@@ -495,10 +476,7 @@ func TestFIFOSubCapacityConsumeCyclesDoNotGrowUnboundedly(t *testing.T) {
 		t.Errorf("expected empty skippedKeys after all consumed, got %d", len(s.skippedKeys))
 	}
 
-	// The live FIFO length must be bounded: it must not grow proportional to the
-	// total keys ever created (which would be numCycles*(cycleJump-1) = 800 stale
-	// entries without the fix). With trimFIFOIfNeeded the live FIFO length is
-	// bounded to 2*len(skippedKeys)+64 = 64 when the map is empty.
+	// trimFIFOIfNeeded bounds the FIFO to 2*len(skippedKeys)+64.
 	liveFIFO := len(s.skippedKeysFIFO) - s.skippedKeysFIFOHead
 	totalCreated := numCycles * (cycleJump - 1)
 	if liveFIFO >= totalCreated {

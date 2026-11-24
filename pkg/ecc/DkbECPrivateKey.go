@@ -2,13 +2,7 @@ package ecc
 
 import "runtime"
 
-// clampCurve25519 applies the Curve25519 clamping operation in-place.
-// Mirrors Rust libsignal's scalar::clamp_integer (curve25519.rs:172 / curve.rs:247).
-// Clamping ensures the scalar is a valid Curve25519 secret key:
-//
-//	key[0]  &= 248   — clear the three low bits
-//	key[31] &= 127   — clear the high bit (cofactor)
-//	key[31] |= 64    — set the second-highest bit (canonicalization)
+// clampCurve25519 clamps in place: key[0] &= 248, key[31] &= 127, key[31] |= 64.
 func clampCurve25519(key *[32]byte) {
 	key[0] &= 248
 	key[31] &= 127

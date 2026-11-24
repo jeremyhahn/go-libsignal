@@ -13,10 +13,7 @@ import (
 	"filippo.io/edwards25519/field"
 )
 
-// Precomputed constants for the Elligator inverse on curve25519.
-//
-// These are derived from the Edwards curve parameter d and related values.
-// They match the Rust curve25519-dalek-signal lizard_constants module.
+// Precomputed Elligator inverse constants, matching curve25519-dalek-signal lizard_constants.
 var (
 	feZero = new(field.Element)
 	feOne  = new(field.Element).One()
@@ -105,16 +102,7 @@ func (jp *jacobiPoint) dual() *jacobiPoint {
 	}
 }
 
-// elligatorInv computes a field element that maps to this Jacobi quartic point
-// under Elligator2, if one exists. Returns (found, fieldElement) where found
-// is 1 if a preimage exists and 0 otherwise. The int return allows the caller
-// to fold the result into a bitmask without a conditional branch.
-//
-// All validity decisions (including the found flag) are computed branchlessly
-// using integer bit-ops on the 0/1 flags produced by field.Element.Equal and
-// field.Element.SqrtRatio, preserving the constant-time guarantee documented at
-// the package level. This matches curve25519-dalek-signal which uses
-// subtle::Choice for the same purpose.
+// elligatorInv returns (found, fe) for a Jacobi quartic point, computed branchlessly; found is 1 when a preimage exists.
 func (jp *jacobiPoint) elligatorInv() (int, *field.Element) {
 	// Special case: s = 0. If s is zero, either t = 1 or t = -1.
 	// If t=1, then sqrt(i*d) is the preimage. Otherwise it's 0.
@@ -153,24 +141,13 @@ func (jp *jacobiPoint) elligatorInv() (int, *field.Element) {
 	// If s==0, use s0Result; otherwise use x (the general case).
 	out := new(field.Element).Select(s0Result, x, int(sIsZero))
 
-	// Compute validity branchlessly: found = sIsZero || (wasSquare && !sIsZero).
-	// Using int bit-ops on the 0/1 flags from field.Element.Equal / SqrtRatio:
-	//   found = sIsZero | (wasSquare &^ sIsZero)
-	// Truth table (exhaustive over {0,1}²):
-	//   sIsZero=0 wasSquare=0 → 0|0 = 0  (no preimage)
-	//   sIsZero=0 wasSquare=1 → 0|1 = 1  (square, preimage exists)
-	//   sIsZero=1 wasSquare=0 → 1|0 = 1  (degenerate s=0 case)
-	//   sIsZero=1 wasSquare=1 → 1|0 = 1  (degenerate s=0 case)
-	// This eliminates the boolean short-circuit branch on secret-derived flags,
-	// matching curve25519-dalek-signal which uses subtle::Choice here.
+	// found = sIsZero | (wasSquare &^ sIsZero), branchless on secret-derived flags.
 	found := sIsZero | (wasSquare &^ sIsZero)
 
 	return found, out
 }
 
-// decodeToExtended decodes a 32-byte canonical ristretto encoding to extended
-// Edwards coordinates (X, Y, Z, T). This reimplements the ristretto DECODE
-// operation from RFC 9496, Section 4.3.1 using only field arithmetic.
+// decodeToExtended decodes a canonical ristretto encoding to extended coordinates (RFC 9496 §4.3.1).
 func decodeToExtended(encoded []byte) (X, Y, Z, T *field.Element, ok bool) {
 	if len(encoded) != 32 {
 		return nil, nil, nil, nil, false

@@ -1,12 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 35 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) and the Double Ratchet
-// specification (section 5.2) require it, so the fips140only build tag drops
-// this file from the FIPS gate. `make test` and `make coverage` still run
-// it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH and the Double Ratchet require X25519, so the fips140only tag drops this file.
 
 package session_test
 
@@ -51,10 +45,7 @@ func (e *errLoadKyberPreKeyStore) ContainsKyberPreKey(id uint32) (bool, error) {
 	return e.inner.ContainsKyberPreKey(id)
 }
 
-// injectSPQRState replaces the PqRatchetState in a serialized session JSON
-// with a new SPQR state created with MinVersion=VersionV1 (immediate V1 resolution).
-// This enables testing SPQR-active decrypt paths that are otherwise blocked by
-// the negotiation-pending state used in normal PQXDH sessions.
+// injectSPQRState replaces a session's PqRatchetState with a V1 state, to test SPQR-active decryption.
 func injectSPQRState(t *testing.T, sessionBytes []byte, serializer *serialize.Serializer,
 	authKey []byte, direction spqr.Direction) *record.Session {
 	t.Helper()
@@ -877,9 +868,7 @@ func TestEncryptStaleSession(t *testing.T) {
 	}
 }
 
-// TestIsSpqrDuplicateErr exercises the isSpqrDuplicateErr function indirectly
-// by triggering a SPQR duplicate condition (second decrypt of same message when
-// SPQR state is active).
+// TestIsSpqrDuplicateErr checks a second decrypt of an SPQR message fails.
 func TestIsSpqrDuplicateErr_ViaSessionDecrypt(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	alice := newTestUser(t, "Alice", 1, serializer)
@@ -916,20 +905,15 @@ func TestIsSpqrDuplicateErr_ViaSessionDecrypt(t *testing.T) {
 		t.Fatalf("first decrypt failed: %v", err)
 	}
 
-	// Second decrypt should fail (duplicate message or SPQR duplicate).
+	// A second decrypt must fail.
 	_, err = bobCipher.Decrypt(preKeyMsg.WhisperMessage())
 	if err == nil {
 		t.Fatal("expected error on second decrypt of same message")
 	}
-	// Accept either ErrDuplicateMessage (DR level) or another error (SPQR level).
-	// The important thing is an error is returned.
+	// Either a Double Ratchet or an SPQR duplicate error is acceptable.
 }
 
-// TestGetOrCreateMessageKeys_FIFOEviction verifies per-chain FIFO eviction behavior
-// matching the Rust reference. When the per-chain skipped key count reaches
-// maxSkippedKeys, the oldest (lowest counter) key is evicted to make room for
-// the new one. Decryption of a message beyond the limit must succeed (no error),
-// and the oldest evicted key is no longer retrievable.
+// TestGetOrCreateMessageKeys_FIFOEviction checks the oldest skipped key is evicted at maxSkippedKeys and decryption still succeeds, as Rust.
 func TestGetOrCreateMessageKeys_FIFOEviction(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	alice := newTestUser(t, "Alice", 1, serializer)
@@ -985,9 +969,7 @@ func TestGetOrCreateMessageKeys_FIFOEviction(t *testing.T) {
 		t.Fatalf("alice decrypt ack failed: %v", err)
 	}
 
-	// Capture the first skipped message (at Alice's current chain index) before
-	// she fills the chain. This is the key that will be FIFO-evicted once the
-	// chain exceeds maxSkippedKeys.
+	// Capture the first skipped message, whose key is evicted later.
 	firstSkipMsg, err := aliceCipher.Encrypt([]byte("first-skip"))
 	if err != nil {
 		t.Fatalf("encrypt first skip failed: %v", err)
@@ -997,8 +979,7 @@ func TestGetOrCreateMessageKeys_FIFOEviction(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Encrypt 2001 more messages without Bob decrypting. Together with firstSkipMsg
-	// this puts >2000 keys on Bob's receiver chain, triggering FIFO eviction.
+	// 2001 more unread messages put over 2000 keys on Bob's chain.
 	const extraSkips = 2001
 	var farMsg *protocol.SignalMessage
 	for i := 0; i < extraSkips; i++ {
@@ -1009,9 +990,7 @@ func TestGetOrCreateMessageKeys_FIFOEviction(t *testing.T) {
 		farMsg = msg.(*protocol.SignalMessage)
 	}
 
-	// Bob decrypts the last message. FIFO eviction means the oldest skipped keys
-	// have been discarded silently, but decryption of the current message succeeds.
-	// This matches the Rust reference behavior (no error on overflow).
+	// The last message decrypts although the oldest keys were evicted.
 	farBytes, err := farMsg.Serialize()
 	if err != nil {
 		t.Fatal(err)
@@ -1093,9 +1072,7 @@ func TestDecryptWithState_WrongMessageVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The inner SignalMessage is a version 4 message. DecryptWithState with a
-	// state that has a DIFFERENT version should return ErrWrongMessageVersion.
-	// We use DecryptWithState directly with a fresh (version-0 -> version-2) state.
+	// DecryptWithState with a state of another version returns ErrWrongMessageVersion.
 	freshState := record.NewState(serializer.State)
 	// freshState.Version() returns 2 (zero is mapped to 2), message version is 4.
 	cipher := session.NewCipher(bob.sessionBuilder, alice.address)
@@ -1117,9 +1094,7 @@ func TestComplete_MarkKyberPreKeyUsedError(t *testing.T) {
 
 	alice.buildSession(t, bob.address, serializer)
 
-	// Replace Bob's Kyber pre-key store with an erroring one BEFORE alice processes
-	// the bundle, but AFTER storing the kyber key. We need the key to be loadable
-	// (so Process succeeds), but MarkKyberPreKeyUsed to fail (so Complete fails).
+	// Kyber key loads but MarkKyberPreKeyUsed fails, so Complete fails.
 	erroringStore := &errMarkKyberPreKeyStore{inner: bob.kyberPreKeyStore}
 
 	bob.sessionBuilder = session.NewBuilderWithKyber(
@@ -1256,9 +1231,7 @@ func TestProcessV3_ArchivesNonFreshSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Second session: Alice builds a NEW session with Bob using pre-key index 1.
-	// Alice uses the SAME identity key (trusted by Bob), only switching pre-keys.
-	// We reset Alice's session store so she generates a fresh PreKeySignalMessage.
+	// Alice starts a second session with prekey 1 and the same trusted identity, from a reset session store.
 	if err := alice.sessionStore.DeleteSession(bob.address); err != nil {
 		t.Fatalf("setup: DeleteSession: %v", err)
 	}
@@ -1494,10 +1467,7 @@ func TestOutOfOrderDecrypt(t *testing.T) {
 	}
 }
 
-// TestSPQRActiveSessionDecrypt verifies the SPQR-active paths in decryptWithClonedState
-// and getOrCreateMessageKeys by injecting SPQR V1 states (MinVersion=VersionV1)
-// into both Alice's and Bob's sessions. This bypasses the normal negotiation-pending
-// state (MinVersion=VersionV0) used in PQXDH sessions, activating the PQR code paths.
+// TestSPQRActiveSessionDecrypt injects SPQR V1 states into both sessions to exercise the SPQR-active paths.
 func TestSPQRActiveSessionDecrypt(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	alice := newTestUser(t, "Alice", 1, serializer)
@@ -1530,8 +1500,7 @@ func TestSPQRActiveSessionDecrypt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A fixed shared authKey for SPQR initialization. Both parties must use
-	// the same key for the derived message keys to match.
+	// Both parties share this authKey so derived message keys match.
 	sharedSPQRKey := make([]byte, 32)
 	for i := range sharedSPQRKey {
 		sharedSPQRKey[i] = byte(i + 1)
@@ -1567,8 +1536,7 @@ func TestSPQRActiveSessionDecrypt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Parse as signal message (Alice's session no longer has unacknowledged pre-key
-	// since setup was completed).
+	// Parse as a SignalMessage; Alice's pre-key state is acknowledged.
 	signalMsg, signalErr := protocol.NewSignalMessageFromBytes(msgBytes, serializer.SignalMessage)
 	if signalErr != nil {
 		// Falls back to PreKeySignalMessage if session still has pending pre-key.
@@ -1586,9 +1554,7 @@ func TestSPQRActiveSessionDecrypt(t *testing.T) {
 	}
 	t.Logf("SPQR active: PQRKey len=%d", len(signalMsg.PqRatchetKey()))
 
-	// Bob decrypts the SPQR-enhanced message. This exercises the SPQR-active
-	// path in decryptWithClonedState (lines 480-496): pqrData is non-empty,
-	// pqrState is active, spqr.Recv is called to derive pqrSalt.
+	// Bob decrypts the SPQR message, calling spqr.Recv to derive pqrSalt.
 	bobCipher2 := session.NewCipher(bob.sessionBuilder, alice.address)
 	decrypted, err := bobCipher2.Decrypt(signalMsg)
 	if err != nil {
@@ -1599,10 +1565,7 @@ func TestSPQRActiveSessionDecrypt(t *testing.T) {
 	}
 }
 
-// TestSPQRSkippedKeyRederive verifies the SPQR re-derive path for stored
-// skipped keys (decryptWithClonedState lines 435-451 and getOrCreateMessageKeys
-// lines 526-534). This requires SPQR to be active and messages to be delivered
-// out of order.
+// TestSPQRSkippedKeyRederive checks out-of-order SPQR messages re-derive stored skipped keys.
 func TestSPQRSkippedKeyRederive(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	alice := newTestUser(t, "Alice", 1, serializer)
@@ -1681,8 +1644,7 @@ func TestSPQRSkippedKeyRederive(t *testing.T) {
 
 	bobCipher2 := session.NewCipher(bob.sessionBuilder, alice.address)
 
-	// Decrypt message 2 first (skipping 0 and 1). This stores skipped keys 0 and 1
-	// with SPQR seed material via chainKey.MessageKeysWithSeed().
+	// Decrypt message 2 first, storing skipped keys 0 and 1 with seed material.
 	decrypted2, err := bobCipher2.Decrypt(signalMsgs[2])
 	if err != nil {
 		t.Fatalf("decrypt msg2 first failed: %v", err)
@@ -1691,10 +1653,7 @@ func TestSPQRSkippedKeyRederive(t *testing.T) {
 		t.Fatalf("expected 'spqr2', got %q", string(decrypted2))
 	}
 
-	// Decrypt messages 0 and 1. The stored skipped keys have seed material and
-	// the messages carry PQR data, so DeriveMessageKeysFromSeed is called.
-	// This exercises decryptWithClonedState lines 435-451 and getOrCreateMessageKeys
-	// lines 526-534 (SPQR skipped key re-derive).
+	// Messages 0 and 1 re-derive their keys with DeriveMessageKeysFromSeed.
 	for i := 0; i < 2; i++ {
 		decrypted, err := bobCipher2.Decrypt(signalMsgs[i])
 		if err != nil {
@@ -1707,9 +1666,7 @@ func TestSPQRSkippedKeyRederive(t *testing.T) {
 	}
 }
 
-// TestEncryptWithoutSPQR verifies the non-SPQR path in Encrypt (the else branch
-// at line 126 in SessionCipher.go). This requires a session state with empty
-// PqRatchetState. We inject this by stripping the SPQR state from the session JSON.
+// TestEncryptWithoutSPQR checks Encrypt without SPQR state, by stripping it from the session JSON.
 func TestEncryptWithoutSPQR(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	alice := newTestUser(t, "Alice", 1, serializer)
@@ -1743,9 +1700,7 @@ func TestEncryptWithoutSPQR(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Bob replies to establish a bidirectional session where Bob's session
-	// has processed Alice's message and advanced its ratchet.
-	// Now strip the PqRatchetState from Bob's session to exercise the non-SPQR path.
+	// After Bob replies, strip his PqRatchetState to use the non-SPQR path.
 	bobSessionBytesRec, _ := bob.sessionStore.LoadSession(alice.address)
 	bobSessionBytes, err := bobSessionBytesRec.Serialize()
 	if err != nil {
@@ -1769,8 +1724,7 @@ func TestEncryptWithoutSPQR(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = bob.sessionStore.StoreSession(alice.address, noSPQRRecord)
-	// Now Bob encrypts with no SPQR state. This exercises the else branch
-	// in Encrypt (chainKey.MessageKeys() instead of chainKey.MessageKeysWithSalt()).
+	// Bob encrypts without SPQR, using chainKey.MessageKeys.
 	bobCipher2 := session.NewCipher(bob.sessionBuilder, alice.address)
 	bobMsg, err := bobCipher2.Encrypt([]byte("no spqr response"))
 	if err != nil {
@@ -1781,10 +1735,7 @@ func TestEncryptWithoutSPQR(t *testing.T) {
 	}
 }
 
-// TestSPQRDuplicateMessageDetection verifies the isSpqrDuplicateErr path in
-// decryptWithClonedState (lines 483-493). When a SPQR-active message is replayed,
-// spqr.Recv returns ErrKeyAlreadyRequested, and the SPQR duplicate check converts
-// it to a DuplicateMessage error (matching Double Ratchet's replay detection).
+// TestSPQRDuplicateMessageDetection checks a replayed SPQR message becomes a DuplicateMessage error.
 func TestSPQRDuplicateMessageDetection(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	alice := newTestUser(t, "Alice", 1, serializer)
@@ -1865,15 +1816,12 @@ func TestSPQRDuplicateMessageDetection(t *testing.T) {
 		t.Fatalf("expected 'duplicate test', got %q", string(decrypted))
 	}
 
-	// Second decrypt of the same SPQR-active message. SPQR.Recv returns
-	// ErrKeyAlreadyRequested (counter 0 already consumed), which combined with
-	// chainKey.Index() > counter triggers the SPQR duplicate detection path.
+	// Replaying hits ErrKeyAlreadyRequested with chainKey.Index() > counter, the SPQR duplicate path.
 	_, err = bobCipher2.Decrypt(signalMsg)
 	if err == nil {
 		t.Fatal("expected error on duplicate SPQR message")
 	}
-	// Accept either ErrDuplicateMessage (SPQR duplicate detection) or
-	// ErrNoValidSessions (if all session states fail).
+	// Either ErrDuplicateMessage or ErrNoValidSessions is acceptable.
 	if !errors.Is(err, session.ErrDuplicateMessage) && !errors.Is(err, session.ErrNoValidSessions) {
 		t.Fatalf("expected ErrDuplicateMessage or ErrNoValidSessions, got: %v", err)
 	}
@@ -1947,7 +1895,7 @@ func TestProcessV3_PreKyberVersionRejected(t *testing.T) {
 		t.Fatalf("NewPreKeySignalMessageFromStruct: %v", err)
 	}
 
-	// Bob.Process(v3Msg) should fail with X3DH no longer supported.
+	// Processing a v3 (X3DH) message must fail.
 	_, err = bob.sessionBuilder.Process(v3Msg)
 	if err == nil {
 		t.Fatal("expected error for V3 (pre-Kyber) message")
@@ -2259,10 +2207,7 @@ func TestDecryptStoredKey_BadMAC(t *testing.T) {
 
 	bobCipher := session.NewCipher(bob.sessionBuilder, alice.address)
 
-	// Bob decrypts msg1 first (skipping msg0). This stores a skipped key for
-	// the ratchet counter corresponding to msg0's ephemeral key chain.
-	// However, both msg0 and msg1 use the SAME Alice ephemeral key (same ratchet
-	// step), so decrypting msg1 advances the chain and stores key for counter 0.
+	// Decrypting msg1 first stores the skipped key for counter 0 on the same chain.
 	msg1Bytes, _ := msg1.Serialize()
 	preKey1, err := protocol.NewPreKeySignalMessageFromBytes(msg1Bytes,
 		serializer.PreKeySignalMessage, serializer.SignalMessage)
@@ -2273,8 +2218,7 @@ func TestDecryptStoredKey_BadMAC(t *testing.T) {
 		t.Fatalf("decrypt msg1 first failed: %v", err)
 	}
 
-	// Now construct a corrupted version of msg0 by zeroing its CipherText.
-	// The MAC will no longer match, but the counter matches the stored key.
+	// Zero msg0's ciphertext: the MAC fails but the counter matches the stored key.
 	var outerRaw map[string]interface{}
 	if err := json.Unmarshal(msg0Bytes, &outerRaw); err != nil {
 		t.Fatalf("unmarshal msg0: %v", err)
@@ -2323,11 +2267,7 @@ func TestDecryptStoredKey_BadMAC(t *testing.T) {
 	}
 }
 
-// TestSPQRNonDuplicateErrorFallthrough verifies that a SPQR error which is NOT
-// a duplicate error (e.g., ErrMaxJump) is returned directly at line 493 in
-// decryptWithClonedState, rather than being converted to ErrDuplicateMessage.
-// This is triggered by setting MaxJump=1 in the SPQR state and attempting to
-// receive a message that jumps the SPQR counter by more than 1.
+// TestSPQRNonDuplicateErrorFallthrough checks a non-duplicate SPQR error such as ErrMaxJump is returned unchanged.
 func TestSPQRNonDuplicateErrorFallthrough(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	alice := newTestUser(t, "Alice", 1, serializer)
@@ -2361,8 +2301,7 @@ func TestSPQRNonDuplicateErrorFallthrough(t *testing.T) {
 		sharedSPQRKey[i] = byte(i + 0x60)
 	}
 
-	// Inject SPQR V1 state with MaxJump=1 for Bob (receiver). Alice uses
-	// MaxJump=25000 (sender doesn't need this constraint).
+	// Bob's receiver state has MaxJump=1; Alice keeps the default.
 	aliceSessionBytesRec, _ := alice.sessionStore.LoadSession(bob.address)
 	aliceSessionBytes, _ := aliceSessionBytesRec.Serialize()
 
@@ -2380,7 +2319,7 @@ func TestSPQRNonDuplicateErrorFallthrough(t *testing.T) {
 	}
 	aliceSessionWithSPQR := injectSPQRStateBytes(t, aliceSessionBytes, serializer, newAliceSPQR)
 	_ = alice.sessionStore.StoreSession(bob.address, aliceSessionWithSPQR)
-	// Inject V1 SPQR for Bob (receiver direction, MaxJump=1 so counter jump > 1 fails).
+	// Inject V1 SPQR for Bob with MaxJump=1, so a jump over 1 fails.
 	bobSessionBytesRec, _ := bob.sessionStore.LoadSession(alice.address)
 	bobSessionBytes, _ := bobSessionBytesRec.Serialize()
 	newBobSPQR, err := spqr.InitialStateWithParams(spqr.Params{
@@ -2423,9 +2362,7 @@ func TestSPQRNonDuplicateErrorFallthrough(t *testing.T) {
 
 	bobCipher2 := session.NewCipher(bob.sessionBuilder, alice.address)
 
-	// Bob tries to decrypt the 3rd message (SPQR counter=2) when Bob expects
-	// counter=0. The jump of 2 exceeds MaxJump=1, so spqr.Recv returns ErrMaxJump.
-	// isSpqrDuplicateErr(ErrMaxJump) = false → line 493 is reached.
+	// Bob receives SPQR counter 2 while expecting 0; the jump exceeds MaxJump and spqr.Recv returns ErrMaxJump.
 	_, err = bobCipher2.Decrypt(lastMsg)
 	if err == nil {
 		t.Fatal("expected error due to SPQR MaxJump exceeded")
@@ -2434,9 +2371,7 @@ func TestSPQRNonDuplicateErrorFallthrough(t *testing.T) {
 	// Either is acceptable as long as an error occurs.
 }
 
-// injectSPQRStateBytes replaces PqRatchetState in a session record with the
-// given pre-built SPQR state bytes. Unlike injectSPQRState (which creates the
-// state internally), this version accepts already-serialized SPQR bytes.
+// injectSPQRStateBytes replaces a session's PqRatchetState with the given serialized SPQR state.
 func injectSPQRStateBytes(t *testing.T, sessionBytes []byte, serializer *serialize.Serializer,
 	spqrState []byte) *record.Session {
 	t.Helper()

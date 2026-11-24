@@ -152,10 +152,7 @@ func (m *Manager) prepForEncryptingLocked(userID string, deviceID uint32, identi
 
 	now := m.clock()
 
-	// Step 1: Load or create user record, delete stale entries.
-	// Per spec: "prep for encrypting" step 1 deletes stale records
-	// unconditionally for sending. The MaxLatency grace period is for
-	// the receive path only.
+	// Send path: delete stale records unconditionally; MaxLatency applies to receive only.
 	userRecord, err := m.store.LoadUserRecord(userID)
 	if err != nil {
 		return nil, err
@@ -238,9 +235,7 @@ func (m *Manager) prepForEncryptingLocked(userID string, deviceID uint32, identi
 		deviceRecord.InsertSession(wrapper, m.config, now)
 	}
 
-	// Fix 2: Per spec section 4.2, sessions that exceed MAXSEND "must no
-	// longer be used for encryption." Check the active session and deactivate
-	// it if expired, then create a new session.
+	// Replace an active session past MAXSEND (Sesame §4.2).
 	if deviceRecord.ActiveSession() != nil && deviceRecord.ActiveSession().IsSendExpired(m.config, now) {
 		deviceRecord.DeactivateSession(m.config)
 

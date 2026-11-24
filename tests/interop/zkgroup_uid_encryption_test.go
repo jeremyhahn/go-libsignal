@@ -1,22 +1,4 @@
-// Conformance tests: zkgroup UID encryption byte-identical to Rust.
-//
-// Covers two Rust unit tests in rust/zkgroup/src/crypto/uid_encryption.rs:
-//
-//   test_uid_encryption (ACI path):
-//     sho = Sho::new("Test_Uid_Encryption", TEST_ARRAY_32)
-//     kp  = KeyPair::derive_from(sho)
-//     uid = UidStruct::from_service_id(Aci::from_uuid_bytes(TEST_ARRAY_16))
-//     assert bincode(kp.encrypt(uid)) == expected_aci_hex
-//
-//   test_pni_encryption (PNI path):
-//     sho = Sho::new("Test_Pni_Encryption", &[])
-//     kp  = KeyPair::derive_from(sho)
-//     uid = UidStruct::from_service_id(Pni::from_uuid_bytes(TEST_ARRAY_16))
-//     assert round_trip decrypt returns ServiceId::Pni
-//
-// Go path: NewShoHmacSha256Ext + AbsorbAndRatchet, DeriveKeyPair with
-// UIDEncryptionDomain, NewACI/NewPNI(TEST_ARRAY_16), NewUIDStructFromServiceID,
-// keypair.Encrypt, EncodeCiphertext for the bincode-equivalent 64 bytes.
+// UID encryption must match Rust uid_encryption.rs test_uid_encryption (ACI) and test_pni_encryption (PNI).
 
 package interop
 
@@ -112,13 +94,7 @@ func TestZkgroup_UidEncryption_ACI_KAT(t *testing.T) {
 	}
 }
 
-// TestZkgroup_UidEncryption_PNI_KAT proves that Go's UID encryption handles
-// the PNI service ID type identically to Rust's test_pni_encryption. The SHO
-// is seeded with an empty byte slice (matching Rust's Sho::new(label, &[])),
-// and the service ID is a PNI, which causes a different M1 point than ACI
-// (because service_id_binary for PNI is 17 bytes: 0x01‖uuid, vs 16 for ACI).
-//
-// Mirrors: rust/zkgroup/src/crypto/uid_encryption.rs::tests::test_pni_encryption
+// TestZkgroup_UidEncryption_PNI_KAT checks PNI encryption with an empty-seeded SHO matches Rust test_pni_encryption.
 func TestZkgroup_UidEncryption_PNI_KAT(t *testing.T) {
 	raw := loader.MustRead("zkgroup/uid_encryption_known_answers.json")
 	var fx uidEncryptionFixture

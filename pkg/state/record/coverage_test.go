@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 22 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH requires X25519, so the fips140only tag drops this file.
 
 package record_test
 
@@ -144,9 +139,7 @@ func TestStateNeedsRefresh(t *testing.T) {
 	_ = state2
 }
 
-// TestStateSerializeWithPendingPreKey exercises the structure() path where
-// pendingPreKey is non-nil, which generates the UnackPreKeyMessageItems
-// structure() method (previously at 0% coverage).
+// TestStateSerializeWithPendingPreKey checks structure() with a pending prekey.
 func TestStateSerializeWithPendingPreKey(t *testing.T) {
 	s := newSerializer()
 	state := makeFullState(t)
@@ -371,9 +364,7 @@ func TestSessionStructureSerializeAndDeserializeWithArchivedStates(t *testing.T)
 	}
 	sess := record.NewSessionFromState(initialState, s.Session)
 
-	// Archive several states. Each archive creates a new empty state, but
-	// the previously fully-populated state moves to previousStates.
-	// We need to set a valid state after archiving so Serialize doesn't panic.
+	// Each archive starts an empty state, so set a valid one before Serialize.
 	for i := 0; i < 3; i++ {
 		newStructure := makeFullStateStructure(t)
 		newState, err := record.NewStateFromStructure(newStructure, s.State)
@@ -545,8 +536,7 @@ func TestRemoveMessageKeysNilChain(t *testing.T) {
 	}
 }
 
-// TestRemoveMessageKeysFirstElementMatch verifies correct behavior when the
-// matching key is at index 0 (the case that was previously buggy).
+// TestRemoveMessageKeysFirstElementMatch checks removal when the match is at index 0.
 func TestRemoveMessageKeysFirstElementMatch(t *testing.T) {
 	s := newSerializer()
 	state := record.NewState(s.State)
@@ -614,8 +604,7 @@ func TestStateClone(t *testing.T) {
 	}
 }
 
-// TestStateCloneWithNilPendingPreKey verifies Clone works when
-// pendingPreKey is nil (previously caused a nil pointer dereference).
+// TestStateCloneWithNilPendingPreKey checks Clone with a nil pending prekey.
 func TestStateCloneWithNilPendingPreKey(t *testing.T) {
 	state := makeFullState(t)
 	state.ClearUnackPreKeyMessage()

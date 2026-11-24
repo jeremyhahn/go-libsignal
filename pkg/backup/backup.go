@@ -271,20 +271,7 @@ func (br *BackupReader) ValidatedReadAll(purpose Purpose) (_ *ValidatedReadResul
 	return result, nil
 }
 
-// parseBackupInfo decodes the BackupInfo protobuf from raw bytes.
-// It returns the decoded fields, any unknown field numbers found, and any
-// parse error.
-//
-// BackupInfo wire format (rust/message-backup/src/proto/backup.proto):
-//
-//	message BackupInfo {
-//	  uint64 version = 1;           // varint
-//	  uint64 backupTimeMs = 2;      // varint
-//	  bytes mediaRootBackupKey = 3; // bytes (32 bytes)
-//	  string currentAppVersion = 4; // bytes
-//	  string firstAppVersion = 5;   // bytes
-//	  bytes debugInfo = 6;          // bytes
-//	}
+// parseBackupInfo decodes a BackupInfo protobuf (rust/message-backup/src/proto/backup.proto) and returns its unknown field numbers.
 func parseBackupInfo(b []byte) (_ *BackupInfoRaw, unknowns []FoundUnknownField, err error) {
 	info := &BackupInfoRaw{}
 	data := b
@@ -392,28 +379,7 @@ func parseBackupInfo(b []byte) (_ *BackupInfoRaw, unknowns []FoundUnknownField, 
 	return info, unknowns, nil
 }
 
-// parseFrame performs a minimal parse of a Frame protobuf to detect unknown
-// field numbers at the top level. It does not recursively validate sub-messages.
-//
-// Frame wire format (rust/message-backup/src/proto/backup.proto):
-//
-//	message Frame {
-//	  oneof item {
-//	    AccountData account = 1;
-//	    Recipient recipient = 2;
-//	    Chat chat = 3;
-//	    ChatItem chatItem = 4;
-//	    StickerPack stickerPack = 5;
-//	    AdHocCall adHocCall = 6;
-//	    NotificationProfile notificationProfile = 7;
-//	    ChatFolder chatFolder = 8;
-//	  }
-//	}
-//
-// frameKnownFieldNames maps Frame oneof field numbers (1-8) to their proto
-// names for use in *ErrUnexpectedWireType messages.
-//
-// Rust libsignal ref: rust/message-backup/src/proto/backup.proto Frame.item
+// parseFrame reports unknown top-level Frame fields without validating sub-messages; frameKnownFieldNames names fields 1-8.
 var frameKnownFieldNames = map[uint64]string{
 	1: "Frame.account",
 	2: "Frame.recipient",
@@ -555,10 +521,7 @@ func PaddedLength(contentLength uint32) uint32 {
 	const base = 1.05
 	exp := math.Ceil(math.Log(float64(contentLength)) / math.Log(base))
 	v := math.Floor(math.Pow(base, exp))
-	// Clamp to [0, math.MaxUint32] before converting to uint32. Near 4 GiB the
-	// float64 result can exceed math.MaxUint32, and Go's float64→uint32 cast is
-	// implementation-defined in that range (Rust uses saturating_cast which
-	// returns u32::MAX). Explicit clamping matches Rust's saturating behavior.
+	// Clamp to MaxUint32 before the cast, matching Rust's saturating cast.
 	if v >= math.MaxUint32 {
 		return math.MaxUint32
 	}

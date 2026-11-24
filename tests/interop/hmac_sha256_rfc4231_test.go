@@ -1,26 +1,8 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 1 test in this file exercises HMAC-SHA256 under keys below 112 bits. FIPS
-// 140-3 does not approve that, but RFC 4231 fixes the key of every test
-// case, and several are shorter than 14 bytes, so the fips140only build tag
-// drops this file from the FIPS gate. `make test` and `make coverage` still
-// run it.
+// FIPS 140-3 exemption (docs/FIPS.md): RFC 4231 keys under 112 bits, so the fips140only tag drops this file.
 
-// HMAC-SHA-256 conformance test using the RFC 4231 reference vectors.
-//
-// HMAC is used pervasively by go-libsignal (every HKDF call, every
-// sealed-sender authenticator, every chain-key derivation). The Rust
-// reference relies on the `hmac` crate, which itself is validated
-// against RFC 4231; we mirror that by validating Go's standard-library
-// crypto/hmac against the same RFC reference. A pass here transitively
-// proves that the lower-level HMAC primitive in both stacks agrees on
-// every byte.
-//
-// Vectors are reproduced verbatim from RFC 4231 section 4. They are NOT
-// tracked by the fixture manifest because the IETF RFC, not Rust
-// libsignal, is the source of truth for them.
+// HMAC-SHA-256 against RFC 4231 §4 vectors, kept outside the fixture manifest.
 
 package interop
 

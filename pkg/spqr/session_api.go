@@ -193,9 +193,7 @@ func InitialStateWithBraidResolved(sharedSecret []byte, direction Direction, sel
 	return s.Serialize()
 }
 
-// resolveNegotiation resolves the version negotiation on a deserialized SPQR
-// instance. If pqrData is non-empty, resolves to V1 and initializes the chain.
-// If pqrData is empty, resolves to V0 (disabled) if minVersion allows it.
+// resolveNegotiation resolves to V1 on non-empty pqrData, else to V0 if minVersion allows.
 func (s *SPQR) resolveNegotiation(pqrData []byte) error {
 	if len(pqrData) > 0 {
 		// Remote supports PQR: resolve to V1 and initialize the chain.
@@ -288,9 +286,7 @@ func Send(serializedState []byte) (newState []byte, pqrMsg []byte, messageKey Me
 		return newState, []byte{}, nil, nil
 	}
 
-	// Braid-integrated path: delegate to SendBraid which handles chain
-	// derivation, SCKA chunk piggybacking, epoch advancement, and
-	// variable-length wire encoding.
+	// With a braid, SendBraid handles derivation, chunks, epochs and encoding.
 	if s.braid != nil {
 		pqrMsg, messageKey, err = s.SendBraid()
 		if err != nil {
@@ -303,8 +299,7 @@ func Send(serializedState []byte) (newState []byte, pqrMsg []byte, messageKey Me
 		return newState, pqrMsg, messageKey, nil
 	}
 
-	// Chain-only path: derive message key and build Rust-compatible SCKA wire message.
-	// The SCKA epoch is 1-indexed (chainToSckaEpoch), while Go chains are 0-indexed.
+	// Without a braid, derive the key and build an SCKA message with a 1-indexed epoch.
 	mk, counter, encErr := s.Encrypt(s.epoch)
 	if encErr != nil {
 		return nil, nil, nil, encErr
@@ -405,16 +400,13 @@ func (s *SPQR) SendBraid() (pqrMsg []byte, messageKey MessageKey, err error) {
 		return []byte{}, nil, nil
 	}
 
-	// Step 1: Call braid to get the outbound SCKA chunk.
-	// The braid must be called first to determine if an epoch advancement
-	// is needed before deriving the message key.
+	// Call the braid first to learn whether the epoch advances.
 	braidMsg, _, outputKey, braidErr := s.braid.Send()
 	if braidErr != nil {
 		return nil, nil, &ErrBraidSend{Err: braidErr}
 	}
 
-	// Step 2: If the braid produced an output key, advance the epoch BEFORE
-	// deriving the message key so the chain derivation uses the new epoch.
+	// Advance the epoch before deriving the message key.
 	if outputKey != nil && outputKey.Key != nil {
 		advErr := s.advanceEpoch(outputKey.Key)
 		outputKey.Key.Destroy()
@@ -430,9 +422,7 @@ func (s *SPQR) SendBraid() (pqrMsg []byte, messageKey MessageKey, err error) {
 	}
 	defer mk.Destroy()
 
-	// Step 4: Build the wire message using the braid's serialization format.
-	// The braid message carries the braid's epoch (>= 1), distinct from the
-	// SPQR chain epoch (>= 0). The chain counter is encoded as chain_index.
+	// The message carries the braid epoch (from 1), not the chain epoch (from 0), and the chain counter.
 	if braidMsg != nil {
 		pqrMsg = braidMsg.SerializeSCKA(counter)
 	} else {
@@ -492,17 +482,13 @@ func (s *SPQR) RecvBraid(pqrMsg []byte) (messageKey MessageKey, err error) {
 		return nil, &ErrPQRMessage{Reason: decErr.Error()}
 	}
 
-	// Step 1: Feed the braid message to the braid's Receive method FIRST,
-	// before deriving the message key, so epoch advancement happens in the
-	// correct order. All message types including MessageTypeNone are passed
-	// through to update epoch tracking in the braid state machine.
+	// Feed every message, including MessageTypeNone, to the braid before deriving the key.
 	_, outputKey, braidErr := s.braid.Receive(braidMsg)
 	if braidErr != nil {
 		return nil, &ErrBraidRecv{Err: braidErr}
 	}
 
-	// Step 2: If the braid produced an output key, advance the epoch
-	// BEFORE deriving the message key.
+	// Advance the epoch before deriving the message key.
 	if outputKey != nil && outputKey.Key != nil {
 		advErr := s.advanceEpoch(outputKey.Key)
 		outputKey.Key.Destroy()
@@ -511,8 +497,7 @@ func (s *SPQR) RecvBraid(pqrMsg []byte) (messageKey MessageKey, err error) {
 		}
 	}
 
-	// Step 3: Map braid epoch to chain epoch. The braid uses 1-indexed epochs
-	// while the SPQR chains use 0-indexed epochs: chain_epoch = braid_epoch - 1.
+	// chain epoch = braid epoch - 1.
 	if braidMsg.Epoch == 0 {
 		return nil, &ErrPQRMessage{Reason: "braid epoch must be >= 1"}
 	}
@@ -624,8 +609,7 @@ func Recv(serializedState []byte, pqrMsg []byte) (newState []byte, messageKey Me
 		return newState, nil, nil
 	}
 
-	// Braid-integrated path: delegate to RecvBraid which handles wire format
-	// parsing, chain derivation, SCKA chunk processing, and epoch advancement.
+	// With a braid, RecvBraid handles parsing, derivation, chunks and epochs.
 	if s.braid != nil {
 		messageKey, err = s.RecvBraid(pqrMsg)
 		if err != nil {

@@ -413,14 +413,7 @@ func parsePHCString(phc string) (salt, hash []byte, err error) {
 	return salt, hash, nil
 }
 
-// isAllDigits reports whether s is non-empty and every rune satisfies
-// unicode.IsDigit. Used by normalizePin to decide whether to apply digit
-// transliteration: the Rust reference only transliterates when the WHOLE
-// trimmed string consists of digits (step 2 of the normalization algorithm).
-//
-// Rust reference: rust/account-keys/src/hash.rs doc comment, step 2:
-// "If the whole string consists of digits, then non-arabic digits must be
-// replaced with their arabic 0-9 equivalents."
+// isAllDigits reports whether s is non-empty and all digits; only then is the PIN transliterated (rust/account-keys/src/hash.rs step 2).
 func isAllDigits(s string) bool {
 	if s == "" {
 		return false
@@ -433,17 +426,7 @@ func isAllDigits(s string) bool {
 	return true
 }
 
-// normalizePin normalizes a PIN string following the Rust reference implementation:
-//  1. Trim leading and trailing whitespace.
-//  2. If and only if the whole trimmed string consists of digits (every rune
-//     satisfies unicode.IsDigit), transliterate non-ASCII decimal digits to
-//     their ASCII equivalents (e.g., Arabic-Indic '١' → '1').
-//  3. Apply Unicode NFKD normalization.
-//
-// Gating transliteration on all-digits (step 2) matches the Rust reference at
-// rust/account-keys/src/hash.rs. The previous implementation transliterated
-// unconditionally, producing divergent SVR/backup keys for mixed PINs such as
-// "abc١def" (incorrectly became "abc1def" instead of staying "abc١def").
+// normalizePin trims, transliterates digits only when the whole PIN is digits, then applies NFKD (rust/account-keys/src/hash.rs).
 func normalizePin(pin string) string {
 	trimmed := strings.TrimSpace(pin)
 	s := trimmed
@@ -453,10 +436,7 @@ func normalizePin(pin string) string {
 	return norm.NFKD.String(s)
 }
 
-// transliterateDigits converts non-ASCII Unicode decimal digits to their ASCII
-// equivalents. For any digit rune where unicode.IsDigit returns true but the
-// rune is outside ASCII 0-9, it finds the zero digit of that Unicode block
-// (decimal digit blocks are contiguous runs of 10) and maps it to '0' + offset.
+// transliterateDigits maps non-ASCII Unicode decimal digits to ASCII 0-9 by offset from their block's zero.
 func transliterateDigits(s string) string {
 	var result []rune
 	for _, r := range s {

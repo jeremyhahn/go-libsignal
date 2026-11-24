@@ -1,30 +1,10 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 2 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH requires X25519, so the fips140only tag drops this file.
 
 package ecc
 
-// VXEdDSA internal-consistency tests.
-//
-// Rust libsignal has no VXEdDSA test vectors because VXEdDSA is only used
-// internally to derive VRF outputs and the Rust test suite does not expose a
-// deterministic sign API for it. These tests therefore verify INTERNAL
-// CONSISTENCY of the Go implementation rather than cross-implementation KAT
-// parity:
-//
-//  1. For N deterministic (seed, message) tuples, sign each message and
-//     verify the resulting signature. Every verification must succeed.
-//  2. For each signature, flip every bit in every byte of the 96-byte
-//     signature blob and assert that verification rejects all 768 corrupted
-//     variants.
-//
-// This mirrors the XEdDSA KAT pattern in xeddsa_kat_test.go:
-// TestXEdDSA_KAT_RustVector/single_bit_flip_always_rejected.
+// VXEdDSA internal-consistency tests: deterministic tuples sign and verify, and every single-bit flip of a signature is rejected.
 
 import (
 	"crypto/sha256"
@@ -130,13 +110,7 @@ func TestVXEdDSAConsistency_SignVerifyRoundTrip(t *testing.T) {
 	}
 }
 
-// TestVXEdDSAConsistency_SingleBitFlipAlwaysRejected verifies that flipping
-// any single bit in a valid 96-byte VXEdDSA signature causes verification to
-// fail. This mirrors the exhaustive bit-flip loop in
-// TestXEdDSA_KAT_RustVector/single_bit_flip_always_rejected.
-//
-// The test runs the full 768-flip loop (96 bytes × 8 bits) for each of the
-// 20 deterministic tuples, giving 15,360 rejection assertions total.
+// TestVXEdDSAConsistency_SingleBitFlipAlwaysRejected flips each of the 768 signature bits for 20 tuples and expects rejection.
 func TestVXEdDSAConsistency_SingleBitFlipAlwaysRejected(t *testing.T) {
 	tuples := vxeddsaConsistencyTuples()
 

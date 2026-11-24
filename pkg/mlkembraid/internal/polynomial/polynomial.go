@@ -121,8 +121,7 @@ func lagrangeInterpolate(pts []pt) Poly {
 	return out
 }
 
-// lagrangeInterpolatePrepare computes PRODUCT(x - pts[i].x) as part of
-// Lagrange interpolation. Mirrors Rust's Poly::lagrange_interpolate_prepare.
+// lagrangeInterpolatePrepare computes PRODUCT(x - pts[i].x) (Rust Poly::lagrange_interpolate_prepare).
 func lagrangeInterpolatePrepare(pts []pt) Poly {
 	p := polyZero(len(pts) + 1)
 	p.Coefficients = p.Coefficients[:len(pts)+1] // resize to len+1
@@ -135,10 +134,7 @@ func lagrangeInterpolatePrepare(pts []pt) Poly {
 	return p
 }
 
-// multXdiffAssignTrailing computes self[start..] *= (x - difference).
-// Interprets the trailing coefficients as a sub-polynomial and multiplies it
-// by (x - difference), with carry into self[start-1].
-// Mirrors Rust's Poly::mult_xdiff_assign_trailing.
+// multXdiffAssignTrailing multiplies self[start:] by (x - difference), carrying into self[start-1] (Rust mult_xdiff_assign_trailing).
 func multXdiffAssignTrailing(p *Poly, start int, difference gf.GF16) {
 	l := len(p.Coefficients)
 	for i := start; i < l; i++ {
@@ -147,10 +143,7 @@ func multXdiffAssignTrailing(p *Poly, start int, difference gf.GF16) {
 	}
 }
 
-// lagrangeInterpolateComplete modifies working in place so that it represents
-// the Lagrange basis polynomial for pts[i], scaled by x.
-// After this call, working[0] should be zero (clean division).
-// Mirrors Rust's Poly::lagrange_interpolate_complete.
+// lagrangeInterpolateComplete turns working into pts[i]'s basis polynomial scaled by x (Rust lagrange_interpolate_complete).
 func lagrangeInterpolateComplete(working *Poly, pts []pt, i int) {
 	pi := pts[i]
 
@@ -174,10 +167,7 @@ func lagrangeInterpolateComplete(working *Poly, pts []pt, i int) {
 	}
 }
 
-// lagrangeInterpolatePt returns the Lagrange basis polynomial for pts[i]:
-// it evaluates to pts[i].y at pts[i].x and to 0 at all other pts[j].x.
-// This is the fallback used when no precomputed table is available.
-// Mirrors Rust's Poly::lagrange_interpolate_pt.
+// lagrangeInterpolatePt returns the basis polynomial that is pts[i].y at pts[i].x and 0 at the others (Rust lagrange_interpolate_pt).
 func lagrangeInterpolatePt(pts []pt, i int) Poly {
 	result := lagrangeInterpolatePrepare(pts)
 	lagrangeInterpolateComplete(&result, pts, i)
@@ -244,12 +234,7 @@ func lagrangeSum(pts []pt, polys []Poly) Poly {
 	return out
 }
 
-// fromCompletePoints constructs a polynomial passing through all pts, where
-// pts[i].x == i for i in 0..len(pts) (a "complete" point set). It uses
-// precomputed Lagrange basis polynomials from the init-time tables for the
-// allowed sizes (0, 1, 3, 5, 30, 34, 36). Other sizes fall back to the
-// generic lagrangeInterpolatePt path.
-// Mirrors Rust's Poly::from_complete_points.
+// fromCompletePoints interpolates a complete point set from the precomputed tables, else the generic path (Rust Poly::from_complete_points).
 func fromCompletePoints(pts []pt) (Poly, error) {
 	for i, p := range pts {
 		if p.x.Value != uint16(i) {
@@ -400,10 +385,7 @@ func byteChunks2(b []byte) [][2]byte {
 	return out
 }
 
-// pointAt returns the y-value of the poly-th polynomial channel at poly_idx.
-// If poly_idx is beyond the stored points, it triggers a transition from
-// Points state to Polys state and then evaluates the interpolated polynomial.
-// Mirrors Rust's PolyEncoder::point_at.
+// pointAt returns channel poly's value at polyIdx, interpolating past the stored points (Rust PolyEncoder::point_at).
 func (e *PolyEncoder) pointAt(poly, polyIdx int) gf.GF16 {
 	if e.state == EncoderStatePoints {
 		if polyIdx < len(e.points[poly].Value) {

@@ -344,8 +344,7 @@ func TestSHO_Zeroize(t *testing.T) {
 	}
 }
 
-// TestSHO_Zeroize_AbsorbingMode ensures that Zeroize() clears state even
-// when the SHO is in ABSORBING mode (hasher and absorbed buffer are active).
+// TestSHO_Zeroize_AbsorbingMode checks Zeroize clears an SHO in absorbing mode.
 func TestSHO_Zeroize_AbsorbingMode(t *testing.T) {
 	sho := NewShoHmacSha256("zeroize-absorbing")
 	sho.Absorb([]byte("partial data not yet ratcheted"))

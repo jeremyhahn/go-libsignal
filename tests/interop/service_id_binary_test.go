@@ -1,14 +1,4 @@
-// Conformance test: ServiceId binary encodings vs Rust libsignal_core.
-//
-// The variable-width binary form is what Rust libsignal uses inside HKDF
-// info strings (e.g. derive_backup_id concatenates AccountEntropyPool ||
-// ACI::service_id_binary), so byte-equality here is critical for cross-
-// implementation key derivation interop.
-//
-// Mirrors rust/core/src/address.rs::tests::{
-//   round_trip_service_id_binary,
-//   accepts_ios_system_story_aci,
-// }.
+// Conformance: ServiceId binary encodings, used in HKDF info strings, against the Rust address.rs round-trip tests.
 
 package interop
 

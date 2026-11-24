@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 8 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) requires it for the Sealed Sender
-// ephemeral keys, so the fips140only build tag drops this file from the FIPS
-// gate. `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): Sealed Sender ephemeral keys use X25519 (X3DH section 2.1).
 
 package sealed
 
@@ -198,10 +193,7 @@ func TestV2BuildReceivedMessage(t *testing.T) {
 	}
 }
 
-// TestV2ReceivedEndToEndDecrypt performs a full encrypt-then-decrypt roundtrip:
-// 1. Encrypt a USMC using the multi-recipient sent format
-// 2. Extract the per-recipient data to build a received format message
-// 3. Decrypt using SealedSenderV2DecryptReceivedToUSMC
+// TestV2ReceivedEndToEndDecrypt encrypts in the sent format, builds the received message and decrypts it.
 func TestV2ReceivedEndToEndDecrypt(t *testing.T) {
 	aliceStore, bobStore, _, bobAddress, bobSession, _ := setupV2Session(t)
 

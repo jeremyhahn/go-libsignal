@@ -23,17 +23,7 @@
 //     (vs HMAC with domain-separator byte after outlen).
 package poksho
 
-// NewShoSha256 creates a new SHO using SHA-256 with the given label.
-//
-// This matches the Rust ShoSha256::new() from libsignal/rust/poksho/src/shosha256.rs.
-// The implementation lives in sho.go via sha256Variant; this file provides the
-// dedicated constructor and documents the SHA-256 variant's design.
-//
-// Use NewShoSha256 when you need byte-identical output with Rust's ShoSha256.
-// Use NewShoHmacSha256 when you need byte-identical output with Rust's ShoHmacSha256.
-//
-// The two variants are NOT interchangeable: they produce different output for the
-// same label and input.
+// NewShoSha256 creates a SHA-256 SHO with label, byte-identical to Rust ShoSha256; its output differs from NewShoHmacSha256.
 func init() {
 	// Compile-time check: sha256Variant must implement shoVariant.
 	var _ shoVariant = sha256Variant{}

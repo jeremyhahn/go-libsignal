@@ -30,11 +30,7 @@ func NewSenderKeyStateFromBytes(serialized []byte, serializer SenderKeyStateSeri
 	if err != nil {
 		return nil, err
 	}
-	// The structure decoded here is ours. Now that Deserialize returns guarded
-	// fields, releasing it is mandatory rather than tidy: NewSenderKeyStateFromStructure
-	// clones out of it and deliberately leaves the source intact for its owner,
-	// and go-enclave sets no finalizer -- so without this every successful load
-	// would strand a duplicate set of secrets mlock'd for the process lifetime.
+	// Release the decoded structure: its guarded fields have no finalizer.
 	defer stateStructure.Zeroize()
 
 	return NewSenderKeyStateFromStructure(stateStructure, serializer)
@@ -126,10 +122,7 @@ func NewSenderKeyStateFromStructure(structure *SenderKeyStateStructure,
 	return state, nil
 }
 
-// destroySenderKeyState releases every guarded buffer a partially built state
-// owns. go-enclave sets no finalizer, so a state abandoned mid-construction keeps
-// its buffers mlock'd for the life of the process unless they are destroyed
-// explicitly.
+// destroySenderKeyState releases every guarded buffer of a partially built state.
 func destroySenderKeyState(state *SenderKeyState) {
 	if state == nil {
 		return
@@ -263,11 +256,7 @@ func (k *SenderKeyState) Serialize() ([]byte, error) {
 	return k.serializer.Serialize(st)
 }
 
-// structure will return a serializable structure of the
-// the given state so it can be persistently stored.
-// The caller owns the returned structure and must Zeroize it once the
-// serializer is done with it; on failure everything built so far is released
-// before returning.
+// structure returns a serializable copy of the state that the caller Zeroizes; on failure it releases what it built.
 func (k *SenderKeyState) structure() (_ *SenderKeyStateStructure, err error) {
 	structure := &SenderKeyStateStructure{
 		Keys:             make([]*ratchet.SenderMessageKeyStructure, len(k.keys)),

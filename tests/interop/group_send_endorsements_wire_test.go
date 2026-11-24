@@ -1,21 +1,4 @@
-// Conformance test: GroupSendEndorsementsResponse wire parity vs Rust libsignal.
-//
-// This test loads the Rust-emitted fixture and:
-//   1. Deserializes the response_hex bytes into a GroupSendEndorsementsResponse
-//      using Go's DeserializeGroupSendEndorsementsResponse.
-//   2. Regenerates the server public params and group secret params from the
-//      pinned seeds recorded in the fixture (deterministic, no RNG).
-//   3. Calls ReceiveWithServiceIDs([Alice, Bob, Carol], now, server_public_key,
-//      group_params) and asserts all three endorsements are received.
-//
-// A fixture only has value if Rust genuinely emits it and Go independently
-// consumes and verifies it. The endorsement proof is a Schnorr-style DLEQ
-// proof over the three members' ciphertext points; a mismatch in any byte of
-// the R vector or proof would cause Receive to fail its poksho verification.
-//
-// Rust source: rust/zkgroup/src/api/groups/group_send_endorsement.rs
-//              GroupSendDerivedKeyPair::for_expiration + GroupSendEndorsementsResponse::issue
-//              (libsignal v0.92.2, RUST_REV 98915c442d)
+// Conformance: a Rust-emitted GroupSendEndorsementsResponse is deserialized and received for three members with params regenerated from the fixture seeds.
 
 package interop
 

@@ -218,12 +218,7 @@ func (r *Session) PromoteState(promotedState *State) {
 	r.previousStates = r.prependStates(r.previousStates, r.sessionState)
 	r.sessionState = promotedState
 
-	// Remove the last state if it has reached our maximum length. The evicted
-	// state owns guarded material — its root key, PQ ratchet state, chain keys,
-	// ratchet private keys and message keys — and the record was its only
-	// owner, so destroy it rather than dropping it: go-enclave reclaims nothing
-	// on its own, and a peer that establishes sessions can drive an eviction
-	// for each one.
+	// Destroy the evicted oldest state, since the record solely owns its guarded keys.
 	if len(r.previousStates) > archivedStatesMaxLength {
 		evicted := r.previousStates[len(r.previousStates)-1]
 		r.previousStates = r.removeLastState(r.previousStates)
@@ -235,8 +230,7 @@ func (r *Session) PromoteState(promotedState *State) {
 // and promotes it to the current session. This matches Rust's promote_old_session
 // which first removes the old entry to prevent duplicates in previousStates.
 func (r *Session) PromoteOldSession(index int, updatedState *State) {
-	// DR-W5: Remove the old entry from previousStates BEFORE promoting,
-	// preventing the same state from appearing in both current and previous.
+	// Remove the entry from previousStates before promoting it.
 	r.previousStates = append(r.previousStates[:index], r.previousStates[index+1:]...)
 	r.PromoteState(updatedState)
 }

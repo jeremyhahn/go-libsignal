@@ -1,10 +1,4 @@
-// Conformance test: Fingerprint wire-format parity vs Rust libsignal.
-//
-// Drives pkg/fingerprint with the seeded inputs the Rust emitter used in
-// tests/interop/rust/src/bin/wire_emitter.rs and asserts byte-equality of
-// the Displayable text and Scannable serialized bytes for both v1 and v2.
-//
-// Rust upstream: rust/protocol/src/fingerprint.rs (libsignal v0.92.2)
+// Conformance: fingerprint display text and scannable bytes, v1 and v2, against the Rust wire_emitter output.
 
 package interop
 

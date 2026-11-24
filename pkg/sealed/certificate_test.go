@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 33 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) requires it for the Sealed Sender
-// ephemeral keys, so the fips140only build tag drops this file from the FIPS
-// gate. `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): Sealed Sender ephemeral keys use X25519 (X3DH section 2.1).
 
 package sealed
 
@@ -869,14 +864,7 @@ func TestSenderCertificateCertificateAndSignatureAccessors(t *testing.T) {
 	}
 }
 
-// TestDeserializeSenderCertificate_EmptyUuidString verifies that a sender
-// certificate whose oneof SenderUuid is set to the UuidString variant with an
-// empty string value "" is accepted verbatim.
-//
-// Rust libsignal (rust/protocol/src/sealed_sender.rs:246-248) takes the
-// UuidString value as-is without rejecting empty strings, so Go must match.
-// The type-switch on GetSenderUuid() still distinguishes the UuidString variant
-// from an absent oneof (which returns *CertificateError via the default case).
+// TestDeserializeSenderCertificate_EmptyUuidString checks an empty UuidString is accepted, as in Rust.
 func TestDeserializeSenderCertificate_EmptyUuidString(t *testing.T) {
 	trustRoot := newTestTrustRoot(t)
 	serverCert, serverKey := newTestServerCertificate(t, trustRoot)

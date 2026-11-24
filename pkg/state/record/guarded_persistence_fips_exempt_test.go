@@ -1,17 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 7 tests in this file exercise X25519. They are the guarded-persistence tests
-// whose fixtures carry a real Curve25519 key pair -- a pre-key, a signed
-// pre-key, or a full session state. FIPS 140-3 does not approve that, but the
-// X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
-//
-// The rest of guarded_persistence_test.go stays inside the gate: those tests
-// build their key material byte by byte, or use Kyber, and reach no primitive
-// the Go Cryptographic Module rejects.
+// FIPS 140-3 exemption (docs/FIPS.md): these guarded-persistence fixtures carry Curve25519 keys, which X3DH requires; the rest stay in guarded_persistence_test.go.
 
 package record_test
 
@@ -25,12 +14,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
-// The records below build their serializable structure on demand and destroy
-// its guarded private key once the serializer is done with it. Serializing
-// twice therefore has to produce identical bytes: if a record ever went back to
-// sharing the guarded key with the structure it hands to the serializer, the
-// first Serialize would destroy the record's own key and the second would
-// return zeros or panic.
+// Serializing twice must give identical bytes, proving the structure does not share the record's guarded key.
 
 func TestPreKeySerializeIsRepeatable(t *testing.T) {
 	s := newSerializer()
@@ -192,9 +176,7 @@ func TestChainStructureAbsentPrivateKey(t *testing.T) {
 	structure.Zeroize()
 }
 
-// TestStatePqRatchetStateStaysGuarded checks that the SPQR state a session was
-// restored with lives in guarded memory rather than in a plain slice, and that
-// it is independent of the structure it was decoded from.
+// TestStatePqRatchetStateStaysGuarded checks a restored SPQR state is guarded and independent of its source structure.
 func TestStatePqRatchetStateStaysGuarded(t *testing.T) {
 	s := newSerializer()
 	want := []byte{0x0a, 0x0b, 0x0c}
@@ -213,8 +195,7 @@ func TestStatePqRatchetStateStaysGuarded(t *testing.T) {
 	}
 }
 
-// TestCopyFromAdoptsClonedPqRatchetState checks the decrypt commit path: the
-// state advanced on a clone replaces the original's SPQR state.
+// TestCopyFromAdoptsClonedPqRatchetState checks the clone's SPQR state replaces the original on commit.
 func TestCopyFromAdoptsClonedPqRatchetState(t *testing.T) {
 	s := newSerializer()
 

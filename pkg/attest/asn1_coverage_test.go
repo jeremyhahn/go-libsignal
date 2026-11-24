@@ -464,17 +464,7 @@ func buildASN1Sequence(items ...[]byte) []byte {
 	return append(result, content...)
 }
 
-// encodeOIDFMSPC encodes "1.2.840.113741.1.13.1.4" (FMSPC OID) in DER.
-// The first two components 1.2 encode as (1*40+2)=42=0x2A.
-// Remaining components use base-128 big-endian encoding with high bit set
-// on all bytes except the last:
-//
-//	840     = 0x86, 0x48
-//	113741  = 0x86, 0xF8, 0x4D
-//	1       = 0x01
-//	13      = 0x0D
-//	1       = 0x01
-//	4       = 0x04
+// encodeOIDFMSPC encodes the FMSPC OID 1.2.840.113741.1.13.1.4 in DER.
 func encodeOIDFMSPC() []byte {
 	return []byte{0x2A, 0x86, 0x48, 0x86, 0xF8, 0x4D, 0x01, 0x0D, 0x01, 0x04}
 }

@@ -1,20 +1,4 @@
-// wire_emitter: deterministic wire-format fixture generator for go-libsignal interop.
-//
-// Rust source: tests/interop/rust/src/bin/wire_emitter.rs (libsignal v0.92.2)
-// Upstream pin: 98915c442d
-//
-// Usage: wire_emitter --out <DIR>
-//
-// Writes six JSON fixture files under <DIR>:
-//   sealed_sender_v1.json
-//   sealed_sender_v2_received.json
-//   sealed_sender_v2_multi.json
-//   senderkey_distribution.json
-//   senderkey_message.json
-//   fingerprint.json
-//
-// All randomness is sourced from ChaCha20Rng seeded at 0xC0DECAFE so that
-// re-running the binary produces byte-identical JSON.
+// wire_emitter writes deterministic wire-format JSON fixtures to --out <DIR>, seeded with ChaCha20Rng 0xC0DECAFE.
 
 use std::path::Path;
 use std::time::SystemTime;
@@ -97,14 +81,10 @@ const CERT_EXPIRY_MS: u64 = 4_102_444_800_000; // 2100-01-01 00:00:00 UTC
 // Fixed plaintext for all encryption fixtures.
 const PLAINTEXT: &[u8] = b"wave-d-fixture-plaintext";
 
-// Shared SPQR auth key — must match the value the Go consumer uses so both
-// sides derive identical chain keys. Identical to the live harness AUTH_KEY in
-// tests/interop/rust/src/main.rs.
+// Shared SPQR auth key; must match the Go consumer and AUTH_KEY in src/main.rs.
 const SPQR_AUTH_KEY: &[u8; 32] = b"interop-shared-auth-key-32bytes!";
 
-// Deterministic seed for the SPQR send RNG. The pq_ratchet wire message embeds
-// freshly generated KEM/ratchet material, so reproducibility requires a fixed
-// RNG seed independent of the shared fixture RNG.
+// Fixed seed for the SPQR send RNG, separate from the shared fixture RNG.
 const SPQR_SEND_SEED: u64 = 0x5051_5253;
 
 // ---------------------------------------------------------------------------
@@ -198,15 +178,7 @@ async fn create_and_store_prekey_bundle(
     Ok(bundle)
 }
 
-// ---------------------------------------------------------------------------
-// D1 — Sealed Sender v1
-// ---------------------------------------------------------------------------
-//
-// Rust source: rust/protocol/src/sealed_sender.rs — sealed_sender_encrypt_from_usmc
-//
-// All key material is derived from the shared RNG so the output is fully
-// reproducible. The fixture records raw private-key bytes so the Go side can
-// reconstruct the exact same keys.
+// Sealed Sender v1 (Rust sealed_sender_encrypt_from_usmc); private key bytes are recorded so Go can rebuild the keys.
 
 async fn emit_sealed_sender_v1(rng: &mut ChaCha20Rng) -> Result<Fixture> {
     use libsignal_protocol::CiphertextMessageType;
@@ -297,13 +269,7 @@ async fn emit_sealed_sender_v1(rng: &mut ChaCha20Rng) -> Result<Fixture> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// D2 — Sealed Sender v2 received-format (single recipient Bob)
-// D3 — Sealed Sender v2 multi-recipient (3 recipients: Bob, Carol, Dave)
-//
-// Rust source: rust/protocol/src/sealed_sender.rs — sealed_sender_multi_recipient_encrypt,
-//              SealedSenderV2SentMessage::received_message_parts_for_recipient
-// ---------------------------------------------------------------------------
+// Sealed Sender v2 received-format and multi-recipient (Rust sealed_sender_multi_recipient_encrypt).
 
 async fn emit_sealed_sender_v2(rng: &mut ChaCha20Rng) -> Result<(Fixture, Fixture)> {
     use libsignal_protocol::CiphertextMessageType;
@@ -505,13 +471,7 @@ async fn emit_sealed_sender_v2(rng: &mut ChaCha20Rng) -> Result<(Fixture, Fixtur
     Ok((d2, d3))
 }
 
-// ---------------------------------------------------------------------------
-// D4 — SenderKeyDistributionMessage
-// D5 — SenderKeyMessage
-//
-// Rust source: rust/protocol/src/group_cipher.rs — create_sender_key_distribution_message,
-//              group_encrypt
-// ---------------------------------------------------------------------------
+// SenderKeyDistributionMessage and SenderKeyMessage (Rust group_cipher.rs).
 
 async fn emit_sender_key(rng: &mut ChaCha20Rng) -> Result<(Fixture, Fixture)> {
 
@@ -600,14 +560,7 @@ async fn emit_sender_key(rng: &mut ChaCha20Rng) -> Result<(Fixture, Fixture)> {
     Ok((d4, d5))
 }
 
-// ---------------------------------------------------------------------------
-// D6 — DisplayableFingerprint + ScannableFingerprint
-//
-// Rust source: rust/protocol/src/fingerprint.rs — Fingerprint::new
-//
-// We use the exact same pinned test-vector keys from the Rust mod test to
-// serve as a regression anchor for the Go fingerprint package.
-// ---------------------------------------------------------------------------
+// Displayable and scannable fingerprints from the Rust fingerprint.rs test keys.
 
 fn emit_fingerprint(rng: &mut ChaCha20Rng) -> Result<Fixture> {
     use libsignal_protocol::FingerprintError;
@@ -734,21 +687,7 @@ fn emit_fingerprint(rng: &mut ChaCha20Rng) -> Result<Fixture> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// K1 — Kyber-1024 KAT (Known-Answer Test)
-//
-// Emits a single deterministic (pk, sk, ct, expected_ss) tuple for Kyber-1024
-// using the ChaCha20-seeded RNG so that re-running the binary produces
-// byte-identical JSON. The shared secret is obtained by encapsulating against
-// the public key and then cross-checked via decapsulate to confirm correctness.
-//
-// TODO: run `make interop-wire-emit` to regenerate
-//       tests/interop/fixtures/kem/kyber1024_kat.json after any upstream
-//       libsignal revision bump (RUST_REV).
-//
-// Rust reference: rust/protocol/src/kem.rs — KeyPair::generate, PublicKey::encapsulate,
-//                 SecretKey::decapsulate (libsignal v0.92.2, RUST_REV 98915c442d).
-// ---------------------------------------------------------------------------
+// Kyber-1024 known-answer test (pk, sk, ct, ss), checked by decapsulation; regenerate with make interop-wire-emit after a RUST_REV change.
 
 fn emit_kyber1024_kat(rng: &mut ChaCha20Rng) -> Result<Fixture> {
     // Generate a deterministic key pair from the seeded RNG.
@@ -797,27 +736,7 @@ fn emit_kyber1024_kat(rng: &mut ChaCha20Rng) -> Result<Fixture> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// P1 — SignalMessage wire vector
-//
-// Rust source: rust/protocol/src/protocol.rs — SignalMessage::new (line 79)
-//
-// SignalMessage::new(
-//     message_version: u8,
-//     mac_key: &[u8],
-//     addresses: Option<(&ProtocolAddress, &ProtocolAddress)>,
-//     sender_ratchet_key: PublicKey,
-//     counter: u32,
-//     previous_counter: u32,
-//     ciphertext: &[u8],
-//     sender_identity_key: &IdentityKey,
-//     receiver_identity_key: &IdentityKey,
-//     pq_ratchet: &[u8],
-// ) -> Result<Self>
-//
-// All key material derived from the shared seeded RNG for full reproducibility.
-// pq_ratchet = [] (no SPQR active), addresses = None (backward-compat).
-// ---------------------------------------------------------------------------
+// SignalMessage vector (Rust SignalMessage::new) with no SPQR and no addresses.
 
 fn emit_signal_message(rng: &mut ChaCha20Rng) -> Result<Fixture> {
     // Fixed 32-byte MAC key — read from seeded RNG.
@@ -880,26 +799,7 @@ fn emit_signal_message(rng: &mut ChaCha20Rng) -> Result<Fixture> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// P2 — PreKeySignalMessage wire vector
-//
-// Rust source: rust/protocol/src/protocol.rs — PreKeySignalMessage::new (line 352)
-//
-// PreKeySignalMessage::new(
-//     message_version: u8,
-//     registration_id: u32,
-//     pre_key_id: Option<PreKeyId>,
-//     signed_pre_key_id: SignedPreKeyId,
-//     kyber_payload: Option<KyberPayload>,  // None → version 3 (pre-Kyber)
-//     base_key: PublicKey,
-//     identity_key: IdentityKey,
-//     message: SignalMessage,
-// ) -> Result<Self>
-//
-// Uses version 3 with kyber_payload = None so Go's NewPreKeySignalMessageFromBytes
-// does not require a Kyber payload (PreKyberVersion branch).
-// Inner SignalMessage constructed first, then wrapped.
-// ---------------------------------------------------------------------------
+// PreKeySignalMessage version 3 vector without a Kyber payload (Rust PreKeySignalMessage::new).
 
 fn emit_prekey_signal_message(rng: &mut ChaCha20Rng) -> Result<Fixture> {
     // Key material for the inner SignalMessage.
@@ -985,22 +885,7 @@ fn emit_prekey_signal_message(rng: &mut ChaCha20Rng) -> Result<Fixture> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// P3 — DecryptionErrorMessage wire vector
-//
-// Rust source: rust/protocol/src/protocol.rs — DecryptionErrorMessage::for_original (line 881)
-//
-// DecryptionErrorMessage::for_original(
-//     original_bytes: &[u8],
-//     original_type: CiphertextMessageType,
-//     original_timestamp: Timestamp,
-//     original_sender_device_id: u32,
-// ) -> Result<Self>
-//
-// Pass a SignalMessage as original_bytes with type Whisper so the constructor
-// extracts the ratchet key. The extracted ratchet key appears in the fixture
-// so Go can validate it matches.
-// ---------------------------------------------------------------------------
+// DecryptionErrorMessage vector from a Whisper SignalMessage, recording the extracted ratchet key (Rust for_original).
 
 fn emit_decryption_error_message(rng: &mut ChaCha20Rng) -> Result<Fixture> {
     // Build a minimal SignalMessage to serve as the "original encrypted message".
@@ -1078,19 +963,7 @@ fn emit_decryption_error_message(rng: &mut ChaCha20Rng) -> Result<Fixture> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// P4 — PlaintextContent wire vector
-//
-// Rust source: rust/protocol/src/protocol.rs — From<DecryptionErrorMessage> for PlaintextContent
-// (line 837); PlaintextContent::PLAINTEXT_CONTEXT_IDENTIFIER_BYTE = 0xC0,
-// PADDING_BOUNDARY_BYTE = 0x80.
-//
-// PlaintextContent is constructed from a DecryptionErrorMessage via the From impl:
-//   [0xC0] || proto::service::Content { decryption_error_message: dem_bytes } || [0x80]
-//
-// We reuse the same DEM from a fresh SignalMessage so the vector is independent
-// of P3.
-// ---------------------------------------------------------------------------
+// PlaintextContent vector: 0xC0 || Content{decryption_error_message} || 0x80, from a fresh DEM.
 
 fn emit_plaintext_content(rng: &mut ChaCha20Rng) -> Result<Fixture> {
     // Build a distinct SignalMessage as the "original" for a fresh DEM.
@@ -1208,27 +1081,7 @@ fn emit_identity_key_pair(rng: &mut ChaCha20Rng) -> Result<Fixture> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// S1 — SPQR pq_ratchet field bytes
-//
-// Rust source: SparsePostQuantumRatchet crate v1.5.1 (tag v1.5.1) — spqr::send.
-//
-// The bytes produced here are exactly what rides in SignalMessage.pq_ratchet
-// (proto field 5): the serialized post-quantum ratchet message. The Go side
-// (pkg/spqr) consumes this format via spqr.Recv and must derive a byte-identical
-// message key from the same auth_key + wire message.
-//
-// Flow (mirrors the live SPQR harness in src/main.rs, but baked into a static
-// fixture so byte-compat is proven without invoking the Rust binary at test
-// time):
-//   1. initial_state(A2B, V1, V1, auth_key)         — sender state
-//   2. send(state, seeded_rng)                       — first message
-//        result.msg  = pq_ratchet wire bytes
-//        result.key  = sender-derived message key
-// Because MinVersion = V1, negotiation resolves on the first send, so result.key
-// is non-empty. The Go consumer initializes a B2A receiver from the same
-// auth_key, calls spqr.Recv(msg), and asserts the receiver key == result.key.
-// ---------------------------------------------------------------------------
+// SPQR pq_ratchet bytes (spqr v1.5.1 send) from an A2B V1 state; Go's receiver must derive the same message key.
 
 fn emit_spqr_pq_ratchet() -> Result<Fixture> {
     // Sender (A2B) initial state. MinVersion = V1 forces immediate negotiation
@@ -1304,25 +1157,7 @@ fn emit_spqr_pq_ratchet() -> Result<Fixture> {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Z1 — GroupSendEndorsementsResponse wire vector
-//
-// Rust source: rust/zkgroup/src/api/groups/group_send_endorsement.rs —
-//              GroupSendDerivedKeyPair::for_expiration + GroupSendEndorsementsResponse::issue
-//              (libsignal v0.92.2, RUST_REV 98915c442d)
-//
-// All inputs are fully pinned (no RNG); the fixture is byte-identical on
-// every invocation.
-//
-//   server_params         ServerSecretParams::generate([0x42; 32])
-//   group_params          GroupSecretParams::generate([0x43; 32])
-//   expiration            Timestamp::from_epoch_seconds(2 * SECONDS_PER_DAY)
-//   issue_randomness      [0x44; 32]
-//   members               Alice / Bob / Carol (UUIDs below)
-//
-// The Go consumer calls DeserializeGroupSendEndorsementsResponse on
-// response_hex, then ReceiveWithServiceIDs to verify the endorsements.
-// ---------------------------------------------------------------------------
+// GroupSendEndorsementsResponse vector from fixed inputs (Rust GroupSendEndorsementsResponse::issue); Go deserializes and verifies it.
 
 fn emit_group_send_endorsements() -> Result<Fixture> {
     use zkgroup::groups::{GroupSendDerivedKeyPair, GroupSendEndorsementsResponse, GroupSecretParams};
@@ -1486,8 +1321,7 @@ fn main() -> Result<()> {
     write_fixture(out_dir, "identity_key_pair.json", &i1)?;
     eprintln!("  wrote identity_key_pair.json");
 
-    // S1 — SPQR pq_ratchet field bytes. Uses its own seeded RNG (independent of
-    // the shared fixture RNG above) so the embedded KEM material is reproducible.
+    // SPQR bytes use their own seeded RNG so the KEM material is reproducible.
     let s1 = emit_spqr_pq_ratchet()?;
     write_fixture(out_dir, "spqr_pq_ratchet.json", &s1)?;
     eprintln!("  wrote spqr_pq_ratchet.json");

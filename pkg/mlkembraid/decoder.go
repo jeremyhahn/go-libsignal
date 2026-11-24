@@ -21,13 +21,7 @@ type Decoder struct {
 	// padded by the Encoder.
 	originalLen int
 
-	// totalChunksNeeded is the number of distinct chunk indices required for
-	// reconstruction (ceil(originalLen/ChunkDataSize)). The decoder accepts
-	// polynomial redundancy chunks (indices ≥ totalChunksNeeded) because the
-	// Lagrange interpolation works with any N distinct x-values. At most
-	// 2*totalChunksNeeded unique indices are accepted per lifetime to bound
-	// memory use; any peer legitimately needs at most one first pass plus one
-	// redundancy pass worth of chunks.
+	// totalChunksNeeded is ceil(originalLen/ChunkDataSize); redundancy indices are accepted up to 2*totalChunksNeeded unique indices.
 	totalChunksNeeded int
 
 	// seenIndices tracks which chunk indices have been accepted, for duplicate
@@ -118,11 +112,7 @@ func (d *Decoder) AddChunk(chunk []byte) error {
 		return nil
 	}
 
-	// Cap unique accepted indices at 2*totalChunksNeeded to bound memory use.
-	// An attacker can otherwise force up to 65536 distinct indices, bloating
-	// seenIndices and chunkLog to ~2 MB. Any legitimate peer needs at most one
-	// first pass (indices 0..N-1) plus one redundancy pass (indices N..2N-1);
-	// any index beyond 2N is spurious.
+	// Cap unique indices at 2*totalChunksNeeded to bound memory against index flooding.
 	if len(d.seenIndices) >= 2*d.totalChunksNeeded {
 		return &ErrChunkIndex{Index: index, Total: uint16(d.totalChunksNeeded)}
 	}
@@ -197,9 +187,7 @@ func (d *Decoder) TotalChunks() int {
 func (d *Decoder) Reset() {
 	inner, err := polynomial.NewPolyDecoder(d.inner.PtsNeeded * 2)
 	if err != nil {
-		// coverage-exempt: defensive invariant panic; parameters were validated at
-		// construction time so NewPolyDecoder cannot fail here. Cannot be unit-tested
-		// without corrupting internal state (see CLAUDE.md).
+		// coverage-exempt: parameters were validated at construction, so this invariant panic is unreachable.
 		panic("mlkembraid: decoder Reset: unexpected polynomial error: " + err.Error())
 	}
 	d.inner = inner

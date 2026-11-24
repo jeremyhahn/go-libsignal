@@ -310,14 +310,7 @@ func TestExpand_TooLargeOutput(t *testing.T) {
 	}
 }
 
-// TestHKDF_SignalVector3 documents that Signal's HKDF v2 (used in older protocol
-// versions) is NOT supported by DeriveSecrets, which implements RFC 5869 (v3).
-//
-// Signal's v2 HKDF uses iteration_start_offset=1 in the expand phase, meaning
-// the HMAC counter starts at 2 instead of 1. This produces different output from
-// the standard RFC 5869 construction. Since our implementation uses the standard
-// golang.org/x/crypto/hkdf package (RFC 5869 compliant), v2 vectors will not
-// match, and we verify that explicitly here.
+// TestHKDF_SignalVector3 checks that Signal's v2 HKDF (counter starting at 2) does not match DeriveSecrets, which is RFC 5869.
 func TestHKDF_SignalVector3(t *testing.T) {
 	ikm := mustDecodeHex("0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b")
 	salt := mustDecodeHex("000102030405060708090a0b0c")

@@ -311,14 +311,7 @@ func (k *MLKEM768IncrementalKEM) Decaps(dk []byte, ct1 []byte, ct2 []byte) ([]by
 	if skErr != nil {
 		return nil, &ErrKEMOperation{Op: "NewSecretKey", Err: skErr}
 	}
-	// kem.NewSecretKey holds the 64-byte ML-KEM-768 decapsulation-key seed in a
-	// plain heap buffer. Bound it to this call rather than leaving it resident
-	// until the GC happens to reclaim the page. Whole-lifetime locked-memory
-	// storage is not reachable here: crypto/mlkem.NewDecapsulationKey768 takes a
-	// []byte seed and expands it on its own heap, and that stdlib call is the
-	// FIPS-validated primitive the protected-memory mandate yields to
-	// (conventions/security-review.md, 2026-08-25). Bounding our copy is the
-	// mitigation that boundary leaves available.
+	// Bound the heap copy of the decapsulation seed to this call; crypto/mlkem expands it on its own heap.
 	defer sk.Zeroize()
 	ciphertext := kem.NewCiphertext(kem.KeyTypeMLKEM768, fullCT)
 
@@ -353,13 +346,7 @@ func (k *MLKEM768IncrementalKEM) HeaderSize() int {
 	return HeaderSize
 }
 
-// headerAwareKEM is an internal interface for KEMs that encode and parse the
-// wire header differently from the legacy ek_seed(32) || SHA3-256(ek_seed||ek_vector)(32)
-// layout. Implemented by IncrementalMLKEM768KEM, NOT by MLKEM768IncrementalKEM.
-//
-// State machine functions detect this interface to build and parse headers correctly
-// so that both KEM types work end-to-end without changing the MLKEM768IncrementalKEM
-// wire format.
+// headerAwareKEM is implemented by KEMs whose wire header differs from the legacy ek_seed || SHA3-256 layout.
 type headerAwareKEM interface {
 	// BuildHeader returns the complete wire header bytes from the given key material.
 	// For IncrementalMLKEM768KEM this is simply pk1 (the header IS pk1).
@@ -370,10 +357,7 @@ type headerAwareKEM interface {
 	EKSeedFromHeader(header []byte) []byte
 }
 
-// kemCompleter is an internal interface for performing the deferred Bob-side
-// full encapsulation. Both MLKEM768IncrementalKEM and IncrementalMLKEM768KEM
-// implement it so that state.go's bobCompleteEncapsulationDeferred can
-// accept either without a concrete type assertion.
+// kemCompleter performs Bob's deferred encapsulation for either KEM type.
 type kemCompleter interface {
 	// CompleteEncaps2 completes encapsulation given the opaque encapsSecret
 	// from Encaps1 and the full key components. Returns ct1, ct2, ss.

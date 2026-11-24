@@ -1,17 +1,4 @@
-// HKDF-SHA-256 conformance test using the RFC 5869 reference vectors.
-//
-// HKDF is the workhorse KDF in go-libsignal: every chain-key step,
-// every account-keys derivation, every backup-id derivation, every
-// sealed-sender envelope key, and every PQXDH transcript expansion
-// flows through HKDF-SHA-256. This test validates Go's
-// golang.org/x/crypto/hkdf against the RFC 5869 appendix A vectors,
-// which the Rust libsignal stack also relies on transitively via the
-// hkdf crate.
-//
-// Vectors are reproduced verbatim from RFC 5869 §A.1 (test case 1)
-// and §A.2 (test case 2). They are NOT tracked by the fixture manifest
-// because the IETF RFC, not Rust libsignal, is the source of truth
-// for them.
+// HKDF-SHA-256 against RFC 5869 §A.1 and §A.2 vectors, kept outside the fixture manifest.
 
 package interop
 

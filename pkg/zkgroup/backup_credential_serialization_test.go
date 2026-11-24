@@ -212,18 +212,7 @@ func buildValidResponseBlob(t *testing.T) []byte {
 	return SerializeBackupAuthCredentialResponse(resp)
 }
 
-// TestDeserializeBackupAuthCredentialResponse_InvalidLevel_Regression is a
-// regression test for the bug where BackupLevel was read as u64 but cast to
-// byte without range or enum validation.
-//
-// Wire layout for response: reserved(1) + redemption_time(8) + backup_level(8) + …
-// Level occupies bytes [9:17].
-//
-// Before the fix: 256 was truncated to BackupLevel(0), no error.
-// After the fix: rejected with a deserialization error.
-//
-// Rust reference: TryFrom<u64> for BackupLevel at
-// rust/zkgroup/src/api/backups/auth_credential.rs:68-78.
+// TestDeserializeBackupAuthCredentialResponse_InvalidLevel_Regression checks an out-of-range backup level is rejected (Rust TryFrom<u64> for BackupLevel).
 func TestDeserializeBackupAuthCredentialResponse_InvalidLevel_Regression(t *testing.T) {
 	validBlob := buildValidResponseBlob(t)
 

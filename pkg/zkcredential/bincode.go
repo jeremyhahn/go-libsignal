@@ -39,10 +39,7 @@ import (
 // Returns (length int, err) where length is safe to use directly with
 // make, copy, and slice-index arithmetic.
 func ReadBincodeU64Len(data []byte, off int, elemSize int, fieldName string) (int, error) {
-	// Precondition guard: panic-free even when called from external code.
-	// off < 0 or off+8 > len(data) would index out of bounds; return a typed
-	// error rather than panicking, matching the security-library invariant that
-	// exported functions must never panic on invalid caller input.
+	// An out-of-range off is an error, not a panic.
 	if off < 0 || off > len(data)-8 {
 		return 0, &ErrInvalidEncoding{
 			Field: fieldName,

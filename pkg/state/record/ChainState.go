@@ -177,10 +177,7 @@ func (c *Chain) PopFirstMessageKeys() *message.Keys {
 	return removed
 }
 
-// structure returns a serializeable structure of the chain state.
-// The caller owns the returned structure and must Zeroize it once the
-// serializer is done with it; on failure everything built so far is released
-// before returning.
+// structure returns a serializable chain state the caller must Zeroize; on failure it releases what it built.
 func (c *Chain) structure() (_ *ChainStructure, err error) {
 	structure := &ChainStructure{
 		SenderRatchetKeyPublic: c.senderRatchetKeyPair.PublicKey().Serialize(),

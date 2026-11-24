@@ -1,73 +1,8 @@
-// Package fipsaudit statically audits the repository's production Go source
-// for cryptographic primitives FIPS 140-3 does not approve.
+// Package fipsaudit statically audits production source for primitives FIPS 140-3 does not approve, covering paths the runtime gate (make fips) misses because only exempt tests reach them.
 //
-// It complements the runtime FIPS gate (`make fips`, docs/FIPS.md) rather than
-// duplicating it. The runtime gate is the stronger check where it applies, but
-// it can only observe code a *gated test* actually executes, and the tests that
-// drive the Signal Protocol are necessarily exempt from it (X25519 is the DH
-// function of X3DH and the Double Ratchet). That leaves a hole: a new
-// non-approved call added to a production path exercised only by an exempt test
-// would compile and never run under `fips140=only`.
+// Two registers fail differently. register pins, per non-test file, how many qualified references to each non-approved primitive it may make. reachRegister bounds, per package, which primitives are reachable through its import closure, which catches wrappers and aliases; a package absent from it reaches none.
 //
-// This audit closes that hole from the other side, with two registers that fail
-// for different reasons.
-//
-// The first reads every non-test .go file in the module and fails on any
-// non-approved primitive imported, or called through a package qualifier, that
-// is not in `register` — regardless of which tests, if any, reach it. It is
-// file-and-symbol scoped and pins a count, so widening it is a visible diff with
-// a reviewer, not a silent consequence of a build tag.
-//
-// Counting qualified references is exact for a direct call and blind to
-// indirection. Once a file holds a curve25519.X25519 call, a package that calls
-// that wrapper — or a function-valued alias of it — performs an X25519 operation
-// while adding no selector anywhere, so no count rises. The second register,
-// `reachRegister`, holds that boundary by import closure rather than by call
-// graph: naming anything in a package requires importing it, so a package that
-// gains the ability to perform a non-approved operation gains an import edge to
-// the package holding it, through however many wrappers. An import edge cannot
-// be hidden, where a syntactic call graph has to guess at methods, interface
-// dispatch, function values and reflection, and every guess is a missed call.
-// Most of the module's packages are absent from that register, which asserts
-// something stronger than an exemption: no non-approved primitive is reachable
-// from them at all.
-//
-// What it does not read is arithmetic. The audit classifies packages, so a
-// primitive implemented in this repository's own source — SHA-1 or ChaCha20
-// written out by hand, importing nothing denied — matches no rule and produces
-// no finding. The runtime gate is equally blind to it, since such code never
-// enters the Go Cryptographic Module. Nothing here enforces that case; a green
-// run means "no non-approved primitive reached through a package outside the
-// register", not "no non-approved cryptography in this repository"
-// (docs/FIPS.md, "What the runtime gate cannot see").
-//
-// Nor does either register count an additional call, from inside a package
-// already registered for a primitive, to a local wrapper of that primitive:
-// there is no new qualified reference and no new import edge. What that leaves
-// unflagged is one more use of a primitive the package is already exempt for, on
-// a protocol path already cited in docs/FIPS.md — and every exemption here is
-// protocol-wide rather than per-call-site (X25519 is the DH function of X3DH),
-// so an additional call is not a new compliance decision.
-// TestRegisterViolations_DoNotCountLocalWrapperCalls pins that boundary so it
-// stays reviewed rather than becoming a surprise.
-//
-// It also covers what the runtime gate structurally cannot: pure-Go
-// implementations that never reach the Go Cryptographic Module and so can never
-// trip it. Ristretto255, edwards25519, Argon2id and Round-3 Kyber are every bit
-// as non-approved as X25519; they were simply invisible. Here they are not.
-//
-// The audit is allowlist-based, not denylist-based. Inside the policed
-// namespaces -- stdlib crypto/..., golang.org/x/crypto/... and the module's
-// cryptographic dependencies -- a package must be classified as approved or as
-// a registered exemption. Anything else is a finding purely for being
-// unclassified, so a primitive nobody thought to enumerate (BLAKE2, say) fails
-// closed rather than passing silently. TestModuleDependenciesAreClassified
-// extends the same rule to go.mod, so a new cryptographic dependency cannot
-// arrive in a namespace the audit does not police.
-//
-// The audit runs in `make test`, `make integration-test` and `make fips-test`:
-// it parses source and executes no cryptography, so it is unaffected by
-// GODEBUG=fips140=only and carries no build tag.
+// The audit is an allowlist over the policed namespaces: an unclassified package fails, and TestModuleDependenciesAreClassified covers go.mod. It does not see primitives written out in this repository's own code, nor an extra call to a local wrapper inside an already-registered package (TestRegisterViolations_DoNotCountLocalWrapperCalls). It parses source only, so it runs in make test, integration-test and fips-test without a build tag.
 package fipsaudit
 
 import (
@@ -83,14 +18,7 @@ import (
 	"testing"
 )
 
-// policedNamespaces are the import-path prefixes where every package must be
-// classified. An import under one of these that appears in neither
-// approvedCrypto nor the denied lists is a finding on its own -- the audit
-// refuses to assume an unknown cryptographic package is safe.
-//
-// Everything outside these prefixes is ordinary application code and is not
-// the audit's business; TestModuleDependenciesAreClassified is what stops a new
-// cryptographic dependency from landing outside them unnoticed.
+// policedNamespaces are the import prefixes where every package must be classified; others are ordinary code.
 var policedNamespaces = []string{
 	"crypto",
 	"golang.org/x/crypto",
@@ -100,12 +28,7 @@ var policedNamespaces = []string{
 	"github.com/flynn/noise",
 }
 
-// approvedCrypto are the packages inside a policed namespace whose primitives
-// FIPS 140-3 approves, or which carry no primitive at all. The value is the
-// reason, so a reader can check the classification rather than trust it.
-//
-// crypto/cipher and crypto/ecdh are approved as packages but restricted by
-// deniedSelectors: each offers both approved and non-approved constructions.
+// approvedCrypto lists policed packages that are approved or hold no primitive, with the reason; crypto/cipher and crypto/ecdh are narrowed by deniedSelectors.
 var approvedCrypto = map[string]string{
 	"crypto":           "the hash and signer registry; carries no primitive of its own",
 	"crypto/aes":       "AES, FIPS 197",
@@ -132,13 +55,7 @@ var approvedCrypto = map[string]string{
 	"golang.org/x/crypto/cryptobyte": "ASN.1/DER encoding; carries no primitive",
 }
 
-// deniedImports are import paths whose whole purpose is a primitive FIPS 140-3
-// does not approve. Importing one is a finding on its own, and so is every
-// qualified call into it: the register pins how many occurrences a file is
-// authorised to make, and counting only the import would let one line stand in
-// for any number of uses.
-//
-// The value is the primitive's name, used in the failure message.
+// deniedImports maps import paths that exist for a non-approved primitive to its name; the import and every qualified call count.
 var deniedImports = map[string]string{
 	"crypto/md5":                           "MD5",
 	"crypto/sha1":                          "SHA-1",
@@ -166,18 +83,7 @@ var deniedImports = map[string]string{
 	"golang.org/x/crypto/nacl/sign":        "NaCl sign",
 	"golang.org/x/crypto/openpgp/elgamal":  "ElGamal",
 
-	// The pure-Go implementations the Go Cryptographic Module never sees. They
-	// do their own field arithmetic, so GODEBUG=fips140=only cannot reject
-	// them however the tests are tagged, and this audit is the only place they
-	// can be caught at all.
-	//
-	// Each is named by exact package, never by module tree. CIRCL ships dozens
-	// of algorithms: a `github.com/cloudflare/circl` prefix would let pkg/kem,
-	// already registered for Kyber, import an unrelated signature or cipher
-	// scheme and produce the same already-allowed finding. edwards25519 is
-	// smaller but the same shape -- two packages today, and nothing says the
-	// third is still curve arithmetic. Every unlisted package of these modules
-	// is inside a policed namespace, so it fails closed as unclassified.
+	// Pure-Go implementations the runtime gate never sees, named by exact package so a module's other algorithms stay unclassified.
 	"filippo.io/edwards25519":                         "edwards25519 group and field arithmetic",
 	"filippo.io/edwards25519/field":                   "edwards25519 group and field arithmetic",
 	"github.com/cloudflare/circl/kem/kyber/kyber1024": "Round-3 Kyber-1024 (CIRCL)",
@@ -189,19 +95,7 @@ var deniedImports = map[string]string{
 	"golang.org/x/crypto/ed25519":                     "Ed25519 (use crypto/ed25519)",
 }
 
-// deniedSelectors are individual functions of an otherwise-approved package.
-// crypto/ecdh serves both P-256 (approved) and X25519 (not), and crypto/cipher
-// offers both NewGCMWithRandomNonce (approved, SP 800-38D section 8.2.2) and
-// the arbitrary-IV constructors the module rejects — so these cannot be judged
-// by import path.
-//
-// The key is "<import path>.<function>"; the value is the primitive's name.
-//
-// Selector analysis assumes a qualified call. A dot import erases the
-// qualifier -- `import . "crypto/ecdh"` turns ecdh.X25519() into a bare
-// X25519() with no SelectorExpr to match -- so dotImportFinding below refuses
-// a dot import of any package named here rather than analysing past it. The
-// audit fails closed on a shape it cannot read.
+// deniedSelectors maps "<import path>.<function>" for non-approved functions of approved packages to the primitive's name; dot imports of these packages are rejected.
 var deniedSelectors = map[string]string{
 	"crypto/ecdh.X25519":                "X25519",
 	"crypto/cipher.NewGCM":              "AES-GCM under a caller-supplied nonce",
@@ -209,13 +103,7 @@ var deniedSelectors = map[string]string{
 	"crypto/cipher.NewGCMWithTagSize":   "AES-GCM under a caller-supplied nonce",
 }
 
-// register is the allowlist: the production sites where a non-approved
-// primitive is mandated by the Signal Protocol or an external standard. It
-// mirrors the exemption register in docs/FIPS.md and must stay in step with it.
-//
-// Keys are module-relative file paths; values are the primitive names from the
-// two maps above. An entry that no longer matches anything in the tree is a
-// failure too, so the register cannot rot into a blanket permission.
+// register maps module-relative files to the non-approved primitives the protocol mandates there, in step with docs/FIPS.md; stale entries fail.
 var register = map[string]map[string]int{
 	// The X3DH DH function and the Double Ratchet's DH ratchet (X3DH section
 	// 2.1, Double Ratchet section 5.2).
@@ -225,8 +113,7 @@ var register = map[string]map[string]int{
 	"pkg/kdf/HKDF.go":                {"X25519": 2},
 	"pkg/sealed/sealed_sender_v2.go": {"X25519": 4},
 
-	// RFC 9180 fixes DHKEM(X25519, HKDF-SHA256) for the
-	// Base_X25519_HkdfSha256_Aes256Gcm suite (rust/crypto/src/hpke.rs).
+	// RFC 9180 fixes DHKEM(X25519, HKDF-SHA256) for this HPKE suite.
 	"pkg/cipher/hpke.go": {"HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)": 17, "X25519": 1},
 
 	// The GCM nonce is derived by the protocol and carried on the wire, so it
@@ -270,15 +157,10 @@ var register = map[string]map[string]int{
 	"pkg/kem/guarded_kem.go": {"Round-3 Kyber-1024 (CIRCL)": 2},
 	"pkg/kem/kyber.go":       {"Round-3 Kyber-1024 (CIRCL)": 2},
 
-	// ECVRF-EDWARDS25519-SHA512-TAI (RFC 9381 section 5.5) is the VRF Signal's
-	// key transparency tree is built on; the ciphersuite names the curve.
+	// ECVRF-EDWARDS25519-SHA512-TAI (RFC 9381 §5.5) underlies key transparency.
 	"pkg/keytrans/vrf.go": {"edwards25519 group and field arithmetic": 21},
 
-	// Ristretto255 (draft-irtf-cfrg-ristretto255-decaf448) is the prime-order
-	// group Signal's zero-knowledge credentials are defined over -- the
-	// Chase-Perrin-Zaverucha system (rust/poksho, rust/zkgroup,
-	// rust/zkcredential) and the SVR OPRF. FIPS 140-3 approves no
-	// Ristretto255 construction, and every group element here is on the wire.
+	// Ristretto255 is the group of Signal's zero-knowledge credentials and the SVR OPRF; FIPS 140-3 approves no Ristretto255 construction.
 	"pkg/poksho/proof.go":                                         {"Ristretto255": 31},
 	"pkg/poksho/sign.go":                                          {"Ristretto255": 4},
 	"pkg/svr/backup.go":                                           {"Ristretto255": 2},
@@ -307,34 +189,7 @@ var register = map[string]map[string]int{
 	"pkg/zkgroup/zkgroup.go":                                      {"Ristretto255": 5},
 }
 
-// reachRegister is the second half of the allowlist, and the one that survives
-// indirection. registerViolations above pins direct uses file by file: exact
-// for a qualified call, blind to everything else. Once pkg/kdf/HKDF.go holds a
-// curve25519.X25519 call, a package that calls kdf.DeriveSecrets performs an
-// X25519 operation without adding a selector anywhere, and so does a caller of
-// a function-valued alias (`agree := curve25519.X25519`) invoked later. Neither
-// raises an occurrence count, so neither shows up in a diff.
-//
-// This register closes that across package boundaries, and closes it by import
-// closure rather than by call graph. A call graph built from syntax cannot be
-// trusted: it has to guess at methods, interface dispatch, function values and
-// reflection, and every guess is a way to miss a call. An import edge cannot be
-// guessed at or hidden. To name anything in package P -- a function, a method,
-// a variable holding a function -- a package must import P, so a package that
-// gains the ability to perform a non-approved operation gains an import edge to
-// the package holding it, however many wrappers lie in between.
-//
-// Keys are module-relative package directories; values are the primitives
-// reachable from them, transitively. A package absent from this table asserts
-// something stronger than an exemption: that no non-approved primitive is
-// reachable from it at all. Most of the module's packages are absent.
-//
-// What it does not bound is a value handed across an interface: a package that
-// receives an already-constructed object can drive it without importing its
-// package. The package that *constructed* it did import, and is registered, so
-// the set below still bounds where a non-approved operation can be introduced
-// by static reference -- it does not claim to name every frame on the stack
-// when one runs. See docs/FIPS.md, "What the runtime gate cannot see".
+// reachRegister maps module-relative package directories to the non-approved primitives transitively reachable through their imports, catching wrappers and aliases that per-file counts miss. A package absent from it reaches none. Values passed across interfaces are bounded only at the package that constructed them.
 var reachRegister = map[string][]string{
 	// The examples build the full protocol, so they reach what the protocol
 	// reaches. They are not shipped as library code.
@@ -389,13 +244,7 @@ var reachRegister = map[string][]string{
 	"tests": {"AES-GCM under a caller-supplied nonce", "HPKE (DHKEM(X25519, HKDF-SHA256) in this repository)", "Round-3 Kyber-1024 (CIRCL)", "X25519", "edwards25519 group and field arithmetic"},
 }
 
-// dependencyClassification records what every module in go.mod is, so a new
-// cryptographic dependency cannot arrive in a namespace policedNamespaces does
-// not cover. Modules inside a policed namespace are absent here: their packages
-// are classified individually by approvedCrypto and the denied lists.
-//
-// "No cryptography" is a claim, so each value names what the module does
-// instead.
+// dependencyClassification says what each go.mod module outside the policed namespaces does, so no cryptographic dependency arrives unpoliced.
 var dependencyClassification = map[string]string{
 	"github.com/Eyevinn/mp4ff":        "ISO-BMFF box-tree parsing for MP4 sanitisation; no cryptography",
 	"golang.org/x/text":               "Unicode normalisation and encoding; no cryptography",
@@ -433,12 +282,7 @@ const unclassified = "\x00unclassified"
 // finding, for the same reason dotImportMarker does.
 const unclassifiedMarker = "unclassified cryptographic package "
 
-// classify decides what an import path is. It returns (primitive, true) for a
-// denied path, (unclassified, false) for a policed path nobody has classified,
-// and ("", false) for anything the audit does not police.
-//
-// Denied beats approved: a path in both lists is a mistake in the tables, and
-// failing closed is the safe way to surface it.
+// classify returns (primitive, true) for a denied path, (unclassified, false) for an unclassified policed path and ("", false) otherwise; denied wins over approved.
 func classify(path string) (string, bool) {
 	if primitive, denied := deniedImports[path]; denied {
 		return primitive, true
@@ -634,19 +478,7 @@ func sortedPrimitives(counts map[string]int) []string {
 	return names
 }
 
-// registerViolations compares what production source actually does against
-// what the register authorises, in the direction the gate cares about: a file
-// nobody registered, a primitive that file is not registered for, or *more
-// occurrences* of a registered primitive than the register accounts for.
-//
-// The count is the point. A register of file-and-primitive pairs alone would
-// let a second X25519 operation land in a file already exempt for X25519
-// without changing anything a reviewer sees. Pinning the number means every
-// new use of an already-exempt primitive has to raise it, in a diff, with the
-// same justification a new entry needs.
-//
-// Marker-prefixed primitives (dot imports, unclassified packages) are never
-// registrable and are reported by the caller instead.
+// registerViolations reports unregistered files, unregistered primitives and counts above the register; marker primitives are reported by the caller.
 func registerViolations(found, reg map[string]map[string]int) []string {
 	var out []string
 	for _, file := range sortedFiles(found) {
@@ -731,11 +563,7 @@ func TestFIPSAudit_ProductionCodeMatchesRegister(t *testing.T) {
 	}
 }
 
-// TestFIPSAudit_RegisterHasNoStaleEntries keeps the register honest in the
-// other direction: an entry whose file is gone, whose primitive is no longer
-// used, or whose count is higher than the file's actual uses is a standing
-// permission nobody needs. The count check is what stops a widening from
-// outliving the code that justified it.
+// TestFIPSAudit_RegisterHasNoStaleEntries fails on register entries for missing files, unused primitives or counts above actual use.
 func TestFIPSAudit_RegisterHasNoStaleEntries(t *testing.T) {
 	root := moduleRoot(t)
 	found := auditTree(t, root)
@@ -749,11 +577,7 @@ func TestFIPSAudit_RegisterHasNoStaleEntries(t *testing.T) {
 	}
 }
 
-// staleRegisterEntries reports permissions the code no longer needs: an entry
-// whose file is gone, whose primitive is unused, or whose count exceeds the
-// file's actual uses. Together with registerViolations it pins the count
-// exactly, in both directions, so the register tracks the code rather than
-// drifting above it.
+// staleRegisterEntries reports entries for missing files, unused primitives or counts above actual use.
 func staleRegisterEntries(found, reg map[string]map[string]int, exists func(string) bool) []string {
 	var out []string
 	for _, file := range sortedFiles(reg) {
@@ -829,12 +653,7 @@ func registrablePrimitive(primitive string) bool {
 		!strings.HasPrefix(primitive, unclassifiedMarker)
 }
 
-// reachablePrimitives propagates each package's direct uses backwards along the
-// import edges until nothing changes: the result is, for every package, every
-// non-approved primitive reachable from it. Go forbids import cycles, so the
-// fixed point converges in as many rounds as the graph is deep; iterating to
-// quiescence rather than assuming a depth keeps it correct if that ever stops
-// being true.
+// reachablePrimitives propagates each package's direct uses back along import edges to a fixed point.
 func reachablePrimitives(g packageGraph) map[string]map[string]bool {
 	reach := map[string]map[string]bool{}
 	for pkg, primitives := range g.direct {
@@ -981,9 +800,7 @@ func reachViolations(reach map[string]map[string]bool, reg map[string][]string) 
 	return out
 }
 
-// staleReachEntries keeps the reachability register honest in the other
-// direction: a package that is gone, or a primitive it can no longer reach, is
-// a standing permission nobody needs.
+// staleReachEntries reports reach entries for missing packages or primitives no longer reachable.
 func staleReachEntries(reach map[string]map[string]bool, reg map[string][]string, exists func(string) bool) []string {
 	var out []string
 	pkgs := make([]string, 0, len(reg))
@@ -1078,12 +895,7 @@ func moduleImportPath(t *testing.T, root string) string {
 	return module
 }
 
-// TestReachablePrimitives_FollowsAWrapperAndAnAlias is the regression for the
-// gap the per-file counts cannot close. Two synthetic packages: one holds the
-// X25519 call and re-exports it as a function value, the other only calls into
-// it. The caller names no denied package and makes no denied selector, so
-// scanFile reports nothing for it -- yet reachability must find X25519 there,
-// through the wrapper and through the alias alike.
+// TestReachablePrimitives_FollowsAWrapperAndAnAlias checks X25519 is found through a wrapper and a function-value alias in another package.
 func TestReachablePrimitives_FollowsAWrapperAndAnAlias(t *testing.T) {
 	const module = "example.test/m"
 
@@ -1234,9 +1046,7 @@ func TestReachViolations_RejectsANewPackageAndANewPrimitive(t *testing.T) {
 	}
 }
 
-// TestStaleReachEntries_ShrinkWithTheCode is the register's other direction: a
-// package that no longer exists, and a primitive it can no longer reach, must
-// both fail rather than sitting as a permission nothing needs.
+// TestStaleReachEntries_ShrinkWithTheCode checks missing packages and unreachable primitives fail.
 func TestStaleReachEntries_ShrinkWithTheCode(t *testing.T) {
 	reg := map[string][]string{
 		"pkg/ecc":     {"X25519", "Ristretto255"},
@@ -1314,18 +1124,7 @@ func TestModulePath_ReadsTheModuleDirective(t *testing.T) {
 	}
 }
 
-// TestRegisterViolations_DoNotCountLocalWrapperCalls pins a limit rather than a
-// guarantee, so it stays a reviewed boundary instead of becoming a surprise.
-//
-// Inside a package already registered for a primitive, a new call to a local
-// wrapper of that primitive adds no occurrence, because there is no new
-// qualified reference to count. reachRegister is what bounds this: the widening
-// cannot leave the package without an import edge, and an edge into a new
-// package fails the reachability gate. What is left unflagged is one more use of
-// a primitive that package is already exempt for, on a protocol path already
-// documented in docs/FIPS.md -- and for this repository those exemptions are
-// protocol-wide (X25519 is the DH function of X3DH), never per-call-site, so an
-// additional call is not a new compliance decision.
+// TestRegisterViolations_DoNotCountLocalWrapperCalls pins that a local wrapper call inside a registered package adds no count; reachRegister bounds it at the package edge.
 func TestRegisterViolations_DoNotCountLocalWrapperCalls(t *testing.T) {
 	src := []byte(`package kdf
 
@@ -1632,10 +1431,7 @@ func requiredModules(src string) []string {
 	return out
 }
 
-// TestScanFile_FlagsUnclassifiedPolicedImports is the inversion's regression:
-// a package inside a policed namespace that nobody enumerated must fail for
-// being unclassified, not pass for being unknown. BLAKE2 is the worked example
-// -- pure Go, not FIPS-approved, and invisible to GODEBUG=fips140=only.
+// TestScanFile_FlagsUnclassifiedPolicedImports checks an unclassified policed import such as BLAKE2 fails.
 func TestScanFile_FlagsUnclassifiedPolicedImports(t *testing.T) {
 	src := []byte(`package p
 
@@ -1833,12 +1629,7 @@ var (
 	}
 }
 
-// TestClassify_NamesDeniedPackagesExactly is the regression for the audit's
-// scope rule: a denied primitive is bound to the exact package that implements
-// it, never to the module tree around it. Registering pkg/kem for Kyber must
-// not carry any other CIRCL algorithm with it -- an unregistered CIRCL package
-// has to come back unclassified, which fails closed and forces a register and
-// docs/FIPS.md change.
+// TestClassify_NamesDeniedPackagesExactly checks a denied primitive binds its exact package, leaving other CIRCL packages unclassified.
 func TestClassify_NamesDeniedPackagesExactly(t *testing.T) {
 	cases := []struct {
 		path      string
@@ -1889,10 +1680,7 @@ func TestClassify_NamesDeniedPackagesExactly(t *testing.T) {
 	}
 }
 
-// TestScanFile_UnregisteredCIRCLAlgorithmIsNotCoveredByKyber is the same rule
-// seen through the scanner, in the shape that matters: pkg/kem is registered
-// for Round-3 Kyber-1024, so the danger is a second CIRCL algorithm arriving in
-// that same file and reporting the primitive the register already allows.
+// TestScanFile_UnregisteredCIRCLAlgorithmIsNotCoveredByKyber checks another CIRCL algorithm in pkg/kem is not covered by its Kyber entry.
 func TestScanFile_UnregisteredCIRCLAlgorithmIsNotCoveredByKyber(t *testing.T) {
 	src := []byte(`package p
 

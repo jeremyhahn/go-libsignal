@@ -149,12 +149,7 @@ func TestValidateWebP_LargeRIFFSize(t *testing.T) {
 	}
 }
 
-// TestValidateMP4_BoxSizeExactlyAtEnd verifies that box size arithmetic is
-// correct when the last box's declared size is exactly the remaining buffer
-// length. The fail-closed core (SanitizeMP4) requires ftyp+moov+mdat; we
-// provide those three boxes and verify no boundary error occurs.
-//
-// Java oracle: Mp4Sanitizer.java — all three boxes are required.
+// TestValidateMP4_BoxSizeExactlyAtEnd checks a last box ending exactly at the buffer end passes.
 func TestValidateMP4_BoxSizeExactlyAtEnd(t *testing.T) {
 	// ftyp: size=20, major="isom", minor=0, compatible=["isom"]
 	var buf bytes.Buffer

@@ -137,9 +137,7 @@ func CalculateSenderSession(parameters *SenderParameters) (*session.KeyPair, *ke
 	chainKey := chain.NewKey(kdf.DeriveSecrets, chainKeyBytes, 0)
 	rootKey := root.NewKey(kdf.DeriveSecrets, rootKeyBytes)
 
-	// Add the root and chain keys to a structure that will hold both keys,
-	// along with the InitialPQRKey for SPQR initialization.
-	// NewKeyPairWithPQR moves pqrKeyBytes into guarded memory and zeroizes the source.
+	// Hold root and chain keys with InitialPQRKey; NewKeyPairWithPQR moves pqrKeyBytes into guarded memory and zeroizes the source.
 	sessionKeys, pqrErr := session.NewKeyPairWithPQR(rootKey, chainKey, pqrKeyBytes)
 	if pqrErr != nil {
 		return nil, nil, pqrErr
@@ -210,8 +208,7 @@ func CalculateReceiverSession(parameters *ReceiverParameters) (*session.KeyPair,
 	}
 	masterSecret = append(masterSecret, secret[:]...)
 
-	// If we had a one-time prekey, use it to calculate the shared secret with our
-	// one time key and their base key.
+	// With a one-time prekey, add DH(one-time key, their base key).
 	if parameters.OurOneTimePreKey() != nil {
 		publicKey = parameters.TheirBaseKey().PublicKey()
 		privateKey = parameters.OurOneTimePreKey().PrivateKey().Serialize()
@@ -282,9 +279,7 @@ func CalculateReceiverSession(parameters *ReceiverParameters) (*session.KeyPair,
 	chainKey := chain.NewKey(kdf.DeriveSecrets, chainKeyBytes, 0)
 	rootKey := root.NewKey(kdf.DeriveSecrets, rootKeyBytes)
 
-	// Add the root and chain keys to a structure that will hold both keys,
-	// along with the InitialPQRKey for SPQR initialization.
-	// NewKeyPairWithPQR moves pqrKeyBytes into guarded memory and zeroizes the source.
+	// Hold root and chain keys with InitialPQRKey; NewKeyPairWithPQR moves pqrKeyBytes into guarded memory and zeroizes the source.
 	sessionKeys, pqrErr := session.NewKeyPairWithPQR(rootKey, chainKey, pqrKeyBytes)
 	if pqrErr != nil {
 		return nil, pqrErr

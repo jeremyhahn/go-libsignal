@@ -1,17 +1,4 @@
-// Conformance test: SenderKeyDistributionMessage wire parity vs Rust libsignal.
-//
-// Assertion strategy: DIRECT BYTES-EQUAL.
-//   The fixture exposes all inputs needed to construct the message deterministically:
-//   distribution_id, chain_id (as a varint-encoded field in the protobuf), iteration,
-//   chain_key, signing_key_public (public key only — no signature needed), and
-//   message_version. We build a SenderKeyDistributionMessage using Go's protocol
-//   package and assert that the serialized bytes are byte-identical to the
-//   Rust-emitted expected.serialized bytes.
-//
-// SenderKeyDistributionMessage serialization is fully deterministic given the
-// inputs: it contains no random nonces, ephemeral keys, or signatures.
-//
-// Rust upstream: rust/protocol/src/group_cipher.rs (libsignal v0.92.2)
+// SenderKeyDistributionMessage built from the fixture inputs must equal the Rust bytes (group_cipher.rs).
 
 package interop
 
@@ -122,7 +109,7 @@ func TestGroupsSKDMWire(t *testing.T) {
 				t.Fatalf("Serialize: %v", err)
 			}
 
-			// DIRECT BYTES-EQUAL: the serialized message must match Rust exactly.
+			// The serialized message must equal Rust's bytes.
 			if !bytes.Equal(got, wantBytes) {
 				t.Errorf("SenderKeyDistributionMessage bytes mismatch:\n  got  %x\n  want %x",
 					got, wantBytes)

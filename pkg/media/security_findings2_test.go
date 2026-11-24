@@ -1,13 +1,6 @@
 package media
 
-// security_findings2_test.go — regression tests for the four security findings
-// fixed in this batch.  Each test covers the exact failure mode described in the
-// finding and must NOT crash or produce silently corrupted output.
-//
-// Finding 1 [HIGH]: Unbounded recursion → fatal stack-overflow DoS.
-// Finding 2 [MEDIUM]: Faststart free/skip stripping omits stco/co64 delta.
-// Finding 3 [LOW]: Negative post-shift co64 wraps to bogus uint64.
-// Finding 4 [LOW]: extractBoxBytes lacks largesize guard → latent panic.
+// Regression tests: deep box nesting, faststart padding offsets, negative co64 shifts and the largesize guard.
 
 import (
 	"bytes"
@@ -63,13 +56,7 @@ func buildMP4WithNestedUdta(udtaCount int) []byte {
 	return buf.Bytes()
 }
 
-// TestFinding1_Security_DeeplyNestedContainerBoxes_Rejected verifies that
-// SanitizeMP4 returns a typed error (NOT a fatal stack-overflow crash) when
-// the input contains more than maxBoxDepth nested container boxes.
-//
-// 40 nested udta boxes exceeds maxBoxDepth=32.  Before the fix, mp4ff's
-// recursive decoder would exhaust the goroutine stack; a Go fatal stack
-// overflow cannot be caught by recover().
+// TestFinding1_Security_DeeplyNestedContainerBoxes_Rejected checks 40 nested udta boxes return a typed error instead of overflowing the stack.
 func TestFinding1_Security_DeeplyNestedContainerBoxes_Rejected(t *testing.T) {
 	data := buildMP4WithNestedUdta(40)
 
@@ -122,12 +109,7 @@ func TestFinding1_Security_NormalNestingDepth_Accepted(t *testing.T) {
 // maxBoxDepth=32; the root scan is at depth 1, moov children at depth 2,
 // so (maxBoxDepth-2) nested udta boxes keep the deepest push at depth≤32.
 func TestFinding1_Security_ExactlyAtDepthLimit_Accepted(t *testing.T) {
-	// moov at top-level (depth 1 scan) → moov children at depth 2
-	// udta_1 at depth 2 → children at depth 3
-	// ...
-	// udta_29 at depth 30 → children at depth 31
-	// udta_30 at depth 31 → children at depth 32 (== maxBoxDepth, allowed)
-	// → deepest push is at depth 32 ≤ 32 → no rejection
+	// 30 nested udta boxes put the deepest children at depth 32, which is allowed.
 	const udtaAtLimit = maxBoxDepth - 2 // 30
 
 	data := buildMP4WithNestedUdta(udtaAtLimit)
@@ -191,20 +173,9 @@ func TestFinding1_Security_CompoundedMdat_DeeplyNested(t *testing.T) {
 // Finding 2 — faststart free/skip stripping must rewrite stco/co64 offsets
 // ---------------------------------------------------------------------------
 
-// buildFaststartWithFreeBox builds a faststart MP4 with layout:
-//
-//	ftyp(20) | moov(60, stco→origChunkOff) | free(8) | mdat(8+payloadLen)
-//
-// The free box is between moov and mdat; stripping it shifts mdat left by 8,
-// so stco entries must be decremented by 8 in the sanitized output.
+// buildFaststartWithFreeBox builds ftyp | moov | free(8) | mdat, so dropping free shifts stco entries by -8.
 func buildFaststartWithFreeBox(payload []byte) (data []byte, origChunkOff uint32) {
-	// moov will be 60 bytes (buildMoovWithStco with 1 stco entry).
-	// Layout offsets:
-	//   0..19:  ftyp (20)
-	//  20..79:  moov (60)
-	//  80..87:  free (8)
-	//  88..95:  mdat header (8)
-	//  96...:   mdat payload
+	// Offsets: ftyp 0, moov 20, free 80, mdat header 88, payload 96.
 	const (
 		ftypLen    = 20
 		moovLen    = 60
@@ -233,14 +204,7 @@ func buildFaststartWithFreeBox(payload []byte) (data []byte, origChunkOff uint32
 	return buf.Bytes(), origChunkOff
 }
 
-// TestFinding2_Security_FaststartFreeBox_StcoAdjusted verifies that stripping
-// the free box between moov and mdat correctly adjusts stco chunk offsets.
-//
-// Before the fix: encodeFtypMoov did not rewrite offsets; the output stco still
-// pointed at the original (pre-strip) mdat payload position, so
-// output[stco[0]] was not the expected first payload byte.
-// After the fix:  rewriteMetadataWithOffsets applies delta = -8 (free box size);
-// output[stco[0]] correctly equals payload[0].
+// TestFinding2_Security_FaststartFreeBox_StcoAdjusted checks stco is shifted by -8 when the free box is dropped.
 func TestFinding2_Security_FaststartFreeBox_StcoAdjusted(t *testing.T) {
 	payload := []byte{0xAA, 0xBB, 0xCC, 0xDD}
 	data, _ := buildFaststartWithFreeBox(payload)
@@ -349,15 +313,7 @@ func buildFaststartWithCustomStco(stcoOffset uint32, freeLen int) []byte {
 	return buf.Bytes()
 }
 
-// TestFinding3_Security_NegativeStcoPostShift_Rejected verifies that
-// rewriteMetadataWithOffsets rejects a stco entry whose value + delta < 0
-// instead of promoting it to a bogus co64.
-//
-// Layout: ftyp(20)|moov(60)|free(200)|mdat(8)
-// originalMdatOffset = 20+60+200 = 280
-// newMdatStart = 20+60 = 80
-// delta = 80-280 = -200
-// stco[0] = 50: 50 + (-200) = -150 < 0 → must be rejected.
+// TestFinding3_Security_NegativeStcoPostShift_Rejected checks an stco of 50 with delta -200 is rejected, not promoted to co64.
 func TestFinding3_Security_NegativeStcoPostShift_Rejected(t *testing.T) {
 	// stco[0] = 50 < 200, so it underflows with delta = -200.
 	const stcoOff = uint32(50)
@@ -375,13 +331,7 @@ func TestFinding3_Security_NegativeStcoPostShift_Rejected(t *testing.T) {
 	}
 }
 
-// TestFinding3_Security_ValidNegativeDelta_Accepted verifies that a valid
-// faststart file with a negative delta (free box present, offsets are
-// large enough to absorb the shift) is NOT rejected.
-//
-// Layout: ftyp(20)|moov(60)|free(8)|mdat(8+4)
-// originalMdatOffset = 88, newMdatStart = 80, delta = -8
-// stco[0] = 96 (original chunk offset): 96-8 = 88 > 0 → accepted.
+// TestFinding3_Security_ValidNegativeDelta_Accepted checks an stco of 96 with delta -8 is accepted.
 func TestFinding3_Security_ValidNegativeDelta_Accepted(t *testing.T) {
 	payload := []byte{0x01, 0x02, 0x03, 0x04}
 	data, _ := buildFaststartWithFreeBox(payload)
@@ -396,12 +346,7 @@ func TestFinding3_Security_ValidNegativeDelta_Accepted(t *testing.T) {
 // Finding 4 — extractBoxBytes largesize guard
 // ---------------------------------------------------------------------------
 
-// TestFinding4_Security_ExtractBoxBytes_NegativeLargesize verifies that
-// extractBoxBytes returns a MediaValidationError (not a panic) when the
-// 64-bit extended-size field has the high bit set (negative as int64).
-//
-// Before the fix: size = int64(uint64_with_high_bit) < 0; the bounds check
-// startPos+size > len(input) would pass, and make([]byte, size) would panic.
+// TestFinding4_Security_ExtractBoxBytes_NegativeLargesize checks a largesize with the high bit set returns a MediaValidationError.
 func TestFinding4_Security_ExtractBoxBytes_NegativeLargesize(t *testing.T) {
 	// 16-byte largesize header: rawSize=1, type="udta", largesize=0x8000000000000010
 	// (negative as int64, but > 16 as uint64 — the pre-fix code only checked

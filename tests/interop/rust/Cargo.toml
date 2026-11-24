@@ -26,8 +26,7 @@ serde_json = "1"
 hex = "0.4"
 anyhow = "1"
 
-# libsignal-protocol and its transitive dependencies (path-based, read-only upstream).
-# Used only by wire_emitter; the SPQR harness (main.rs) does not link it.
+# libsignal-protocol from the upstream path, linked only by wire_emitter.
 libsignal-protocol = { path = "../../../../libsignal/rust/protocol" }
 zkgroup = { path = "../../../../libsignal/rust/zkgroup" }
 libsignal-core = { path = "../../../../libsignal/rust/core" }

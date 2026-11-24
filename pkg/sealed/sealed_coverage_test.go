@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 24 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) requires it for the Sealed Sender
-// ephemeral keys, so the fips140only build tag drops this file from the FIPS
-// gate. `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): Sealed Sender ephemeral keys use X25519 (X3DH section 2.1).
 
 package sealed
 
@@ -975,9 +970,7 @@ func newTestSerializer() *serialize.Serializer {
 
 // --- ErrSenderKeyMismatch path ---
 
-// TestSealedSenderDecryptToUSMC_SenderKeyMismatch exercises the ErrSenderKeyMismatch
-// path by encrypting a message from Alice but with a USMC whose sender cert has
-// a different identity key than Alice's actual identity key.
+// TestSealedSenderDecryptToUSMC_SenderKeyMismatch encrypts with Alice's key under a sender cert for another key.
 func TestSealedSenderDecryptToUSMC_SenderKeyMismatch(t *testing.T) {
 	trustRoot := newTestTrustRoot(t)
 	serverCert, serverKey := newTestServerCertificate(t, trustRoot)
@@ -1011,9 +1004,7 @@ func TestSealedSenderDecryptToUSMC_SenderKeyMismatch(t *testing.T) {
 		t.Fatalf("NewUnidentifiedSenderMessageContent error: %v", err)
 	}
 
-	// Encrypt using Alice's REAL identity key (aliceStore has Alice's real keypair).
-	// The encrypted static field will be Alice's real key.
-	// But the USMC sender cert key is fakeKP - these will not match.
+	// The encrypted static key is Alice's; the certificate key is fakeKP.
 	ciphertext, err := SealedSenderEncryptFromUSMC(bobAddress, usmc, aliceStore)
 	if err != nil {
 		t.Fatalf("SealedSenderEncryptFromUSMC error: %v", err)
@@ -1166,16 +1157,7 @@ func TestV2ParseMessage_DuplicateServiceIDRedundantlyEmpty(t *testing.T) {
 	buf = append(buf, make([]byte, v2EncryptedMKeySize)...)
 	buf = append(buf, make([]byte, v2AuthTagSize)...)
 
-	// Entry 2: same ServiceId but with device_id = 0 (excluded)
-	// This should trigger "recipient redundantly encoded as empty" error
-	// because the existing entry for this ServiceId already has devices.
-	// But wait - device_id=0 means "excluded", so no C_i/AT_i are read.
-	// The code checks: if len(deviceIDs) > 0 then break without adding to recipients.
-	// So excluded recipients don't get added to the recipients map at all.
-	// This means the "redundantly encoded as empty" path requires TWO device-bearing
-	// entries where one has empty DeviceIDs after processing. That can only happen
-	// if we manipulate the parsed structure directly.
-	// Let's instead verify the merge path succeeds normally.
+	// device_id 0 marks an excluded recipient, which is never added; check the merge path succeeds.
 	buf = append(buf, serviceIDBytes...)
 	buf = append(buf, 0x02)       // device_id = 2 (another device for same ID)
 	buf = append(buf, 0x00, 0x02) // reg_id = 2
@@ -1248,11 +1230,7 @@ func TestSealedSenderMultiRecipientEncrypt_InvalidRegistrationID(t *testing.T) {
 
 // --- SealedSenderV2DecryptToUSMC invalid sender UUID path ---
 
-// TestSealedSenderV2DecryptToUSMC_InvalidSenderUUID exercises line 623-625
-// (ServiceIdFromString failing on the sender UUID from the decrypted USMC).
-// A valid v2 message is constructed using a sender cert with a malformed UUID
-// string. AES-GCM-SIV decryption and USMC deserialization succeed (the UUID
-// string is stored as-is), but the subsequent ServiceId parse fails.
+// TestSealedSenderV2DecryptToUSMC_InvalidSenderUUID checks a malformed sender UUID fails the ServiceId parse after decryption.
 func TestSealedSenderV2DecryptToUSMC_InvalidSenderUUID(t *testing.T) {
 	aliceStore, bobStore, _, bobAddress, bobSession, _ := setupV2Session(t)
 
@@ -1350,8 +1328,7 @@ func TestSealedSenderV2DecryptReceivedToUSMC_InvalidSenderUUID(t *testing.T) {
 		parsed.EncryptedPayload,
 	)
 
-	// Decryption: ECDH succeeds, AES-GCM-SIV succeeds, USMC deserializes with
-	// "not-a-uuid" UUID, but ServiceIdFromString fails → ErrV2ReceivedDeserializeFailed.
+	// Decryption succeeds, then ServiceIdFromString fails: ErrV2ReceivedDeserializeFailed.
 	_, err = SealedSenderV2DecryptReceivedToUSMC(receivedMsg, bobStore)
 	if err == nil {
 		t.Fatal("SealedSenderV2DecryptReceivedToUSMC should fail with invalid sender UUID")
@@ -1363,23 +1340,7 @@ func TestSealedSenderV2DecryptReceivedToUSMC_InvalidSenderUUID(t *testing.T) {
 
 // --- SealedSenderV2DecryptToUSMC auth tag mismatch path ---
 
-// TestSealedSenderV2DecryptToUSMC_AuthTagMismatch exercises line 670-672
-// (sender authentication tag verification failed) by constructing a valid v2
-// message and then tampering ONLY with AT_i, leaving C_i intact so that M is
-// recovered correctly, the ephemeral key check passes, AES-GCM-SIV decryption
-// succeeds, and the USMC deserializes — but the final AT comparison fails.
-//
-// Wire layout for version 0x23, 1 recipient, 1 device:
-//
-//	[0]      version (1 byte)
-//	[1]      recipient_count varint (1 byte for count=1)
-//	[2..18]  ServiceId (17 bytes)
-//	[19]     device_id (1 byte)
-//	[20..21] reg_id with has_more bit (2 bytes)
-//	[22..53] C_i (32 bytes)
-//	[54..69] AT_i (16 bytes)   ← tamper here only
-//	[70..101] ephPub (32 bytes)
-//	[102..]  encrypted payload
+// TestSealedSenderV2DecryptToUSMC_AuthTagMismatch tampers only AT_i (bytes 54..69 for version 0x23, one recipient) so only the final tag check fails.
 func TestSealedSenderV2DecryptToUSMC_AuthTagMismatch(t *testing.T) {
 	aliceStore, bobStore, _, bobAddress, bobSession, _ := setupV2Session(t)
 
@@ -1410,8 +1371,7 @@ func TestSealedSenderV2DecryptToUSMC_AuthTagMismatch(t *testing.T) {
 
 	bobServiceId, _ := protocol.ServiceIdFromString(protocol.ServiceIdKindACI, bobAddress.Name())
 
-	// Tamper ONLY with AT_i at the correct offset (54..69) for version 0x23.
-	// C_i at [22..53] must remain intact so M is recovered correctly.
+	// Tamper only AT_i (54..69); C_i (22..53) stays intact.
 	const (
 		versionSize = 1
 		varintSize  = 1                                                                        // varint for count=1 is exactly 1 byte
@@ -1435,13 +1395,7 @@ func TestSealedSenderV2DecryptToUSMC_AuthTagMismatch(t *testing.T) {
 
 // --- SealedSenderDecryptWithKyber inner decrypt failure paths ---
 
-// TestSealedSenderDecryptWithKyber_PreKeyDecryptReplay exercises line 535
-// (DecryptPreKeyMessage returning error) by replaying a sealed sender PreKey
-// message after the session has already been established from that message.
-// The outer sealed sender layer decrypts successfully on both attempts (each
-// decrypt uses fresh ephemeral ECDH), but on the second attempt the inner
-// whisper message has counter=0 which has already been processed — the session
-// cipher returns a duplicate message error.
+// TestSealedSenderDecryptWithKyber_PreKeyDecryptReplay replays a sealed PreKey message; the inner message is a duplicate.
 func TestSealedSenderDecryptWithKyber_PreKeyDecryptReplay(t *testing.T) {
 	serializer := serialize.NewProtobufSerializer()
 	trustRoot := newTestTrustRoot(t)

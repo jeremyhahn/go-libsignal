@@ -14,14 +14,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
 )
 
-// The deserialization constructors move key material into guarded memory as
-// they decode, so a record that is malformed only after a well formed,
-// secret-bearing component used to strand every buffer allocated before the
-// failure. Nothing in go-enclave reports how many locked buffers a process
-// holds, so these tests read the kernel's own accounting — VmLck in
-// /proc/self/status — which is exactly the resource an abandoned buffer
-// consumes. That measurement is Linux-only; the cleanup itself is covered
-// portably in destroy_test.go.
+// Failed deserialization must free the guarded buffers it allocated; these tests read VmLck from /proc/self/status (Linux only; destroy_test.go is portable).
 
 // failedAttempts is how many malformed records each test feeds through a
 // constructor. Enough that a leak of a handful of pages per attempt is orders
@@ -139,8 +132,7 @@ func stateStructure(t *testing.T, receiverChains []*record.ChainStructure) *reco
 
 func TestNewStateFromStructureReleasesGuardedMemoryOnMalformedChain(t *testing.T) {
 	assertNoLockedMemoryGrowth(t, "failed state deserializations", func() {
-		// A valid sender chain and receiver chain, then a malformed one: the
-		// guarded buffers behind the first two are what used to be stranded.
+		// Two valid chains then a malformed one; the first two must be freed.
 		structure := stateStructure(t, []*record.ChainStructure{
 			chainStructure(t, 0x07),
 			malformedChainStructure(t, 0x08),

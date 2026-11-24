@@ -25,12 +25,7 @@ func TestErrKyberPreKeyTypeMismatch_ErrorMessage(t *testing.T) {
 	}
 }
 
-// TestNewKyberPreKeyFromStructure_TypeConsistency verifies that a round-trip
-// through NewKyberPreKey → Serialize → NewKyberPreKeyFromStructure succeeds
-// and the public-key type survives the round-trip intact.
-//
-// This exercises the type-guard assertion in NewKyberPreKeyFromStructure and
-// confirms it does not incorrectly reject a valid key pair.
+// TestNewKyberPreKeyFromStructure_TypeConsistency checks a valid key pair round-trips with its type intact.
 func TestNewKyberPreKeyFromStructure_TypeConsistency(t *testing.T) {
 	// Use zero-value key bytes; NewPublicKey and NewSecretKey do not validate
 	// the content of the key material, only the length.
@@ -68,13 +63,7 @@ func TestNewKyberPreKeyFromStructure_TypeConsistency(t *testing.T) {
 	}
 }
 
-// TestNewKyberPreKeyFromStructure_MismatchedPublicKey verifies that loading a
-// structure whose serialized public key has an invalid/unexpected type prefix
-// returns an error rather than silently loading inconsistent key material.
-//
-// We craft a structure where structure.PublicKey[0] is set to an unrecognized
-// type byte (0xFF), which DeserializePublicKey rejects.  This confirms that
-// the guard path is reachable and the error surface is correct.
+// TestNewKyberPreKeyFromStructure_MismatchedPublicKey checks an unknown public key type byte (0xFF) is an error.
 func TestNewKyberPreKeyFromStructure_MismatchedPublicKey(t *testing.T) {
 	// Build a valid Kyber1024 public key serialization and then corrupt the type
 	// byte to a value that no valid SecretKey can have.
@@ -112,13 +101,7 @@ func TestNewKyberPreKeyFromStructure_MismatchedPublicKey(t *testing.T) {
 	}
 }
 
-// TestNewKyberPreKeyFromStructure_InvalidPrivateKeyForType verifies that a
-// structure whose private key bytes are the wrong size for the advertised public
-// key type is rejected with a KyberPreKeyDeserializeError.
-//
-// This is the practical "type mismatch" scenario: the public key serialization
-// claims Kyber1024 (type 0x08) but the private key bytes are only 4 bytes long
-// (valid for no KEM algorithm), simulating a corrupted or swapped key record.
+// TestNewKyberPreKeyFromStructure_InvalidPrivateKeyForType checks a 4-byte private key under a Kyber1024 public key is a KyberPreKeyDeserializeError.
 func TestNewKyberPreKeyFromStructure_InvalidPrivateKeyForType(t *testing.T) {
 	pubKeyData := make([]byte, 1568)
 	pubKey := kem.NewPublicKey(kem.KeyTypeKyber1024, pubKeyData)

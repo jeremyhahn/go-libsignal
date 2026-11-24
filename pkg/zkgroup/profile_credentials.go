@@ -647,14 +647,7 @@ func (s *ServerSecretParams) VerifyExpiringProfileKeyCredentialPresentation(
 	return nil
 }
 
-// expiringProfileKeyCredentialPresentationStatement returns the poksho statement
-// for expiring profile key credential presentations. Matches Rust
-// ExpiringProfileKeyCredentialPresentationProof::get_poksho_statement.
-//
-// fullChecking selects between the V3 (false) and V4 (true) statement. V4 adds
-// a `C_y5 = z * G_y5` clause that proves the empty C_y5 commitment was actually
-// formed with the same z used elsewhere. Rust ties this to the const generic
-// `V >= PRESENTATION_VERSION_4`.
+// expiringProfileKeyCredentialPresentationStatement returns the V3 statement, or with fullChecking the V4 statement that adds C_y5 = z * G_y5.
 func expiringProfileKeyCredentialPresentationStatement(fullChecking bool) *poksho.Statement {
 	st := poksho.NewStatement()
 	st.Add("Z", [][2]string{{"z", "I"}})

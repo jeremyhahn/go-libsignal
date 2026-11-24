@@ -1,9 +1,4 @@
-// Validation tests for AccountEntropyPool alphabet, uniqueness, and parse error cases.
-//
-// Rust libsignal ref: rust/account-keys/src/lib.rs @ 98915c44
-//   - only_alphabet_characters_are_used (lib.rs:127)
-//   - uniqueness (lib.rs:139)
-//   - parse (lib.rs:154)
+// Validation tests for AccountEntropyPool alphabet, uniqueness and parse errors (rust/account-keys/src/lib.rs).
 package accountkeys
 
 import (
@@ -12,12 +7,7 @@ import (
 	"testing"
 )
 
-// TestAccountEntropyPool_OnlyAlphabetCharactersAreUsed verifies that every
-// character produced by GenerateAccountEntropyPool is in the set [0-9a-z].
-//
-// Rust libsignal ref: rust/account-keys/src/lib.rs only_alphabet_characters_are_used (line 127)
-// The Rust test uses a proptest over 1000 seeds; we generate 1000 independent
-// pools with the Go crypto RNG and verify the same invariant.
+// TestAccountEntropyPool_OnlyAlphabetCharactersAreUsed checks 1000 generated pools use only [0-9a-z] (lib.rs:127).
 func TestAccountEntropyPool_OnlyAlphabetCharactersAreUsed(t *testing.T) {
 	const iterations = 1000
 	allowed := make(map[rune]bool, 36)
@@ -63,13 +53,7 @@ func TestAccountEntropyPool_Uniqueness(t *testing.T) {
 	}
 }
 
-// TestAccountEntropyPool_Validate_ParseErrorCases exercises the parse (Validate)
-// error paths that correspond to the Rust from_str error cases in lib.rs:154.
-//
-// Rust libsignal ref: rust/account-keys/src/lib.rs parse (line 154)
-//   - from_str("[m"; 64) => Ok
-//   - from_str("abc") => Err(WrongLength(3))
-//   - from_str([' '; 64]) => Err(InvalidCharacter(' '))
+// TestAccountEntropyPool_Validate_ParseErrorCases covers the Rust from_str error cases (lib.rs:154).
 func TestAccountEntropyPool_Validate_ParseErrorCases(t *testing.T) {
 	tests := []struct {
 		name        string

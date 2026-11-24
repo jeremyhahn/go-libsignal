@@ -1,13 +1,6 @@
 //go:build linux && !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 5 tests in this file exercise X25519: each establishes a real session pair
-// before measuring the locked memory a decrypt leaves behind. FIPS 140-3 does
-// not approve that, but the X3DH specification (section 2.1) and the Double
-// Ratchet specification (section 5.2) require it, so the fips140only build tag
-// drops this file from the FIPS gate. `make test` and `make coverage` still
-// run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) and the Double Ratchet (section 5.2) require X25519.
 
 package session_test
 
@@ -23,14 +16,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/session"
 )
 
-// A decrypt runs on a clone of the session state so that a failure can be
-// rolled back, and that clone holds guarded buffers of its own. go-enclave
-// reclaims nothing on its own, so a clone that is thrown away without being
-// released costs the process locked memory permanently — and a peer can force
-// that with any message that fails to decrypt. Nothing in go-enclave
-// reports how many locked buffers a process holds, so this test reads the
-// kernel's own accounting, VmLck in /proc/self/status, which is exactly the
-// resource being consumed. The measurement is Linux-only.
+// A failed decrypt must release its cloned state's guarded buffers, or any peer can leak locked memory; the tests read VmLck from /proc/self/status (Linux only).
 
 // decryptAttempts is how many messages each test feeds through the cipher.
 // Enough that even the smallest possible leak — one locked page per message —
@@ -198,10 +184,7 @@ func tamperCipherText(t *testing.T, raw []byte) []byte {
 	return tampered
 }
 
-// A message that matches a stored skipped message key takes those keys out of
-// the clone before it authenticates them, so the clone's own cleanup no longer
-// covers them. An attacker only has to replay a captured message with a
-// corrupted ciphertext to drive that path.
+// A message matching a stored skipped key takes those keys out of the clone before authentication; a replay with a corrupted ciphertext reaches that path.
 func TestFailedSkippedKeyDecryptDoesNotStrandLockedMemory(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	_, _, aliceCipher, bobCipher := setupSessionPair(t, serializer)

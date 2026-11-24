@@ -27,8 +27,7 @@ func TestNewOldCounterError(t *testing.T) {
 	}
 }
 
-// TestIsSpqrDuplicateErr verifies the isSpqrDuplicateErr function returns
-// true for SPQR duplicate error types and false for other errors.
+// TestIsSpqrDuplicateErr checks isSpqrDuplicateErr is true only for SPQR duplicate errors.
 func TestIsSpqrDuplicateErr(t *testing.T) {
 	tests := []struct {
 		name string

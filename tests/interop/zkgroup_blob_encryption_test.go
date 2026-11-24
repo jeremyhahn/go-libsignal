@@ -1,16 +1,4 @@
-// Conformance test: zkgroup group blob encryption byte-identical to Rust.
-//
-// Mirrors rust/zkgroup/tests/integration_tests.rs::test_blob_encryption:
-//   - Derive GroupSecretParams from a GroupMasterKey seeded with
-//     TEST_ARRAY_32_1 (100..131).
-//   - Encrypt a 17-byte plaintext with TEST_ARRAY_32_2 (200..231) randomness.
-//   - Assert the resulting ciphertext byte-matches the pinned hex.
-//   - Decrypt and assert plaintext round-trips exactly.
-//
-// This is the AES-256-GCM-SIV (RFC 8452) blob path used by the group
-// management protocol; passing this KAT proves byte-wire compatibility
-// of the GroupSecretParams blob-key derivation, the GCM-SIV nonce/tag
-// layout, and the SHO-driven randomness expansion.
+// Conformance: GroupSecretParams blob encryption (AES-256-GCM-SIV) against Rust test_blob_encryption, byte for byte and round trip.
 
 package interop
 
@@ -28,17 +16,7 @@ type blobEncryptionFixture struct {
 	ExpectedCiphertextHex string `json:"expected_ciphertext_hex"`
 }
 
-// TestZkgroup_GroupBlobEncryption_KAT proves Go's GroupSecretParams.EncryptBlob
-// produces byte-identical ciphertext to Rust's test_blob_encryption.
-//
-// HISTORY: the previous turn observed a divergence here that traced to a
-// fixture typo (a duplicated 0x18 byte in the plaintext) — NOT a Go
-// implementation bug. With the fixture corrected, Go's
-// GroupSecretParams.EncryptBlob is byte-identical to Rust libsignal for
-// the canonical (TEST_ARRAY_32_1, TEST_ARRAY_32_2, 17-byte plaintext)
-// inputs. The harness did its job: it forced byte-level scrutiny of the
-// fixture and the implementation simultaneously, exposing the bug
-// (fixture transcription error) rather than letting it stay latent.
+// TestZkgroup_GroupBlobEncryption_KAT checks EncryptBlob matches Rust test_blob_encryption.
 func TestZkgroup_GroupBlobEncryption_KAT(t *testing.T) {
 	raw := loader.MustRead("zkgroup/blob_encryption_known_answers.json")
 	var fx blobEncryptionFixture

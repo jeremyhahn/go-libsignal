@@ -69,8 +69,7 @@ func CreateRSAPrivateKey(bits int, format KeyFormat) ([]byte, error) {
 		for _, prime := range key.Primes {
 			zeroizeBigInt(prime)
 		}
-		// Note: key.Precomputed.CRTValues is deprecated since Go 1.20 and
-		// is no longer populated by the Go runtime, so no zeroization is needed.
+		// Precomputed.CRTValues is not populated by the Go runtime, so it needs no zeroization.
 	}()
 
 	switch format {
@@ -195,15 +194,7 @@ var oidO = asn1.ObjectIdentifier{2, 5, 4, 10}
 // oidOU is the ASN.1 OID for X.509 Organizational Unit (2.5.4.11).
 var oidOU = asn1.ObjectIdentifier{2, 5, 4, 11}
 
-// buildSubjectName constructs a pkix.Name with RDNs in the exact order
-// CN, O, OU — matching the Rust libsignal device-transfer build_self_signed_name
-// which calls append_entry_by_text("CN", ...), "O", "OU" in that sequence.
-//
-// We use ExtraNames only (no standard fields) so that pkix.Name.ToRDNSequence
-// marshals exclusively from ExtraNames, preserving our specified order.
-// Using Names alone would be ignored during marshaling (see pkix.Name docs).
-//
-// Rust reference: rust/device-transfer/src/lib.rs build_self_signed_name
+// buildSubjectName orders RDNs CN, O, OU through ExtraNames only, matching Rust build_self_signed_name.
 func buildSubjectName(cn string) pkix.Name {
 	return pkix.Name{
 		ExtraNames: []pkix.AttributeTypeAndValue{
@@ -214,11 +205,7 @@ func buildSubjectName(cn string) pkix.Name {
 	}
 }
 
-// createCertificate is the shared certificate creation logic used by both
-// CreateSelfSignedCert and CreateSelfSignedCertWithSigner.
-//
-// The Subject and Issuer RDNs are ordered CN, O, OU to match the Rust reference
-// at rust/device-transfer/src/lib.rs.
+// createCertificate is the shared logic of both certificate constructors, with Subject and Issuer ordered CN, O, OU.
 func createCertificate(signer keyops.RSASigner, name string, validDays int) ([]byte, error) {
 	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
@@ -265,10 +252,7 @@ func parseRSAPrivateKey(der []byte) (*rsa.PrivateKey, error) {
 	return key, nil
 }
 
-// zeroizeBigInt overwrites the backing word slice of a big.Int with zeros
-// before setting it to zero. This prevents sensitive key material from
-// lingering in freed memory, unlike SetInt64(0) which merely replaces
-// the value without clearing the old backing array.
+// zeroizeBigInt clears a big.Int's backing words before setting it to zero.
 func zeroizeBigInt(n *big.Int) {
 	if n == nil {
 		return

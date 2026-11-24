@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 5 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) requires it for the Sealed Sender
-// ephemeral keys, so the fips140only build tag drops this file from the FIPS
-// gate. `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH and the Double Ratchet require X25519, so the fips140only tag drops this file.
 
 package sealed
 
@@ -130,7 +125,7 @@ func TestDeserializeUnidentifiedSenderMessageContent(t *testing.T) {
 }
 
 func TestDeserializeUnidentifiedSenderMessageContentMissingSender(t *testing.T) {
-	// Cover the "USMC missing sender certificate" error path at line 75.
+	// Cover the USMC missing sender certificate error.
 	pbMsg := &sealedpb.UnidentifiedSenderMessage_Message{
 		Type:    sealedpb.UnidentifiedSenderMessage_Message_MESSAGE.Enum(),
 		Content: []byte("test"),
@@ -182,16 +177,7 @@ func TestDeserializeUnidentifiedSenderMessageContentInvalid(t *testing.T) {
 	}
 }
 
-// TestDeserializeUnidentifiedSenderMessageContent_MissingContent verifies
-// Finding 4: a USMC protobuf message that omits the `content` field is rejected
-// with a *CertificateError rather than silently accepted with nil content.
-//
-// The Rust reference (libsignal-protocol/src/sealed_sender.rs UnidentifiedSenderMessageContent
-// decode) validates that the content field is non-empty; the Go implementation
-// must enforce the same constraint.
-//
-// Before the fix, a USMC with no content field was accepted and usmc.Contents()
-// returned nil, which callers passed to the session cipher without validation.
+// TestDeserializeUnidentifiedSenderMessageContent_MissingContent checks a USMC without content is a *CertificateError, as Rust.
 func TestDeserializeUnidentifiedSenderMessageContent_MissingContent(t *testing.T) {
 	trustRoot := newTestTrustRoot(t)
 	cert, _ := newTestSenderCertificate(t, trustRoot)
@@ -220,8 +206,7 @@ func TestDeserializeUnidentifiedSenderMessageContent_MissingContent(t *testing.T
 	}
 }
 
-// TestDeserializeUnidentifiedSenderMessageContent_ContentPresent verifies the
-// positive case for Finding 4: a USMC with the content field present is accepted.
+// TestDeserializeUnidentifiedSenderMessageContent_ContentPresent checks a USMC with content is accepted.
 func TestDeserializeUnidentifiedSenderMessageContent_ContentPresent(t *testing.T) {
 	trustRoot := newTestTrustRoot(t)
 	cert, _ := newTestSenderCertificate(t, trustRoot)

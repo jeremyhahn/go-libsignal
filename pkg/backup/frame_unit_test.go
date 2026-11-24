@@ -1,15 +1,4 @@
-// Frame-layer crypto unit tests ported from the Rust message-backup crate.
-//
-// Rust libsignal ref: rust/message-backup/src/frame/ @ 98915c44
-//   - unpad.rs tests (empty, single, multiple, last_is_all_padding, empty_without_padding)
-//   - block_stream.rs tests (empty, multiple_blocks, exact_block_stream_valid,
-//     exact_block_stream_ragged_block)
-//   - cbc.rs tests (stream_empty, stream_decrypts, stream_passes_errors — adapted)
-//   - forward_secrecy.rs ValidateMetadata (valid, invalid variants)
-//
-// The hex / byte inputs mirror the exact constants used in the Rust tests.
-// The unpadding and block-stream logic is exercised directly on Go's
-// pkcs7Unpad and on the FrameDecryptor internals respectively.
+// Frame-layer unit tests ported from rust/message-backup/src/frame (unpad, block_stream, cbc, forward_secrecy).
 package backup
 
 import (
@@ -24,10 +13,7 @@ import (
 // PKCS#7 unpadding tests (Rust: frame/unpad.rs)
 // ---------------------------------------------------------------------------
 
-// LAST and LAST_PADDING match the Rust constants in unpad.rs:115.
-//
-//	const LAST: [u8; 10] = [0xab; 10];
-//	const LAST_PADDING: [u8; 6] = [6; 6];
+// LAST and LAST_PADDING match the Rust constants in unpad.rs.
 var (
 	unpadLAST        = bytes.Repeat([]byte{0xab}, 10)
 	unpadLASTPADDING = bytes.Repeat([]byte{6}, 6)
@@ -427,12 +413,7 @@ func TestValidateMetadata_InvalidIVLength(t *testing.T) {
 // Encrypt→Decrypt round-trip with plaintext comparison
 // ---------------------------------------------------------------------------
 
-// TestFrameEncryptDecryptRoundTrip verifies that Go-encrypted frames can be
-// decrypted back to the original bytes. This exercises both the FrameEncryptor
-// and FrameDecryptor code paths end-to-end with a plaintext comparison.
-//
-// This extends the coverage of messagebackup_cases_valid_test.go, which only
-// verifies HMAC on Rust-generated data; here we verify Go-generated data.
+// TestFrameEncryptDecryptRoundTrip checks Go-encrypted frames decrypt to the original bytes.
 func TestFrameEncryptDecryptRoundTrip(t *testing.T) {
 	key := testMessageBackupKey(t)
 	defer key.Zeroize()
@@ -465,8 +446,7 @@ func TestFrameEncryptDecryptRoundTrip(t *testing.T) {
 	}
 }
 
-// TestModernFrameEncryptDecryptRoundTrip verifies the modern SBACKUP\x01 format
-// round-trips correctly, including metadata encode/decode and HMAC verification.
+// TestModernFrameEncryptDecryptRoundTrip checks the SBACKUP\x01 format round-trips with metadata and HMAC.
 func TestModernFrameEncryptDecryptRoundTrip(t *testing.T) {
 	key := testMessageBackupKey(t)
 	defer key.Zeroize()

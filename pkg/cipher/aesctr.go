@@ -89,15 +89,7 @@ func (c *AES256CTR) Process(buf []byte) error {
 	return nil
 }
 
-// aesCTR32BEMaxLength is the maximum input length for AES-CTR with a 32-bit
-// counter. The counter starts at 0 and can produce 2^32 distinct keystream
-// blocks (counter values 0x00000000 through 0xFFFFFFFF, inclusive) of 16
-// bytes each, giving 2^32 * 16 bytes total before the counter wraps.
-//
-// Note: The Rust reference implementation does not enforce an explicit length
-// cap and allows the ctr crate to silently wrap the 32-bit counter. Go
-// intentionally rejects inputs that would wrap in order to prevent keystream
-// reuse. This is a deliberate hardening measure beyond the Rust reference.
+// aesCTR32BEMaxLength is 2^32 blocks of 16 bytes; unlike Rust, longer input is rejected to prevent keystream reuse.
 const aesCTR32BEMaxLength = (int64(math.MaxUint32) + 1) * aes.BlockSize
 
 // AESCTREncrypt encrypts plaintext using AES-256-CTR with a zero IV
@@ -115,13 +107,7 @@ func AESCTRDecrypt(key, ciphertext []byte) ([]byte, error) {
 	return aesCTR32BE(key, ciphertext)
 }
 
-// aesCTR32BE performs AES-CTR encryption or decryption with a zero IV,
-// using a 32-bit big-endian counter in the last 4 bytes of the 16-byte
-// counter block. The first 12 bytes remain fixed (all zeros for the
-// sealed sender protocol).
-//
-// This matches Rust's ctr::Ctr32BE<Aes256>, where only bytes [12..16]
-// of the counter block are incremented as a big-endian uint32.
+// aesCTR32BE runs AES-CTR with a zero IV, incrementing only bytes 12..16 as a big-endian uint32, like Rust ctr::Ctr32BE.
 func aesCTR32BE(key, input []byte) ([]byte, error) {
 	if len(key) != 32 {
 		return nil, &ErrAESCTRKeySize{}

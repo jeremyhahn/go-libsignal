@@ -150,8 +150,7 @@ func (r *Restore1) Restore2(responses1 [][]byte, handshakeHashes [][]byte) (*Res
 		return nil, err
 	}
 
-	// Sum the OPRF elements from all servers:
-	//   SUM = sum(P * k_i + H * z_i) = P * k_oprf + H * 0 = P * k_oprf
+	// SUM = sum(P*k_i + H*z_i) = P*k_oprf.
 	sum := ristretto255.NewIdentityElement()
 	for _, auth := range auths {
 		elem, err := decodeElement(auth.GetElement())

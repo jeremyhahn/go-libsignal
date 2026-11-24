@@ -1,18 +1,4 @@
-// Conformance test: zkgroup ServerSecretParams.Sign byte-identical to
-// Rust's test_server_sigs.
-//
-// Mirrors rust/zkgroup/tests/integration_tests.rs::test_server_sigs:
-//   - generate ServerSecretParams from TEST_ARRAY_32 (0..31)
-//   - sign TEST_ARRAY_32_1 (100..131) using TEST_ARRAY_32_2 (200..231) as
-//     randomness
-//   - assert the resulting 64-byte Schnorr-style signature matches the
-//     pinned EXPECTED_SIGNATURE hex literal
-//   - verify the signature with the public key
-//
-// A pass here proves Go's zkgroup ServerSecretParams generation, the new
-// SignatureKeyPair.Sign method, the underlying poksho.Sign primitive,
-// the SHO transcript construction, and the Ristretto255 scalar/point
-// arithmetic all produce byte-identical output to Rust libsignal.
+// Conformance: ServerSecretParams from TEST_ARRAY_32 signs TEST_ARRAY_32_1 with TEST_ARRAY_32_2 to Rust's EXPECTED_SIGNATURE, which the public key verifies.
 
 package interop
 

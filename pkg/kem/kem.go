@@ -170,10 +170,7 @@ func expectedPublicKeySize(kt KeyType) int {
 	}
 }
 
-// expectedSecretKeySize returns the expected raw secret key data size for the
-// given algorithm. Kyber-1024 secret keys are 3168 bytes (round-3 full form).
-// ML-KEM-768 and ML-KEM-1024 secret keys are 64-byte seeds per NIST FIPS 203.
-// KeyTypeKyber768 is intentionally absent: Kyber-768 has no backend.
+// expectedSecretKeySize returns 3168 bytes for Kyber-1024 and a 64-byte seed for ML-KEM; Kyber-768 has no backend.
 func expectedSecretKeySize(kt KeyType) int {
 	switch kt {
 	case KeyTypeKyber1024:

@@ -366,11 +366,7 @@ func TestVerifyFullTreeHead_AuditingNoAuditorHeads(t *testing.T) {
 }
 
 func TestCheckSearchConsistency_LowVersion(t *testing.T) {
-	// The code checks: for each node on the monitoring path from verPos,
-	// if that node is in Ptrs and its version < the new version, return error.
-	// So we need the stored version to be LOWER than the new version,
-	// and the stored node to be on the monitoring path of verPos.
-	// monitoringPath(2,0,8) always returns [3,7] (2 elements).
+	// A stored version lower than the new version on the monitoring path of verPos must fail.
 	path, pathErr := monitoringPath(2, 0, 8)
 	if pathErr != nil {
 		t.Fatalf("unexpected error: %v", pathErr)
@@ -1091,12 +1087,7 @@ func TestImplicitMoveWithin_LeftBranch(t *testing.T) {
 }
 
 func TestImplicitMoveWithin_RightBranch(t *testing.T) {
-	// Test case where x < start, forcing rightStep
-	// Use a non-leaf node (level > 0) that is below start
-	// Node 1 has level 1, rightStep(1) = 2
-	// For start=3, n=8: node 1 < start=3, so rightStep(1)=2, still < 3, so rightStep again...
-	// Actually node 1 is not a leaf (level=1), leftStep(1)=0, rightStep(1)=2
-	// Let's use node 3 (level 2) which has rightStep(3) = 5
+	// Node 3 (level 2) is below start, forcing rightStep to 5.
 	result, err := implicitMoveWithin(3, 5, 8)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1969,8 +1960,7 @@ func TestGuidePoll_NonMonotonicCounters(t *testing.T) {
 		t.Fatalf("unexpected error: %v", gfErr)
 	}
 
-	// Insert first id with HIGH counter, second id with LOW counter.
-	// After sorting by id, sorted[0].version > sorted[1].version → non-monotonic.
+	// Counters that decrease when sorted by id are non-monotonic.
 	gf.Insert(gf.ids[0], 10)
 	gf.Insert(gf.ids[1], 5) // lower version for second (larger) id
 
@@ -2022,13 +2012,7 @@ func TestGuideConsume_PollError(t *testing.T) {
 }
 
 func TestGuidePoll_LastEqualsPos(t *testing.T) {
-	// Exercise the ctr >= version && last == pos path (guide.go:114-116).
-	// In a tree of size 2 with pos=0: root = implicitRoot(0, 2).
-	// The root of size 2 is node 1 (the only internal node).
-	// If we search for version 0 and insert root with ctr=0,
-	// then ctr(0) >= version(0), and last = root(1) != pos(0), so go left.
-	// Left child of 1 = 0 = pos. Insert with ctr=0 >= version=0.
-	// Now last=0 == pos=0 -> done!
+	// Size-2 tree: root 1 then leaf 0 with ctr >= version reach pos.
 	g, gErr := newProofGuideForVersion(0, 0, 2)
 	if gErr != nil {
 		t.Fatalf("unexpected error: %v", gErr)
@@ -2425,17 +2409,7 @@ func TestUpdateInconsistentVersionsFromMapping(t *testing.T) {
 		t.Fatalf("no common monitoring path node found: path0=%v path2=%v", path0, path2)
 	}
 
-	// Stored positions 0 and 2, both will be updated to the common node.
-	// If we give them different stored versions, the update to common should match.
-	// But if the versions in the entries differ at the common node (impossible
-	// since it is the same step), the key question is whether two ptrs converge
-	// to the same updated position with different final versions.
-	// The easiest way is: both pos 0 and pos 2 share the first path node = common.
-	// Entry at common has Counter=10. Both will update to (common, 10).
-	// But if stored versions differ, this is fine (same final version).
-	// To get an actual inconsistency, we need them to arrive at the same position
-	// with different versions, which requires entries at different path nodes.
-	// Let's just test the convergent (no-error) case covers the dedup path.
+	// Both positions converge on the common node with one version, covering the dedup path.
 	data := &MonitoringData{
 		Index: [32]byte{1},
 		Pos:   0,
@@ -3003,15 +2977,7 @@ func TestGuidePoll_RightBranch(t *testing.T) {
 }
 
 func TestGuidePoll_LeftBranchTermination(t *testing.T) {
-	// Exercise the ctr >= version && last == pos path (line 114-116).
-	// We need a non-leaf node at position pos with ctr >= version.
-	// Tree(0, 4): root = implicitRoot(0, 4) = 3.
-	// If we insert root with ctr=5 >= version=5, then last=root(3).
-	// Since ctr >= version, we check if last == pos(0). 3 != 0, so go left.
-	// Left child of 3 in implicit tree = implicitLeft(3, 0, 4) = 1.
-	// Insert node 1 with ctr=5 >= version=5. last=1, 1 != pos(0), go left again.
-	// Left child of 1 = implicitLeft(1, 0, 4) = 0.
-	// Insert node 0 with ctr=5 >= version=5. last=0, 0 == pos(0) -> done!
+	// Size-4 tree: nodes 3, 1 and 0 with ctr >= version walk left to pos.
 	g, gErr := newProofGuideForVersion(5, 0, 4)
 	if gErr != nil {
 		t.Fatalf("unexpected error: %v", gErr)
@@ -4352,9 +4318,7 @@ func TestProofGuide_ConsumeWithPollError(t *testing.T) {
 }
 
 func TestUpdateWithConsistentDuplicateVersions(t *testing.T) {
-	// Test the case where two ptrs map to the same position with the SAME version.
-	// This should succeed (line 909-914 in update()).
-	// monitoringPath(0,0,8) always returns [1,3,7] (3 elements).
+	// Two ptrs mapping to one position with the same version succeed.
 	path, pathErr := monitoringPath(0, 0, 8)
 	if pathErr != nil {
 		t.Fatalf("unexpected error: %v", pathErr)
@@ -4568,8 +4532,7 @@ func TestCheckSearchConsistency_VersionMismatchAtSamePosition(t *testing.T) {
 }
 
 func TestCheckSearchConsistency_LowVersionOnMonitoringPath(t *testing.T) {
-	// Test the error when stored version at a monitoring path position is LESS than
-	// the new version (ver < version at line 873 in verify.go).
+	// A stored version lower than the new version at a monitoring path position is an error.
 	data := &MonitoringData{
 		Index: [32]byte{1},
 		Pos:   0,

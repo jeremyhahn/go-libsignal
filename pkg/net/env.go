@@ -197,10 +197,7 @@ func (s *SvrBEnv) CurrentAndPrevious() []*EnclaveEndpoint {
 	return result
 }
 
-// newTLSVersion allocates a fresh *TLSVersion so that each ConnectionConfig
-// literal gets an independent pointer. This prevents callers from mutating a
-// single shared instance and accidentally affecting all other configs that
-// share the same backing value.
+// newTLSVersion returns a fresh *TLSVersion so configs never share one.
 func newTLSVersion(v TLSVersion) *TLSVersion { return &v }
 
 // newHTTPVersion allocates a fresh *HTTPVersion for the same reason as
@@ -583,14 +580,7 @@ var (
 	}
 )
 
-// cloneDomainConfig returns a DomainConfig that is a deep copy of src with
-// independent allocations for every pointer and slice field:
-//   - MinTLSVersion and HTTPVersion are freshly-allocated pointers.
-//   - Connect.Proxy is a freshly-allocated *ConnectionProxyConfig (value copy).
-//   - IPv4 and IPv6 are independent slice copies (new backing arrays).
-//
-// This ensures each returned Env is fully isolated: mutating any field of one
-// Env cannot affect another Env or the package-level configuration constants.
+// cloneDomainConfig deep-copies src so each Env is independent of the package defaults.
 func cloneDomainConfig(src DomainConfig) DomainConfig {
 	dst := src
 	if src.Connect.MinTLSVersion != nil {
@@ -608,13 +598,7 @@ func cloneDomainConfig(src DomainConfig) DomainConfig {
 	return dst
 }
 
-// deepCopyKeyTransConfig returns a KeyTransConfig whose AuditorKeyMaterials
-// slice is a freshly-allocated copy of the one in src. SigningKeyMaterial and
-// VRFKeyMaterial are fixed-size arrays and are copied by value automatically.
-// Without this deep copy, assigning a KeyTransConfig by value would share the
-// backing array of AuditorKeyMaterials with the package-level constant,
-// allowing a caller to silently corrupt the global default for all future
-// calls to Production() / Staging().
+// deepCopyKeyTransConfig copies AuditorKeyMaterials so callers cannot change the package defaults.
 func deepCopyKeyTransConfig(src KeyTransConfig) KeyTransConfig {
 	auditors := make([][32]byte, len(src.AuditorKeyMaterials))
 	copy(auditors, src.AuditorKeyMaterials)

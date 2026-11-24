@@ -1,15 +1,6 @@
 //go:build interop_live
 
-// Package live provides cross-implementation interop tests that wire Go and
-// Rust libsignal together in real time via the interop_runner subprocess.
-//
-// Test naming convention:
-//
-//	TestLiveInterop_<Flow>_<Direction>
-//	  Direction: GoEncryptRustDecrypt | RustEncryptGoDecrypt
-//
-// All tests use fixed, deterministic seeds so that failures are reproducible.
-// Build tag: interop_live — excluded from default `make test`.
+// Package live runs Go-Rust interop tests TestLiveInterop_<Flow>_<Direction> with fixed seeds through interop_runner (interop_live tag).
 package live
 
 import (
@@ -680,8 +671,7 @@ func TestLiveInterop_SealedSenderV1_RustEncryptGoDecrypt(t *testing.T) {
 
 	trustRootPub := pubKeyFrom33Bytes(t, mustDecodeHex(t, trustRootPubHex))
 
-	// Rust v1 sealed sender uses CiphertextMessageType::Plaintext (not a real Signal session),
-	// so we just decrypt the outer sealed-sender layer and read the USMC contents directly.
+	// Rust v1 sealed sender uses Plaintext content, so read the USMC contents after the outer layer.
 	usmc, err := sealed.SealedSenderDecryptToUSMC(ctBytes, bobIDStore)
 	if err != nil {
 		t.Fatalf("SealedSenderDecryptToUSMC: %v", err)

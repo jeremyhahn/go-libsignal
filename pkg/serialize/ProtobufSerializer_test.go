@@ -928,10 +928,7 @@ func TestProtobufStateSerializer_WithNilChainKey(t *testing.T) {
 	}
 }
 
-// ================== Strict SKM / SKDM field-presence rejection tests ==================
-// These tests verify that missing required fields are rejected with
-// ErrInvalidProtobufEncoding, mirroring Rust's InvalidProtobufEncoding behavior
-// (rust/protocol/src/protocol.rs:614-657 for SKM, :748-800 for SKDM).
+// SKM and SKDM missing required fields return ErrInvalidProtobufEncoding (Rust protocol.rs:614-657, 748-800).
 
 // buildSKMBytes encodes a partial SenderKeyMessage protobuf, prepends the
 // version header byte, and appends 64 zero bytes as the signature.
@@ -1102,26 +1099,9 @@ func TestProtobufStateSerializer_WithEmptyPendingPreKey(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// Finding 7 regression tests: required-field presence checks
-//
-// Rust libsignal (rust/protocol/src/protocol.rs:299-301 for SignalMessage and
-// :481-483 for PreKeySignalMessage) rejects messages where the protobuf encoding
-// omits certain required fields by returning InvalidProtobufEncoding. The Go
-// implementation must enforce the same check.
-//
-// Strategy: craft a raw SignalMessage or PreKeySignalMessage proto body with the
-// target required field absent, wrap it with the appropriate wire-format framing
-// (version byte, MAC suffix), and verify that Deserialize returns
-// *ErrInvalidProtobufEncoding for the right field.
-// =============================================================================
+// SignalMessage and PreKeySignalMessage missing required fields return ErrInvalidProtobufEncoding (Rust protocol.rs:299-301, 481-483).
 
-// buildSignalMessageBytes constructs a binary SignalMessage wire payload:
-//
-//	version_byte || proto_body || mac[8]
-//
-// The proto body is encoded from a wirepb.SignalMessage where only the fields
-// supplied via the non-nil pointer arguments are set. Pass nil to omit a field.
+// buildSignalMessageBytes returns version || proto || mac[8] with only the non-nil fields set.
 func buildSignalMessageBytes(t *testing.T, counter *uint32, ratchetKey []byte) []byte {
 	t.Helper()
 	pb := &wirepb.SignalMessage{

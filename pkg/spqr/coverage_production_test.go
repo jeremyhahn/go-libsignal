@@ -1189,12 +1189,7 @@ func TestStateKindToInnerState_Ct2Sampled_MissingEncoder(t *testing.T) {
 // Ct1Sampled state where bobCt1 is nil.
 func TestStateKindToInnerState_Ct1Sampled_MissingCt1(t *testing.T) {
 	auth := makeTestAuth(t, 66)
-	// ProtoSetFromFields param order (positions 4-22):
-	//   auth, dk, ekSeed, ekVector, receivedCt1,
-	//   bobEkSeed, bobHek, bobEncapSecret, bobEkVector, bobCt1, bobSS,
-	//   headerEncoder, ekEncoder, ct1Encoder, ct2Encoder,
-	//   headerDecoder, ekDecoder, ct1Decoder, ct2Decoder
-	// bobCt1 = nil → marshalCt1Sampled returns ErrProtoMissingField for "Ct1Sampled.bobCt1".
+	// A nil bobCt1 makes marshalCt1Sampled return ErrProtoMissingField.
 	state, err := mlkembraid.ProtoSetFromFields(
 		mlkembraid.StateCt1Sampled, 0, mlkembraid.DefaultChunkSize,
 		auth,

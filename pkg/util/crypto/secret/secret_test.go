@@ -387,17 +387,7 @@ func TestSecret_Clone_Independence(t *testing.T) {
 	cloned.Destroy()
 }
 
-// TestSecret_Clone_DoesNotStageOnTheHeap is the regression test for the review
-// finding on PR #18: Clone used to allocate an ordinary []byte, copy the
-// plaintext into it and hand that to New, putting every cloned key on a
-// swappable, core-dumpable page. Independence and equality tests cannot see
-// that — the clone is correct either way — so the property has to be measured.
-//
-// Guarded memory is mmap'd rather than heap-allocated, so a guarded-to-guarded
-// copy leaves heap growth flat while a staged copy grows it by at least the
-// secret's size. The threshold is a quarter of the payload: far above the
-// bookkeeping a correct Clone allocates, far below the payload a staged one
-// must.
+// TestSecret_Clone_DoesNotStageOnTheHeap checks Clone copies guarded to guarded: heap growth must stay under a quarter of the payload.
 func TestSecret_Clone_DoesNotStageOnTheHeap(t *testing.T) {
 	const size = 1 << 20 // 1 MiB, large enough to dwarf incidental allocation
 
@@ -850,9 +840,7 @@ func TestSecret32_EqualTo_AfterDestroy(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Helper factory: newSizeMismatchError / newAllocError
-// ---------------------------------------------------------------------------
+// Helper factories newSizeMismatchError and newAllocError.
 
 func TestNewSizeMismatchError(t *testing.T) {
 	err := newSizeMismatchError(32, 10)

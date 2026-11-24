@@ -1,15 +1,6 @@
 package svr
 
-// Package svr implements Secure Value Recovery (SVR) for the Signal protocol.
-//
-// This file provides constructors for SVR4 rotation request messages and
-// response decoders for the rotation arms of the Request4/Response4 protocol.
-//
-// Rotation requests use a hand-rolled protobuf wire encoder (encodeRotateStart,
-// encodeRotateCommit, encodeRotateRollback) that is byte-for-bit identical to
-// the generated proto.Marshal path; see TestRotateStartWireByteEquality.
-//
-// Rust libsignal ref: rust/svrb/src/proto/svrb.proto Request4/Response4
+// Package svr implements Signal Secure Value Recovery; rotation requests use a hand-written encoder identical to proto.Marshal (Rust svrb.proto Request4/Response4).
 
 import (
 	"encoding/binary"
@@ -48,11 +39,7 @@ func protoFieldMessage(fieldNum uint32, msg []byte) []byte {
 	return protoFieldBytes(fieldNum, msg)
 }
 
-// encodeRotateStart encodes a Request4 with a RotateStart inner message.
-// Wire encoding: oneof field 6, submessage with fixed32 version=1,
-// bytes oprf_secretshare_delta=2, bytes encryption_secretshare_delta=3.
-//
-// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateStart
+// encodeRotateStart encodes Request4.RotateStart (oneof 6: version, oprf and encryption share deltas).
 func encodeRotateStart(version uint32, oprfDelta, encDelta []byte) []byte {
 	// Encode the RotateStart submessage.
 	var sub []byte
@@ -63,19 +50,13 @@ func encodeRotateStart(version uint32, oprfDelta, encDelta []byte) []byte {
 	return protoFieldMessage(6, sub)
 }
 
-// encodeRotateCommit encodes a Request4 with a RotateCommit inner message.
-// Wire encoding: oneof field 7, submessage with fixed32 version=1.
-//
-// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateCommit
+// encodeRotateCommit encodes Request4.RotateCommit (oneof 7: version).
 func encodeRotateCommit(version uint32) []byte {
 	sub := protoFieldFixed32(1, version)
 	return protoFieldMessage(7, sub)
 }
 
-// encodeRotateRollback encodes a Request4 with a RotateRollback inner message.
-// Wire encoding: oneof field 8, submessage with fixed32 version=1.
-//
-// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateRollback
+// encodeRotateRollback encodes Request4.RotateRollback (oneof 8: version).
 func encodeRotateRollback(version uint32) []byte {
 	sub := protoFieldFixed32(1, version)
 	return protoFieldMessage(8, sub)
@@ -195,13 +176,7 @@ func finalizeRotation(responses [][]byte, statusOf func([]byte) (svrpb.Response4
 	return nil
 }
 
-// decodeRotateStartStatus parses a Response4 and extracts the RotateStart
-// status field. It uses the generated proto decoder for the Response4 outer
-// message; because the generated types do not include the rotation oneof
-// wrappers, the oneof inner bytes are read from the unknown fields and decoded
-// manually.
-//
-// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.RotateStart
+// decodeRotateStartStatus returns the RotateStart status from a Response4, read from unknown fields.
 func decodeRotateStartStatus(b []byte) (svrpb.Response4_Status, error) {
 	return decodeRotationResponseStatus(b, 6)
 }
@@ -220,14 +195,7 @@ func decodeRotateRollbackStatus(b []byte) (svrpb.Response4_Status, error) {
 	return decodeRotationResponseStatus(b, 8)
 }
 
-// decodeRotationResponseStatus decodes a Response4 protobuf and extracts the
-// status field from the rotation submessage at the given oneof field number
-// (6=RotateStart, 7=RotateCommit, 8=RotateRollback). Each rotation response
-// submessage has a single status field at field number 1.
-//
-// proto.Unmarshal validates the outer message structure; the raw submessage
-// bytes are then located directly via extractProtoLenField to read the status
-// varint without allocating additional generated types.
+// decodeRotationResponseStatus returns field 1 of the rotation submessage at oneof field (6, 7 or 8) of a Response4.
 func decodeRotationResponseStatus(b []byte, oneofFieldNum int) (svrpb.Response4_Status, error) {
 	// First pass: use proto.Unmarshal to validate the outer message structure.
 	resp := &svrpb.Response4{}

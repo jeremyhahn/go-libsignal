@@ -17,18 +17,7 @@ const (
 // SenderKeySignatureLength is the length of the Ed25519 signature appended to SenderKey messages.
 const SenderKeySignatureLength = 64
 
-// Message type constants.
-//
-// WHISPER_TYPE, PREKEY_TYPE, SENDERKEY_TYPE, and PLAINTEXT_TYPE are wire
-// values matching Rust's CiphertextMessageType enum at
-// rust/protocol/src/protocol.rs:33-40.
-//
-// SENDERKEY_DISTRIBUTION_TYPE is a Go-internal tag only. It is NOT present
-// in the Rust CiphertextMessageType enum and is NEVER sent on the wire.
-// SenderKeyDistributionMessage has no CiphertextMessageType in Rust; this
-// constant exists solely as a local dispatch tag for callers that need to
-// distinguish distribution messages from encrypted messages in a common
-// interface. Do not use this value in wire-format code.
+// Message types: the first four match Rust CiphertextMessageType; SENDERKEY_DISTRIBUTION_TYPE is a local tag never sent on the wire.
 const (
 	WHISPER_TYPE                = 2 // SignalMessage (Rust: Whisper = 2)
 	PREKEY_TYPE                 = 3 // PreKeySignalMessage (Rust: PreKey = 3)

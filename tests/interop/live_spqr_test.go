@@ -1,42 +1,8 @@
 //go:build interop_live
 
-// Package interop provides live interop tests that shell out to the Rust
-// libsignal-interop CLI binary to verify wire-format compatibility between
-// Go and Rust SPQR implementations.
+// Package interop runs live tests against the Rust libsignal-interop CLI for SPQR compatibility.
 //
-// # Wire-Format Architecture (Phase E — converged)
-//
-// The Rust SPQR crate uses two serialization layers:
-//
-//  1. State serialization: protobuf (prost::Message::encode_to_vec).
-//     Go's pkg/spqr.Serialize / Deserialize now produce Rust-compatible proto
-//     bytes via MarshalStateProto / UnmarshalStateProto (Phase D codec).
-//
-//  2. Wire messages (the "msg" field in Send/Recv): the Rust-compatible SCKA
-//     variable-length format: version(0x01) + varint(epoch) + varint(counter)
-//     + msgType(1) + [chunk_data]. After Phase E, Go's non-braid and
-//     braid-integrated paths both produce and consume this format.
-//
-// # Epoch Convention
-//
-// Rust SCKA wire messages carry 1-indexed epochs. Go chains are 0-indexed.
-// The helpers sckaToChainEpoch / chainToSckaEpoch in pkg/spqr/wire.go perform
-// the offset conversion explicitly, making the mapping audit-friendly.
-//
-// # Key Parity
-//
-// Both sides initialize from the same auth_key (MinVersion=V1 so negotiation
-// resolves immediately) and derive chain keys via the same HKDF-SHA256 KDF.
-// For the first epoch (no SCKA advancement), Rust and Go derive identical
-// message keys. After epoch advancement, keys diverge because the SCKA state
-// machines are independently implemented with different RNG seeds.
-//
-// The tests below:
-//  1. Confirm the Rust CLI is functional (Rust self-test).
-//  2. Confirm Go can parse Rust-generated wire messages (structural parse).
-//  3. Confirm Go's non-braid Recv accepts Rust-generated SCKA messages (Phase E gap closed).
-//  4. Confirm key parity for the first epoch in both directions.
-//  5. Confirm Go's own chain KDF pipeline is regression-free.
+// State serializes as protobuf (MarshalStateProto). Wire messages use the SCKA format version(0x01) || varint epoch || varint counter || type || chunk, with 1-based epochs against 0-based Go chains (sckaToChainEpoch, chainToSckaEpoch). Both sides start from one auth_key with MinVersion V1, so first-epoch message keys match; later epochs diverge with independent SCKA randomness.
 package interop
 
 import (
@@ -161,13 +127,7 @@ func rustRecv(t *testing.T, bin, stateHex, msgHex string) (newStateHex, keyHex s
 	return out.StateHex, out.KeyHex
 }
 
-// TestInteropSPQRRustSelfTest verifies the Rust CLI can perform a multi-step
-// send/recv round trip entirely within Rust. This confirms:
-//  1. The CLI binary is functional.
-//  2. The Rust SPQR state machine exercises send → recv correctly.
-//  3. Sender and receiver derive identical keys from the same wire message.
-//
-// This is a prerequisite sanity check before any cross-impl tests.
+// TestInteropSPQRRustSelfTest checks the Rust CLI round-trips send and recv with matching keys, before any cross tests.
 func TestInteropSPQRRustSelfTest(t *testing.T) {
 	bin := requireBin(t)
 
@@ -282,16 +242,7 @@ func TestInteropSPQRRustMultiRound(t *testing.T) {
 	t.Logf("verified %d unique keys across %d rounds", len(seen), len(keys))
 }
 
-// TestInteropSPQRRustToGoWireFormat verifies that Go's wire message parser
-// (pkg/spqr decodeWireMessage, exported via WireMessage) can structurally
-// parse Rust-generated wire messages without error. This confirms the
-// variable-length wire format (version + varint fields) is understood by both
-// implementations.
-//
-// NOTE on key parity: full cross-impl key equality (Go derives the same
-// message key as Rust from the same wire message) is NOT possible without a
-// shared SCKA transcript. See the package-level doc comment for details.
-// This test verifies structural parse compatibility only.
+// TestInteropSPQRRustToGoWireFormat checks Go parses Rust wire messages; key equality is covered by the parity tests.
 func TestInteropSPQRRustToGoWireFormat(t *testing.T) {
 	bin := requireBin(t)
 
@@ -351,15 +302,7 @@ func TestInteropSPQRRustToGoWireFormat(t *testing.T) {
 	}
 }
 
-// TestInteropSPQRWireFormatParityVerified verifies that the Phase E wire-format
-// gap between Go's non-braid SPQR path and Rust's SPQR crate is now CLOSED.
-//
-// After Phase E, Go's non-braid Send/Recv use the same Rust-compatible SCKA
-// variable-length wire format: version(0x01) + varint(epoch) + varint(counter)
-// + msgType + [chunk_data]. Go Recv now accepts Rust-generated wire messages.
-//
-// This test replaces the former TestInteropSPQRWireFormatGapDocumented which
-// asserted the formats diverged. Failure here means Phase E regression.
+// TestInteropSPQRWireFormatParityVerified checks Go's non-braid Recv accepts a Rust SCKA wire message.
 func TestInteropSPQRWireFormatParityVerified(t *testing.T) {
 	bin := requireBin(t)
 
@@ -402,9 +345,7 @@ func TestInteropSPQRWireFormatParityVerified(t *testing.T) {
 		t.Errorf("Rust wire version byte: got 0x%02x, want 0x01", msgBytes[0])
 	}
 
-	// Go non-braid Recv must now accept the Rust-generated SCKA wire message.
-	// Both sides are initialized from the same auth_key and use MinVersion=V1,
-	// so negotiation resolves immediately and the chain KDF inputs match.
+	// Same auth_key and MinVersion V1 on both sides, so the chain KDF inputs match.
 	_, _, recvErr := spqr.Recv(goState, msgBytes)
 	if recvErr != nil {
 		t.Errorf("PHASE E REGRESSION: Go non-braid Recv rejected Rust wire message: %v", recvErr)
@@ -415,14 +356,7 @@ func TestInteropSPQRWireFormatParityVerified(t *testing.T) {
 	}
 }
 
-// TestInteropSPQRGoChainKDFSelfConsistency verifies that Go's chain KDF
-// (HKDF info strings) is internally consistent across a multi-message sequence.
-// This is a regression guard: any change to KDF info strings, key ordering,
-// or chain advancement logic will cause this test to fail.
-//
-// It does NOT compare against Rust keys (which requires a shared SCKA
-// transcript — see package-level doc comment), but it documents the KDF
-// parameters used so they can be compared against the Rust source manually.
+// TestInteropSPQRGoChainKDFSelfConsistency pins Go's chain KDF across a message sequence.
 func TestInteropSPQRGoChainKDFSelfConsistency(t *testing.T) {
 	// Both sides use the same shared auth_key that the Rust CLI also uses.
 	authKey := []byte("interop-shared-auth-key-32bytes!")
@@ -514,13 +448,7 @@ func TestInteropSPQRGoChainKDFSelfConsistency(t *testing.T) {
 	t.Logf("verified %d unique message keys", len(seen))
 }
 
-// TestInteropSPQRRustToGoKeyParity verifies cross-impl key parity between
-// Rust and Go SPQR. Both sides initialize from the same auth_key (MinVersion=V1
-// so negotiation resolves immediately). Rust sends a native SCKA wire message;
-// Go's non-braid Recv now accepts SCKA format directly (Phase E wire convergence).
-//
-// The chain KDF inputs (auth_key, HKDF info strings, epoch, counter) are identical
-// between Rust and Go, so both sides must derive the same message key.
+// TestInteropSPQRRustToGoKeyParity checks Go derives Rust's message key from a Rust SCKA message.
 func TestInteropSPQRRustToGoKeyParity(t *testing.T) {
 	bin := requireBin(t)
 
@@ -542,8 +470,7 @@ func TestInteropSPQRRustToGoKeyParity(t *testing.T) {
 	t.Logf("Rust sender key: %s", rustKeyHex)
 	t.Logf("Rust wire msg (%d bytes): %s", len(rustMsgBytes), rustMsgHex)
 
-	// Go: init B2A state with MinVersion=V1 so negotiation resolves immediately.
-	// After Phase E, Go Recv accepts the Rust SCKA wire message natively.
+	// Go: init B2A with MinVersion V1.
 	goState, err := spqr.InitialStateWithParams(spqr.Params{
 		AuthKey:    authKey,
 		Version:    spqr.VersionV1,
@@ -556,7 +483,7 @@ func TestInteropSPQRRustToGoKeyParity(t *testing.T) {
 		t.Fatalf("Go InitialStateWithParams: %v", err)
 	}
 
-	// Go Recv with the native Rust SCKA wire message — no translation needed.
+	// Go receives the Rust SCKA message unchanged.
 	_, goKey, err := spqr.Recv(goState, rustMsgBytes)
 	if err != nil {
 		t.Fatalf("Go Recv with Rust SCKA message: %v", err)
@@ -576,17 +503,13 @@ func TestInteropSPQRRustToGoKeyParity(t *testing.T) {
 	}
 }
 
-// TestInteropSPQRGoToRustKeyParity is the reverse of TestInteropSPQRRustToGoKeyParity:
-// Go sends (producing a native SCKA wire message after Phase E), Rust receives,
-// and the keys are compared. This confirms bidirectional chain KDF and wire-format
-// compatibility.
+// TestInteropSPQRGoToRustKeyParity checks Rust derives Go's message key from a Go SCKA message.
 func TestInteropSPQRGoToRustKeyParity(t *testing.T) {
 	bin := requireBin(t)
 
 	authKey := []byte("interop-shared-auth-key-32bytes!")
 
-	// Go: init A2B with MinVersion=V1 and Send.
-	// After Phase E, Go Send produces a native SCKA wire message — no translation needed.
+	// Go: init A2B with MinVersion V1 and send.
 	goState, err := spqr.InitialStateWithParams(spqr.Params{
 		AuthKey:    authKey,
 		Version:    spqr.VersionV1,
@@ -612,7 +535,7 @@ func TestInteropSPQRGoToRustKeyParity(t *testing.T) {
 	t.Logf("Go sender key: %s", goKeyHex)
 	t.Logf("Go wire msg (%d bytes): %s", len(pqrMsg), hex.EncodeToString(pqrMsg))
 
-	// Verify Go produces SCKA format (version byte 0x01) after Phase E.
+	// Go must produce SCKA format (version byte 0x01).
 	if len(pqrMsg) == 0 {
 		t.Fatal("Go Send produced empty wire message")
 	}
@@ -620,7 +543,7 @@ func TestInteropSPQRGoToRustKeyParity(t *testing.T) {
 		t.Errorf("Go Send wire version byte: got 0x%02x, want 0x01 (SCKA format)", pqrMsg[0])
 	}
 
-	// Rust: init B2A state and recv Go's native SCKA message — no translation needed.
+	// Rust: init B2A and receive Go's SCKA message.
 	rustBobState := rustInit(t, bin, "b2a")
 	_, rustKeyHex := rustRecv(t, bin, rustBobState, hex.EncodeToString(pqrMsg))
 

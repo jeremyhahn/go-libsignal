@@ -1,12 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 1 test in this file exercises X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) and the Double Ratchet
-// specification (section 5.2) require it, so the fips140only build tag drops
-// this file from the FIPS gate. `make test` and `make coverage` still run
-// it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) and the Double Ratchet (section 5.2) require X25519.
 
 package tests
 
@@ -18,22 +12,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/sessionmanagement"
 )
 
-// TestSessionManagement_Facade_1kMessageRoundTrip stresses the
-// pkg/sessionmanagement facade across a long ratchet trace. Both sides
-// alternate sender/receiver so every message exercises a fresh chain
-// step. The test asserts:
-//
-//  1. Every plaintext round-trips exactly.
-//  2. No skipped-message keys leak across the run (no spurious
-//     session resets).
-//  3. Total runtime stays under 60 seconds — a regression sentinel
-//     for the per-message ratchet cost.
-//
-// The 1k-message budget is the same order of magnitude as Rust's
-// rust/protocol/tests/session.rs::test_basic_simultaneous_initiate,
-// which exercises ~50 ratchet steps. We stretch to 1k so any
-// non-deterministic state corruption surfaces statistically rather
-// than by luck.
+// TestSessionManagement_Facade_1kMessageRoundTrip alternates 1000 messages through pkg/sessionmanagement and checks every plaintext round-trips, no skipped keys remain, and the run takes under 60 seconds.
 func TestSessionManagement_Facade_1kMessageRoundTrip(t *testing.T) {
 	const messages = 1000
 

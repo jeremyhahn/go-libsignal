@@ -1,12 +1,4 @@
-// Conformance test: zkgroup profile-key encryption byte-identical to Rust.
-//
-// Mirrors rust/zkgroup/src/crypto/profile_key_encryption.rs::tests::test_profile_key_encryption:
-//
-//   1. let mut sho = Sho::new(b"Test_Profile_Key_Encryption", &TEST_ARRAY_32_1);
-//   2. let key_pair = KeyPair::derive_from(sho.as_mut());
-//   3. let profile_key = ProfileKeyStruct::new(TEST_ARRAY_32_1, TEST_ARRAY_16_1);
-//   4. let ciphertext = key_pair.encrypt(&profile_key);
-//   5. assert bincode::serialize(&ciphertext) == 64-byte expected hex.
+// Profile-key encryption must match Rust profile_key_encryption.rs test_profile_key_encryption's 64-byte ciphertext.
 
 package interop
 

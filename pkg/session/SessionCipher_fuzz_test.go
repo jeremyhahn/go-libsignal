@@ -1,30 +1,10 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 2 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) and the Double Ratchet
-// specification (section 5.2) require it, so the fips140only build tag drops
-// this file from the FIPS gate. `make test` and `make coverage` still run
-// it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) and the Double Ratchet (section 5.2) require X25519.
 
 package session_test
 
-// Fuzz targets for the session cipher's out-of-order / malformed message paths.
-//
-// These targets confirm that Decrypt and DecryptPreKeyMessage never panic on
-// arbitrary byte inputs — they must either succeed (return plaintext) or return
-// a typed error from pkg/session or pkg/protocol. Any panic is a bug.
-//
-// Seed corpus covers three representative failure modes per target:
-//   1. Truncated message — too short to parse.
-//   2. Plausible version byte but garbage body.
-//   3. Unknown version byte — unknown major/minor version fields.
-//
-// Run as a CI smoke-check:
-//
-//	go test -run=^$ -fuzz=FuzzDecryptSignalMessage -fuzztime=10s ./pkg/session/...
-//	go test -run=^$ -fuzz=FuzzDecryptPreKeyMessage -fuzztime=10s ./pkg/session/...
+// Fuzz targets: Decrypt and DecryptPreKeyMessage must return plaintext or a typed error, never panic, e.g. go test -run=^$ -fuzz=FuzzDecryptSignalMessage -fuzztime=10s ./pkg/session/...
 
 import (
 	"testing"
@@ -145,14 +125,7 @@ func buildFuzzSession(tb testing.TB) (aliceCipher *session.Cipher, bobBuilder *s
 	return aliceCipher, bobBuilder, bobCipher, ser.SignalMessage, ser.PreKeySignalMessage
 }
 
-// FuzzDecryptSignalMessage feeds mutated bytes to the SignalMessage deserializer
-// and then to Cipher.Decrypt. The cipher must not panic on any input.
-// A typed error return is acceptable; a panic is a bug.
-//
-// Seed corpus covers three representative malformed inputs:
-//   - Seed 0: 1-byte truncated message — too short to parse.
-//   - Seed 1: 10 bytes with a plausible v3 version prefix and garbage body.
-//   - Seed 2: unknown future version byte 0xFF.
+// FuzzDecryptSignalMessage checks Cipher.Decrypt never panics, seeded with truncated, v3-garbage and 0xFF-version inputs.
 func FuzzDecryptSignalMessage(f *testing.F) {
 	// Seed 0: truncated — 1 byte only.
 	f.Add([]byte{0x33})
@@ -174,14 +147,7 @@ func FuzzDecryptSignalMessage(f *testing.F) {
 	})
 }
 
-// FuzzDecryptPreKeyMessage feeds mutated bytes to the PreKeySignalMessage
-// deserializer and then to Cipher.DecryptPreKeyMessage. The cipher must not
-// panic on any input.
-//
-// Seed corpus:
-//   - Seed 0: 1-byte truncated message.
-//   - Seed 1: 12-byte message with a plausible v4 prefix but no body.
-//   - Seed 2: empty slice.
+// FuzzDecryptPreKeyMessage checks Cipher.DecryptPreKeyMessage never panics, seeded with truncated, v4-prefix-only and empty inputs.
 func FuzzDecryptPreKeyMessage(f *testing.F) {
 	// Seed 0: truncated — 1 byte only.
 	f.Add([]byte{0x44})

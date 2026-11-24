@@ -1,32 +1,6 @@
 package incremental_mlkem768
 
-// This file implements the public incremental ML-KEM-768 API matching the
-// libcrux-ml-kem incremental feature and the sparsepostquantumratchet crate's
-// incremental_mlkem768.rs wrapper.
-//
-// Rust upstream:
-//   - sparsepostquantumratchet/src/incremental_mlkem768.rs
-//   - libcrux-ml-kem v0.0.8 src/ind_cca/incremental.rs
-//   - libcrux-ml-kem v0.0.8 src/ind_cca/incremental/types.rs
-//
-// Public key layout (matches libcrux KeyPairCompressedBytes::pk1 / pk2):
-//   pk1 (64 bytes)  = seed_for_A(32) || H(ek)(32)
-//   pk2 (1152 bytes) = ByteEncode12(t_as_ntt[0]) || ... || ByteEncode12(t_as_ntt[k-1])
-//
-// Decapsulation key layout (KeyPairCompressedBytes, 2400 bytes):
-//   libcrux src/ind_cca/incremental/types.rs to_bytes_compressed lines 417-433:
-//   ByteEncode12(s_as_ntt[0..k]) || ByteEncode12(t[0..k]) || seed_for_A(32) || H(ek)(32) || z(32)
-//   = k*384 + k*384 + 32 + 32 + 32 = 1152 + 1152 + 96 = 2400 bytes
-//
-//   This matches the NIST FIPS 203 standard decapsulation key format:
-//   dk_pke(1152) || ek(1184) || H(ek)(32) || z(32) = 2400 bytes
-//   where ek = ByteEncode12(t) || rho = 1152 + 32 = 1184 bytes.
-//
-// Wire sizes:
-//   ct1: k * encodingSize10 = 960 bytes
-//   ct2: encodingSize4      = 128 bytes
-//   es:  EncapsStateSize    = 2080 bytes
-//   ss:  SharedSecretSize   = 32 bytes
+// Incremental ML-KEM-768 matching libcrux-ml-kem v0.0.8 incremental and SPQR incremental_mlkem768.rs: pk1 64 bytes, pk2 1152, dk 2400 (FIPS 203 layout), ct1 960, ct2 128, es 2080.
 
 import (
 	"crypto/rand"
@@ -60,11 +34,7 @@ func GenerateKey() (pk1 [PublicKey1Size]byte, pk2 [PublicKey2Size]byte, dk [Deca
 	return kemKeyGen(d, z)
 }
 
-// kemKeyGen implements ML-KEM.KeyGen_internal (FIPS 203 Algorithm 16) merged
-// with K-PKE.KeyGen (FIPS 203 Algorithm 13).
-//
-// Inputs d (32B CPA seed) and z (32B implicit-rejection seed).
-// Matches the Go stdlib's internal kemKeyGen in crypto/internal/fips140/mlkem/mlkem768.go.
+// kemKeyGen implements ML-KEM.KeyGen_internal with K-PKE.KeyGen (FIPS 203 Algorithms 16 and 13) from seeds d and z.
 func kemKeyGen(d, z []byte) (pk1 [PublicKey1Size]byte, pk2 [PublicKey2Size]byte, dk [DecapsKeySize]byte, err error) {
 	// Step 1: G(d || k) → (rho, sigma). The domain separator byte k=3 is
 	// appended per FIPS 203 Algorithm 16 and the Go stdlib implementation.
@@ -277,23 +247,7 @@ func Encaps2(es []byte, pk2 []byte) (ct2 [Ciphertext2Size]byte, err error) {
 		}
 	}
 
-	// The message mu in full K-PKE.Encrypt is Compress1^{-1}(encode(m)).
-	// In the incremental split, m was derived from randomness via G in Encaps1
-	// and encoded into 32 bytes. We re-derive it from the stored randomness.
-	//
-	// Per FIPS 203 Algorithm 17: the K-PKE.Encrypt call uses m (a 32-byte
-	// message from the hash) and r (pseudorandomness). In the split:
-	//   - Encaps1 used r to produce r_poly, e1, e2 and the A^T·r part of u
-	//   - Encaps2 uses t^T·r + e2 + Decompress1(m) for v
-	//
-	// We need to recover m. In the full encapsulation:
-	//   G(randomness || H(ek)) → (K, r)
-	// But m = randomness itself (the input to G before hashing), encoded as a
-	// 32-byte ring element message via Compress1.
-	//
-	// FIPS 203 Algorithm 14 K-PKE.Encrypt line 1: the message m is the 32-byte
-	// argument. In ML-KEM.Encaps_internal, m is the random seed passed into G.
-	// So mu = Decompress1(m) where m = randomness.
+	// mu = Decompress1(m), where m is the Encaps1 randomness (FIPS 203 Algorithms 14 and 17).
 	var msgArr [encodingSize1]byte
 	copy(msgArr[:], randomness[:])
 	mu := ringDecodeDecompress1(msgArr[:])
@@ -337,12 +291,7 @@ func Decaps(dk []byte, ct1 []byte, ct2 []byte) (ss [SharedSecretSize]byte, err e
 		return ss, &ErrInvalidInputLength{Name: "Decaps/ct2", Expected: Ciphertext2Size, Got: len(ct2)}
 	}
 
-	// Parse the 2400-byte compressed dk:
-	//   [0..1152]    ByteEncode12(s_ntt) — CPA secret key
-	//   [1152..2304] ByteEncode12(t_ntt) — encapsulation key part 1
-	//   [2304..2336] rho                 — encapsulation key part 2
-	//   [2336..2368] H(ek)
-	//   [2368..2400] z                  — implicit rejection seed
+	// dk layout: s_ntt[0:1152] t_ntt[1152:2304] rho[2304:2336] H(ek)[2336:2368] z[2368:2400].
 	off := 0
 	var s [k]nttElement
 	for i := range s {

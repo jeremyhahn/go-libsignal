@@ -245,10 +245,7 @@ func SealedSenderMultiRecipientEncrypt(
 			return nil, &V2InputError{Detail: fmt.Sprintf("nil session for destination %s", dest.String())}
 		}
 
-		// Parse the address name as a ServiceId, auto-detecting ACI vs PNI from
-		// the canonical "PNI:<uuid>" prefix. Rust uses ServiceId::parse_from_service_id_string
-		// which accepts both prefixed and bare UUID forms. Hard-coding ACI here would
-		// silently reject PNI-addressed destinations.
+		// Parse the name as a ServiceId, accepting ACI and PNI forms as Rust does.
 		sid, err := protocol.ServiceIdFromServiceIdString(dest.Name())
 		if err != nil {
 			return nil, &V2ParseError{Detail: fmt.Sprintf("invalid service ID for %s", dest.Name()), Err: err}
@@ -266,12 +263,7 @@ func SealedSenderMultiRecipientEncrypt(
 		}
 		identityPubRaw := remoteIdentity.PublicKey().PublicKey() // [32]byte
 
-		// Validate that the registration ID fits in 14 bits before truncating to
-		// uint16. Bit 15 is reserved for the has_more flag in the wire format;
-		// bits outside the valid mask indicate corruption or an invalid session
-		// state. The full uint32 must be checked first so that values in the
-		// range [0x4000, 0xFFFF] are correctly rejected rather than silently
-		// masked away by the uint16 truncation.
+		// The registration ID must fit 14 bits; check the full uint32 before truncating, since bit 15 is the has_more flag.
 		fullRegID := sess.SessionState().RemoteRegistrationID()
 		if fullRegID & ^uint32(v2ValidRegistrationIDMask) != 0 {
 			return nil, ErrInvalidRegistrationID
@@ -411,26 +403,12 @@ func v2SerializePublicKey(raw [32]byte) []byte {
 	return out
 }
 
-// v2BuildMessage serializes a v2 multi-recipient sealed sender message into the
-// Rust-compatible wire format. This is the backward-compatible entry point that
-// encodes no excluded recipients.
-//
-// Wire format per recipient entry:
-//
-//	ServiceId (17 bytes fixed-width binary)
-//	For each device:
-//	  device_id (1 byte, u8)
-//	  registration_id (2 bytes, u16 big-endian, bit 15 = has_more devices)
-//	C_i (32 bytes) || AT_i (16 bytes)
+// v2BuildMessage serializes a v2 message with no excluded recipients: per recipient a 17-byte ServiceId, device entries (u8 id, u16 BE registration ID with has_more bit 15), then C_i(32) || AT_i(16).
 func v2BuildMessage(version byte, recipients []v2RecipientOutput, ephPub, encryptedPayload []byte) ([]byte, error) {
 	return v2BuildMessageWithExcluded(version, recipients, nil, ephPub, encryptedPayload)
 }
 
-// v2BuildMessageWithExcluded serializes a v2 multi-recipient sealed sender message
-// including excluded recipients in the Rust-compatible wire format.
-//
-// Excluded recipients are encoded as: ServiceId (17 bytes) + device_id=0 (1 byte).
-// The recipient count varint includes both normal and excluded recipients.
+// v2BuildMessageWithExcluded serializes a v2 message; an excluded recipient is its ServiceId and device_id 0, counted in the recipient count.
 func v2BuildMessageWithExcluded(
 	version byte,
 	recipients []v2RecipientOutput,
@@ -678,10 +656,7 @@ func SealedSenderV2DecryptToUSMC(
 		return nil, &V2OperationError{Operation: "failed to deserialize USMC", Err: err}
 	}
 
-	// Step 7.5: Validate that the sender's UUID from the certificate is a
-	// well-formed ServiceId, auto-detecting ACI vs PNI from the "PNI:" prefix.
-	// Rust uses ServiceId::parse_from_service_id_string which accepts both
-	// prefixed and bare UUID forms; PNI-keyed sender certificates must succeed.
+	// The sender UUID must parse as an ACI or PNI ServiceId, as in Rust.
 	senderUUID := usmcContent.Sender().SenderUUID()
 	if senderUUID == "" {
 		return nil, &CertificateError{Detail: "sender certificate has empty UUID"}
@@ -757,11 +732,7 @@ type V2ReceivedMessage struct {
 	EncryptedPayload []byte // remaining bytes - common ciphertext
 }
 
-// v2ParseReceivedMessage parses a v2 received (single-recipient) message.
-// The received format is: version(1) || C(32) || AT(16) || E.pub(32) || ciphertext.
-//
-// This is the format described by UnidentifiedSenderMessage::deserialize in the
-// Rust reference for v2 messages (major version 2, version bytes 0x22 or 0x23).
+// v2ParseReceivedMessage parses a v2 received message (version 0x22 or 0x23).
 func v2ParseReceivedMessage(data []byte) (*V2ReceivedMessage, error) {
 	if len(data) < 1 {
 		return nil, ErrV2ReceivedMessageTooShort
@@ -972,13 +943,7 @@ func SealedSenderV2DecryptReceivedToUSMC(
 		return nil, ErrV2ReceivedDeserializeFailed
 	}
 
-	// Step 7.5: Validate that the sender's UUID from the certificate is a
-	// well-formed ServiceId, auto-detecting ACI vs PNI from the "PNI:" prefix.
-	// Rust uses ServiceId::parse_from_service_id_string which accepts both
-	// prefixed and bare UUID forms; PNI-keyed sender certificates must succeed.
-	// Without this check, a malformed certificate could pass AT verification
-	// (which only binds the identity key) but carry an invalid sender UUID
-	// that would cause failures downstream.
+	// The sender UUID must parse as an ACI or PNI ServiceId; AT binds only the identity key.
 	senderUUID := usmcContent.Sender().SenderUUID()
 	if senderUUID == "" {
 		return nil, ErrV2ReceivedDeserializeFailed
@@ -1034,14 +999,7 @@ func SealedSenderV2DecryptReceivedToUSMC(
 	return usmcContent, nil
 }
 
-// v2ParseMessage parses the body (after version byte) of a v2 multi-recipient message.
-//
-// The wire format uses the Rust reference encoding:
-//   - Recipient count as varint (includes excluded recipients)
-//   - Per recipient: ServiceId + device entries + C_i + AT_i
-//   - Device entries use single-byte device IDs with a has_more bit (0x8000) in
-//     the registration ID field
-//   - A device_id of 0 signals an excluded recipient (no further device data or C_i/AT_i)
+// v2ParseMessage parses a v2 body after the version byte: varint recipient count, then per recipient a ServiceId, device entries and C_i || AT_i; device_id 0 marks an excluded recipient.
 func v2ParseMessage(data []byte, version byte) (*SealedSenderV2SentMessage, error) {
 	offset := 0
 
@@ -1052,10 +1010,7 @@ func v2ParseMessage(data []byte, version byte) (*SealedSenderV2SentMessage, erro
 	}
 	offset += n
 
-	// Rust caps only the IndexMap *preallocation* at 6000; it never rejects
-	// a message based on recipient count. We mirror that: use a bounded
-	// preallocation but do not return an error for large counts. Callers
-	// (e.g. server policy enforcement) may impose their own cap after parsing.
+	// Cap only the preallocation at 6000, as Rust does; callers may enforce their own count limit.
 	const v2MaxPreallocRecipients = 6000
 	preallocCap := recipientCount
 	if preallocCap > v2MaxPreallocRecipients {
@@ -1093,10 +1048,7 @@ func v2ParseMessage(data []byte, version byte) (*SealedSenderV2SentMessage, erro
 			}
 		}
 
-		// Read device entries using the has_more bit protocol.
-		// Each device entry: device_id (1 byte u8) + registration_id (2 bytes u16 BE).
-		// Bit 15 (0x8000) of registration_id = has_more devices for this recipient.
-		// A device_id of 0 as the first entry means this is an excluded recipient.
+		// Device entry: device_id u8 and registration_id u16 BE with has_more in bit 15; device_id 0 first means excluded.
 		var deviceIDs []uint32
 		var regIDs []uint16
 
@@ -1173,12 +1125,7 @@ func v2ParseMessage(data []byte, version byte) (*SealedSenderV2SentMessage, erro
 				recipientOrder = append(recipientOrder, sidKey)
 			}
 		} else {
-			// Excluded recipient (device_id == 0): insert into the map with empty
-			// device/key-material so callers can distinguish "explicitly excluded"
-			// from "not in message". Mirrors Rust's IndexMap insert with
-			// devices:[] and c_and_at:[] for excluded entries.
-			// Inserting a second excluded entry for the same ServiceId is an error
-			// (matches Rust's "recipient redundantly encoded as empty" check).
+			// Record an excluded recipient with empty devices and key material, as Rust does; a second excluded entry for the same ServiceId is an error.
 			if existing, ok := recipients[sidKey]; ok {
 				if len(existing.DeviceIDs) == 0 {
 					return nil, &V2ParseError{Detail: "recipient redundantly encoded as empty"}

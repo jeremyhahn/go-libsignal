@@ -1,14 +1,4 @@
-// Port of the Rust libsignal incremental_mac test suite to Go.
-//
-// All tests use the same HMAC key and chunk size as the Rust reference:
-//   TEST_HMAC_KEY = a83481457efecc69ad1342e21d9c0297f71debbf5c9304b4c1b2e433c1a78f98
-//   TEST_CHUNK_SIZE = 32
-//
-// These vectors require chunk sizes below MinChunkSize (64 KiB) to be
-// accepted by New(), which was the divergence fixed by lowering the guard to
-// chunk_size > 0 (matching Rust's assert in incremental_mac.rs:50).
-//
-// Rust source: rust/protocol/src/incremental_mac.rs (test module, lines 140-452)
+// Port of the Rust incremental_mac tests with its HMAC key and 32-byte chunk size.
 
 package incrementalmac
 
@@ -64,13 +54,7 @@ func newRustIncremental(t *testing.T, chunkSize int) *Incremental {
 	return inc
 }
 
-// TestRustVectors_FinalResultEqualsNonIncrementalHMAC ports
-// final_result_should_be_equal_to_non_incremental_hmac.
-// Rust source: rust/protocol/src/incremental_mac.rs:184-195
-//
-// The Rust test uses proptest over inputs of 0-100 bytes. We exercise the
-// full range with deterministic inputs covering empty, sub-chunk, exact-chunk,
-// and multi-chunk cases.
+// TestRustVectors_FinalResultEqualsNonIncrementalHMAC ports final_result_should_be_equal_to_non_incremental_hmac over 0-100 byte inputs.
 func TestRustVectors_FinalResultEqualsNonIncrementalHMAC(t *testing.T) {
 	key := testHMACKey
 	chunkSize := testChunkSize
@@ -212,11 +196,6 @@ func TestRustVectors_IncrementalMACsAreValid(t *testing.T) {
 }
 
 // TestRustVectors_ValidatingSimpleTest ports validating_simple_test.
-// Rust source: rust/protocol/src/incremental_mac.rs:231-289
-//
-// Input: "this is a simple test input string" (34 bytes, > 1 chunk at size 32)
-// Sub-cases: valid, corrupt first MAC, corrupt final MAC, missing last MAC,
-// missing first MAC.
 func TestRustVectors_ValidatingSimpleTest(t *testing.T) {
 	key := testHMACKey
 	chunkSize := testChunkSize
@@ -314,17 +293,7 @@ func TestRustVectors_ValidatingSimpleTest(t *testing.T) {
 	})
 }
 
-// TestRustVectors_ValidatingReturnsRightSize ports validating_returns_right_size.
-// Rust source: rust/protocol/src/incremental_mac.rs:292-327
-//
-// Input: "this is a simple test input string" (34 bytes)
-// Chunk size: 32
-// Splitting into 16-byte feeds: 3 feeds (16+16+2)
-//
-//	feed 0: 16 bytes  -> no complete chunk  -> UpdateValidated returns 0
-//	feed 1: 16 bytes  -> completes chunk 0  -> UpdateValidated returns 32
-//	feed 2: 2 bytes   -> no complete chunk  -> UpdateValidated returns 0
-//	FinalizeValidated -> returns pending = 34 - 32 = 2
+// TestRustVectors_ValidatingReturnsRightSize ports validating_returns_right_size: 16+16+2 byte feeds return 0, 32, 0, then 2 pending.
 func TestRustVectors_ValidatingReturnsRightSize(t *testing.T) {
 	key := testHMACKey
 	chunkSize := testChunkSize
@@ -432,12 +401,7 @@ func TestRustVectors_ProduceAndValidate(t *testing.T) {
 	}
 }
 
-// TestRust_ChunkSizesSHA512 ports the chunk_sizes_sha512 test from the Rust
-// reference. SHA-512 has a 64-byte output, so targetChunkCount = 8192/64 = 128
-// (half of SHA-256's 256). This shifts the threshold where chunk sizes grow
-// from MinChunkSize to smaller data sizes relative to the SHA-256 case.
-//
-// Rust source: rust/protocol/src/incremental_mac.rs:379-397
+// TestRust_ChunkSizesSHA512 ports chunk_sizes_sha512 (128 target chunks).
 func TestRust_ChunkSizesSHA512(t *testing.T) {
 	const (
 		kibibytes = 1024

@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 16 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH requires X25519, so the fips140only tag drops this file.
 
 package sessionmanagement_test
 
@@ -782,11 +777,7 @@ func establishSignalMessageSession(t *testing.T, alice, bob *testParty, ser *ser
 	return signalMsg
 }
 
-// TestMessageDecryptSignal_WithMatchingLocalAddress verifies that when both
-// addresses are known and match the message's embedded binding, decryption
-// succeeds via the VerifyMacWithAddresses path.
-//
-// Codex finding P1 — with both addresses known + matching → decrypt succeeds.
+// TestMessageDecryptSignal_WithMatchingLocalAddress checks decryption succeeds when both addresses match the binding.
 func TestMessageDecryptSignal_WithMatchingLocalAddress(t *testing.T) {
 	ser := serialize.NewJSONSerializer()
 	alice := newTestParty(t, "alice_bind", 1, ser)
@@ -811,12 +802,7 @@ func TestMessageDecryptSignal_WithMatchingLocalAddress(t *testing.T) {
 	}
 }
 
-// TestMessageDecryptSignal_MismatchedLocalAddress verifies that when the
-// localAddress does not match the recipient embedded in the message's
-// addresses binding field, MessageDecryptSignal fails with the address-mismatch
-// typed error from pkg/protocol.
-//
-// Codex finding P1 — mismatched localAddress → decrypt FAILS with typed error.
+// TestMessageDecryptSignal_MismatchedLocalAddress checks a mismatched local address fails with the typed address-mismatch error.
 func TestMessageDecryptSignal_MismatchedLocalAddress(t *testing.T) {
 	ser := serialize.NewJSONSerializer()
 	alice := newTestParty(t, "alice_mm", 1, ser)
@@ -845,11 +831,7 @@ func TestMessageDecryptSignal_MismatchedLocalAddress(t *testing.T) {
 	}
 }
 
-// TestMessageDecryptSignal_NilLocalAddress verifies that passing a nil
-// localAddress skips address-binding enforcement, retaining backward
-// compatibility with legacy callers that do not supply a local address.
-//
-// Codex finding P1 — localAddress nil (legacy path) → decrypt succeeds.
+// TestMessageDecryptSignal_NilLocalAddress checks a nil local address skips address binding.
 func TestMessageDecryptSignal_NilLocalAddress(t *testing.T) {
 	ser := serialize.NewJSONSerializer()
 	alice := newTestParty(t, "alice_nil", 1, ser)
@@ -976,9 +958,7 @@ func setupSessionForCustom(t *testing.T, alice, bob *testParty, aliceAddr, bobAd
 	}
 }
 
-// TestBackCompat_PhoneNumberBothEndpoints exercises the back-compat fallback
-// when BOTH endpoints use phone-number names (non-canonical). Encryption and
-// decryption must succeed via the unbound legacy path.
+// TestBackCompat_PhoneNumberBothEndpoints checks phone-number names on both ends use the unbound path.
 func TestBackCompat_PhoneNumberBothEndpoints(t *testing.T) {
 	ser := serialize.NewJSONSerializer()
 	alice := newPhoneTestParty(t, "+15555550100", 1, ser)
@@ -1134,18 +1114,7 @@ func TestBackCompat_PNIBothEndpoints(t *testing.T) {
 	}
 }
 
-// =============================================================================
-// Finding 1 regression: double-commit of deferred.Complete()
-//
-// Before the fix, sessionmanagement.MessageDecryptPreKey called
-// deferred.Complete() AFTER SessionCipher.DecryptPreKeyMessage had ALREADY
-// called it internally. For a non-idempotent store (one that errors on the
-// second call to MarkKyberPreKeyUsed/RemovePreKey), this caused a spurious
-// error on what was otherwise a successful first message decrypt.
-//
-// The fix discards the returned *DeferredActions with `_`, so Complete() is
-// only called once — inside DecryptPreKeyMessage.
-// =============================================================================
+// MessageDecryptPreKey must not call deferred.Complete again after DecryptPreKeyMessage.
 
 // oneShotKyberStore wraps memKyberPreKeyStore and makes MarkKyberPreKeyUsed
 // succeed exactly once. A second call returns an error, simulating a
@@ -1166,19 +1135,7 @@ func (s *oneShotKyberStore) MarkKyberPreKeyUsed(id uint32, regID uint32, ik ecc.
 
 var _ store.KyberPreKey = (*oneShotKyberStore)(nil)
 
-// TestMessageDecryptPreKey_NoDoubleCommit verifies Finding 1: that
-// MessageDecryptPreKey does NOT call deferred.Complete() a second time after
-// SessionCipher.DecryptPreKeyMessage has already called it internally.
-//
-// Before the fix: MessageDecryptPreKey called deferred.Complete() again after
-// DecryptPreKeyMessage returned, which triggered a second call to
-// MarkKyberPreKeyUsed. With a non-idempotent store (one that errors on the
-// second call, e.g., because the key was already removed), this produced a
-// spurious error even though decryption succeeded.
-//
-// After the fix: deferred is discarded with `_`, so MarkKyberPreKeyUsed is
-// only called once (from within DecryptPreKeyMessage) and the one-shot store
-// does not see a second call. MessageDecryptPreKey succeeds.
+// TestMessageDecryptPreKey_NoDoubleCommit checks MarkKyberPreKeyUsed runs once, so a one-shot store does not error.
 func TestMessageDecryptPreKey_NoDoubleCommit(t *testing.T) {
 	ser := serialize.NewJSONSerializer()
 	alice := newTestParty(t, "alice_nodc", 1, ser)

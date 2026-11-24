@@ -1,12 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 3 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) and the Double Ratchet
-// specification (section 5.2) require it, so the fips140only build tag drops
-// this file from the FIPS gate. `make test` and `make coverage` still run
-// it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) and the Double Ratchet (section 5.2) require X25519.
 
 package tests
 
@@ -50,7 +44,7 @@ func TestSessionBuilder(t *testing.T) {
 		t.Fatalf("Unable to encrypt message: %v", err)
 	}
 
-	///////////// RECEIVER SESSION CREATION ///////////////
+	// Receiver session creation.
 
 	// Emulate receiving the message as JSON over the network.
 	messageBytes, err := message.Serialize()
@@ -112,7 +106,7 @@ func TestSessionRoundtrip(t *testing.T) {
 	alice.buildSession(bob.address, serializer)
 	bob.buildSession(alice.address, serializer)
 
-	///////////// SENDER SESSION CREATION ///////////////
+	// Sender session creation.
 
 	// Create a PreKeyBundle from Bob's prekey records with Kyber keys.
 	// Fetch Bob's prekey
@@ -128,7 +122,7 @@ func TestSessionRoundtrip(t *testing.T) {
 	aliceSessionCipher := session.NewCipherWithLocalAddress(alice.sessionBuilder, alice.address, bob.address)
 	aliceMessageStrings1, aliceMessages1 := sendMessages(1000, aliceSessionCipher, serializer, t)
 
-	///////////// RECEIVER SESSION CREATION ///////////////
+	// Receiver session creation.
 
 	// Create a session builder
 	bobSessionCipher := session.NewCipherWithLocalAddress(bob.sessionBuilder, bob.address, alice.address)
@@ -145,7 +139,7 @@ func TestSessionRoundtrip(t *testing.T) {
 		t.Fatalf("first message mismatch: got %q, want %q", string(firstPlaintext), aliceMessageStrings1[0])
 	}
 
-	/////////// ROUND TRIP 1 ////////////
+	// Round trip 1.
 	receiveMessages(aliceMessages1[1:], aliceMessageStrings1[1:], bobSessionCipher, t)
 
 	// Let Bob encrypt and send some messages.
@@ -154,14 +148,14 @@ func TestSessionRoundtrip(t *testing.T) {
 	// Let Alice decrypt the messages from Bob.
 	receiveMessages(bobMessages1, bobMessageStrings1, aliceSessionCipher, t)
 
-	/////////// ROUND TRIP 2 ////////////
+	// Round trip 2.
 	aliceMessageStrings2, aliceMessages2 := sendMessages(1000, aliceSessionCipher, serializer, t)
 	receiveMessages(aliceMessages2, aliceMessageStrings2, bobSessionCipher, t)
 
 	bobMessageStrings2, bobMessages2 := sendMessages(1000, bobSessionCipher, serializer, t)
 	receiveMessages(bobMessages2, bobMessageStrings2, aliceSessionCipher, t)
 
-	/////////// ROUND TRIP 3 ////////////
+	// Round trip 3.
 	aliceMessageStrings3, aliceMessages3 := sendMessages(1000, aliceSessionCipher, serializer, t)
 	receiveMessages(aliceMessages3, aliceMessageStrings3, bobSessionCipher, t)
 
@@ -183,7 +177,7 @@ func TestSessionOutOfOrder(t *testing.T) {
 	alice.buildSession(bob.address, serializer)
 	bob.buildSession(alice.address, serializer)
 
-	///////////// SENDER SESSION CREATION ///////////////
+	// Sender session creation.
 
 	// Create a PreKeyBundle from Bob's prekey records with Kyber keys.
 	// Fetch Bob's prekey
@@ -199,7 +193,7 @@ func TestSessionOutOfOrder(t *testing.T) {
 	aliceSessionCipher := session.NewCipherWithLocalAddress(alice.sessionBuilder, alice.address, bob.address)
 	aliceMessageStrings, aliceMessages := sendMessages(4, aliceSessionCipher, serializer, t)
 
-	///////////// RECEIVER SESSION CREATION ///////////////
+	// Receiver session creation.
 
 	// Create a session builder
 	bobSessionCipher := session.NewCipherWithLocalAddress(bob.sessionBuilder, bob.address, alice.address)
@@ -211,7 +205,7 @@ func TestSessionOutOfOrder(t *testing.T) {
 		t.Fatalf("Unable to process/decrypt prekeysignal message: %v", err)
 	}
 
-	/////////// ROUND TRIP 1 ////////////
+	// Round trip 1.
 	if string(plaintext3) != aliceMessageStrings[3] {
 		t.Fatalf("message 3 mismatch: got %q, want %q", string(plaintext3), aliceMessageStrings[3])
 	}

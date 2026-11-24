@@ -1,19 +1,4 @@
-// Conformance test: backup-key and backup-id derivation.
-//
-// Mirrors Rust's inline test_module tests in rust/account-keys/src/backup.rs:
-//   - backup_key_known_from_account_entropy
-//   - backup_id_known_from_account_entropy
-//
-// The fixture JSON at fixtures/accountkeys/backup_known_answers.json carries
-// the same hex constants as those Rust tests (AccountEntropyPool seed, fake
-// ACI UUID, expected BackupKey, expected BackupId). The drift detector
-// runs grep against the upstream source so a change to those Rust
-// constants fails the conformance gate before this test runs.
-//
-// Goal: prove byte-identical output between Go's
-// pkg/accountkeys.BackupKey derivation chain and Rust's
-// libsignal-account-keys for the same inputs. This exercises the
-// Argon2/HKDF info strings and the BackupKey → BackupId chain end-to-end.
+// Conformance: BackupKey and BackupId derivation against the Rust account-keys tests, from fixtures/accountkeys/backup_known_answers.json.
 
 package interop
 
@@ -72,15 +57,7 @@ func TestAccountKeys_BackupKey_FromEntropy_Known(t *testing.T) {
 	}
 }
 
-// TestAccountKeys_BackupId_FromEntropy_Known mirrors the Rust test
-// backup_id_known_from_account_entropy. The chain is:
-//
-//	AccountEntropyPool → BackupKey → BackupId(BackupKey, ACI).
-//
-// We verify the end of that chain matches Rust byte for byte, which also
-// transitively verifies (a) HKDF info string "20240801_SIGNAL_BACKUP_KEY",
-// (b) HKDF info "20241024_SIGNAL_BACKUP_ID:", and (c) the ACI binary
-// concatenation policy.
+// TestAccountKeys_BackupId_FromEntropy_Known checks AccountEntropyPool -> BackupKey -> BackupId(BackupKey, ACI) matches Rust.
 func TestAccountKeys_BackupId_FromEntropy_Known(t *testing.T) {
 	ka := loadBackupKnownAnswers(t)
 

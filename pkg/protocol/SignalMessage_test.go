@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 17 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) requires X25519.
 
 package protocol
 
@@ -349,13 +344,7 @@ func TestNewSignalMessageSerializeError(t *testing.T) {
 	}
 }
 
-// TestSignalMessageVerifyMac_NoLongerCallsSerializer verifies that VerifyMac
-// uses the retained wire bytes (serializedBytes) rather than re-serializing
-// the struct. Replacing the serializer with a failing one after construction
-// must NOT cause VerifyMac to return an error — the serializer is simply not
-// consulted. This is the regression test for the byte-malleability fix:
-// previously VerifyMac called Serialize() and would error when the serializer
-// failed; now it uses the pre-stored bytes unconditionally.
+// TestSignalMessageVerifyMac_NoLongerCallsSerializer checks VerifyMac uses the retained wire bytes, not the serializer.
 func TestSignalMessageVerifyMac_NoLongerCallsSerializer(t *testing.T) {
 	goodSerializer := &jsonSignalMessageSerializer{}
 	ratchetKey := newTestKeyPair(t)
@@ -576,12 +565,7 @@ func TestSignalMessageVersionValidation(t *testing.T) {
 	})
 }
 
-// TestSignalMessageVerifyMacAlwaysIncludesIdentityKeys verifies that getMac
-// unconditionally includes sender and receiver identity keys in the HMAC input,
-// matching Rust's SignalMessage::get_mac which always writes both keys
-// (rust/protocol/src/protocol.rs:230-246). The legacy v2 branch that omitted
-// identity keys has been removed; all supported versions (>= PreKyberVersion)
-// include identity keys.
+// TestSignalMessageVerifyMacAlwaysIncludesIdentityKeys checks the MAC always covers both identity keys.
 func TestSignalMessageVerifyMacAlwaysIncludesIdentityKeys(t *testing.T) {
 	serializer := &jsonSignalMessageSerializer{}
 	ratchetKey := newTestKeyPair(t)
@@ -616,11 +600,7 @@ func TestSignalMessageVerifyMacAlwaysIncludesIdentityKeys(t *testing.T) {
 	}
 }
 
-// TestNewSignalMessage_AddressBinding_ValidAddresses verifies that supplying two
-// valid ServiceId-format addresses (UUID names, device IDs 1-127) embeds the
-// address-binding field (proto field 6) in the resulting message.
-//
-// Codex finding P2 — valid addresses → binding present.
+// TestNewSignalMessage_AddressBinding_ValidAddresses checks valid addresses add the binding field.
 func TestNewSignalMessage_AddressBinding_ValidAddresses(t *testing.T) {
 	serializer := &jsonSignalMessageSerializer{}
 	ratchetKey := newTestKeyPair(t)
@@ -703,11 +683,7 @@ func TestNewSignalMessage_AddressBinding_DeviceIDTooLarge(t *testing.T) {
 	}
 }
 
-// TestNewSignalMessage_AddressBinding_BothNil verifies that the legacy
-// unbound path (both addresses nil) produces a message without the
-// addresses field and returns no error.
-//
-// Codex finding P2 — both addresses nil → binding absent, no error (legacy path).
+// TestNewSignalMessage_AddressBinding_BothNil checks nil addresses omit the binding field without error.
 func TestNewSignalMessage_AddressBinding_BothNil(t *testing.T) {
 	serializer := &jsonSignalMessageSerializer{}
 	ratchetKey := newTestKeyPair(t)

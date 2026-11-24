@@ -114,37 +114,20 @@ func (e *Encoder) TotalChunks() int {
 
 // Reset resets the encoder to the beginning of the first pass.
 func (e *Encoder) Reset() {
-	// The polynomial encoder's idx is a monotonically-increasing counter;
-	// re-create the encoder from the same message to reset to chunk 0.
-	// We reconstruct from the points that are already stored in the inner encoder.
-	// Since PolyEncoder.ChunkAt(idx) is pure, we can just reset the idx counter.
-	// The polynomial package exposes Idx() but not a setter — reconstruct by
-	// resetting sent and letting the inner encoder continue from its current idx.
-	// For a true reset we need to recreate the inner encoder. Capture the message
-	// from the existing points array.
+	// Recreate the inner encoder from its stored message to reset to chunk 0.
 	msg := encoderMessage(e.inner)
 	inner, err := polynomial.NewPolyEncoder(msg)
 	if err != nil {
-		// coverage-exempt: defensive invariant panic; message was validated at
-		// construction time so NewPolyEncoder cannot fail here. Cannot be unit-tested
-		// without corrupting internal state (see CLAUDE.md).
+		// coverage-exempt: the message was validated at construction, so this invariant panic is unreachable.
 		panic("mlkembraid: encoder Reset: unexpected polynomial error: " + err.Error())
 	}
 	e.inner = inner
 	e.sent = 0
 }
 
-// encoderMessage reconstructs the original message bytes from the inner
-// PolyEncoder's stored points (only valid before the first transition to Polys
-// state, which is the common case for Reset). In Polys state we evaluate at
-// x=0..N to recover the original points.
+// encoderMessage recovers the original message bytes from the inner encoder.
 func encoderMessage(e *polynomial.PolyEncoder) []byte {
-	// Walk chunk indices 0..(total-1) and pull raw point values.
-	// Each chunk at index i covers NumPolys=16 GF(2^16) elements.
-	// We reconstruct the message by calling ChunkAt on a clone of the encoder.
-	// Since ChunkAt is non-destructive (it only reads/lazily interpolates),
-	// the simplest approach is to use the existing inner encoder's ChunkAt
-	// to read the first-pass chunk data and concatenate their payloads.
+	// Concatenate the first-pass chunk payloads; ChunkAt does not change the encoder.
 
 	// Determine total chunks from the stored points length.
 	pts := e.Points()

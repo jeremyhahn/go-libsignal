@@ -1,23 +1,4 @@
-// Interop tests for valid message-backup encrypted frame cases.
-//
-// Source: rust/message-backup/tests/res/test-cases/valid-encrypted/*.binproto.encrypted
-// at Rust libsignal commit 98915c442d.
-//
-// The Rust test encrypted_proto_matches_source (test_cases.rs:287) verifies
-// that BackupReader::new_encrypted_compressed succeeds for each of these files
-// using the standard test key material:
-//
-//	AEP  = "mmm...m" (64 chars)
-//	ACI  = [0x11; 16]
-//	FST  = [0xAB; 32] (forward secrecy token, omitted for legacy cases)
-//
-// Here we drive pkg/backup.FrameDecryptor against the legacy CBC+HMAC format
-// (legacy-account.binproto.encrypted). The decoder must accept the bucketed
-// zero-padding that Rust's pad_gzipped_bucketed appends after the gzip stream
-// (see pkg/backup/frame.go for the gzip Multistream(false) hand-off).
-// The newer SBACKUP\x01 format is documented but not yet implemented in Go;
-// that fixture is loaded and its magic header is asserted to distinguish the
-// two formats.
+// Valid encrypted message-backup cases from rust/message-backup/tests/res/test-cases/valid-encrypted, with Rust's test keys (AEP "m"*64, ACI 0x11*16, FST 0xAB*32). FrameDecryptor reads the legacy CBC+HMAC case; for the SBACKUP\x01 format only the magic header is checked.
 package interop
 
 import (
@@ -75,19 +56,7 @@ func mbKeyFromFixture(t *testing.T, fix *mbCaseFixture) *backup.MessageBackupKey
 	}
 }
 
-// TestMessageBackup_ValidLegacyEncrypted verifies that the Rust-generated
-// legacy CBC+HMAC backup (legacy-account.binproto.encrypted) passes HMAC
-// verification in Go.
-//
-// Mirrors Rust's is_valid_encrypted_proto for legacy-account.binproto.encrypted
-// in rust/message-backup/tests/test_cases.rs:287.
-//
-// NOTE: The Rust format includes bucketed zero-padding (PadGzippedBucketed)
-// inside the AES-CBC region after the gzip stream. Go's FrameDecryptor
-// uses a simpler format without this padding. The HMAC therefore passes,
-// but full frame decoding fails at the gzip layer due to the trailing zeros
-// being interpreted as a second (invalid) gzip stream. This divergence is
-// documented: Go generates non-padded backups and reads non-padded backups.
+// TestMessageBackup_ValidLegacyEncrypted checks the Rust legacy backup passes HMAC verification; Go neither writes nor reads Rust's bucketed padding after the gzip stream.
 func TestMessageBackup_ValidLegacyEncrypted(t *testing.T) {
 	raw := loader.MustRead("messagebackup/cases/valid/legacy_account_encrypted.json")
 	var fix mbCaseFixture
@@ -123,13 +92,7 @@ func TestMessageBackup_ValidLegacyEncrypted(t *testing.T) {
 	t.Logf("Decoded %d frames from Rust legacy-format backup (source: %s)", len(frames), fix.Source)
 }
 
-// TestMessageBackup_ValidNewAccountFormat documents the newer SBACKUP\x01
-// backup format. The Go pkg/backup FrameDecryptor implements the legacy
-// CBC+HMAC format only; this test asserts the magic header is present so
-// any future FrameDecryptor extension can be verified.
-//
-// Mirrors Rust's is_valid_encrypted_proto for new-account.binproto.encrypted
-// in rust/message-backup/tests/test_cases.rs:287.
+// TestMessageBackup_ValidNewAccountFormat checks the new-account backup starts with SBACKUP\x01, a format FrameDecryptor does not read.
 func TestMessageBackup_ValidNewAccountFormat(t *testing.T) {
 	raw := loader.MustRead("messagebackup/cases/valid/new_account_encrypted.json")
 	var fix mbCaseFixture

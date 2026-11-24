@@ -1,16 +1,4 @@
-// Conformance test: zkgroup ProfileKeyCommitment byte-identical to Rust.
-//
-// Mirrors rust/zkgroup/src/crypto/profile_key_commitment.rs::tests::test_commitment:
-//
-//	let profile_key = ProfileKeyStruct::new(TEST_ARRAY_32, TEST_ARRAY_16);
-//	let c1 = CommitmentWithSecretNonce::new(profile_key, TEST_ARRAY_16);
-//	let c2 = CommitmentWithSecretNonce::new(profile_key, TEST_ARRAY_16);
-//	assert!(c1 == c2);
-//
-// The Rust test verifies determinism (same inputs → same output). The Go KAT
-// additionally pins the exact byte values of J1‖J2‖J3 (three compressed
-// Ristretto255 points, 96 bytes total) so any future drift in the computation
-// is caught as a byte-level regression.
+// Conformance: ProfileKeyCommitment is deterministic, as Rust test_commitment checks, and J1 || J2 || J3 (96 bytes) is pinned.
 
 package interop
 
@@ -27,13 +15,7 @@ type profileKeyCommitmentFixture struct {
 	ExpectedCommitmentHex string `json:"expected_commitment_hex"`
 }
 
-// TestZkgroup_ProfileKeyCommitment_KAT verifies that Go's
-// NewProfileKeyCommitmentWithSecretNonce produces a commitment whose J1‖J2‖J3
-// bytes are byte-identical to the Rust reference for the canonical
-// TEST_ARRAY_32 profile key and TEST_ARRAY_16 UUID inputs.
-//
-// Source: rust/zkgroup/src/crypto/profile_key_commitment.rs::tests::test_commitment
-// Fixture: tests/interop/fixtures/zkgroup/profile_key_commitment_known_answers.json
+// TestZkgroup_ProfileKeyCommitment_KAT checks NewProfileKeyCommitmentWithSecretNonce matches fixtures/zkgroup/profile_key_commitment_known_answers.json.
 func TestZkgroup_ProfileKeyCommitment_KAT(t *testing.T) {
 	raw := loader.MustRead("zkgroup/profile_key_commitment_known_answers.json")
 	var fx profileKeyCommitmentFixture

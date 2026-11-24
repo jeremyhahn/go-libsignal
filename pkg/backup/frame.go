@@ -26,12 +26,7 @@ const (
 	// malicious or corrupted stream from exhausting memory.
 	maxBackupSize = 100 * 1024 * 1024 * 1024 // 100 GiB
 
-	// maxDecompressedSize is the cumulative budget for decompressed frame
-	// bytes across a single backup stream. A gzip decompression bomb can
-	// expand far beyond the encrypted payload size; this cap limits the
-	// total cleartext accumulated in memory after HMAC verification.
-	// The check fires only for authenticated data (i.e., the caller holds
-	// the key) but guards against corrupt or adversarial backup generators.
+	// maxDecompressedSize caps the decompressed bytes of one backup stream against gzip bombs.
 	maxDecompressedSize = maxBackupSize // 100 GiB
 )
 
@@ -252,12 +247,7 @@ func (fd *FrameDecryptor) decryptPayloadWithBudget(content []byte, budget int64)
 	if err != nil {
 		return nil, &ErrCreatingGzipReader{Err: err}
 	}
-	// Rust libsignal's pad_gzipped_bucketed (rust/message-backup/src/export.rs:26)
-	// appends zero bytes after the gzip stream to round the encrypted region up
-	// to a bucketed length, then PKCS7-pads the result for AES-CBC. After
-	// decrypt+unpad those trailing zeros remain. Disable multistream so the
-	// reader returns EOF at the end of the first gzip stream rather than
-	// trying to parse the trailing zeros as a second gzip header.
+	// Single-stream gzip: Rust pads the gzip stream with zeros, which must not be parsed as a second header.
 	gzr.Multistream(false)
 	defer func() {
 		if cerr := gzr.Close(); cerr != nil && err == nil {
@@ -287,11 +277,7 @@ func (fd *FrameDecryptor) decryptPayloadWithBudget(content []byte, budget int64)
 	return frames, nil
 }
 
-// stripModernHeader parses the modern SBACKUP\x01 header from data. It
-// returns the payload (IV||ciphertext||HMAC) and any error. ValidateMetadata
-// is called on the parsed metadata before returning.
-//
-// Rust libsignal ref: rust/message-backup/src/frame/forward_secrecy.rs verify_metadata
+// stripModernHeader parses and validates the SBACKUP\x01 header and returns IV||ciphertext||HMAC.
 func stripModernHeader(data []byte) (payload []byte, err error) {
 	// Skip the 8-byte magic; it was already verified by the caller.
 	off := MagicNumberLen
@@ -327,21 +313,7 @@ func stripModernHeader(data []byte) (payload []byte, err error) {
 	return data[off:], nil
 }
 
-// decodeMetadataPb decodes a MetadataPb protobuf wire-format byte slice into
-// a BackupMetadata struct. It implements the minimal protobuf wire-format
-// decoder needed for this specific message type without requiring a generated
-// .pb.go file.
-//
-// MetadataPb wire format (rust/svrb/src/proto/backup_metadata.proto):
-//
-//	message MetadataPb {
-//	  repeated Pair pair = 1; // field 1, wire type 2 (LEN)
-//	  bytes iv = 2;           // field 2, wire type 2 (LEN)
-//	  message Pair {
-//	    bytes ct = 1;         // field 1, wire type 2 (LEN)
-//	    bytes pw_salt = 2;    // field 2, wire type 2 (LEN)
-//	  }
-//	}
+// decodeMetadataPb decodes a MetadataPb message (rust/svrb/src/proto/backup_metadata.proto).
 func decodeMetadataPb(b []byte) (*BackupMetadata, error) {
 	var meta BackupMetadata
 	for len(b) > 0 {
@@ -563,10 +535,7 @@ func (fe *FrameEncryptor) EncryptFramesModern(w io.Writer, frames [][]byte, meta
 	return nil
 }
 
-// encodeMetadataPb encodes a BackupMetadata into MetadataPb protobuf
-// wire format bytes. This is the inverse of decodeMetadataPb.
-//
-// Rust libsignal ref: rust/svrb/src/proto/backup_metadata.proto
+// encodeMetadataPb is the inverse of decodeMetadataPb.
 func encodeMetadataPb(meta *BackupMetadata) ([]byte, error) {
 	var buf bytes.Buffer
 	for _, pair := range meta.Pairs {

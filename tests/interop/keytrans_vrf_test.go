@@ -1,17 +1,4 @@
-// Keytrans VRF proof-to-hash conformance test.
-//
-// Drives pkg/keytrans.VRFPublicKey.ProofToHash against the three test vectors
-// extracted from rust/keytrans/src/vrf.rs::tests::TEST_VECTORS (the same
-// vectors exercised by test_proof_to_hash and test_encode_to_curve_try_and_increment).
-//
-// The Rust implementation is ECVRF-EDWARDS25519-SHA512-TAI (RFC 9381 TAI
-// variant). Each vector supplies a compressed Edwards25519 public key, a
-// message (alpha), and an 80-byte proof (pi). ProofToHash must verify the proof
-// and return the 32-byte VRF hash (beta) byte-for-byte identical to the Rust
-// reference.
-//
-// Rust source: rust/keytrans/src/vrf.rs:158-243
-// Upstream commit: 98915c442d
+// Keytrans VRF conformance: ProofToHash (ECVRF-EDWARDS25519-SHA512-TAI, RFC 9381) returns Rust's 32-byte beta for its three test vectors.
 package interop
 
 import (

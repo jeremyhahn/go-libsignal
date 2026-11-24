@@ -45,9 +45,7 @@ const (
 	AESGCMSIVKeySize = aesGCMSIVKeySize
 )
 
-// aesGCMSIV implements the crypto/cipher.AEAD interface for AES-256-GCM-SIV.
-// The key is stored in locked memory and must be destroyed via
-// Zeroize() when the cipher is no longer needed.
+// aesGCMSIV implements cipher.AEAD for AES-256-GCM-SIV; its key is in locked memory until Zeroize.
 type aesGCMSIV struct {
 	key *secret.Secret
 }
@@ -105,11 +103,7 @@ func (a *aesGCMSIV) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
 		panic("aesgcmsiv: incorrect nonce length")
 	}
 	if int64(len(plaintext)) > aesGCMSIVMaxPlaintextLen {
-		// panic: cryptographic invariant violation — plaintext exceeds the
-		// RFC 8452 §6 maximum (2^36 - 32). Inputs equal to the limit are
-		// permitted; only strictly larger inputs are rejected (matching the
-		// aesGCMSIVEncryptInternal bound). Checked here (not in aesGCMSIVCTR)
-		// so the panic is attributed to the public entry point.
+		// panic: plaintext exceeds the RFC 8452 §6 maximum (2^36 - 32).
 		panic("aesgcmsiv: plaintext exceeds RFC 8452 §6 maximum length")
 	}
 
@@ -257,15 +251,7 @@ func aesGCMSIVDecryptInternal(key, nonce, ciphertext, aad []byte) ([]byte, error
 	return plaintext, nil
 }
 
-// computeTag computes the AES-GCM-SIV authentication tag (synthetic IV)
-// per RFC 8452 Section 4.
-//
-// The tag is computed as:
-//  1. Build the POLYVAL input: pad(AAD) || pad(plaintext) || len(AAD) || len(plaintext)
-//  2. Compute POLYVAL over this input using the hash key.
-//  3. XOR the nonce into the result.
-//  4. Clear the most significant bit of the last byte.
-//  5. Encrypt the result with AES using the encryption key.
+// computeTag computes the synthetic IV tag per RFC 8452 §4.
 func computeTag(hashKey, encKey, nonce, plaintext, aad []byte) ([]byte, error) {
 	// Build POLYVAL input: padded AAD || padded plaintext || length block.
 	input := buildPolyvalInput(aad, plaintext)
@@ -331,14 +317,7 @@ func padToBlockSize(data []byte) []byte {
 // wrap back to the initial value, which would allow the 32-bit counter to alias.
 const aesGCMSIVMaxPlaintextLen = (1 << 36) - 32
 
-// aesGCMSIVCTR encrypts or decrypts data using AES-CTR mode with the
-// authentication tag as the initial counter value, per RFC 8452 Section 4.
-//
-// The counter is formed from the tag with the most significant bit of the
-// last byte set to 1, and only the first 32 bits are incremented.
-//
-// The caller is responsible for enforcing the plaintext length limit before
-// calling this function (see aesGCMSIVMaxPlaintextLen).
+// aesGCMSIVCTR runs AES-CTR from the tag with its top bit set, per RFC 8452 §4; the caller enforces the length limit.
 func aesGCMSIVCTR(encKey, tag, input, output []byte) {
 
 	block, err := aes.NewCipher(encKey)

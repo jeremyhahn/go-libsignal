@@ -71,11 +71,7 @@ func hashParamsFor(h gocrypto.Hash) (hashParams, error) {
 	}
 }
 
-// clonableHMAC holds the decomposed HMAC state: the running inner hash and
-// the pre-computed outer padding hash. This allows cloning the inner hash
-// (SHA-256 and SHA-512 both implement encoding.BinaryMarshaler) at chunk
-// boundaries to produce intermediate MACs without disrupting the running
-// computation.
+// clonableHMAC holds the running inner hash and outer pad hash, so intermediate MACs can be cloned at chunk boundaries.
 type clonableHMAC struct {
 	inner  hash.Hash  // H(ipad || data...) — accumulates all input
 	outer  []byte     // K XOR opad, pre-computed for the outer hash pass
@@ -172,9 +168,9 @@ type Incremental struct {
 //
 // The chunk size must be positive and at most MaxChunkSize. This matches the
 // Rust reference which asserts only chunk_size > 0 (incremental_mac.rs:50).
-// MinChunkSize is a recommended minimum for production use (good chunk-count
-// vs. overhead trade-off) but is no longer enforced here, allowing callers
-// and tests to use small chunk sizes such as the Rust test constant of 32.
+// MinChunkSize is a recommended minimum for production use but is not
+// enforced, so callers and tests can use small chunk sizes such as the Rust
+// test constant of 32.
 func New(key []byte, chunkSize int) (*Incremental, error) {
 	return NewWithHash(key, chunkSize, gocrypto.SHA256)
 }

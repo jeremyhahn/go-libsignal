@@ -155,17 +155,7 @@ func TestUnmarshalCompositeMessage_TooShort(t *testing.T) {
 
 // --- Many-message test to exercise advancePQEpoch and purgeOldSkippedKeys ---
 
-// TestEncryptDecrypt_ManyMessages exchanges enough messages to advance the SPQR
-// receive chain through many counter positions, exercising receivePQKey's
-// chain-stepping path and the snapshot/restore path across many messages.
-//
-// Round budget: the ML-KEM Braid SCKA completes when Bob receives all EK chunks
-// from Alice. With ChunkDataSize=32, the header envelope (96 bytes) takes 3
-// chunks (rounds 0-2) and the EK (1152 bytes) takes 36 chunks (rounds 3-38).
-// Bob calls bobCompleteEncapsulation at round 38, advances his PQ epoch, and
-// diverges from Alice who hasn't received CT2 yet. The test is bounded to 30
-// rounds — well below the 38-round boundary — to keep the braid pre-handshake.
-// A bidirectional braid integration test covers the full epoch-advance path.
+// TestEncryptDecrypt_ManyMessages runs 30 rounds, below the 38 at which Bob completes encapsulation, stepping the receive chain and snapshot path.
 func TestEncryptDecrypt_ManyMessages(t *testing.T) {
 	ss := randomSharedSecret(t)
 	alice, bob := newTestPair(t, ss)
@@ -349,19 +339,10 @@ func TestDecrypt_ECHeaderLengthExceedsData(t *testing.T) {
 	}
 }
 
-// TestDecrypt_BraidErrorAfterHandshake exercises the path where braid.Receive
-// returns an error after braidHandshakeComplete=true, which causes the error to
-// propagate rather than be suppressed.
-//
-// This is a whitebox-only test (requires internal state access) but we exercise
-// it from the blackbox by crafting a message where the SCKA part is invalid.
-// After a full session, the braid has advanced to a state where it rejects
-// replayed or corrupt SCKA messages.
+// TestDecrypt_BraidErrorAfterHandshake checks a corrupt SCKA part after the handshake makes Decrypt fail.
 func TestDecrypt_BraidErrorAfterHandshake(t *testing.T) {
 	ss := randomSharedSecret(t)
-	// Use a session that has exchanged enough messages to be "handshake-complete"
-	// after a direct epoch injection (tested here via the blackbox interface by
-	// fabricating a message with a corrupt SCKA section).
+	// Use a session past the handshake and a message with a corrupt SCKA section.
 
 	// Build a fresh pair and encrypt a message to get a valid composite structure.
 	alice, bob := newTestPair(t, ss)
@@ -375,8 +356,7 @@ func TestDecrypt_BraidErrorAfterHandshake(t *testing.T) {
 		t.Fatalf("initial Decrypt: %v", err)
 	}
 
-	// Now construct a message with a corrupt (but syntactically valid-looking) SCKA.
-	// Encrypt another message and corrupt the SCKA region.
+	// Encrypt another message and corrupt its SCKA region.
 	ct2, err := alice.Encrypt([]byte("second message"))
 	if err != nil {
 		t.Fatalf("Encrypt 2: %v", err)

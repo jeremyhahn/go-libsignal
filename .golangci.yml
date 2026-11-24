@@ -1,11 +1,4 @@
-# golangci-lint v2 configuration for go-libsignal.
-#
-# conventions/devops.md §8 requires staticcheck, errcheck, unused, ineffassign,
-# misspell and gocritic to be enabled here — installing the umbrella with the
-# security linters off does not satisfy that section.
-#
-# staticcheck's check list mirrors staticcheck.conf so `make lint` and
-# `make staticcheck` cannot disagree. Keep the two in sync.
+# golangci-lint v2 configuration; the staticcheck check list mirrors staticcheck.conf.
 version: "2"
 
 run:
@@ -19,10 +12,7 @@ linters:
     - ineffassign
     - staticcheck
     - unused
-    # misspell carries no locale on purpose. The tree is written in British
-    # English ("behaviour", "serialised", "amortised"); pinning locale: US
-    # would turn 42 deliberate spellings into lint failures. Without a locale
-    # misspell still catches genuine typos, which is what §8 wants from it.
+    # No misspell locale: the tree uses British spelling on purpose.
     - misspell
     - gocritic
     - bodyclose
@@ -33,10 +23,7 @@ linters:
       check-blank: false
 
     staticcheck:
-      # Mirrors staticcheck.conf. ST1003 (initialisms) and ST1016 (receiver
-      # name consistency) are deferred to the v1.0 rename pass; both are
-      # API-breaking to fix and are documented in staticcheck.conf,
-      # CONTRIBUTING.md and CHANGELOG.md.
+      # Mirrors staticcheck.conf; ST1003 and ST1016 are API-breaking and deferred to v1.0.
       checks:
         - "all"
         - "-ST1003"

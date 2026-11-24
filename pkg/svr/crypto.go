@@ -34,10 +34,7 @@ func arrXOR(from, into []byte) {
 	}
 }
 
-// kdf derives a key of the given length using HKDF-SHA256 with the
-// concatenation of input1 and input2 as IKM and info as the info parameter.
-// No salt is used. The intermediate concatenation buffer is protected in
-// guarded memory and destroyed after use.
+// kdf derives length bytes by unsalted HKDF-SHA256 over input1 || input2 with info, concatenating in guarded memory.
 func kdf(info, input1, input2 []byte, out []byte) {
 	concat := make([]byte, 0, len(input1)+len(input2))
 	concat = append(concat, input1...)
@@ -106,10 +103,7 @@ func scalarsSummingTo(n int, s *ristretto255.Scalar) []*ristretto255.Scalar {
 	return result
 }
 
-// bytesXORingTo returns n byte slices that XOR together to produce b.
-// The first n-1 are random; the last is computed so the XOR equals b.
-// All intermediate random buffers used during computation are zeroized
-// after being copied into the result slices.
+// bytesXORingTo returns n slices that XOR to b: n-1 random and the last computed, zeroizing the scratch.
 func bytesXORingTo(n int, b []byte) [][]byte {
 	if n <= 0 {
 		panic("svr: bytesXORingTo called with n <= 0")
@@ -118,10 +112,7 @@ func bytesXORingTo(n int, b []byte) [][]byte {
 	// Accumulator for XOR shares — zeroized after computing the final share.
 	xor := make([]byte, len(b))
 	copy(xor, b)
-	// buf is reused for generating random bytes. After each iteration the
-	// random material is copied into the result and the buffer XOR'd into
-	// the accumulator. We zeroize buf after the loop to prevent the last
-	// intermediate share from lingering in memory.
+	// Zeroize buf after the loop so no share lingers.
 	buf := make([]byte, len(b))
 	for i := 0; i < n-1; i++ {
 		if _, err := io.ReadFull(rand.Reader, buf); err != nil {
@@ -158,9 +149,7 @@ func authPt(input *[64]byte, kOprf *ristretto255.Scalar) *ristretto255.Element {
 	return ristretto255.NewIdentityElement().ScalarMult(kOprf, inputHashPt(input))
 }
 
-// authSecret derives the master authorization key from the input and the
-// authentication point. The returned secret is in guarded memory and must
-// be destroyed by the caller when no longer needed.
+// authSecret derives the master authorization key in guarded memory; the caller destroys it.
 func authSecret(input *[64]byte, authPoint *ristretto255.Element) *secret.Secret {
 	raw := kdf32(
 		[]byte("Signal_SVR_MasterAuthorizationKey_20240823"),
@@ -190,11 +179,7 @@ func authCommitments(serverIDs []uint64, input *[64]byte, authPoint *ristretto25
 				kAuthBytes,
 				idBytes[:],
 			)
-			// The Rust reference uses Scalar::hash_from_bytes::<Sha512>(&k),
-			// which computes SHA-512(k) and then calls
-			// from_bytes_mod_order_wide on the 64-byte hash output. We must
-			// replicate this: SHA-512 first, then SetUniformBytes (which
-			// performs mod-order reduction on 64 bytes).
+			// Reduce SHA-512(k) mod order, as Rust Scalar::hash_from_bytes::<Sha512> does.
 			h := sha512.Sum512(k[:])
 			crypto.ZeroizeArray64(&k)
 			s, serr := ristretto255.NewScalar().SetUniformBytes(h[:])
@@ -236,9 +221,7 @@ func zeroizeScalars(scalars []*ristretto255.Scalar) {
 	}
 }
 
-// encryptionKey derives the output encryption key from the encryption secret
-// share and the auth key. The returned secret is in guarded memory and must
-// be destroyed by the caller when no longer needed.
+// encryptionKey derives the output encryption key from the secret share and auth key, in guarded memory the caller destroys.
 func encryptionKey(sEnc []byte, kAuth []byte) *secret.Secret {
 	raw := kdf32([]byte("Signal_SVR_EncryptionKey_20240823"), sEnc, kAuth)
 	defer crypto.ZeroizeArray32(&raw)

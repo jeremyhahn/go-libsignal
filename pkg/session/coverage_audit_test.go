@@ -1,12 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 9 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) and the Double Ratchet
-// specification (section 5.2) require it, so the fips140only build tag drops
-// this file from the FIPS gate. `make test` and `make coverage` still run
-// it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) and the Double Ratchet (section 5.2) require X25519.
 
 package session_test
 
@@ -50,15 +44,7 @@ func TestErrorIs_NonSessionErrorTarget(t *testing.T) {
 	}
 }
 
-// TestProcessV3_SessionAlreadyExists verifies that processV3 short-circuits
-// when a session state for the same base key already exists in the record.
-// This covers Session.go lines 202-205 (sessionExists early return).
-// Processing the same PreKeySignalMessage twice triggers this path: the second
-// call finds an existing session state and returns nil,nil,nil without error.
-//
-// We use a bundle WITHOUT a one-time pre-key to avoid the pre-key removal
-// confounding the test. A Kyber-only bundle (no one-time prekey) allows the
-// second Process call to proceed even if HasSessionState doesn't trigger.
+// TestProcessV3_SessionAlreadyExists checks a repeated PreKeySignalMessage finds the existing session state and returns nil without error.
 func TestProcessV3_SessionAlreadyExists(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	alice := newTestUser(t, "Alice", 1, serializer)
@@ -67,9 +53,7 @@ func TestProcessV3_SessionAlreadyExists(t *testing.T) {
 	alice.buildSession(t, bob.address, serializer)
 	bob.buildSession(t, alice.address, serializer)
 
-	// Use a bundle WITHOUT a one-time pre-key so the pre-key store is not
-	// mutated by deferred1.Complete(). This simplifies the test of processV3's
-	// sessionExists path by removing the confounding pre-key removal.
+	// No one-time pre-key, so Complete leaves the pre-key store alone.
 	if err := alice.sessionBuilder.ProcessBundle(bob.kyberBundleNoOneTimePreKey()); err != nil {
 		t.Fatal(err)
 	}
@@ -185,17 +169,7 @@ func TestProcessV3_SessionAlreadyExists_ThenDecrypt(t *testing.T) {
 	}
 }
 
-// TestSelfSessionLargeJump verifies the self-session forward-jump exemption in
-// getOrCreateMessageKeys (SessionCipher.go lines 559-563). When a session's local
-// and remote identity keys are the same (self-session for linked device sync),
-// counter gaps exceeding maxFutureMessages=25000 are allowed.
-//
-// This test constructs a self-session by injecting a matching remote identity key
-// into the session state JSON, then verifying that a session with SessionWithSelf=true
-// can be established. Since generating 25001 messages in a test is impractical, we
-// verify the property by creating an SPQR-injected session state and checking
-// that decryption doesn't error with ErrTooFarIntoFuture. The meaningful assertion
-// is that the path is reachable and the session is recognized as a self-session.
+// TestSelfSessionLargeJump checks a self-session (matching identity keys) is recognized and exempt from the 25000 forward-jump limit.
 func TestSelfSessionLargeJump(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	// Use the same user as both sender and receiver (self-session).
@@ -231,10 +205,7 @@ func TestSelfSessionLargeJump(t *testing.T) {
 	t.Log("Self-session confirmed: SessionWithSelf=true")
 }
 
-// TestSPQRActiveEncryptPath verifies that the SPQR encrypt path in Encrypt
-// (SessionCipher.go lines 117-124: pqrErr != nil branch) is handled correctly.
-// We inject a V1 SPQR state and verify that a failed pqr.Send would propagate.
-// This test also verifies that normal SPQR-active Encrypt works end-to-end.
+// TestSPQRActiveEncryptPath checks Encrypt and Decrypt with SPQR V1 active.
 func TestSPQRActiveEncryptPath(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	alice := newTestUser(t, "Alice", 1, serializer)
@@ -661,10 +632,7 @@ func TestDecrypt_ZeroizesMessageKeys(t *testing.T) {
 	}
 }
 
-// TestEncryptAndDecrypt_MultipleRounds verifies encrypt/decrypt across multiple
-// message exchanges covering the encrypt helper and the normal (non-SPQR) path
-// in getOrCreateMessageKeys. Both the in-order and the forward-ratchet paths
-// (where counter == chainKey.Index()) are exercised.
+// TestEncryptAndDecrypt_MultipleRounds checks several exchanges on the in-order and forward-ratchet paths.
 func TestEncryptAndDecrypt_MultipleRounds(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	alice := newTestUser(t, "Alice", 1, serializer)

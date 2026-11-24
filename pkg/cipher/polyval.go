@@ -27,17 +27,7 @@ import (
 // polyvalBlockSize is the size of a POLYVAL block in bytes (128 bits).
 const polyvalBlockSize = 16
 
-// polyval computes POLYVAL over the given input blocks using the provided
-// hash key H. The input length must be a multiple of 16 bytes.
-//
-// POLYVAL is defined as:
-//
-//	POLYVAL(H, X_1, X_2, ..., X_s) iteratively computes:
-//	  S_0 = 0
-//	  S_i = dot(S_{i-1} XOR X_i, H)
-//	  result = S_s
-//
-// This is implemented via the GHASH relationship from RFC 8452 Section 3.
+// polyval computes POLYVAL over 16-byte blocks with hash key H through the GHASH relationship of RFC 8452 §3.
 func polyval(h, input []byte) []byte {
 	if len(input)%polyvalBlockSize != 0 {
 		// panic: cryptographic invariant violation — all callers pass input
@@ -55,8 +45,7 @@ func polyval(h, input []byte) []byte {
 		// ByteReverse the input block and XOR into state.
 		// ByteReverse reverses the order of bytes in the 16-byte block.
 		for j := 0; j < 4; j++ {
-			// Read as little-endian uint32 from input (which effectively
-			// byte-reverses when we treat it as big-endian GHASH state).
+			// Little-endian reads byte-reverse the input for the big-endian GHASH state.
 			w := binary.LittleEndian.Uint32(input[i+12-j*4 : i+16-j*4])
 			s[j] ^= w
 		}
@@ -74,12 +63,7 @@ func polyval(h, input []byte) []byte {
 	return result
 }
 
-// toGHASHKey converts a POLYVAL key to a GHASH key by computing
-// mulX_GHASH(ByteReverse(H)).
-//
-// mulX_GHASH multiplies by x in the GHASH field, which is a right shift
-// of the 128-bit value with conditional XOR of the reduction constant
-// (0xe1 << 120) if the lowest bit was set.
+// toGHASHKey computes mulX_GHASH(ByteReverse(H)): a right shift with conditional reduction by 0xe1 << 120.
 func toGHASHKey(h []byte) [4]uint32 {
 	// ByteReverse: reverse byte order of the 16-byte key.
 	var rev [16]byte
@@ -87,8 +71,7 @@ func toGHASHKey(h []byte) [4]uint32 {
 		rev[i] = h[15-i]
 	}
 
-	// mulX_GHASH: right-shift by 1 bit with polynomial reduction.
-	// Check if the LSB (bit 127 in GHASH convention) is set.
+	// mulX_GHASH: right shift by one bit with reduction when the low bit is set.
 	hiBit := rev[15] & 1
 
 	// Right-shift the entire 128-bit value by 1.
@@ -99,10 +82,7 @@ func toGHASHKey(h []byte) [4]uint32 {
 		carry = (t & 1) << 7
 	}
 
-	// Constant-time conditional XOR with the reduction constant.
-	// In GHASH, the reduction polynomial (excluding x^128) is
-	// x^7 + x^2 + x + 1 = 0xe1 at byte 0.
-	// mask is 0xFF when hiBit==1, 0x00 when hiBit==0.
+	// Constant-time XOR of the reduction constant 0xe1; mask is 0xFF when hiBit is 1.
 	mask := -hiBit // 0xFF when hiBit=1, 0x00 when hiBit=0
 	rev[0] ^= 0xe1 & mask
 
@@ -116,14 +96,7 @@ func toGHASHKey(h []byte) [4]uint32 {
 	return key
 }
 
-// ghashMul multiplies the GHASH state s by key h in-place.
-//
-// The multiplication is performed in GF(2^128) with the polynomial
-// x^128 + x^7 + x^2 + x + 1, using big-endian bit ordering.
-//
-// This uses a bit-by-bit multiply-and-reduce approach. For each bit of
-// the state, if set, XOR the key (shifted appropriately) into the result,
-// then double the key (multiply by x) with polynomial reduction.
+// ghashMul multiplies s by h in place in GF(2^128) modulo x^128 + x^7 + x^2 + x + 1, bit by bit.
 func ghashMul(s *[4]uint32, h *[4]uint32) {
 	// We'll iterate over each bit of s (128 bits total), and for each
 	// set bit, XOR the current value of v (which represents h * x^i)
@@ -147,8 +120,7 @@ func ghashMul(s *[4]uint32, h *[4]uint32) {
 			z[2] ^= v[2] & mask
 			z[3] ^= v[3] & mask
 
-			// Double v: v = v * x in the GHASH field.
-			// This is a right-shift with constant-time reduction.
+			// v = v * x with constant-time reduction.
 			lsb := v[3] & 1
 			v[3] = (v[3] >> 1) | (v[2] << 31)
 			v[2] = (v[2] >> 1) | (v[1] << 31)
@@ -163,16 +135,7 @@ func ghashMul(s *[4]uint32, h *[4]uint32) {
 	*s = z
 }
 
-// derivePolyvalKey derives the POLYVAL hash key and AES encryption key from
-// a master AES key and nonce, as specified in RFC 8452 Section 4.
-//
-// For AES-256-GCM-SIV, six key-derivation blocks are computed:
-//
-//	Blocks 0-1: message_authentication_key (POLYVAL hash key, 16 bytes)
-//	Blocks 2-5: message_encryption_key (AES-256 key, 32 bytes)
-//
-// Each block is formed by encrypting le32(counter) || nonce with the
-// master key and taking only the first 8 bytes.
+// derivePolyvalKey derives the POLYVAL key (blocks 0-1) and AES-256 key (blocks 2-5) from AES(le32(i) || nonce), RFC 8452 §4.
 func derivePolyvalKey(aesKey, nonce []byte) (hashKey, encKey []byte, err error) {
 	block, err := aes.NewCipher(aesKey)
 	if err != nil {

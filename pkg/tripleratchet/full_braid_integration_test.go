@@ -1,11 +1,4 @@
-// Package tripleratchet whitebox tests for advancePQEpoch, purgeOldSkippedKeys,
-// and takeSnapshot exercised via direct internal-state manipulation and
-// single-direction braid message exchange.
-//
-// These tests live in package tripleratchet (not tripleratchet_test) to allow
-// direct inspection and mutation of unexported fields (pqEpoch, sendCounter,
-// recvCounter, braidHandshakeComplete, skippedPQKeys) without adding exported
-// accessor surface area.
+// White-box tests for advancePQEpoch, purgeOldSkippedKeys and takeSnapshot.
 package tripleratchet
 
 import (
@@ -82,9 +75,7 @@ func braidRandomSharedSecret(t *testing.T) []byte {
 	return buf
 }
 
-// newUnidirectionalPair creates an Alice/Bob TripleRatchet pair where ONLY
-// Alice→Bob message exchange is used. This is the only reliably exercisable
-// direction before the braid handshake completes.
+// newUnidirectionalPair creates an Alice and Bob pair that only sends Alice to Bob, the direction that works before the handshake completes.
 func newUnidirectionalPair(t *testing.T) (alice, bob *TripleRatchet, ss []byte) {
 	t.Helper()
 	ss = braidRandomSharedSecret(t)
@@ -106,15 +97,7 @@ func newUnidirectionalPair(t *testing.T) (alice, bob *TripleRatchet, ss []byte) 
 	return alice, bob, ss
 }
 
-// injectEpochAdvance directly advances a TripleRatchet's PQ epoch using a
-// test epoch secret, exercising the advancePQEpoch code path without requiring
-// a full braid handshake. This is the whitebox path for testing advancePQEpoch.
-//
-// advancePQEpoch calls secret.New(epochSecret) which uses
-// the locked-memory constructor — this destructively zeroes the input slice.
-// injectEpochAdvance therefore makes an independent copy so the caller's slice
-// is not clobbered. Callers that need to pass the same secret to multiple
-// TripleRatchet instances must call injectEpochAdvance separately for each.
+// injectEpochAdvance calls advancePQEpoch with a copy of epochSecret, since secret.New zeroes its input.
 func injectEpochAdvance(t *testing.T, tr *TripleRatchet, epochSecret []byte) {
 	t.Helper()
 	secretCopy := make([]byte, len(epochSecret))
@@ -126,13 +109,7 @@ func injectEpochAdvance(t *testing.T, tr *TripleRatchet, epochSecret []byte) {
 
 // ---- Tests ----
 
-// TestTripleRatchet_AdvancePQEpoch_DirectCall exercises advancePQEpoch directly
-// via whitebox access. It verifies that:
-//   - pqEpoch increments
-//   - sendCounter and recvCounter reset to 0
-//   - braidHandshakeComplete becomes true
-//   - chain keys are replaced with new values derived from the epoch secret
-//   - a subsequent Encrypt/Decrypt round succeeds with the new chain keys
+// TestTripleRatchet_AdvancePQEpoch_DirectCall checks advancePQEpoch bumps the epoch, resets counters, completes the handshake, replaces the chain keys and still encrypts and decrypts.
 func TestTripleRatchet_AdvancePQEpoch_DirectCall(t *testing.T) {
 	alice, bob, _ := newUnidirectionalPair(t)
 
@@ -161,7 +138,7 @@ func TestTripleRatchet_AdvancePQEpoch_DirectCall(t *testing.T) {
 	if _, err = io.ReadFull(rand.Reader, epochSecret); err != nil {
 		t.Fatalf("rand: %v", err)
 	}
-	// Use the SAME epoch secret for both parties (as the braid would produce).
+	// Both parties get the same epoch secret, as the braid would produce.
 	injectEpochAdvance(t, alice, epochSecret)
 	injectEpochAdvance(t, bob, epochSecret)
 
@@ -248,12 +225,7 @@ func TestTripleRatchet_AdvancePQEpoch_MultipleEpochs(t *testing.T) {
 	}
 }
 
-// TestTripleRatchet_PurgeOldSkippedKeys_DirectCall exercises purgeOldSkippedKeys
-// via direct whitebox manipulation. It:
-//  1. Creates a TripleRatchet and populates skippedPQKeys with keys from multiple epochs.
-//  2. Sets pqEpoch high enough so the older epochs fall below the retention cutoff.
-//  3. Calls purgeOldSkippedKeys() directly.
-//  4. Verifies old-epoch keys are removed and current-epoch keys are retained.
+// TestTripleRatchet_PurgeOldSkippedKeys_DirectCall checks purgeOldSkippedKeys drops keys from epochs before the cutoff and keeps current ones.
 func TestTripleRatchet_PurgeOldSkippedKeys_DirectCall(t *testing.T) {
 	ss := braidRandomSharedSecret(t)
 	ec := newBraidECCipher(ss)
@@ -414,12 +386,7 @@ func TestTripleRatchet_PurgeOldSkippedKeys_ViaAdvanceEpoch(t *testing.T) {
 	}
 }
 
-// TestTripleRatchet_TakeSnapshot_PostEpochAdvance verifies that takeSnapshot
-// captures all post-advancePQEpoch state fields correctly:
-//   - braidData is non-empty
-//   - pqEpoch matches the live value
-//   - handshakeDone is true after epoch advance
-//   - skippedPQKeys deep-copy path is exercised (snapshot has the right count)
+// TestTripleRatchet_TakeSnapshot_PostEpochAdvance checks takeSnapshot captures braid data, epoch, handshake flag and skipped keys after an epoch advance.
 func TestTripleRatchet_TakeSnapshot_PostEpochAdvance(t *testing.T) {
 	alice, bob, _ := newUnidirectionalPair(t)
 
@@ -497,7 +464,7 @@ func TestTripleRatchet_Restore_FromPostEpochSnapshot(t *testing.T) {
 		t.Fatalf("Alice.Encrypt: %v", err)
 	}
 
-	// Take snapshot of Bob BEFORE decrypting.
+	// Snapshot Bob before decrypting.
 	snap, snapErr := bob.takeSnapshot()
 	if snapErr != nil {
 		t.Fatalf("takeSnapshot: %v", snapErr)
@@ -691,13 +658,7 @@ func TestTripleRatchet_AdvancePQEpoch_SymmetricChainDerivation(t *testing.T) {
 	injectEpochAdvance(t, alice, epochSecret)
 	injectEpochAdvance(t, bob, epochSecret)
 
-	// Alice (initiator, isResponder=false): sendChain = newCKs, recvChain = newCKr
-	// Bob  (responder,  isResponder=true):  sendChain = newCKr, recvChain = newCKs
-	//
-	// Therefore: Alice.sendChain == Bob.recvChain (both = newCKs)
-	//            Alice.recvChain == Bob.sendChain (both = newCKr)
-	//
-	// A single Encrypt/Decrypt round confirms this structural invariant.
+	// Alice sends on newCKs and receives on newCKr; Bob the reverse, so one round trip confirms the pairing.
 	msg := []byte("chain symmetry check")
 	ct, encErr := alice.Encrypt(msg)
 	if encErr != nil {

@@ -39,10 +39,7 @@ var Zero = GF16{Value: 0}
 // One is the multiplicative identity in GF(2^16). Matches Rust's GF16::ONE.
 var One = GF16{Value: 1}
 
-// reduceBytes is the precomputed lookup table for polynomial reduction.
-// reduceBytes[b] encodes the u16 XOR contribution when byte b appears
-// in bit positions [24..32] or [16..24] of an unreduced u32 product.
-// Matches Rust's REDUCE_BYTES.
+// reduceBytes[b] is the XOR contribution of byte b in the high bits of an unreduced product (Rust REDUCE_BYTES).
 var reduceBytes [256]uint16
 
 func init() {
@@ -150,17 +147,7 @@ func (g GF16) Inv() (GF16, error) {
 	return GF16{Value: divImpl(One.Value, g.Value)}, nil
 }
 
-// divImpl computes num * denom^(2^16-2) = num / denom using Fermat's little
-// theorem in GF(2^16). denom must be non-zero.
-//
-// This is a direct port of Rust's div_impl / const_div:
-//
-//	square = denom * denom    // denom^2
-//	out = num
-//	for i in 1..16:
-//	  square, out = square*square, out*square
-//	  // after i=k: square=denom^(2^(k+1)*2), out=num*denom^(2^(k+1)-2)
-//	  // after i=15: out = num * denom^(2^16-2) = num / denom
+// divImpl returns num * denom^(2^16-2) = num/denom for non-zero denom, a port of Rust div_impl.
 func divImpl(num, denom uint16) uint16 {
 	square := rawMul(denom, denom) // denom^2
 	out := num

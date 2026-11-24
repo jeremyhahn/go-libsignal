@@ -35,11 +35,7 @@ func NewSenderKeyFromBytes(serialized []byte, serializer SenderKeySerializer,
 func NewSenderKeyFromStruct(structure *SenderKeyStructure, serializer SenderKeySerializer,
 	stateSerializer SenderKeyStateSerializer) (*SenderKey, error) {
 
-	// Build our sender key states from structure. Each successful call allocates
-	// guarded clones, so a malformed later state must not abandon the earlier
-	// ones: without the cleanup below, a peer supplying records whose last state
-	// is invalid could strand every preceding state's signing key, chain key and
-	// message keys, one record at a time.
+	// Build the states, releasing earlier ones if a later state is malformed.
 	senderKeyStates := make([]*SenderKeyState, len(structure.SenderKeyStates))
 	handedOver := false
 	defer func() {
@@ -193,11 +189,7 @@ func (k *SenderKey) Serialize() ([]byte, error) {
 	return k.serializer.Serialize(st)
 }
 
-// structure will return a simple serializable record structure.
-// This is used for serialization to persistently store a session record.
-// Each SenderKeyStateStructure is zeroized after the enclosing Serialize call
-// via the deferred Zeroize on the returned SenderKeyStructure.
-// On failure every state structure built so far is released before returning.
+// structure returns the serializable record structure; failures release every state structure built so far.
 func (k *SenderKey) structure() (_ *SenderKeyStructure, err error) {
 	structure := &SenderKeyStructure{
 		SenderKeyStates: make([]*SenderKeyStateStructure, len(k.senderKeyStates)),

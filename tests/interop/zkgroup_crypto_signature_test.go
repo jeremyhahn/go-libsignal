@@ -1,26 +1,4 @@
-// Interop test for zkgroup Schnorr signature parity.
-//
-// Source: rust/zkgroup/src/crypto/signature.rs:73-115 at commit 98915c442d.
-//
-// Rust's test_signature() generates a SignatureKeyPair via
-// Sho(HMAC-SHA256, b"Test_Signature") then absorbs TEST_ARRAY_32, signs
-// TEST_ARRAY_32_1, and pins the 64-byte signature. It also verifies that
-// flipping message byte 0 causes verify to fail.
-//
-// Go equivalent: poksho.Sign / poksho.Verify via zkgroup.SignatureKeyPair.
-//
-// NOTE: the intermediate SHO randomness fed to key generation and signing
-// is consumed in sequence; the Rust test calls sho.get_scalar() then
-// sho.squeeze_as_array::<32>() for the signing randomness. The Go API
-// abstracts the exact scalar/randomness schedule through
-// zkgroup.GenerateSignatureKeyPair + SignatureKeyPair.Sign. Because the
-// two calls share the same SHO state there is an order dependency. The
-// sign step's randomness must come from the same SHO after GenerateSignatureKeyPair
-// has consumed its scalar. If the Go SHO ratcheting differs from Rust's
-// the resulting bytes will diverge. We therefore assert only on:
-//  1. Sign + Verify round-trip succeeds.
-//  2. Verify on a tampered message fails.
-//  3. The expected bytes from the Rust test, with a skip note if they differ.
+// zkgroup Schnorr signatures against Rust test_signature: sign and verify round-trip and a tampered message fails; a byte mismatch with Rust is logged, as the SHO schedule may differ.
 package interop
 
 import (
@@ -60,12 +38,7 @@ type zkSigExpect struct {
 	VerifyResult string `json:"verify_result"`
 }
 
-// TestZKGroup_CryptoSignature drives zkgroup.SignatureKeyPair.{Sign,Verify}
-// against vectors extracted from rust/zkgroup/src/crypto/signature.rs.
-//
-// The primary assertion is round-trip correctness and tamper rejection.
-// Byte-level signature identity depends on matching SHO ratcheting between
-// Go and Rust; if they diverge this test logs the difference without failing.
+// TestZKGroup_CryptoSignature checks Sign and Verify round-trip and reject tampering, logging any byte difference from Rust.
 func TestZKGroup_CryptoSignature(t *testing.T) {
 	raw := loader.MustRead("zkgroup/crypto/signature.json")
 	var fix zkSigFixture

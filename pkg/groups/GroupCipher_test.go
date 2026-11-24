@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 17 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH requires X25519, so the fips140only tag drops this file.
 
 package groups
 
@@ -1060,12 +1055,7 @@ func TestErrorIsMismatchedKind(t *testing.T) {
 	}
 }
 
-// TestDecryptUsesDistributionIDFromMessage verifies that Decrypt uses the
-// distribution_id embedded in the SenderKeyMessage for the store lookup,
-// matching the Rust reference group_decrypt behavior. A message encrypted
-// with distribution_id A must be looked up in the store under the group ID
-// derived from distribution_id A, regardless of what group ID the
-// GroupCipher was constructed with.
+// TestDecryptUsesDistributionIDFromMessage checks Decrypt looks up the store by the message's distribution ID, not the cipher's group ID.
 func TestDecryptUsesDistributionIDFromMessage(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 
@@ -1103,9 +1093,7 @@ func TestDecryptUsesDistributionIDFromMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Bob's cipher is constructed with a DIFFERENT group ID string ("wrong-group"),
-	// but Decrypt should still succeed because it uses the distribution ID
-	// from the message (distA) to derive the store lookup key.
+	// Bob's cipher has a different group ID; Decrypt still uses the message's distribution ID.
 	wrongName := protocol.NewSenderKeyName("wrong-group", aliceAddress)
 	bobCipher := NewGroupCipher(bobBuilder, wrongName, bobStore)
 

@@ -146,8 +146,8 @@ func NewKeysFromStruct(structure *KeysStructure) (_ *Keys, err error) {
 // stored (cipher_key, mac_key, iv populated; seed empty), matching the Keys
 // variant of into_pb.
 //
-// Every component is cloned guarded-to-guarded, so serialization no longer
-// stages message key material on the heap. Callers must Zeroize the returned
+// Every component is cloned guarded-to-guarded, so serialization does not
+// stage message key material on the heap. Callers must Zeroize the returned
 // structure once the serializer has consumed it; on failure everything cloned
 // so far is released before returning.
 func NewStructFromKeys(keys *Keys) (_ *KeysStructure, err error) {

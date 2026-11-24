@@ -12,12 +12,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 )
 
-// maxForwardJumps limits the forward jump in sender key iteration.
-// Unlike the 1:1 session cipher which pre-checks total skipped keys,
-// the group cipher iterates up to maxForwardJumps HMAC derivations per
-// message. This matches the Rust reference (group_cipher.rs) where
-// MAX_FORWARD_JUMPS is the only limit. The per-add eviction in
-// AddSenderMessageKey caps stored keys at maxMessageKeys=2000.
+// maxForwardJumps limits the sender key chain advance per message, as Rust group_cipher.rs MAX_FORWARD_JUMPS.
 const maxForwardJumps = 25000
 
 // NewGroupCipher will return a new group message cipher that can be used for
@@ -209,10 +204,7 @@ func (c *GroupCipher) getSenderKey(senderKeyState *record.SenderKeyState, iterat
 		return nil, newOldCounterError(senderChainKey.Iteration(), iteration)
 	}
 
-	// Guard against uint32 underflow: if iteration < chainIteration the
-	// subtraction wraps, producing a very large value that exceeds the limit.
-	// The earlier branch (chainIteration > iteration) should catch this, but
-	// we defend against it explicitly for safety.
+	// Guard against uint32 underflow explicitly.
 	jump := iteration - senderChainKey.Iteration()
 	if jump > maxForwardJumps {
 		return nil, &Error{kind: errTooManyFutureMessages}

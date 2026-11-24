@@ -137,9 +137,7 @@ type hpkeSender struct {
 	publicKey hpke.PublicKey
 }
 
-// hpkeReceiver holds a parsed recipient private key for opening.
-// Call Zeroize when the receiver is no longer needed to clear private key
-// material from memory.
+// hpkeReceiver holds a recipient private key; call Zeroize when done.
 type hpkeReceiver struct {
 	privateKey   hpke.PrivateKey
 	privKeyBytes []byte

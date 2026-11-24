@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 10 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the Noise_NK_25519_ChaChaPoly_SHA256 pattern Signal uses to reach its
-// SGX and HSM enclaves requires it, so the fips140only build tag drops this
-// file from the FIPS gate. `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): these tests use X25519 for Signal's Noise NK pattern.
 
 // Copyright 2024 Signal Messenger, LLC.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -563,15 +558,7 @@ func TestPreQuantumHandshakeStillWorks(t *testing.T) {
 	}
 }
 
-// TestDecodeRaftGroupConfig_GiantVarintLength is a regression test for Finding 3
-// (pre-auth DoS via crafted varint in the length-delimited protobuf branch).
-// Before the fix, a varint encoding 2^63 caused int(length) to be negative,
-// bypassing the "offset += int(length)" bounds, triggering a panic or data
-// corruption.  The fix validates length in uint64 arithmetic before the int()
-// cast and returns ProtobufDecodeError.
-//
-// The crafted input: tag 0x52 (field 10, wire type 2) followed by the 10-byte
-// varint for 2^63 = {0x80 × 9, 0x01}.
+// TestDecodeRaftGroupConfig_GiantVarintLength feeds a 2^63 length varint and expects ProtobufDecodeError.
 func TestDecodeRaftGroupConfig_GiantVarintLength(t *testing.T) {
 	// varint encoding of 2^63: nine 0x80 continuation bytes then 0x01.
 	tag := byte(0x52) // field 10, wire type 2 (length-delimited)

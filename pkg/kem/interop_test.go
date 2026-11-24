@@ -1,23 +1,6 @@
 package kem
 
-// Cross-implementation compatibility tests for the KEM wrappers.
-//
-// These tests verify:
-//
-//  1. Key sizes match the specification (round-3 Kyber for Kyber-768/1024,
-//     NIST FIPS 203 for ML-KEM-768).
-//  2. The same seed always produces the same key material (determinism) for
-//     circl-based KEMs.
-//  3. Encapsulate/Decapsulate round-trips succeed with deterministic seeds.
-//  4. The go-libsignal wrappers produce results that are byte-identical to
-//     direct circl calls for the same inputs (Kyber-1024 only; ML-KEM-768
-//     uses stdlib crypto/mlkem which is not byte-compatible with circl
-//     Kyber-768).
-//
-// Algorithm parameter sizes:
-//
-//	ML-KEM-768 (FIPS 203): pk=1184, sk seed=64, ct=1088, ss=32
-//	Kyber-1024 (round 3):  pk=1568, sk=3168,    ct=1568, ss=32, keySeed=64
+// KEM wrapper tests: key sizes, seed determinism, round trips, and byte parity with circl for Kyber-1024.
 
 import (
 	"bytes"

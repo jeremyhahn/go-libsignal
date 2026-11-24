@@ -6,10 +6,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 )
 
-// alternateIdentityPrefix1 is the first domain-separation prefix for
-// alternate-identity signatures: 32 bytes of 0xFF.
-// Mirrors Rust ALTERNATE_IDENTITY_SIGNATURE_PREFIX_1 in
-// rust/protocol/src/identity_key.rs.
+// alternateIdentityPrefix1 is 32 bytes of 0xFF (Rust ALTERNATE_IDENTITY_SIGNATURE_PREFIX_1).
 var alternateIdentityPrefix1 = func() []byte {
 	b := make([]byte, 32)
 	for i := range b {
@@ -18,10 +15,7 @@ var alternateIdentityPrefix1 = func() []byte {
 	return b
 }()
 
-// alternateIdentityPrefix2 is the second domain-separation prefix:
-// the ASCII bytes of "Signal_PNI_Signature".
-// Mirrors Rust ALTERNATE_IDENTITY_SIGNATURE_PREFIX_2 in
-// rust/protocol/src/identity_key.rs.
+// alternateIdentityPrefix2 is "Signal_PNI_Signature" (Rust ALTERNATE_IDENTITY_SIGNATURE_PREFIX_2).
 var alternateIdentityPrefix2 = []byte("Signal_PNI_Signature")
 
 // buildAltIdentityMessage constructs the message to sign/verify for alternate-identity

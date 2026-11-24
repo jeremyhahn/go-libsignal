@@ -1,22 +1,4 @@
-// Functional round-trip conformance tests for zkgroup credential flows that
-// have no static hex vectors in the Rust test suite.
-//
-// Each test mirrors the corresponding Rust test file exactly — same canonical
-// randomness seeds, same ServiceID byte values, same room IDs, same timestamps,
-// same flow order — so that any algorithmic divergence from the Rust reference
-// implementation will cause the round-trip to fail rather than pass silently.
-//
-// Sources:
-//   - rust/zkgroup/tests/backup_auth_flow.rs   → TestZkgroupFlow_BackupAuth
-//   - rust/zkgroup/tests/call_link_flow.rs      → TestZkgroupFlow_CallLinkCreateCredential
-//                                                  TestZkgroupFlow_CallLinkCreateEnforcesTimestamp
-//                                                  TestZkgroupFlow_CallLinkAuthCredential
-//                                                  TestZkgroupFlow_CallLinkAuthEnforcesTimestamp
-//   - rust/zkgroup/tests/group_send_endorsements.rs → TestZkgroupFlow_GroupSendEndorsement
-//                                                       TestZkgroupFlow_GroupSendSingleMember
-//                                                       TestZkgroupFlow_GroupSendRejectsExpiration
-//   - rust/zkgroup/tests/receipt_flow.rs        → TestZkgroupFlow_ReceiptApi
-//                                                  TestZkgroupFlow_ReceiptRejectsNonDayAligned
+// Round-trip zkgroup flows mirroring Rust backup_auth_flow, call_link_flow, group_send_endorsements and receipt_flow with the same inputs.
 
 package interop
 
@@ -26,8 +8,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/zkgroup"
 )
 
-// dayAlignedTimestamp mirrors DAY_ALIGNED_TIMESTAMP in the Rust tests:
-// 1681344000 = 2023-04-13 00:00:00 UTC.
+// dayAlignedTimestamp is Rust DAY_ALIGNED_TIMESTAMP, 2023-04-13 00:00:00 UTC.
 const dayAlignedTimestamp uint64 = 1681344000
 
 // ---- Backup auth flow -------------------------------------------------------

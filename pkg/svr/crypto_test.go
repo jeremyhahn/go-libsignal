@@ -99,13 +99,7 @@ func TestBytesXORingToPanic(t *testing.T) {
 	bytesXORingTo(0, []byte{1})
 }
 
-// testPassword builds an SVR password fixture of the length production uses.
-// Every caller of NewOPRFBackup4 / NewRestore1 in Signal passes
-// BackupKey.DeriveForwardSecrecyPassword output, which is always 32 bytes
-// (docs/backup/account-keys.md). Fixtures match that length so the tests
-// exercise the same key size as production -- and so they stay inside the
-// FIPS 140-3 gate, which rejects HKDF keys shorter than 112 bits
-// (docs/FIPS.md).
+// testPassword builds a 32-byte password, the length of BackupKey.DeriveForwardSecrecyPassword output and above the FIPS 112-bit HKDF minimum.
 func testPassword(label string) []byte {
 	pw := make([]byte, 32)
 	copy(pw, label)

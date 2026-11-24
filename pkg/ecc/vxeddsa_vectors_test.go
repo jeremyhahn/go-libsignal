@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 4 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH requires X25519, so the fips140only tag drops this file.
 
 package ecc
 
@@ -34,17 +29,7 @@ type deterministicVector struct {
 	negated bool   // whether calculateEdwardsKeyPair negates the scalar
 }
 
-// regressionVectors returns the set of deterministic test vectors generated
-// from the current implementation. Each vector covers a different combination
-// of key material, message content, and random input.
-//
-// Vector selection rationale:
-//   - vector0: C library key, empty message, all-zero random
-//   - vector1: C library key, "This is unique." message, sequential random
-//   - vector2: key requiring sign negation, ASCII message, all-0xFF random
-//   - vector3: minimal key requiring negation, binary message, 0xAA random
-//   - vector4: key requiring negation, 256-byte zero message, zero random
-//   - vector5: key without negation, 4-byte zero message, 0x42 random
+// regressionVectors returns deterministic vectors covering keys with and without sign negation, varied messages and random inputs.
 func regressionVectors() []deterministicVector {
 	return []deterministicVector{
 		{

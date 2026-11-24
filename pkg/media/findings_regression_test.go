@@ -1,14 +1,6 @@
 package media
 
-// findings_regression_test.go — regression tests for the five code-review
-// findings fixed in this batch.  Each test covers exactly the failure mode
-// described in the finding and must NOT panic.
-//
-// Finding 1 (CRITICAL): panic on crafted mdat larger than file.
-// Finding 2 (MEDIUM):   silent uint32 truncation after stco→co64 promotion.
-// Finding 3 (MEDIUM):   VP8X 16383 canvas-dimension cap (removed).
-// Finding 4 (LOW):      VP8L short code at chunk boundary → ErrLosslessTruncated.
-// Finding 5 (LOW):      faststart re-parse without DecModeLazyMdat (perf fix).
+// Regression tests for five media review findings; none may panic.
 
 import (
 	"bytes"
@@ -44,9 +36,7 @@ func buildFaststartMP4WithInflatedMdat(inflatedSize uint32) []byte {
 	return buf.Bytes()
 }
 
-// buildFaststartMP4WithLargeBoxMdat builds a faststart MP4 where the mdat box
-// uses a 16-byte large-box (ISO BMFF extended-size) header claiming a 64-bit
-// size near math.MaxInt64.
+// buildFaststartMP4WithLargeBoxMdat builds a faststart MP4 whose 64-bit mdat size is near math.MaxInt64.
 func buildFaststartMP4WithLargeBoxMdat(size64 uint64) []byte {
 	ftyp := javaFtyp()
 	moov := buildMoovWithStco([]uint32{0})
@@ -213,21 +203,7 @@ func buildMP4With2TrakStco(payload []byte, off1, off2 uint32) []byte {
 	return buf.Bytes()
 }
 
-// TestFinding2_Regression_MultiTrakPostPromotionOverflow verifies that when
-// promoting trak1's stco→co64 increases delta enough to cause trak2's stco
-// to overflow uint32, the fixed-point promotion loop promotes trak2 as well.
-//
-// Layout: ftyp(20) | mdat(12) | moov(112, 2 traks with 1 stco entry each).
-// originalMdatStart = 20.
-// moovLen = 112; D0 = 112.
-//
-// trak1 stco[0] = 0xFFFFFF90 → 0xFFFFFF90+112 = 4294967296 > MaxUint32 → promoted.
-// After promotion: moovLen = 116; D1 = 116.
-// trak2 stco[0] = 0xFFFFFF8F → 0xFFFFFF8F+112 = MaxUint32 (safe with D0), but
-//
-//	0xFFFFFF8F+116 = 4294967299 > MaxUint32 → promoted by fixed-point pass 2.
-//
-// ISO BMFF §8.7.5; Rust mp4san stco→co64 promotion.
+// TestFinding2_Regression_MultiTrakPostPromotionOverflow checks that promoting one trak to co64 also promotes a trak it pushes past MaxUint32 (ISO BMFF §8.7.5).
 func TestFinding2_Regression_MultiTrakPostPromotionOverflow(t *testing.T) {
 	const (
 		trak1Off = uint32(0xFFFFFF90) // 4294967184: overflows with D0=112
@@ -295,14 +271,7 @@ func TestFinding2_Regression_MultiTrakPostPromotionOverflow(t *testing.T) {
 // trak whose stco fits after promotion (no secondary overflow) is handled
 // correctly by the fixed-point loop exiting after one pass.
 func TestFinding2_Regression_SingleTrakSafeWithFinalDelta(t *testing.T) {
-	// Use an offset that overflows with D0 but not with D1.
-	// moovLen with 1 trak, 1 stco entry = 60; D0 = 60.
-	// After promotion: moovLen = 64; D1 = 64.
-	// off = 0xFFFFFFC0 (4294967232): 4294967232+60=4294967292 ≤ MaxUint32 — no overflow.
-	// Actually we need overflow on first pass to trigger promotion. Use 0xFFFFFFF0+1:
-	// 0xFFFFFFF1 + 60 = 4294967297 > MaxUint32 → promote in pass 1.
-	// After promotion D1 = 64: 0xFFFFFFF1 + 64 = 4294967301 > MaxUint32?
-	// ... that's still >MaxUint32, so co64 handles it fine.
+	// 0xFFFFFFF1 overflows on the first pass, forcing promotion; co64 then holds it.
 	const off = uint32(0xFFFFFFF0)
 	payload := []byte{0x01, 0x02, 0x03, 0x04}
 	input := buildMP4WithStco(payload, []uint32{off})
@@ -334,12 +303,7 @@ func TestFinding2_Regression_SingleTrakSafeWithFinalDelta(t *testing.T) {
 // Finding 3 — VP8X dimensions above old 16383 cap are accepted
 // ---------------------------------------------------------------------------
 
-// TestFinding3_Regression_VP8XDimAbove16383Accepted verifies that a WebP with
-// VP8X canvas dimensions between 16384 and 65536 (actual) is accepted when the
-// pixel count does not overflow uint32.
-//
-// webpsan 0.5.3 oracle: only pixel-count overflow is rejected; there is no
-// per-dimension cap.
+// TestFinding3_Regression_VP8XDimAbove16383Accepted checks VP8X dimensions above 16383 pass when the pixel count fits uint32, as in webpsan 0.5.3.
 func TestFinding3_Regression_VP8XDimAbove16383Accepted(t *testing.T) {
 	// storedW = storedH = 16384 → actual = 16385.
 	// 16385 * 16385 = 268,370,225 << 0xFFFFFFFF → must be accepted.
@@ -384,15 +348,7 @@ func TestFinding3_Regression_VP8XPixelOverflowStillRejected(t *testing.T) {
 // Finding 4 — VP8L short code at chunk boundary
 // ---------------------------------------------------------------------------
 
-// TestFinding4_Regression_HuffmanDecodeShortCodeAtBoundary verifies that
-// huffmanTree.decode correctly handles the case where the stream ends with
-// exactly 1 bit remaining, which is sufficient to decode a 1-bit code but
-// not the full maxCodeLen (2) bits.
-//
-// The old code called readBits(maxCodeLen) unconditionally, returning
-// ErrLosslessTruncated when fewer bits were available.
-//
-// Rust oracle: bitstream.rs CanonicalHuffmanTree::read_symbol.
+// TestFinding4_Regression_HuffmanDecodeShortCodeAtBoundary checks a 1-bit code decodes with 1 bit left (Rust read_symbol).
 func TestFinding4_Regression_HuffmanDecodeShortCodeAtBoundary(t *testing.T) {
 	// Build a tree with 3 symbols, maxCodeLen=2:
 	//   sym 0: length 1, code 0b0  (table[0] and table[2])
@@ -449,15 +405,7 @@ func TestFinding4_Regression_HuffmanDecodeTruncatedZeroBitsRemaining(t *testing.
 	}
 }
 
-// TestFinding4_Regression_HuffmanDecodeShortCodeNeedsMoreBitsThanAvailable
-// verifies that if the available bits form a 1-bit prefix that resolves to a
-// codeLen=2 symbol (which is impossible with a valid tree, but guards the
-// codeLen > available check), or more practically that when available=1 and
-// the only matching entry has codeLen=2, we get ErrLosslessTruncated.
-//
-// To trigger this: build a tree where all symbols have codeLen=2 (maxCodeLen=2),
-// then position bitPos so only 1 bit is available.  The 1-bit zero-extended
-// lookup finds entry.codeLen=2 > available=1 → truncated.
+// TestFinding4_Regression_HuffmanDecodeShortCodeNeedsMoreBitsThanAvailable checks a 2-bit code with 1 bit left is ErrLosslessTruncated.
 func TestFinding4_Regression_HuffmanDecodeCodeLenExceedsAvailable(t *testing.T) {
 	// 4-symbol tree, all code length 2.
 	codeLengths := []symLen{

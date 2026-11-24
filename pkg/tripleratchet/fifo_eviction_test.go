@@ -1,10 +1,6 @@
 package tripleratchet
 
-// White-box tests for the FIFO eviction fix in receivePQKey.
-// These tests live in package tripleratchet (not tripleratchet_test) so they
-// can access unexported fields (skippedPQKeysFIFO, skippedPQKeysFIFOHead,
-// skippedPQKeys, pqEpoch, recvCounter) and call unexported methods
-// (purgeOldSkippedKeys).
+// White-box tests for FIFO eviction in receivePQKey.
 
 import (
 	"bytes"
@@ -17,13 +13,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
-// TestFIFOEviction_StaleTailBehindLiveHead exercises the case the round-3
-// review flagged: an old skipped key stays live at the FIFO head while many
-// newer keys are inserted and consumed. Head-only compaction cannot advance
-// past the live head, so without the trim-and-rebuild guard the backing slice
-// grows without bound even though the live map stays tiny. This is a white-box
-// test: it populates skippedPQKeys and the FIFO directly and drives the
-// consume-path trim helper.
+// TestFIFOEviction_StaleTailBehindLiveHead checks the FIFO stays bounded while an old key stays live at its head.
 func TestFIFOEviction_StaleTailBehindLiveHead(t *testing.T) {
 	tr := &TripleRatchet{
 		skippedPQKeys: make(map[pqSkippedKeyID]*secret.Secret),
@@ -75,9 +65,7 @@ func TestFIFOEviction_StaleTailBehindLiveHead(t *testing.T) {
 	tr.skippedPQKeys[headID].Destroy()
 }
 
-// fifoTestECCipher is a symmetric deterministic EC cipher for internal FIFO
-// tests. Both sides are initialised from the same seed; the send counter is
-// encoded in the 4-byte header so ReceiveKey can reproduce the exact same key.
+// fifoTestECCipher is a deterministic EC cipher whose header carries the send counter.
 type fifoTestECCipher struct {
 	seed    []byte
 	sendCtr uint32
@@ -154,24 +142,12 @@ func fifoRandomSS(t *testing.T) []byte {
 	return buf
 }
 
-// pqFIFOLiveLen returns the number of FIFO entries that have NOT yet been
-// consumed by the head pointer (includes both live and mid-slice stale entries).
-// It is used to verify that the FIFO does not grow unboundedly.
+// pqFIFOLiveLen returns the FIFO entries past the head pointer, live or stale.
 func pqFIFOLiveLen(tr *TripleRatchet) int {
 	return len(tr.skippedPQKeysFIFO) - tr.skippedPQKeysFIFOHead
 }
 
-// TestFIFOEviction_OldestEvictedAtCapacity verifies the FIFO eviction fix:
-//
-//  1. After a forward jump large enough to fill skippedPQKeys to exactly
-//     maxSkippedPQKeys and then add one more entry, the OLDEST skipped counter
-//     (counter 1) must be evicted.
-//  2. The NEWEST skipped counter (maxSkippedPQKeys+1) must still be decryptable
-//     — before the fix it was silently dropped.
-//  3. The evicted counter returns ErrPQKeyConsumed (it is no longer in the map
-//     and recvCounter has advanced past it).
-//
-// Rust reference: KeyHistory::gc / evict_oldest in chain.rs.
+// TestFIFOEviction_OldestEvictedAtCapacity checks overflow evicts the oldest counter (ErrPQKeyConsumed) and keeps the newest (Rust KeyHistory::gc).
 func TestFIFOEviction_OldestEvictedAtCapacity(t *testing.T) {
 	const jumpTarget = maxSkippedPQKeys + 2 // counters 1..jumpTarget; skipped 1..jumpTarget-1
 
@@ -191,11 +167,7 @@ func TestFIFOEviction_OldestEvictedAtCapacity(t *testing.T) {
 		plaintexts[i] = msg
 	}
 
-	// Bob receives the LAST message first (counter jumpTarget).
-	// This triggers a forward jump of jumpTarget-1 skipped entries:
-	//   counters 1..maxSkippedPQKeys fill the map,
-	//   counter maxSkippedPQKeys+1 evicts counter 1 and is inserted.
-	// After this call: skippedPQKeys = {2..maxSkippedPQKeys+1}.
+	// Receiving the last message first skips counters 1..maxSkippedPQKeys+1, evicting counter 1.
 	lastIdx := jumpTarget - 1
 	_, err := bob.Decrypt(ciphertexts[lastIdx])
 	if err != nil {
@@ -207,8 +179,7 @@ func TestFIFOEviction_OldestEvictedAtCapacity(t *testing.T) {
 		t.Fatalf("skippedPQKeys size = %d, want %d", got, maxSkippedPQKeys)
 	}
 
-	// The NEWEST skipped counter (maxSkippedPQKeys+1 = index maxSkippedPQKeys)
-	// must still be decryptable — this was dropped by the old code.
+	// The newest skipped counter must still decrypt.
 	newestIdx := maxSkippedPQKeys // 0-based index → counter = maxSkippedPQKeys+1
 	got, decErr := bob.Decrypt(ciphertexts[newestIdx])
 	if decErr != nil {
@@ -218,8 +189,7 @@ func TestFIFOEviction_OldestEvictedAtCapacity(t *testing.T) {
 		t.Fatalf("newest skipped plaintext mismatch: got %v want %v", got, plaintexts[newestIdx])
 	}
 
-	// The OLDEST skipped counter (counter 1 = index 0) must be evicted.
-	// recvCounter > 1 and the key is not in the map → ErrPQKeyConsumed.
+	// Counter 1 was evicted, so it returns ErrPQKeyConsumed.
 	_, decErrOldest := bob.Decrypt(ciphertexts[0])
 	if decErrOldest == nil {
 		t.Fatal("expected ErrPQKeyConsumed for evicted oldest counter, got nil")
@@ -230,12 +200,7 @@ func TestFIFOEviction_OldestEvictedAtCapacity(t *testing.T) {
 	}
 }
 
-// TestFIFOEviction_NoDoubleFreOnConsumeAndPurge verifies that no secret key is
-// Destroy()d more than once when skipped keys are consumed (via normal decryption)
-// and then purged (via epoch advancement calling purgeOldSkippedKeys directly).
-//
-// go-enclave panics on a double-free of a protected allocation, so the absence of
-// a panic is the correctness proof.
+// TestFIFOEviction_NoDoubleFreOnConsumeAndPurge checks consumed then purged keys are destroyed once; go-enclave panics on a double free.
 func TestFIFOEviction_NoDoubleFreOnConsumeAndPurge(t *testing.T) {
 	ss := fifoRandomSS(t)
 	alice, bob := newFIFOTestPair(t, ss)
@@ -272,11 +237,7 @@ func TestFIFOEviction_NoDoubleFreOnConsumeAndPurge(t *testing.T) {
 		}
 	}
 
-	// FIFO has stale entries for counters 2, 3, 4 (consumed) and live entries
-	// for counters 1 and 5. Call purgeOldSkippedKeys as if a new epoch has
-	// advanced past the retention window (set pqEpoch to force cutoff).
-	// We do this by directly manipulating internal state to simulate an epoch
-	// advance without requiring a real braid handshake.
+	// Counters 2-4 are consumed and 1 and 5 live; force an epoch cutoff and purge.
 	const purgeEpoch = epochsToKeepPriorToSendEpoch + 2
 	bob.pqEpoch = purgeEpoch
 	// purgeOldSkippedKeys removes keys with epoch < pqEpoch - epochsToKeepPriorToSendEpoch.
@@ -295,14 +256,7 @@ func TestFIFOEviction_NoDoubleFreOnConsumeAndPurge(t *testing.T) {
 	}
 }
 
-// TestFIFOEviction_FIFOBoundedBelowCapacity verifies that the FIFO does not
-// grow unbounded during repeated cycles of small forward-jumps (below capacity)
-// followed by consumption of the skipped keys.
-//
-// Without the compactPQFIFOIfNeeded fix on the consume and purge paths, each
-// insert-consume cycle would leave a stale FIFO entry that accumulates without
-// bound because eviction (which was the only compaction trigger) is never
-// invoked when the map stays below capacity.
+// TestFIFOEviction_FIFOBoundedBelowCapacity checks insert-and-consume cycles below capacity keep the FIFO bounded.
 func TestFIFOEviction_FIFOBoundedBelowCapacity(t *testing.T) {
 	ss := fifoRandomSS(t)
 	alice, bob := newFIFOTestPair(t, ss)
@@ -342,10 +296,7 @@ func TestFIFOEviction_FIFOBoundedBelowCapacity(t *testing.T) {
 			t.Fatalf("cycle %d: skippedPQKeys = %d, want 0", cycle, got)
 		}
 
-		// FIFO live length must not grow cycle-over-cycle. After all skipped
-		// keys are consumed, compactPQFIFOIfNeeded should have trimmed all
-		// stale head entries so the effective FIFO length stays bounded (zero
-		// or very small, not unboundedly growing).
+		// compactPQFIFOIfNeeded keeps the live FIFO length from growing between cycles.
 		currentFIFOLen := pqFIFOLiveLen(bob)
 		if cycle > 0 && currentFIFOLen > prevFIFOLen+jumpSize {
 			t.Fatalf("cycle %d: FIFO live length grew from %d to %d (expected bounded growth, max +%d per cycle)",
@@ -354,8 +305,7 @@ func TestFIFOEviction_FIFOBoundedBelowCapacity(t *testing.T) {
 		prevFIFOLen = currentFIFOLen
 	}
 
-	// After all cycles, the FIFO live length must be zero: the map is empty and
-	// compaction trims all stale entries from the head.
+	// With the map empty, the live FIFO length must be zero.
 	if live := pqFIFOLiveLen(bob); live != 0 {
 		t.Fatalf("after all cycles: FIFO live length = %d, want 0", live)
 	}

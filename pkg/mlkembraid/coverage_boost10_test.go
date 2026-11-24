@@ -8,17 +8,7 @@ import (
 
 // ================== ProtoUnmarshalEncoder: Polys-state empty message ==================
 
-// TestProtoUnmarshalEncoder_PolysStateEmptyMessage verifies that
-// ProtoUnmarshalEncoder returns an error when the PolyEncoder is in Polys state
-// and encoderMessage returns an empty byte slice (no stored Points).
-// This exercises proto_accessors.go:494-496, the "encoder produced empty message"
-// branch triggered when ProtoEncoderMessageLen returns 0.
-//
-// When polys are provided (not pts), protoPolyEncoderFromFields calls
-// NewPolyEncoderFromPolys which creates an encoder in EncoderStatePolys.
-// In Polys state, e.Points() returns an array of empty Points (Value==nil),
-// so encoderMessage computes totalElems=0, msgLen=0, and returns []byte{}.
-// ProtoEncoderMessageLen then returns 0, triggering the error path.
+// TestProtoUnmarshalEncoder_PolysStateEmptyMessage checks an encoder in Polys state with no stored points is an error.
 func TestProtoUnmarshalEncoder_PolysStateEmptyMessage(t *testing.T) {
 	// Build 16 minimal valid serialized polynomials (2 bytes each = 1 coefficient).
 	// DeserializePoly requires len > 0 and len%2 == 0.

@@ -348,8 +348,7 @@ func makeTestAuth(t *testing.T, seed int) *mlkembraid.Authenticator {
 	return auth
 }
 
-// buildAndRoundTrip creates a SPQR with the given braid state, marshals/unmarshals,
-// and asserts byte-level round-trip equality.
+// buildAndRoundTrip marshals and unmarshals an SPQR with the given braid state and checks byte equality.
 func buildAndRoundTrip(t *testing.T, state *mlkembraid.State, label string) {
 	t.Helper()
 	braid := mlkembraid.BraidFromState(state, mlkembraid.NewMLKEM768IncrementalKEM(), mlkembraid.DefaultChunkSize)
@@ -919,12 +918,7 @@ func TestProtoEpochLinkToChain_NilLinkReturnsError(t *testing.T) {
 	}
 }
 
-// TestInsertionSortEpochs is what actually pins the shift loop. Driving the
-// sort through a map cannot: Go randomises iteration order, so a map-based test
-// exercises the shift only on the runs where the shuffle happens to come out
-// unsorted — which is why the function's measured coverage moved between
-// otherwise identical runs. Feeding the slice directly makes every case
-// deterministic.
+// TestInsertionSortEpochs feeds slices directly, since map iteration order is random.
 func TestInsertionSortEpochs(t *testing.T) {
 	for name, tc := range map[string]struct {
 		in   []uint64
@@ -1003,16 +997,11 @@ func TestProtoCodec_ChainParamDefaults(t *testing.T) {
 
 // ─────────────── skipped-key round-trip tests (Finding #25) ──────────────────
 
-// TestSkippedKeysPrevRoundTrip verifies that a Chain.Epoch with 3 skipped recv
-// keys survives a full marshal → proto bytes → unmarshal cycle byte-for-byte.
-// The skipped keys must be present in the deserialized SPQR.skippedKeys map
-// with the correct epoch and counter indices (Rust format: KEY_SIZE=36,
-// be32 idx | 32 B key per record).
+// TestSkippedKeysPrevRoundTrip checks three skipped recv keys survive marshal and unmarshal with their epoch and counter.
 func TestSkippedKeysPrevRoundTrip(t *testing.T) {
 	sharedSecret := randomBytes(t, 32)
 
-	// Build an SPQR with epoch 0 and inject 3 skipped recv keys at counters
-	// 2, 4, 6 to simulate out-of-order messages arriving before counter 7.
+	// Skipped recv keys at counters 2, 4 and 6 in epoch 0.
 	s, err := Init(sharedSecret, DirectionA2B, maxJump)
 	if err != nil {
 		t.Fatalf("Init: %v", err)
@@ -1069,15 +1058,7 @@ func TestSkippedKeysPrevRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSkippedKeysPrevRustFormat verifies that Go correctly parses a hand-typed
-// Rust-format prev buffer (concatenation of (be32 idx | 32 B key) records).
-// The test constant is derived from Rust's KeyHistory wire format as described
-// in chain.rs: KEY_SIZE=36, add() appends k.0.to_be_bytes() ++ k.1 (32 bytes).
-//
-// Rust source: spqr/src/chain.rs KeyHistory::add (line 140-142):
-//
-//	self.data.extend_from_slice(&k.0.to_be_bytes()[..]);
-//	self.data.extend_from_slice(&k.1[..]);
+// TestSkippedKeysPrevRustFormat parses a hand-built Rust prev buffer (spqr chain.rs KeyHistory::add).
 func TestSkippedKeysPrevRustFormat(t *testing.T) {
 	// Construct a synthetic Rust-emitted prev buffer with 2 records:
 	//   record 0: idx=0x00000001, key=0x01 02 ... 20 (1..=32)

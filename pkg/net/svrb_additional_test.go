@@ -15,9 +15,7 @@ import (
 func TestSvrBErrorFromSvrLogicError_StatusMissing(t *testing.T) {
 	// Create an svr.Error with StatusMissing to trigger the data-missing branch.
 	err := &svr.Error{}
-	// We can't set private fields directly, so use the restore flow to generate one.
-	// Instead, use the checkStatus helper from the svr package indirectly.
-	// The simplest path: create a query finalize with MISSING status.
+	// Build the error through a query finalize with MISSING status.
 	q := svr.Query4{}
 	resp := &svrpb.Response4{
 		Inner: &svrpb.Response4_Query_{

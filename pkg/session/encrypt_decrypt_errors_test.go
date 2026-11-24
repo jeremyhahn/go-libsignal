@@ -1,12 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 8 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) and the Double Ratchet
-// specification (section 5.2) require it, so the fips140only build tag drops
-// this file from the FIPS gate. `make test` and `make coverage` still run
-// it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH and the Double Ratchet require X25519, so the fips140only tag drops this file.
 
 package session_test
 
@@ -428,12 +422,7 @@ func TestDecryptAndGetKey_StoreSessionError(t *testing.T) {
 
 // ================== VerifyMacWithAddresses paths ==================
 
-// TestDecryptAndGetKey_WithAddressBinding verifies the VerifyMacWithAddresses
-// code path when both localAddress and remoteAddress are set on the cipher.
-// This exercises SessionCipher.go:578-585 (the address-bound MAC verification).
-//
-// UUID-format names are required so SerializeAddresses can embed the binding
-// field (proto field 6) into the SignalMessage, matching Rust's behavior.
+// TestDecryptAndGetKey_WithAddressBinding checks address-bound MAC verification with UUID names, which bind field 6 as Rust does.
 func TestDecryptAndGetKey_WithAddressBinding(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	// Use valid ServiceId (UUID) format addresses so SerializeAddresses works.
@@ -502,13 +491,7 @@ func TestDecryptAndGetKey_WithAddressBinding(t *testing.T) {
 	}
 }
 
-// TestDecryptAndGetKey_WithAddressBinding_BadMAC verifies that
-// VerifyMacWithAddresses returns an error when the address mismatch is detected.
-// This exercises SessionCipher.go:582-585.
-//
-// Valid ServiceId (UUID) format addresses are used so that SerializeAddresses
-// embeds address binding in the message. Alice decrypts using a wrong local
-// address, causing a mismatch at VerifyMacWithAddresses.
+// TestDecryptAndGetKey_WithAddressBinding_BadMAC checks a wrong local address fails VerifyMacWithAddresses.
 func TestDecryptAndGetKey_WithAddressBinding_BadMAC(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 

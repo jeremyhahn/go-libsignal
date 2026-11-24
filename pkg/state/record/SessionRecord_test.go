@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 45 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) requires X25519.
 
 package record_test
 
@@ -664,10 +659,7 @@ func TestSessionHasSessionState(t *testing.T) {
 	kp := genKP(t)
 	state.SetSenderBaseKey(kp.PublicKey().Serialize())
 
-	// HasSessionState returns true when BOTH version AND base key match
-	// (using constant-time comparison). This matches Rust promote_matching_session.
-	// SetSenderBaseKey now correctly parses the 33-byte type-prefixed form via
-	// ecc.DecodePoint, so state.SenderBaseKey() equals kp.PublicKey().Serialize().
+	// HasSessionState needs both version and base key to match, compared in constant time.
 	baseKey := state.SenderBaseKey()
 	result := sess.HasSessionState(3, baseKey)
 	if !result {

@@ -1,13 +1,4 @@
-// Conformance test: PreKeySignalMessage wire-format parity vs Rust libsignal.
-//
-// Rust source: rust/protocol/src/protocol.rs:352 PreKeySignalMessage::new (libsignal v0.92.2)
-//
-// Loads the Rust-emitted wire/prekey_signal_message.json fixture and verifies:
-//  1. NewPreKeySignalMessageFromBytes parses the serialized bytes without error.
-//  2. MessageVersion, RegistrationID, PreKeyID, SignedPreKeyID match fixture inputs.
-//  3. BaseKey and IdentityKey serialize back to fixture input bytes.
-//  4. The inner WhisperMessage MAC verifies with the fixture's mac_key.
-//  5. Re-serializing the parsed message produces the original bytes byte-for-byte.
+// PreKeySignalMessage wire parity with the Rust fixture (protocol.rs:352): fields, keys, inner MAC and byte round-trip.
 
 package interop
 

@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 4 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) requires X25519.
 
 package protocol
 
@@ -191,13 +186,7 @@ func TestNewSenderKeyMessageSerializeError(t *testing.T) {
 	}
 }
 
-// TestNewSenderKeyMessageWithVersion_StoresVersionParameter verifies that the
-// version parameter supplied to NewSenderKeyMessageWithVersion is stored in the
-// struct's version field so the wire byte high nibble encodes it correctly.
-// Rust reference: protocol.rs:551 encodes message_version in the high nibble;
-// the struct stores SENDERKEY_MESSAGE_CURRENT_VERSION (protocol.rs:558), but Go
-// exposes version via Version() which must reflect the caller-supplied value.
-// Latent while only v3 exists; critical once a v4 is introduced.
+// TestNewSenderKeyMessageWithVersion_StoresVersionParameter checks Version reflects the caller's version.
 func TestNewSenderKeyMessageWithVersion_StoresVersionParameter(t *testing.T) {
 	serializer := &jsonSenderKeyMessageSerializer{}
 	signingKey, err := ecc.GenerateKeyPair()

@@ -195,14 +195,7 @@ func TestSvr2NewHandshakeWithConstants_MalformedProtobuf(t *testing.T) {
 	}
 }
 
-// TestDecodeSVRClientHandshakeStart_GiantVarintLength is a regression test for
-// Finding 3 (pre-auth DoS via crafted varint length).  Before the fix, a varint
-// encoding 2^63 caused int(length) to be negative, bypassing the bounds check,
-// and make([]byte, length) panicked.  The fix validates length in uint64 arithmetic
-// before the int() cast so the function returns a ProtobufDecodeError instead.
-//
-// The crafted input is: tag 0x12 (field 2, wire type 2 = length-delimited) followed
-// by the 10-byte varint for 2^63 = {0x80 × 9, 0x01}.
+// TestDecodeSVRClientHandshakeStart_GiantVarintLength checks a 2^63 length varint returns a ProtobufDecodeError instead of panicking.
 func TestDecodeSVRClientHandshakeStart_GiantVarintLength(t *testing.T) {
 	// varint encoding of 2^63: nine 0x80 continuation bytes then 0x01.
 	tag := byte(0x12) // field 2 (evidence), wire type 2 (length-delimited)

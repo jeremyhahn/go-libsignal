@@ -358,12 +358,7 @@ func hashFromScalars(scalars [3]*ristretto255.Scalar) *ristretto255.Element {
 	return ristretto255.NewIdentityElement().MultiScalarMult(ss, pp)
 }
 
-// --- Proof system using poksho Statement ---
-//
-// The proof demonstrates knowledge of 3 scalars such that:
-//   username_hash = username_sha_scalar*G1 + nickname_scalar*G2 + discriminator_scalar*G3
-//
-// Uses the poksho Statement system matching the Rust reference implementation.
+// The proof shows knowledge of three scalars with username_hash = sha*G1 + nickname*G2 + discriminator*G3, as a poksho Statement.
 
 // usernameProofStatement returns the poksho Statement for username proofs.
 // This matches Rust's PROOF_STATEMENT exactly.

@@ -35,8 +35,7 @@ func NewSenderChainKey(iteration uint32, chainKey []byte) *SenderChainKey {
 	copy(cp, chainKey)
 	s, err := secret.New(cp)
 	if err != nil {
-		// coverage-exempt: defensive OOM guard for the locked-memory allocation;
-		// cannot be unit-tested without modifying the host (see CLAUDE.md).
+		// coverage-exempt: defensive OOM guard for the locked-memory allocation.
 		panic("ratchet: failed to allocate guarded memory for chain key: " + err.Error())
 	}
 	return &SenderChainKey{
@@ -70,7 +69,7 @@ func NewSenderChainKeyFromStruct(structure *SenderChainKeyStructure) (*SenderCha
 
 // NewStructFromSenderChainKey returns a serializable structure of a SenderChainKey,
 // suitable for persistence and transmission. Mirrors NewSenderChainKeyFromStruct:
-// the key is cloned guarded-to-guarded, so serialization no longer stages it on
+// the key is cloned guarded-to-guarded, so serialization does not stage it on
 // the heap. Callers must Zeroize the returned structure once the serializer has
 // consumed it.
 func NewStructFromSenderChainKey(key *SenderChainKey) (*SenderChainKeyStructure, error) {
@@ -134,8 +133,7 @@ func (k *SenderChainKey) Next() (*SenderChainKey, error) {
 	// which will zeroize it (that's fine, it's a throwaway buffer).
 	s, err := secret.New(derived)
 	if err != nil {
-		// coverage-exempt: defensive OOM guard for the locked-memory allocation;
-		// cannot be unit-tested without modifying the host (see CLAUDE.md).
+		// coverage-exempt: defensive OOM guard for the locked-memory allocation.
 		panic("ratchet: failed to allocate guarded memory for next chain key: " + err.Error())
 	}
 	return &SenderChainKey{

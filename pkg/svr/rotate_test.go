@@ -296,13 +296,7 @@ func TestEncodeRotateStartVersionRoundTrip(t *testing.T) {
 	}
 }
 
-// TestRotateStartWireByteEquality verifies that the hand-rolled wire encoder in
-// rotate.go produces bit-for-bit identical bytes to proto.Marshal using the
-// generated Request4 / Request4_RotateStart_ types.
-//
-// This guards against any divergence between the two encoding paths and
-// confirms that the regenerated pb.go is wire-compatible with the hand-rolled
-// encoder used before the proto regen was available.
+// TestRotateStartWireByteEquality checks the hand-written encoder matches proto.Marshal byte for byte.
 func TestRotateStartWireByteEquality(t *testing.T) {
 	const version = uint32(0x0000_0042)
 	oprfDelta := []byte{0xDE, 0xAD, 0xBE, 0xEF}

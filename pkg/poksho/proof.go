@@ -95,18 +95,7 @@ func (s *Statement) addPoint(name string) uint8 {
 	return idx
 }
 
-// toBytes serializes the statement description into the compact binary
-// format that gets absorbed into the SHO transcript.
-//
-// Format:
-//
-//	Ne : number of equations (1 byte)
-//	for each equation:
-//	  point_index : LHS point index (1 byte)
-//	  Nt : number of terms (1 byte)
-//	  for each term:
-//	    scalar_index : (1 byte)
-//	    point_index : (1 byte)
+// toBytes serializes the description: equation count, then per equation the LHS point index, term count and (scalar, point) index pairs, one byte each.
 func (s *Statement) toBytes() []byte {
 	eqCount := uint8(len(s.equations))
 	v := []byte{eqCount}

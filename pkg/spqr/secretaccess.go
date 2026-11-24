@@ -2,10 +2,7 @@ package spqr
 
 import "github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 
-// copySecret copies the material of s out inside a WithBytes borrow, for a
-// value that must leave the borrow (a proto field, a returned message key).
-// A nil, empty or destroyed secret yields nil. The caller should wipe the
-// copy after use.
+// copySecret returns a copy of s's bytes, or nil if s is nil, empty or destroyed; the caller wipes it.
 func copySecret(s *secret.Secret) []byte {
 	var out []byte
 	if err := s.WithBytes(func(b []byte) error {

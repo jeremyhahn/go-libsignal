@@ -6,11 +6,7 @@ import (
 	"github.com/gtank/ristretto255"
 )
 
-// profileKeyCredentialRequestFixedSize is the fixed-length prefix of a
-// serialized ProfileKeyCredentialRequest: a reserved byte followed by five
-// 32-byte ristretto points (the blinding public key Y and the ciphertext
-// elements D1, D2, E1, E2). The poksho proof bytes follow and are
-// variable-length.
+// profileKeyCredentialRequestFixedSize is a reserved byte plus five 32-byte points, before the variable proof.
 const profileKeyCredentialRequestFixedSize = 1 + 5*32 // 161
 
 // SerializeProfileKeyCredentialRequest serializes a ProfileKeyCredentialRequest
@@ -155,10 +151,7 @@ func DeserializeProfileKeyCommitment(data []byte) (*ProfileKeyCommitment, error)
 	}, nil
 }
 
-// expiringProfileKeyCredentialResponseFixedSize is the fixed-length prefix of a
-// serialized ExpiringProfileKeyCredentialResponse: a reserved byte, the
-// 128-byte blinded credential (t, U, S1, S2), and an 8-byte expiration. The
-// poksho issuance proof follows and is variable-length.
+// expiringProfileKeyCredentialResponseFixedSize is a reserved byte, the 128-byte credential and an 8-byte expiration, before the proof.
 const expiringProfileKeyCredentialResponseFixedSize = 1 + 4*32 + 8 // 137
 
 // SerializeExpiringProfileKeyCredentialResponse serializes the server's

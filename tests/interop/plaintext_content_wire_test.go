@@ -1,19 +1,4 @@
-// Conformance test: PlaintextContent wire-format parity vs Rust libsignal.
-//
-// Rust source: rust/protocol/src/protocol.rs:837
-// From<DecryptionErrorMessage> for PlaintextContent (libsignal v0.92.2)
-//
-// Wire layout: [0xC0 identifier] || Content proto body || [0x80 padding-boundary]
-//
-// Loads the Rust-emitted wire/plaintext_content.json fixture and verifies:
-//  1. NewPlaintextContentFromBytes parses expected.serialized without error.
-//  2. First byte is 0xC0 (PLAINTEXT_CONTEXT_IDENTIFIER_BYTE).
-//  3. Last byte is 0x80 (PADDING_BOUNDARY_BYTE).
-//  4. Body() returns bytes[1:] (everything after the identifier byte).
-//  5. body_hex matches fixture expected.body_hex.
-//  6. Serialized bytes round-trip byte-for-byte.
-//  7. ExtractDecryptionErrorMessageFromSerializedContent recovers the embedded DEM
-//     with the correct timestamp and device_id.
+// PlaintextContent wire parity with the Rust fixture (protocol.rs:837): 0xC0 || Content || 0x80, body, round-trip and DEM extraction.
 
 package interop
 

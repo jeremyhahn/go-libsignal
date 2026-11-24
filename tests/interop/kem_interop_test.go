@@ -1,9 +1,4 @@
-// Package interop verifies that the Go KEM implementation accepts and
-// round-trips the exact byte sequences produced by the Rust libsignal
-// reference implementation.
-//
-// Test vectors are stored under fixtures/kem/ and are copied verbatim from
-// rust/protocol/src/kem/test-data/ in the Rust libsignal repository.
+// Package interop checks Go accepts and round-trips bytes from Rust libsignal; KEM vectors in fixtures/kem/ are copied from rust/protocol/src/kem/test-data/.
 package interop
 
 import (
@@ -36,13 +31,7 @@ func mustReadFixture(t *testing.T, name string) []byte {
 	return data
 }
 
-// TestKEMInteropKyber1024Serialize mirrors the Rust test_serialize function.
-// It loads the raw Kyber-1024 public and secret key bytes from the Rust
-// fixture files (which carry no type prefix), prepends the Kyber-1024 type
-// byte 0x08, deserializes both keys through the Go KEM package, reserializes
-// them, and asserts the output is byte-identical to the tagged input.
-//
-// Rust reference: rust/protocol/src/kem.rs test_serialize (lines 521–544).
+// TestKEMInteropKyber1024Serialize round-trips the Rust Kyber-1024 keys with type byte 0x08 (Rust kem.rs test_serialize).
 func TestKEMInteropKyber1024Serialize(t *testing.T) {
 	rawPK := mustReadFixture(t, "pk.dat")
 	rawSK := mustReadFixture(t, "sk.dat")
@@ -83,13 +72,7 @@ func TestKEMInteropKyber1024Serialize(t *testing.T) {
 	}
 }
 
-// TestKEMInteropKyber1024EncapDecap mirrors the Rust test_kyber1024_kem
-// function. It loads the Rust Kyber-1024 fixture key pair, deserializes both
-// keys, encapsulates a shared secret against the public key, decapsulates the
-// resulting ciphertext using the secret key, and asserts the two shared
-// secrets are equal.
-//
-// Rust reference: rust/protocol/src/kem.rs test_kyber1024_kem (lines 546–579).
+// TestKEMInteropKyber1024EncapDecap encapsulates and decapsulates with the Rust Kyber-1024 keys (Rust test_kyber1024_kem).
 func TestKEMInteropKyber1024EncapDecap(t *testing.T) {
 	rawPK := mustReadFixture(t, "pk.dat")
 	rawSK := mustReadFixture(t, "sk.dat")
@@ -128,21 +111,7 @@ func TestKEMInteropKyber1024EncapDecap(t *testing.T) {
 	}
 }
 
-// TestKEMInteropMLKEM1024 mirrors the Rust test_mlkem1024_kem function for
-// the public key fixture. The mlkem-pk.dat file already contains the 0x0A
-// type prefix byte, matching the Rust deserialization path which passes the
-// raw file bytes directly to PublicKey::deserialize.
-//
-// The mlkem-sk.dat fixture stores the ML-KEM-1024 secret key in the 3168-byte
-// libcrux expanded format (MlKem1024PrivateKey). Go's standard library
-// crypto/mlkem only accepts the 64-byte FIPS 203 seed form ("d || z"), making
-// the Rust secret key fixture incompatible with the Go decapsulation API. This
-// test therefore verifies public key fixture deserialization and performs a
-// full encapsulate/decapsulate round-trip using a freshly generated ML-KEM key
-// pair, confirming the implementation is correct even though the Rust secret
-// key material cannot be imported.
-//
-// Rust reference: rust/protocol/src/kem.rs test_mlkem1024_kem (lines 580–596).
+// TestKEMInteropMLKEM1024 parses the Rust ML-KEM-1024 public key and round-trips a fresh key pair; Go cannot import libcrux's expanded secret key (Rust test_mlkem1024_kem).
 func TestKEMInteropMLKEM1024(t *testing.T) {
 	// mlkem-pk.dat already includes the 0x0A type prefix; pass it directly.
 	pkBytes := mustReadFixture(t, "mlkem-pk.dat")

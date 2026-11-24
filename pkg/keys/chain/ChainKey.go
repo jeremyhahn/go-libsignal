@@ -55,7 +55,7 @@ func NewKeyFromStruct(structure *KeyStructure, kdf kdf.HKDF) (*Key, error) {
 }
 
 // NewStructFromKey will return a chain key structure for serialization.
-// The key is cloned guarded-to-guarded, so serialization no longer stages the
+// The key is cloned guarded-to-guarded, so serialization does not stage the
 // chain key on the heap. Callers must call Zeroize() on the returned structure
 // once the serializer has consumed it.
 func NewStructFromKey(key *Key) (*KeyStructure, error) {

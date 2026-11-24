@@ -1,14 +1,6 @@
 package tripleratchet
 
-// Whitebox error-injection tests for TripleRatchet.
-//
-// These tests live in package tripleratchet (not tripleratchet_test) to allow
-// access to unexported types (splitHybridOutput, decryptSnapshot, pqSkippedKeyID,
-// maxSkippedPQKeys) and direct mutation of unexported fields.
-//
-// All tests here are meaningful regressions: they verify that every error
-// path returns a typed error and leaves the TripleRatchet in a consistent
-// state — not just coverage padding.
+// White-box error-injection tests: every error path returns a typed error and leaves the TripleRatchet consistent.
 
 import (
 	"bytes"
@@ -320,11 +312,7 @@ func TestReceivePQKey_MaxSkippedKeysReached(t *testing.T) {
 	injectEpochAdvance(t, tr, make([]byte, 32))
 	tr.recvCounter = 0
 
-	// Fill skippedPQKeys to capacity using a DIFFERENT epoch (epoch 2) so that
-	// the map is at capacity but the entries don't match pqEpoch=1. This means:
-	//   - The initial "check for previously stored skipped key" won't find {1, counter}
-	//   - The loop will run and try to store an intermediate key at {1, counter}
-	//   - The map is already at capacity → mk.Destroy() fires
+	// Fill skippedPQKeys with epoch 2 entries so storing an epoch 1 key hits capacity.
 	for i := 0; i < maxSkippedPQKeys; i++ {
 		k, secErr := secret.New([]byte{byte(i), byte(i >> 8), 0xAA, 0xBB})
 		if secErr != nil {
@@ -377,12 +365,7 @@ func TestReceivePQKey_CounterAlreadyConsumed(t *testing.T) {
 	}
 }
 
-// TestReceivePQKey_MaxCounterAccepted verifies that receivePQKey succeeds for
-// the maximum reachable counter (MaxUint32) when recvCounter is just below.
-// This also documents that the recvCounter overflow guard inside the loop is
-// defensive dead code: with uint32 counters the loop can advance recvCounter
-// at most to MaxUint32-1 (when counter == MaxUint32), so the MaxUint32 check
-// inside the loop never fires in normal operation.
+// TestReceivePQKey_MaxCounterAccepted checks counter MaxUint32 is accepted; the in-loop overflow guard cannot fire.
 func TestReceivePQKey_MaxCounterAccepted(t *testing.T) {
 	ss := braidRandomSharedSecret(t)
 	ec := newBraidECCipher(ss)
@@ -513,8 +496,7 @@ func TestUnmarshalCompositeHeader_TooShort(t *testing.T) {
 	}
 }
 
-// TestUnmarshalCompositeHeader_CorruptSCKA verifies that unmarshalCompositeHeader
-// returns ErrInvalidCompositeMessage when the SCKA message bytes are corrupt.
+// TestUnmarshalCompositeHeader_CorruptSCKA checks corrupt SCKA bytes return ErrInvalidCompositeMessage.
 func TestUnmarshalCompositeHeader_CorruptSCKA(t *testing.T) {
 	// Build a header: ecHeaderLen=0, then some garbage bytes that will fail SCKA parsing.
 	data := []byte{
@@ -735,13 +717,7 @@ func TestAdvancePQEpoch_DestroyedRootKey(t *testing.T) {
 	}
 }
 
-// TestDecrypt_TakeSnapshotError verifies that Decrypt returns an error when
-// takeSnapshot fails due to braid serialize failure. We can trigger this by
-// replacing the braid with nil (which makes snapshotBraid panic - not useful),
-// or by crafting a scenario that causes braid.Serialize to fail.
-// In practice, braid.Serialize only fails on a nil braid. We test the snapshot
-// failure path indirectly by using a failing EC cipher that makes takeSnapshot
-// fail via TakeECSnapshot error, which propagates as snapErr in Decrypt.
+// TestDecrypt_TakeSnapshotError checks Decrypt returns a TakeECSnapshot failure.
 func TestDecrypt_TakeSnapshotError(t *testing.T) {
 	ss := braidRandomSharedSecret(t)
 	delegate := newBraidECCipher(ss)
@@ -826,9 +802,7 @@ func TestDecrypt_CiphertextShorterThanMAC(t *testing.T) {
 	_, bob, _ := newUnidirectionalPair(t)
 	_ = ss // used in test setup, not directly below
 
-	// Build a composite message with a valid header but a ciphertext that is only
-	// 1 byte (less than HMACSize=32).
-	// Inner header: ecHeaderLen=4, ecHeader=[0x01,0x02,0x03,0x04], no SCKA.
+	// Valid header (4-byte EC header, no SCKA) with a 1-byte ciphertext, shorter than HMACSize.
 	innerHeader := []byte{0x00, 0x00, 0x00, 0x04, 0x01, 0x02, 0x03, 0x04}
 	shortCiphertext := []byte{0x42} // 1 byte < HMACSize(32)
 
@@ -851,13 +825,7 @@ func TestDecrypt_CiphertextShorterThanMAC(t *testing.T) {
 	}
 }
 
-// TestDecryptWithSnapshot_BraidReceiveErrorAfterHandshake directly exercises
-// the ErrBraidFailed propagation path in decryptWithSnapshot when
-// braidHandshakeComplete==true and braid.Receive returns an error.
-//
-// Bob's braid starts in StateNoHeaderReceived. receiveNoHeaderReceived rejects
-// any message type other than Hdr or None, returning ErrInvalidMessageType.
-// When braidHandshakeComplete==true, this error propagates as ErrBraidFailed.
+// TestDecryptWithSnapshot_BraidReceiveErrorAfterHandshake checks a braid Receive error after the handshake becomes ErrBraidFailed.
 func TestDecryptWithSnapshot_BraidReceiveErrorAfterHandshake(t *testing.T) {
 	ss := braidRandomSharedSecret(t)
 	bobEC := newBraidECCipher(ss)
@@ -870,9 +838,7 @@ func TestDecryptWithSnapshot_BraidReceiveErrorAfterHandshake(t *testing.T) {
 	// Mark handshake complete so braid errors propagate.
 	bob.braidHandshakeComplete = true
 
-	// Construct a CompositeHeader with a SCKA message whose type is Ct1 (not Hdr).
-	// Bob's braid is in StateNoHeaderReceived, which only accepts Hdr or None.
-	// Passing a Ct1 message causes receiveNoHeaderReceived to return ErrInvalidMessageType.
+	// A Ct1 message is rejected by Bob's braid in StateNoHeaderReceived.
 	header := &CompositeHeader{
 		ECHeader:  []byte{0x00, 0x00, 0x00, 0x01}, // counter=1
 		PQCounter: 1,
@@ -904,13 +870,7 @@ func TestDecryptWithSnapshot_BraidReceiveErrorAfterHandshake(t *testing.T) {
 	}
 }
 
-// TestDecrypt_BraidErrorAfterHandshakeComplete exercises the path in
-// decryptWithSnapshot where braidHandshakeComplete==true and braid.Receive
-// returns an error. The error must propagate as ErrBraidFailed (not be suppressed).
-//
-// Strategy: we deliver a replay of a previously-accepted SCKA message to a Bob
-// whose braidHandshakeComplete is set. The braid state machine rejects replayed
-// epoch numbers and returns an error, which decryptWithSnapshot then propagates.
+// TestDecrypt_BraidErrorAfterHandshakeComplete checks a replayed SCKA message after the handshake fails with ErrBraidFailed.
 func TestDecrypt_BraidErrorAfterHandshakeComplete(t *testing.T) {
 	alice, bob, _ := newUnidirectionalPair(t)
 
@@ -926,9 +886,7 @@ func TestDecrypt_BraidErrorAfterHandshakeComplete(t *testing.T) {
 	// Mark Bob's handshake as complete so braid errors propagate.
 	bob.braidHandshakeComplete = true
 
-	// Replay ct1 to Bob. The SCKA message in ct1 has an epoch that the braid has
-	// already consumed. With braidHandshakeComplete=true, braid.Receive will return
-	// an ErrInvalidEpoch or similar which must be propagated as ErrBraidFailed.
+	// Replaying ct1's consumed epoch must fail with ErrBraidFailed.
 	_, decErr := bob.Decrypt(ct1)
 	if decErr == nil {
 		// If no error, it means the braid accepted a replay (should not happen).
@@ -949,14 +907,7 @@ func TestDecrypt_BraidErrorAfterHandshakeComplete(t *testing.T) {
 	}
 }
 
-// TestDecrypt_PreNegotiationECOnlyPath exercises the KDFHybridECOnly branch in
-// decryptWithSnapshot. The branch fires when pqEpoch==0 AND PQCounter==0, which
-// is the pre-negotiation state where no PQ ratchet key has been established yet.
-//
-// In practice Encrypt always increments sendCounter before use, so wire messages
-// always carry PQCounter≥1. This test directly constructs a valid PQCounter=0
-// message to verify the EC-only fallback handles it correctly and serves as a
-// regression guard for the branch.
+// TestDecrypt_PreNegotiationECOnlyPath checks a PQCounter 0 message at pqEpoch 0 uses KDFHybridECOnly.
 func TestDecrypt_PreNegotiationECOnlyPath(t *testing.T) {
 	ss := braidRandomSharedSecret(t)
 
@@ -1031,9 +982,7 @@ func TestDecrypt_PreNegotiationECOnlyPath(t *testing.T) {
 	}
 }
 
-// TestDecrypt_BraidErrorPropagatesFromHandshakeComplete directly exercises the
-// braidHandshakeComplete error propagation by calling decryptWithSnapshot with
-// a header that has a valid SCKA message but an epoch that the braid will reject.
+// TestDecrypt_BraidErrorPropagatesFromHandshakeComplete checks decryptWithSnapshot propagates a braid epoch rejection.
 func TestDecrypt_BraidErrorPropagatesFromHandshakeComplete(t *testing.T) {
 	alice, bob, _ := newUnidirectionalPair(t)
 

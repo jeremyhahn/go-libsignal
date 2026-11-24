@@ -281,8 +281,7 @@ func TestValidateMP4_DeepParse_RoundTrip(t *testing.T) {
 
 // ---- WebP deep-parse acceptance tests ---------------------------------------
 
-// TestValidateWebP_DeepParse_VP8Lossy verifies that a well-formed VP8 (lossy)
-// WebP file passes the full RIFF chunk-structure walk.
+// TestValidateWebP_DeepParse_VP8Lossy checks a well-formed VP8 WebP passes the chunk walk.
 func TestValidateWebP_DeepParse_VP8Lossy(t *testing.T) {
 	data := buildValidWebP()
 
@@ -319,8 +318,7 @@ func TestValidateWebP_DeepParse_VP8Lossless(t *testing.T) {
 	}
 }
 
-// TestValidateWebP_DeepParse_TruncatedChunk verifies that a WebP file with a
-// chunk whose size extends beyond the declared RIFF payload is rejected.
+// TestValidateWebP_DeepParse_TruncatedChunk checks a chunk running past the RIFF payload is rejected.
 func TestValidateWebP_DeepParse_TruncatedChunk(t *testing.T) {
 	vp8Payload := []byte{0xAB, 0xCD}
 	// Lie about chunk size: claim 1000 bytes, only provide 2.
@@ -345,8 +343,7 @@ func TestValidateWebP_DeepParse_TruncatedChunk(t *testing.T) {
 	}
 }
 
-// TestValidateWebP_DeepParse_TruncatedHeader verifies that WebP data shorter
-// than the 12-byte RIFF/WEBP header is rejected.
+// TestValidateWebP_DeepParse_TruncatedHeader checks data shorter than the 12-byte header is rejected.
 func TestValidateWebP_DeepParse_TruncatedHeader(t *testing.T) {
 	tests := []struct {
 		name string
@@ -366,8 +363,7 @@ func TestValidateWebP_DeepParse_TruncatedHeader(t *testing.T) {
 	}
 }
 
-// TestValidateWebP_DeepParse_InvalidRIFF verifies that data not starting with
-// "RIFF" is rejected.
+// TestValidateWebP_DeepParse_InvalidRIFF checks data not starting with RIFF is rejected.
 func TestValidateWebP_DeepParse_InvalidRIFF(t *testing.T) {
 	data := make([]byte, 20)
 	copy(data[0:4], "XXXX")
@@ -426,8 +422,7 @@ func TestValidateWebP_DeepParse_OddSizePadding(t *testing.T) {
 	}
 }
 
-// TestValidateWebP_DeepParse_TruncatedChunkHeader verifies that a WebP file
-// whose RIFF payload ends mid-chunk-header is rejected.
+// TestValidateWebP_DeepParse_TruncatedChunkHeader checks a payload ending mid chunk header is rejected.
 func TestValidateWebP_DeepParse_TruncatedChunkHeader(t *testing.T) {
 	// RIFF payload: "WEBP" + 5 bytes (too short for a full chunk header of 8 bytes).
 	riffPayload := []byte("WEBPVP8 \x04") // only 9 bytes after WEBP; chunk header needs 8
@@ -442,13 +437,7 @@ func TestValidateWebP_DeepParse_TruncatedChunkHeader(t *testing.T) {
 	}
 }
 
-// TestValidateWebP_DeepParse_ValidExtended verifies that a VP8X extended
-// WebP file (with a lossless bitstream, EXIF, and XMP chunks) passes validation.
-//
-// VP8X flags: HAS_EXIF(0x08)|HAS_XMP(0x04) = 0x0C.
-// webpsan requires extended files to include image data (VP8/VP8L) plus
-// EXIF and XMP when the respective flags are set.
-// webpsan/src/lib.rs:179–204 (sanitize_extended)
+// TestValidateWebP_DeepParse_ValidExtended checks a VP8X file with image data, EXIF and XMP (flags 0x0C) passes (webpsan sanitize_extended).
 func TestValidateWebP_DeepParse_ValidExtended(t *testing.T) {
 	buildChunk := func(fourcc string, payload []byte) []byte {
 		size := uint32(len(payload))
@@ -487,17 +476,13 @@ func TestValidateWebP_DeepParse_ValidExtended(t *testing.T) {
 	}
 }
 
-// TestValidateWebP_DeepParse_RIFFDeclaredSizeMismatch verifies that WebP
-// data where the declared RIFF size is smaller than the actual file length is
-// REJECTED (Finding #7: trailing bytes after declared RIFF payload are disallowed
-// under webpsan's strict, fail-closed posture).
+// TestValidateWebP_DeepParse_RIFFDeclaredSizeMismatch checks trailing bytes after the declared RIFF payload are rejected.
 func TestValidateWebP_DeepParse_RIFFDeclaredSizeMismatch(t *testing.T) {
 	data := buildValidWebP()
 	// Append extra padding bytes beyond the declared RIFF boundary.
 	extended := append(data, 0x00, 0x00, 0x00, 0x00)
 
-	// Finding #7: webpsan rejects trailing bytes after the declared RIFF payload
-	// to prevent concatenated-file attacks and malformed-file ingestion.
+	// webpsan rejects trailing bytes after the declared RIFF payload.
 	if err := ValidateWebP(extended); err == nil {
 		t.Error("expected error for WebP with trailing bytes after declared RIFF payload (Finding #7)")
 	}

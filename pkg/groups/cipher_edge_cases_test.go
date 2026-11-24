@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 5 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH requires X25519, so the fips140only tag drops this file.
 
 package groups
 
@@ -20,12 +15,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/keyhelper"
 )
 
-// TestGroupCipherEncryptNilPrivateKey verifies that Encrypt returns an error
-// when the sender key state's signing key has a nil private key. This covers
-// GroupCipher.go line 92-94: the err path from NewSenderKeyMessageWithVersion.
-//
-// This scenario arises when a receiver-only state (built from a public key via
-// AddSenderKeyState/Process) is mistakenly used for encryption.
+// TestGroupCipherEncryptNilPrivateKey checks Encrypt fails on a receiver-only state with no signing private key.
 func TestGroupCipherEncryptNilPrivateKey(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	groupID := testGroupID()
@@ -194,13 +184,7 @@ func TestGroupCipherEncryptChainAtMaxUint32(t *testing.T) {
 	}
 }
 
-// TestGroupCipherDecryptChainNextFailsAtEnd verifies that getSenderKey returns an
-// error when the final Next() call (after the advance loop) fails because the
-// chain iteration is at MaxUint32. This exercises GroupCipher.go lines 222-226.
-//
-// Setup: Bob's state has chain at MaxUint32-1. Alice's message carries iteration
-// MaxUint32. The forward jump = 1, which is within the limit. The loop advances
-// the chain to MaxUint32. Then the final Next() call at line 222 fails.
+// TestGroupCipherDecryptChainNextFailsAtEnd checks the final Next() at MaxUint32 fails after a one-step advance.
 func TestGroupCipherDecryptChainNextFailsAtEnd(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	groupID := testGroupID()
@@ -237,12 +221,7 @@ func TestGroupCipherDecryptChainNextFailsAtEnd(t *testing.T) {
 
 	bobCipher := NewGroupCipher(bobBuilder, senderKeyName, bobStore)
 
-	// Construct a SenderKeyMessage with iteration = MaxUint32 signed with the
-	// same key pair stored in Bob's state. The distribution ID is testDistributionID
-	// so Bob's store lookup (via distributionIDToGroupID) finds the right record.
-	//
-	// The plaintext can be anything; AES-GCM decryption would need the correct key,
-	// but the chain too long error fires before decryption succeeds.
+	// A MaxUint32-iteration message signed with Bob's stored key; the chain error fires before decryption.
 	msg, err := protocol.NewSenderKeyMessageWithVersion(
 		protocol.SenderKeyCurrentVersion,
 		testDistributionID,
@@ -274,18 +253,7 @@ func TestGroupCipherDecryptChainNextFailsAtEnd(t *testing.T) {
 	}
 }
 
-// TestGroupCipherDecryptGetSenderKeyLoopNextFails verifies that getSenderKey
-// returns an error when Next() fails inside the advance loop. This requires the
-// chain to start at MaxUint32-1 and request an iteration >= MaxUint32+1, which
-// is not representable in uint32. Instead, we test the scenario that comes closest
-// to this: chain at MaxUint32-2 requesting MaxUint32.
-//
-// Walk-through of getSenderKey with chain=MaxUint32-2, iteration=MaxUint32:
-//   - jump = 2, within limit
-//   - loop iter 1: chain=MaxUint32-2, derive msgKey at MaxUint32-2, Next() → MaxUint32-1 (success)
-//   - loop iter 2: chain=MaxUint32-1, derive msgKey at MaxUint32-1, Next() → MaxUint32 (success)
-//   - loop exits (MaxUint32 == MaxUint32)
-//   - final Next() at MaxUint32 → ErrChainTooLong (line 224)
+// TestGroupCipherDecryptGetSenderKeyLoopNextFails advances from MaxUint32-2 to MaxUint32 and expects ErrChainTooLong from the final Next().
 func TestGroupCipherDecryptChainNextFailsAtEndWithJumpTwo(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	groupID := testGroupID()

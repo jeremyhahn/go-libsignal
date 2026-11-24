@@ -413,12 +413,7 @@ func TestSanitizeMP4WithCompoundedMdat_MissingMoov(t *testing.T) {
 	}
 }
 
-// TestSanitizeMP4WithCompoundedMdat_MissingMdat verifies that the compounded
-// path rejects input with no mdat box.
-//
-// Finding #2: cumulativeMdatBoxSize < 8 is rejected immediately to prevent the
-// infinite-loop / DoS. Use a valid box-sized value (16 bytes) to reach the
-// scanner, which then correctly returns ErrMissingMdat for the ftyp+moov-only input.
+// TestSanitizeMP4WithCompoundedMdat_MissingMdat checks ErrMissingMdat for ftyp+moov with a valid 16-byte size.
 func TestSanitizeMP4WithCompoundedMdat_MissingMdat(t *testing.T) {
 	input := append(javaFtyp(), javaMoov()...)
 	_, err := SanitizeMP4WithCompoundedMdat(input, 16)
@@ -625,21 +620,7 @@ func buildMP4WithEmptyAndRealMdat() []byte {
 // with a dref URL box pointing to an external file, triggering the
 // ErrExternalDataReference rejection.
 func buildMP4WithExternalDref() []byte {
-	// We build raw bytes for an ftyp + synthetic moov containing a URL box
-	// with Flags=0 (no self-contained flag) and a non-empty Location string.
-	// Rather than using mp4ff's builder (which auto-adds a self-contained URL),
-	// we craft the bytes directly.
-	//
-	// Box tree:
-	//   ftyp (20)
-	//   moov
-	//     trak
-	//       mdia
-	//         minf
-	//           dinf
-	//             dref
-	//               url  (version=0, flags=0, location="http://x.com\0")
-	//   mdat (8)
+	// Hand-built ftyp + moov/trak/mdia/minf/dinf/dref with a non-self-contained url box, + mdat.
 
 	urlLocation := "http://x.com"
 	// url  box: 4-size + 4-type + 4-version/flags + location + \0

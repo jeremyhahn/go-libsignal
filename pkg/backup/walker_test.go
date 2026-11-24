@@ -9,12 +9,7 @@ import (
 	"testing"
 )
 
-// canonicalBackupSubpath locates canonical-backup.binproto inside an upstream
-// Rust libsignal checkout. The fixture is upstream's, not this repository's, so
-// it is resolved from LIBSIGNAL_UPSTREAM — the same environment variable
-// tests/interop/scripts/check_fixtures.sh uses to find the tree pinned by
-// /RUST_REV. Hardcoding a developer's checkout path here made this test pass on
-// exactly one machine and fail everywhere else, CI included.
+// canonicalBackupSubpath locates canonical-backup.binproto in the upstream checkout named by LIBSIGNAL_UPSTREAM.
 const canonicalBackupSubpath = "rust/message-backup/tests/res/canonical-backup.binproto"
 
 // loadCanonicalBackupFrames reads the canonical-backup.binproto from the
@@ -53,15 +48,7 @@ func loadCanonicalBackupFrames(t *testing.T) [][]byte {
 	return frames
 }
 
-// TestScrambleBackupSmoke is a port of the Rust scrambler_smoke_test.
-// It loads the canonical backup, scrambles it with a fixed seed (0),
-// and verifies:
-//  1. The scrambled output differs from the input.
-//  2. The scrambled backup is still structurally valid (parseable as frames).
-//  3. ScrambleBackup is deterministic: calling it twice with the same frames
-//     produces identical output.
-//
-// Rust libsignal ref: rust/message-backup/tests/test_cases.rs scrambler_smoke_test
+// TestScrambleBackupSmoke ports Rust scrambler_smoke_test: output differs, stays parseable and is deterministic.
 func TestScrambleBackupSmoke(t *testing.T) {
 	frames := loadCanonicalBackupFrames(t)
 
@@ -142,12 +129,7 @@ func TestErrScrambleInvalidBackup(t *testing.T) {
 	}
 }
 
-// TestScrambleBackupInfoFrame verifies that the BackupInfo frame has its
-// mediaRootBackupKey (field 3) randomized and that the version (field 1) is
-// preserved.
-//
-// BackupInfo wire: field 1=version varint, field 2=backupTimeMs varint,
-// field 3=mediaRootBackupKey bytes (32 bytes).
+// TestScrambleBackupInfoFrame checks mediaRootBackupKey (field 3) is randomized and version (field 1) kept.
 func TestScrambleBackupInfoFrame(t *testing.T) {
 	// Build a minimal BackupInfo with version=1, backupTimeMs=9999,
 	// mediaRootBackupKey=32 bytes of 0xAB.
@@ -362,8 +344,7 @@ func TestWalkMessageInvalidVarint(t *testing.T) {
 	}
 }
 
-// TestScrambleBodyText verifies that message body text is replaced with the
-// constant replacement text and that U+FFFC mention characters are preserved.
+// TestScrambleBodyText checks body text is replaced and U+FFFC mention characters kept.
 func TestScrambleBodyText(t *testing.T) {
 	t.Run("short body replaced with prefix", func(t *testing.T) {
 		body := []byte("Hello!")
@@ -486,14 +467,7 @@ func TestScrambleFilePointerContentType(t *testing.T) {
 	}
 }
 
-// TestScrambleBackupMalformedNestedMessage verifies that when a nested
-// protobuf message inside a backup frame is malformed (truncated), ScrambleBackup
-// returns an error instead of silently producing corrupted output.
-//
-// Before the fieldHandler signature change, scrambleX calls discarded their
-// errors with `out, _ := scrambleX(...)`, causing the scrambler to "fail open"
-// and serialize partial/unscrambled replacements. After the fix the error
-// propagates to the caller.
+// TestScrambleBackupMalformedNestedMessage checks a truncated nested message returns an error.
 func TestScrambleBackupMalformedNestedMessage(t *testing.T) {
 	// Build a Frame that wraps an AccountData (field 1) whose inner bytes
 	// are a length-delimited field that claims 100 bytes but only provides 3.

@@ -10,9 +10,7 @@ import (
 	"time"
 )
 
-// Wire-format sizes for CDSI fixed-length serialization.
-// These must match the Rust FixedLengthSerializable constants in
-// rust/net/src/cdsi.rs exactly.
+// CDSI wire sizes, equal to the Rust FixedLengthSerializable constants in rust/net/src/cdsi.rs.
 const (
 	// E164SerializedLen is the wire size of an E.164 phone number: 8-byte big-endian uint64.
 	E164SerializedLen = 8

@@ -60,13 +60,7 @@ func DefaultExpiration(currentTime Timestamp) Timestamp {
 	return NewTimestamp(expiration)
 }
 
-// sortPoints computes a deterministic sort order for ristretto255 points.
-// Each point is doubled and compressed to a canonical 32-byte encoding, and
-// the resulting sort keys are compared lexicographically. Returns the
-// permutation (sorted index -> original index) and the reordered points.
-//
-// This matches Rust GroupSendEndorsementsResponse::sort_points which uses
-// double_and_compress_batch for deterministic ordering.
+// sortPoints orders points by their doubled compressed encoding and returns the permutation and sorted points (Rust sort_points).
 func sortPoints(points []*ristretto255.Element) (perm []int, sorted []*ristretto255.Element) {
 	type indexedKey struct {
 		index int

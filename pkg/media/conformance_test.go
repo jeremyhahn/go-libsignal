@@ -1,13 +1,6 @@
 package media
 
-// conformance_test.go — ports of the Java conformance tests from:
-//   libsignal/java/client/src/test/java/org/signal/libsignal/media/Mp4SanitizerTest.java
-//   libsignal/java/client/src/test/java/org/signal/libsignal/media/WebpSanitizerTest.java
-//
-// Every test case, byte-vector builder, and assertion mirrors the Java original.
-// These tests are the parity proof that Go SanitizeMP4 / SanitizeMP4WithCompoundedMdat
-// / SanitizeWebP behave byte-for-byte identically to the Rust mp4san / webpsan crates
-// (accessed through the Java JNI bridge).
+// Ports of libsignal's Java Mp4SanitizerTest and WebpSanitizerTest, proving parity with mp4san and webpsan.
 
 import (
 	"bytes"
@@ -21,16 +14,7 @@ import (
 // Mp4SanitizerTest.java and WebpSanitizerTest.java.
 // ---------------------------------------------------------------------------
 
-// javaFtyp returns the 20-byte ftyp box produced by Mp4SanitizerTest.ftyp().
-//
-// Java oracle: Mp4SanitizerTest.java:L113–L123
-//
-//	DataOutputStream layout:
-//	  writeInt(20)          → 4 bytes big-endian box size
-//	  write("ftyp")         → 4 bytes box type
-//	  write("isom")         → 4 bytes major_brand
-//	  writeInt(0)           → 4 bytes minor_version
-//	  write("isom")         → 4 bytes compatible_brands[0]
+// javaFtyp returns the 20-byte ftyp box of Mp4SanitizerTest.ftyp(): size, ftyp, isom, 0, isom.
 func javaFtyp() []byte {
 	var buf bytes.Buffer
 	be := binary.BigEndian
@@ -46,12 +30,7 @@ func javaFtyp() []byte {
 	return buf.Bytes()
 }
 
-// javaMoov returns the 56-byte moov box produced by Mp4SanitizerTest.moov().
-//
-// Java oracle: Mp4SanitizerTest.java:L126–L157
-//
-//	moov(56) → trak(48) → mdia(40) → minf(32) → stbl(24) → stco(16)
-//	stco: version/flags = 0, entry_count = 0
+// javaMoov returns the 56-byte moov/trak/mdia/minf/stbl/stco box of Mp4SanitizerTest.moov().
 func javaMoov() []byte {
 	var buf bytes.Buffer
 	be := binary.BigEndian
@@ -80,13 +59,7 @@ func javaMoov() []byte {
 	return buf.Bytes()
 }
 
-// javaMdat returns the 16-byte mdat box produced by Mp4SanitizerTest.mdat().
-//
-// Java oracle: Mp4SanitizerTest.java:L159–L168
-//
-//	writeInt(16)             → 4 bytes big-endian box size
-//	write("mdat")            → 4 bytes box type
-//	write("12345678")        → 8 bytes payload
+// javaMdat returns the 16-byte mdat box of Mp4SanitizerTest.mdat().
 func javaMdat() []byte {
 	var buf bytes.Buffer
 	size := make([]byte, 4)
@@ -97,14 +70,7 @@ func javaMdat() []byte {
 	return buf.Bytes()
 }
 
-// javaCompoundedMdat returns the 12-byte compounded mdat box produced by
-// Mp4SanitizerTest.compoundedMdat().
-//
-// Java oracle: Mp4SanitizerTest.java:L170–L179
-//
-//	writeInt(0)              → 4 bytes: size=0 (extends to EOF)
-//	write("mdat")            → 4 bytes box type
-//	write("12345678")        → 8 bytes payload
+// javaCompoundedMdat returns the 12-byte size-0 mdat box of Mp4SanitizerTest.compoundedMdat().
 func javaCompoundedMdat() []byte {
 	var buf bytes.Buffer
 	size := make([]byte, 4)
@@ -115,17 +81,7 @@ func javaCompoundedMdat() []byte {
 	return buf.Bytes()
 }
 
-// javaWebp returns a minimal VP8L WebP byte sequence matching
-// WebpSanitizerTest.webp().
-//
-// Java oracle: WebpSanitizerTest.java:L64–L78
-//
-//	write("RIFF")            → 4 bytes
-//	write({20,0,0,0})        → 4-byte LE chunk size = 20
-//	write("WEBP")            → 4 bytes
-//	write("VP8L")            → 4 bytes chunk type
-//	write({8,0,0,0})         → 4-byte LE chunk size = 8
-//	write({0x2f,0,0,0,0,0x88,0x88,8}) → 8 bytes VP8L data
+// javaWebp returns the minimal VP8L WebP of WebpSanitizerTest.webp().
 func javaWebp() []byte {
 	var buf bytes.Buffer
 	buf.WriteString("RIFF")

@@ -160,8 +160,7 @@ func (r *NKhfsResponder) ProcessMessage1(msg1 []byte) ([]byte, *NKhfsCipherState
 	}
 	kemSS, kemCt := kemEK.Encapsulate()
 
-	// Per HFS spec: EncryptAndHash(kemCt) FIRST (with key from ee), then
-	// MixKey(kemSS). Initiator does the inverse.
+	// HFS order: EncryptAndHash(kemCt) with the ee key, then MixKey(kemSS).
 	encryptedKemCt, err := ss.encryptAndHash(kemCt)
 	if err != nil {
 		return nil, nil, nil, nil, err

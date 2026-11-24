@@ -93,13 +93,7 @@ func CalculateSharedSecret(theirKey, ourKey [32]byte) ([32]byte, error) {
 	return validateAndCopySharedSecret(result)
 }
 
-// validateAndCopySharedSecret rejects all-zero DH results in constant time and
-// copies the raw bytes into a fixed-size output, zeroizing the source slice.
-//
-// An all-zero result indicates a low-order peer public key that would compromise
-// security. This matches the Rust reference CurveError::InvalidKeyAgreement.
-// In practice curve25519.X25519 already rejects known low-order points via error,
-// so this check is a defence-in-depth guard against future API changes.
+// validateAndCopySharedSecret rejects an all-zero DH result in constant time and copies it out, zeroizing the source.
 func validateAndCopySharedSecret(result []byte) ([32]byte, error) {
 	var allZero [32]byte
 	if subtle.ConstantTimeCompare(result, allZero[:]) == 1 {

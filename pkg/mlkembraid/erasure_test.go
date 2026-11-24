@@ -431,11 +431,7 @@ func TestEncoderDecoderRoundTripVariousSizes(t *testing.T) {
 // --- Encoder wraparound with varint indices ---
 
 func TestEncoderWraparoundProducesCorrectIndices(t *testing.T) {
-	// With polynomial encoding, the encoder emits sequential chunk indices
-	// without wrapping. After the first pass (HasMore returns false), subsequent
-	// NextChunk calls emit redundancy chunks with higher indices. This is the
-	// correct Rust SPQR behavior: any TotalChunks() distinct indices suffice for
-	// decoding, so redundancy chunks beyond the first pass still reconstruct.
+	// After the first pass NextChunk emits higher-index redundancy chunks; any TotalChunks() distinct indices decode.
 	data := make([]byte, 64) // 2 chunks
 	for i := range data {
 		data[i] = byte(i)

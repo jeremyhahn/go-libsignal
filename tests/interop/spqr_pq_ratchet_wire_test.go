@@ -1,24 +1,4 @@
-// Conformance test: SPQR pq_ratchet field-byte parity vs Rust libsignal.
-//
-// Rust source: SparsePostQuantumRatchet crate v1.5.1 (tag v1.5.1) — spqr::send.
-//
-// The bytes under test are exactly what rides in SignalMessage.pq_ratchet
-// (proto field 5): the serialized post-quantum ratchet message. The fixture is
-// emitted by tests/interop/rust/src/bin/wire_emitter.rs::emit_spqr_pq_ratchet,
-// which runs the Rust SPQR send step against a fixed auth_key and a deterministic
-// RNG seed.
-//
-// Loads the Rust-emitted wire/spqr_pq_ratchet.json fixture and verifies:
-//  1. The pq_ratchet message begins with the SCKA wire version byte 0x01.
-//  2. Go's pkg/spqr.Recv accepts the Rust-emitted pq_ratchet bytes without error,
-//     when the receiver is initialized from the same shared auth_key.
-//  3. The receiver-derived message key is byte-identical to the sender key the
-//     Rust side derived for the same message.
-//
-// This closes the gap where SPQR byte-compatibility was only proven by the live
-// harness (which shells out to the Rust binary at test time) or Go-internal
-// round-trips. Here the bytes are a static Rust-emitted fixture, and Go must
-// independently match them.
+// SPQR pq_ratchet parity: Go spqr.Recv on the Rust-emitted message must derive the sender's key.
 
 package interop
 

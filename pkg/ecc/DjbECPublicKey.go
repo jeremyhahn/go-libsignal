@@ -64,17 +64,7 @@ func (d *DjbECPublicKey) IsCanonical() bool {
 	return d.isTorsionFree() && d.scalarIsInRange()
 }
 
-// isTorsionFree checks that the Montgomery point, when converted to Edwards form
-// using sign=0 (positive square root), is in the prime-order subgroup.
-//
-// This matches the Rust libsignal implementation which calls
-// mont_point.to_edwards(0).is_some_and(|ed| ed.is_torsion_free()).
-// Only sign=0 is checked; keys requiring sign=1 are rejected.
-//
-// Algorithm: convert Montgomery u-coordinate to Edwards y-coordinate via
-// y = (u-1)/(u+1), reconstruct the Edwards point with sign bit 0, then
-// verify prime order using the cofactor inverse trick:
-// P has prime order iff [8]([8^{-1} mod l] * P) == P.
+// isTorsionFree converts the Montgomery point to Edwards with sign 0 and checks it has prime order, as Rust to_edwards(0).is_torsion_free().
 func (d *DjbECPublicKey) isTorsionFree() bool {
 	u, err := new(field.Element).SetBytes(d.publicKey[:])
 	if err != nil {
@@ -113,12 +103,7 @@ func (d *DjbECPublicKey) isTorsionFree() bool {
 	return hasPrimeOrder(pt)
 }
 
-// hasPrimeOrder checks whether the Edwards25519 point is in the prime-order
-// subgroup by verifying [8]([8^{-1} mod l] * P) == P.
-// This works because if P is in the prime-order-l subgroup, then
-// [8^{-1} mod l] * P is also in that subgroup, and [8] is an isomorphism
-// on the subgroup. If P has a torsion component, the torsion is destroyed
-// by the scalar multiplication and [8] cannot recover it.
+// hasPrimeOrder reports whether [8]([8^-1 mod l] * P) == P, which holds only for points in the prime-order subgroup.
 func hasPrimeOrder(pt *edwards25519.Point) bool {
 	cofInv, err := edwards25519.NewScalar().SetCanonicalBytes(cofactorInvBytes[:])
 	if err != nil {
@@ -137,10 +122,7 @@ func (d *DjbECPublicKey) ScalarIsInRange() bool {
 	return d.scalarIsInRange()
 }
 
-// scalarIsInRange checks that the Curve25519 public key encoding is in the
-// reduced range [0, 2^255 - 19). Matches the Rust scalar_is_in_range() check:
-//
-//	!(k[31] & 0x80 != 0 || (k[0] >= 237 && k[1..31] == [0xFF; 30] && k[31] == 0x7F))
+// scalarIsInRange reports whether the encoding is below 2^255 - 19, as Rust scalar_is_in_range.
 func (d *DjbECPublicKey) scalarIsInRange() bool {
 	k := d.publicKey
 

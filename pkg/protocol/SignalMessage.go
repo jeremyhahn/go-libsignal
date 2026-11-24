@@ -46,26 +46,7 @@ func NewSignalMessageFromBytes(serialized []byte, serializer SignalMessageSerial
 		return nil, err
 	}
 
-	// Retain the bytes over which the MAC was computed so that VerifyMac can
-	// use them directly rather than re-serializing. This prevents byte-malleability
-	// where re-encoding a message with non-minimal varints or unknown proto fields
-	// produces different bytes, causing the MAC to be verified against a different
-	// input than what the sender signed. Mirrors Rust protocol.rs:160-184.
-	//
-	// Format detection: the Protobuf wire format appends the 8-byte MAC as a binary
-	// suffix (version_byte || proto_body || mac[8]), so the last macLength bytes of
-	// the received buffer equal signalMessageStructure.Mac. JSON and other formats
-	// embed the MAC as a field, not as a binary suffix.
-	//
-	// For binary (protobuf) format: retain serialized[:len-macLength] directly —
-	// these are the exact bytes the sender's getMac was called over, ensuring
-	// that any malleability in the proto body (non-minimal varints, unknown fields)
-	// is correctly detected at verification time.
-	//
-	// For non-binary formats (JSON, test serializers): re-serialize with Mac=nil
-	// to reproduce the canonical pre-MAC bytes. This is the same as the original
-	// VerifyMac implementation and carries no additional malleability risk for
-	// these test-only formats.
+	// Keep the MAC'd bytes so VerifyMac checks the original encoding (Rust protocol.rs:160-184): the protobuf suffix is stripped, JSON is re-serialized without the MAC.
 	if len(serialized) > macLength &&
 		hmac.Equal(serialized[len(serialized)-macLength:], signalMessageStructure.Mac) {
 		// Binary wire format: MAC is a binary suffix; retain original pre-MAC bytes.
@@ -121,21 +102,7 @@ func NewSignalMessage(messageVersion int, counter, previousCounter uint32, macKe
 	receiverIdentityKey *identity.Key, serializer SignalMessageSerializer,
 	pqRatchetMsg []byte, localAddress, remoteAddress *SignalAddress) (*SignalMessage, error) {
 
-	// Serialize addresses into the binding field (proto field 6).
-	//
-	// Address binding is opportunistic, matching Rust SignalMessage::new
-	// (rust/protocol/src/protocol.rs:91-92), which builds the field via
-	// `addresses.and_then(serialize_addresses)`. serialize_addresses
-	// (protocol.rs:250-256) parses each name as a ServiceId with the `?`
-	// operator on an Option, so a non-ServiceId name (or out-of-range device
-	// ID) yields None and the binding field is simply omitted — the message
-	// falls back to the legacy unbound format rather than erroring. Production
-	// addresses are always ServiceIds and still bind; legacy/non-ServiceId
-	// callers degrade gracefully, and the receiver independently accepts
-	// unbound messages (verify_mac_with_addresses, protocol.rs:198-200).
-	//
-	// Both nil, or exactly one nil, also leaves the field unset (no address
-	// pair to bind).
+	// Bind addresses (field 6) only when both are valid ServiceIds, otherwise send unbound, as Rust serialize_addresses.
 	var addresses []byte
 	if localAddress != nil && remoteAddress != nil {
 		addresses = SerializeAddresses(localAddress, remoteAddress)
@@ -202,15 +169,7 @@ type SignalMessage struct {
 	structure        SignalMessageStructure
 	senderRatchetKey ecc.ECPublicKeyable
 	serializer       SignalMessageSerializer
-	// serializedBytes holds the wire bytes used as MAC input (everything
-	// before the trailing macLength-byte MAC tag). Set at construction time
-	// from the pre-MAC serialized bytes (encrypt path) or from the received
-	// wire bytes stripped of the MAC suffix (deserialize path). VerifyMac
-	// MACs these bytes directly instead of re-serializing the struct, which
-	// prevents byte-malleability attacks where re-encoding a message with
-	// non-minimal varints or unknown proto fields would change the MAC input.
-	// Mirrors Rust: rust/protocol/src/protocol.rs:160-184 MACs
-	// self.serialized[..self.serialized.len()-MAC_LENGTH].
+	// serializedBytes holds the bytes before the MAC, which VerifyMac uses instead of re-serializing (Rust protocol.rs:160-184).
 	serializedBytes []byte
 }
 
@@ -342,15 +301,7 @@ func (s *SignalMessage) Type() uint32 {
 	return WHISPER_TYPE
 }
 
-// getMac calculates the HMAC-SHA256 MAC over the sender identity key,
-// receiver identity key, and serialized message bytes. The MAC is truncated
-// to macLength (8) bytes.
-//
-// Rust unconditionally prepends both identity keys before the message body
-// (rust/protocol/src/protocol.rs:230-246). Go matches that behaviour: version
-// checks are performed at the deserialization boundary (NewSignalMessageFromBytes
-// rejects version < PreKyberVersion), so by the time getMac is called the
-// version is always >= 3 and identity keys are always included.
+// getMac returns the 8-byte HMAC-SHA256 over both identity keys and the message bytes (Rust protocol.rs:230-246).
 func getMac(senderIdentityKey, receiverIdentityKey *identity.Key,
 	macKey, serialized []byte) ([]byte, error) {
 

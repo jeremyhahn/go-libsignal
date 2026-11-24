@@ -1,17 +1,6 @@
 package ecc
 
-// VXEdDSA: Verifiable XEdDSA signature scheme with VRF output.
-// Extends XEdDSA (signing with Curve25519 keys using Ed25519 math)
-// to produce a verifiable random function (VRF) output.
-// See: https://signal.org/docs/specifications/xeddsa/#vxeddsa
-//
-// Hash function diversifiers per spec (Section 2.5):
-//   hash_i(X) = hash(2^b - 1 - i || X), where b = 256 for Curve25519
-//   hash_1: 0xFE prefix (XEdDSA nonce, used in SignCurve25519.go)
-//   hash_2: 0xFD prefix (hash_to_point)
-//   hash_3: 0xFC prefix (VXEdDSA nonce r)
-//   hash_4: 0xFB prefix (VXEdDSA challenge h)
-//   hash_5: 0xFA prefix (VRF output v)
+// VXEdDSA (signal.org xeddsa spec): XEdDSA with a VRF output; hash_i prefixes 0xFE nonce, 0xFD hash_to_point, 0xFC r, 0xFB h, 0xFA v.
 
 import (
 	"crypto/sha512"
@@ -90,15 +79,7 @@ func init() {
 	constTwo, _ = new(field.Element).SetBytes(twoBytes[:])
 }
 
-// elligator2 maps a field element r to a Montgomery u-coordinate on Curve25519
-// using the Elligator 2 map.
-//
-// Algorithm:
-//  1. Compute u1 = -A / (1 + 2*r^2) where A = 486662
-//  2. Compute w1 = u1*(u1^2 + A*u1 + 1)
-//  3. If w1 is not a square, u = -A - u1; otherwise u = u1
-//
-// Returns the Montgomery u-coordinate as a field element.
+// elligator2 maps r to a Montgomery u: u1 = -A/(1+2r^2); u = u1 if u1(u1^2+A u1+1) is square, else -A-u1.
 func elligator2(r *field.Element) *field.Element {
 	// d = 1 + 2*r^2
 	r2 := new(field.Element).Square(r)
@@ -133,19 +114,7 @@ func elligator2(r *field.Element) *field.Element {
 	return finalU
 }
 
-// hashToPoint maps arbitrary input bytes to a point on the Edwards 25519 curve
-// in the prime-order subgroup, using hash_2 (SHA-512 with 0xFD diversifier)
-// followed by Elligator 2.
-//
-// Spec (Section 2.6):
-//
-//	h = hash_2(X)
-//	r = h (mod 2^|p|)           -- field element from low 255 bits
-//	s = floor((h mod 2^b) / 2^(b-1))  -- sign bit from bit 255 of hash
-//	u = elligator2(r)
-//	P.y = u_to_y(u)
-//	P.s = s
-//	return cP
+// hashToPoint maps input to the prime-order subgroup with hash_2 and Elligator 2 (spec §2.6).
 func hashToPoint(input []byte) (*edwards25519.Point, error) {
 	// h = hash_2(input)
 	var digest [64]byte
@@ -194,20 +163,7 @@ func hashToPoint(input []byte) (*edwards25519.Point, error) {
 	return result, nil
 }
 
-// calculateEdwardsKeyPair derives the Edwards public key and clamped scalar
-// from a Curve25519 private key, matching the XEdDSA calculate_key_pair spec.
-//
-// Spec (Section 2.3):
-//
-//	E = kB
-//	A.y = E.y
-//	A.s = 0
-//	if E.s == 1: a = -k (mod q)
-//	else:        a = k (mod q)
-//	return A, a
-//
-// edwardsKeyPairResult holds the output of calculateEdwardsKeyPair,
-// including the original sign bit needed for Rust/Java interoperability.
+// calculateEdwardsKeyPair derives the Edwards key with sign 0 and scalar a (spec §2.3); edwardsKeyPairResult also keeps the original sign bit.
 type edwardsKeyPairResult struct {
 	// A is the Edwards public key point with sign bit 0.
 	A *edwards25519.Point
@@ -269,10 +225,7 @@ func isSmallOrderPoint(p *edwards25519.Point) bool {
 	return cofactored.Equal(edwards25519.NewIdentityPoint()) == 1
 }
 
-// vrfOutput computes hash_5(cV) to produce the VRF output.
-// Per spec Section 4: v = hash_5(cV) (mod 2^b) where c=8 is the cofactor
-// and b=256. The (mod 2^b) truncation means we return only the first 32
-// bytes of the SHA-512 digest, matching the Rust reference implementation.
+// vrfOutput returns the first 32 bytes of hash_5(cV), cofactor c=8.
 func vrfOutput(V *edwards25519.Point) []byte {
 	// Multiply V by cofactor c=8
 	cV := new(edwards25519.Point).MultByCofactor(V)
@@ -290,25 +243,7 @@ func vrfOutput(V *edwards25519.Point) []byte {
 	return out
 }
 
-// vxeddsaSign performs VXEdDSA signing.
-//
-// Parameters:
-//   - privateKey: 32-byte Curve25519 private key
-//   - message: arbitrary-length message to sign
-//   - random: 64 bytes of randomness for nonce generation
-//
-// Spec (Section 4):
-//
-//	A, a = calculate_key_pair(k)
-//	B_v = hash_to_point(A || M)
-//	V = aB_v
-//	r = hash_3(a || V || Z) (mod q)
-//	R = rB
-//	R_v = rB_v
-//	h = hash_4(A || V || R || R_v || M) (mod q)
-//	s = r + ha (mod q)
-//	v = hash_5(cV) (mod 2^b)
-//	return (V || h || s), v
+// vxeddsaSign signs message with a 32-byte private key and 64 random bytes, returning (V || h || s) and v (spec §4).
 func vxeddsaSign(privateKey *[32]byte, message []byte, random [64]byte) (*[96]byte, []byte, error) {
 	// Step 1: Calculate Edwards key pair (A has sign bit 0)
 	kpResult := calculateEdwardsKeyPair(privateKey)
@@ -382,37 +317,9 @@ func vxeddsaSign(privateKey *[32]byte, message []byte, random [64]byte) (*[96]by
 	return signature, vrf, nil
 }
 
-// vxeddsaVerify verifies a VXEdDSA signature and returns the VRF output if valid.
-//
-// Parameters:
-//   - publicKey: 32-byte Curve25519 public key (Montgomery x-coordinate)
-//   - message: the message that was signed
-//   - signature: 96-byte signature (V || h || s)
-//
-// Spec (Section 4):
-//
-//	A = convert_mont(u)
-//	B_v = hash_to_point(A || M)
-//	if cA == I or cV == I or B_v == I: return false
-//	R = sB - hA
-//	R_v = sB_v - hV
-//	h_check = hash_4(A || V || R || R_v || M) (mod q)
-//	if h == h_check: v = hash_5(cV); return v
-//	return false
+// vxeddsaVerify verifies a 96-byte (V || h || s) signature and returns the VRF output (spec §4).
 func vxeddsaVerify(publicKey [32]byte, message []byte, signature *[96]byte) (bool, []byte) {
-	// VXEdDSA intentionally masks bit 255 of the Montgomery x-coordinate before
-	// the canonicity check. This matches the behavior of curve25519-dalek-signal's
-	// FieldElement::from_bytes, which silently masks that bit when decoding, so any
-	// key with bit 255 set is reduced to its canonical form rather than rejected.
-	//
-	// This differs deliberately from XEdDSA verify (verify() in SignCurve25519.go),
-	// which skips the pre-mask and rejects non-canonical keys outright. That
-	// stricter check is documented there as an intentional hardening.
-	//
-	// VXEdDSA retains the dalek-compatible mask because there is no Rust oracle to
-	// confirm the strict-rejection behavior for VXEdDSA specifically; changing the
-	// semantics here without a cross-implementation reference risks breaking
-	// interoperability with peers whose public keys carry the high bit.
+	// Mask bit 255 before the canonical check, as curve25519-dalek does; XEdDSA verify rejects instead.
 	publicKey[31] &= 0x7F
 
 	// Reject keys whose value (after masking bit 255) is still >= p.

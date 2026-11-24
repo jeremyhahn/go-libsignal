@@ -1,17 +1,4 @@
-// Ed25519 conformance test using the RFC 8032 §7.1 reference vectors.
-//
-// Ed25519 is used by go-libsignal for several signing operations
-// (server certificates ed25519 path in the legacy go-signal code,
-// trust-root key signatures in some configurations) and is the bedrock
-// the XEdDSA signing scheme builds on. This test validates Go's stdlib
-// crypto/ed25519 against the RFC 8032 published vectors. A pass here
-// guarantees the underlying Ed25519 primitive is spec-compliant, which
-// is necessary for any code path that signs or verifies Ed25519
-// signatures interoperably with Rust libsignal or external clients.
-//
-// Vectors are reproduced verbatim from RFC 8032 §7.1. They are NOT
-// tracked by the fixture manifest because the IETF RFC is the source
-// of truth for them.
+// Ed25519 conformance of crypto/ed25519 with the RFC 8032 §7.1 vectors.
 
 package interop
 
@@ -71,12 +58,7 @@ var rfc8032Cases = []rfc8032Case{
 			"4a7c15e9716ed28dc027beceea1ec40a",
 	},
 	{
-		// RFC 8032 §7.1 Test 1024 — Long message (1023 bytes from
-		// the canonical SHA-512(abc) chain). The full 1023-byte
-		// message hex is omitted here because it would dominate the
-		// fixture; we exercise the same primitive at the longer
-		// boundary indirectly via the §7.1 short-message vectors
-		// above plus the §7.1 Test SHA(abc) below.
+		// The 1023-byte Test 1024 vector is omitted; the short vectors and Test SHA(abc) cover the primitive.
 	},
 	{
 		// RFC 8032 §7.1 Test SHA(abc) — Long message

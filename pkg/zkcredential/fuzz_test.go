@@ -4,13 +4,7 @@ import (
 	"testing"
 )
 
-// FuzzDecodePresentationProofBincode verifies that DecodePresentationProofBincode
-// never panics on arbitrary input. Seed corpus is a valid round-tripped encoding
-// derived from the same deterministic inputs used in existing coverage tests.
-//
-// Matches the u64-LE length prefix protection added to address integer-overflow
-// / unbounded-alloc on attacker-controlled wire lengths (Rust bincode
-// reject_trailing_bytes + bounded-alloc invariant).
+// FuzzDecodePresentationProofBincode checks DecodePresentationProofBincode never panics, seeded with a valid encoding.
 func FuzzDecodePresentationProofBincode(f *testing.F) {
 	// Seed: generate a real PresentationProof and encode it.
 	var keyRand [RandomnessLen]byte

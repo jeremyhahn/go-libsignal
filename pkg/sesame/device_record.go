@@ -226,7 +226,7 @@ func (d *DeviceRecord) PromoteInactiveSession(index int, config *Config, now tim
 	}
 	promoted := d.inactiveSessions[index]
 
-	// Check expiry BEFORE removing from inactive list to avoid losing sessions.
+	// Check expiry before removing it from the inactive list.
 	if config != nil && promoted.IsSendExpired(config, now) {
 		return false
 	}

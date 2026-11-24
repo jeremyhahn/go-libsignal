@@ -86,7 +86,7 @@ alone drives a sender chain 25,002 messages forward to exercise the
 `maxForwardJumps` limit.
 
 **Run the suite with `ulimit -l` of at least 2 GiB**, or `unlimited`.
-Measured on go1.26.6 with `-race`, 2026-08-14:
+Measured on go1.26.6 with `-race`:
 
 | `ulimit -l` | Result |
 |---|---|
@@ -108,13 +108,12 @@ Container runtimes are the usual culprit: Docker defaults `memlock` to
 its hard limit without `CAP_SYS_RESOURCE`. Run containers with an
 explicit budget, e.g. `--ulimit memlock=4294967296:4294967296`. The
 GitHub-hosted VM starts at 8 MiB, and the CI jobs raise it to 4 GiB with
-`sudo prlimit` before the tests (Company Agent m2286 (2)). Local runs
+`sudo prlimit` before the tests. Local runs
 still need the limit raised by hand.
 
 Prefer a bounded figure to `-1:-1`. Locked pages are unswappable, so an
-unlimited job can pin all of a shared runner's RAM. The company's Gitea
-runners grant 4 GiB (ratified 2026-08-14, `infra/gitea/docs/lessons.md`):
-2x the measured requirement, raised deliberately if a suite ever
+unlimited job can pin all of a shared runner's RAM. Self-hosted runners
+grant 4 GiB: 2x the measured requirement, raised deliberately if a suite ever
 outgrows it.
 
 ## Commit Conventions

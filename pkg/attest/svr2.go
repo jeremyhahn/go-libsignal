@@ -88,16 +88,7 @@ func svr2NewHandshakeWithConstants(
 	return unvalidated.Validate(expectedRaftConfig)
 }
 
-// decodeSVRClientHandshakeStart decodes a protobuf-encoded SVR ClientHandshakeStart message.
-// Returns (evidence, endorsement, error).
-//
-// The protobuf message has the following fields:
-//
-//	message ClientHandshakeStart {
-//	  reserved 1;
-//	  bytes evidence = 2;
-//	  bytes endorsement = 3;
-//	}
+// decodeSVRClientHandshakeStart returns the evidence (field 2) and endorsement (field 3) of a ClientHandshakeStart message.
 func decodeSVRClientHandshakeStart(data []byte) ([]byte, []byte, error) {
 	var evidence, endorsement []byte
 	offset := 0

@@ -38,10 +38,7 @@ type shoVariant interface {
 	// current chaining value. Called at the start of absorbing.
 	initHasher(cv [hashLen]byte) hash.Hash
 
-	// ratchetFinalize completes the ratchet phase on the given hasher,
-	// returning the new chaining value.
-	// HMAC: appends 0x00, then cv = HMAC.finalize()
-	// SHA256: cv = SHA256(SHA256(accumulated_data))
+	// ratchetFinalize returns the new chaining value: HMAC appends 0x00 and finalizes; SHA256 double-hashes.
 	ratchetFinalize(h hash.Hash) [hashLen]byte
 
 	// squeezeBlock produces one output block for the given counter.

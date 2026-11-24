@@ -1,30 +1,10 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 5 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) and the Double Ratchet
-// specification (section 5.2) require it, so the fips140only build tag drops
-// this file from the FIPS gate. `make test` and `make coverage` still run
-// it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH and the Double Ratchet require X25519, so the fips140only tag drops this file.
 
 package session_test
 
-// rust_integration_test.go — ports the highest-impact Rust integration tests
-// from rust/protocol/tests/session.rs and rust/protocol/tests/groups.rs that
-// are not already covered by the existing Go session/groups test suites.
-//
-// Ported Rust tests (by file:line):
-//   test_repeat_bundle_message  (session.rs:461) → TestRust_RepeatBundleMessage
-//   test_bad_message_bundle     (session.rs:595) → TestRust_BadMessageBundle
-//   group_no_send_session       (groups.rs:18)   → TestRust_GroupNoSendSession
-//   group_no_recv_session       (groups.rs:43)   → TestRust_GroupNoRecvSession
-//   group_basic_encrypt_decrypt (groups.rs:90)   → TestRust_GroupBasicEncryptDecrypt
-//   group multi-sender scenario (groups.rs:146+) → TestRust_GroupMultipleSenders
-//
-// Rust constants used verbatim:
-//   original_message = "L'homme est condamné à être libre"
-//   distribution_id  = 0xd1d1d1d1_7000_11eb_b32a_33b8a8a487a6
+// Ports of Rust session.rs and groups.rs integration tests, using the Rust message and distribution ID constants.
 
 import (
 	"bytes"
@@ -78,21 +58,7 @@ func (s *rustGroupSenderKeyStore) LoadSenderKey(name *protocol.SenderKeyName) (*
 
 // ---- Session integration tests ----
 
-// TestRust_RepeatBundleMessage ports test_repeat_bundle_message
-// (rust/protocol/tests/session.rs:461).
-//
-// Alice generates two PreKey messages (msg1, msg2) from the SAME pre-key
-// session state before Bob has replied to either. Bob decrypts msg1,
-// acknowledges (whisper reply), then decrypts msg2. Both decryptions must
-// succeed and yield the Rust test literal.
-//
-// Go note: because Go's KyberPreKey implementation commits the pre-key
-// deletion eagerly (via DeferredActions.Complete), msg2 is processed from
-// a second distinct pre-key bundle (different pre-key index). The Rust test
-// achieves the same effect via deferred commit; the end-to-end semantic —
-// two sequential pre-key messages both decrypt correctly — is identical.
-//
-// Rust verbatim constant: original_message = "L'homme est condamné à être libre"
+// TestRust_RepeatBundleMessage ports test_repeat_bundle_message (session.rs:461): two prekey messages both decrypt; Go uses a second bundle since it commits prekey deletion eagerly.
 func TestRust_RepeatBundleMessage(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	alice := newTestUser(t, "+14151111111", 1, serializer)
@@ -184,15 +150,7 @@ func TestRust_RepeatBundleMessage(t *testing.T) {
 	}
 }
 
-// TestRust_BadMessageBundle ports test_bad_message_bundle
-// (rust/protocol/tests/session.rs:595).
-//
-// Alice sends a PreKey message. The wire bytes are corrupted (one bit flip
-// near the end). Bob must reject the corrupted form. The original uncorrupted
-// message must subsequently be decryptable. The pre-key must not be consumed
-// by the failed attempt.
-//
-// Rust verbatim constant: original_message = "L'homme est condamné à être libre"
+// TestRust_BadMessageBundle ports test_bad_message_bundle (session.rs:595): a corrupted prekey message is rejected without consuming the prekey.
 func TestRust_BadMessageBundle(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	alice := newTestUser(t, "+14151111111", 1, serializer)
@@ -231,13 +189,7 @@ func TestRust_BadMessageBundle(t *testing.T) {
 		serializer.SignalMessage,
 	)
 	if parseErr == nil {
-		// DecryptPreKeyMessage is atomic: Builder.Process operates on a copy of
-		// the session record, and the deferred side effects (store session, burn
-		// pre-key) commit only after the inner SignalMessage decrypts. A failed
-		// decrypt therefore leaves Bob's stored session and pre-keys untouched,
-		// so no manual reset is needed before retrying the original message.
-		// Mirrors Rust process_prekey_signal_message, which rolls back on
-		// failure (rust/protocol/src/session.rs:595).
+		// DecryptPreKeyMessage commits only after decryption succeeds, so a failure leaves Bob's state untouched, as Rust.
 		bobCipher := session.NewCipher(bob.sessionBuilder, alice.address)
 		if _, _, decErr := bobCipher.DecryptPreKeyMessage(bob.sessionBuilder, corruptedMsg); decErr == nil {
 			t.Fatal("corrupted prekey message should have been rejected at decrypt")
@@ -288,10 +240,7 @@ func TestRust_GroupNoSendSession(t *testing.T) {
 	}
 }
 
-// TestRust_GroupNoRecvSession ports group_no_recv_session (groups.rs:43).
-//
-// Decrypting without having processed the SKDM must fail with an error
-// (the record is nil / not found in the store).
+// TestRust_GroupNoRecvSession ports group_no_recv_session (groups.rs:43): decrypting before the SKDM fails.
 func TestRust_GroupNoRecvSession(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	groupID := groups.DistributionIDToGroupID(rustDistributionID)
@@ -337,13 +286,7 @@ func TestRust_GroupNoRecvSession(t *testing.T) {
 	}
 }
 
-// TestRust_GroupBasicEncryptDecrypt ports group_basic_encrypt_decrypt
-// (groups.rs:90).
-//
-// Full group cipher round-trip using the Rust test literals:
-//
-//	distribution_id = 0xd1d1d1d1_7000_11eb_b32a_33b8a8a487a6
-//	plaintext       = "space camp?"
+// TestRust_GroupBasicEncryptDecrypt ports group_basic_encrypt_decrypt (groups.rs:90) with the Rust literals.
 func TestRust_GroupBasicEncryptDecrypt(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	groupID := groups.DistributionIDToGroupID(rustDistributionID)
@@ -398,12 +341,7 @@ func TestRust_GroupBasicEncryptDecrypt(t *testing.T) {
 	}
 }
 
-// TestRust_GroupMultipleSenders ports the multi-sender group scenario from
-// groups.rs (the sealed_sender and large_messages tests, ~line 146+).
-//
-// Alice creates a SKDM. Both Bob and Carol process it independently.
-// Alice encrypts once. Both Bob and Carol must be able to decrypt the
-// same ciphertext.
+// TestRust_GroupMultipleSenders checks Bob and Carol both decrypt one group ciphertext (groups.rs).
 func TestRust_GroupMultipleSenders(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 	groupID := groups.DistributionIDToGroupID(rustDistributionID)

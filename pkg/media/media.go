@@ -10,16 +10,10 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/media/goextensions"
 )
 
-// maxMetadataSize is the upper bound on metadata/parser memory for MP4 parsing,
-// matching MAX_METADATA_SIZE in the Rust libsignal mp4san config.
-//
-// Rust source: libsignal/rust/media/src/sanitize/mp4.rs
+// maxMetadataSize bounds MP4 metadata memory, as Rust mp4san MAX_METADATA_SIZE.
 const maxMetadataSize = 300 * 1024 * 1024
 
-// maxWebPFileLen is the maximum RIFF payload size permitted by WebP.
-// Matches webpsan MAX_FILE_LEN = u32::MAX - 2 = 0xFFFFFFFD.
-//
-// webpsan/src/lib.rs:64 — `pub const MAX_FILE_LEN: u32 = u32::MAX - 2;`
+// maxWebPFileLen is webpsan MAX_FILE_LEN (u32::MAX - 2).
 const maxWebPFileLen = 0xFFFFFFFD
 
 // VP8X flag bits — matching webpsan/src/parse/vp8x.rs Vp8xFlags.
@@ -33,13 +27,10 @@ const (
 	vp8xFlagAnim  = 0b0000_0010 // IS_ANIMATED
 )
 
-// vp8lSignature is the VP8L bitstream signature byte.
-// webpsan/src/parse/vp8l.rs:42 — `const SIGNATURE: u8 = 0x2F;`
+// vp8lSignature is the VP8L bitstream signature byte (webpsan vp8l.rs).
 const vp8lSignature = 0x2F
 
-// Magic byte sequences for JPEG, PNG, and GIF detection used by the
-// back-compat Sanitize shim. These mirror the constants in goextensions to
-// avoid a package-level dependency inversion.
+// JPEG, PNG and GIF magic bytes for the Sanitize shim, copied from goextensions to avoid a dependency inversion.
 var (
 	shimJPEGMagic   = []byte{0xFF, 0xD8, 0xFF}
 	shimPNGMagic    = []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
@@ -47,8 +38,7 @@ var (
 	shimGIF89aMagic = []byte("GIF89a")
 )
 
-// isGoExtensionsType reports whether data starts with a JPEG, PNG, or GIF
-// magic byte sequence, indicating it should be routed to goextensions.
+// isGoExtensionsType reports whether data starts with JPEG, PNG or GIF magic bytes.
 func isGoExtensionsType(data []byte) bool {
 	if len(data) >= 3 && bytes.HasPrefix(data, shimJPEGMagic) {
 		return true
@@ -249,8 +239,7 @@ var (
 	ftypMagic = []byte("ftyp")
 )
 
-// minDetectionSize is the minimum number of bytes needed for media type
-// detection. WebP requires the most: 4 (RIFF) + 4 (size) + 4 (WEBP) = 12.
+// minDetectionSize is the bytes WebP detection needs: RIFF, size and WEBP.
 const minDetectionSize = 12
 
 // maxMediaSize is the maximum allowed input size for ValidateReader (100 MiB).
@@ -326,8 +315,7 @@ func Validate(data []byte) (*ValidateResult, error) {
 	}
 
 	mediaType := DetectMediaType(data)
-	// Validate only handles MP4 and WebP. JPEG, PNG, and GIF are handled by
-	// pkg/media/goextensions.Sanitize; return ErrUnsupportedMediaType for them.
+	// JPEG, PNG and GIF belong to goextensions.Sanitize.
 	if mediaType != MediaTypeMP4 && mediaType != MediaTypeWebP {
 		return nil, ErrUnsupportedMediaType
 	}
@@ -453,22 +441,7 @@ func SanitizeReader(r io.Reader) (*SanitizeResult, error) {
 	return Sanitize(data)
 }
 
-// sanitizeMP4 is the fail-closed MP4 validation core used by the legacy
-// Validate/ValidateMP4 API.  It delegates to SanitizeMP4 (the mp4san-faithful
-// implementation in mp4san.go) so that the legacy path and the new API share a
-// single validation core: both reject fragmented MP4, non-isom brand,
-// discontiguous mdat, and external dref, and neither passes through arbitrary
-// top-level boxes.
-//
-// The ValidateResult.Validated output is reconstructed solely from the
-// validated metadata (ftyp+moov) and the original mdat span identified by
-// SanitizedMetadata — no arbitrary boxes from the original file are re-emitted.
-// For the already-faststart case (SanitizedMetadata.Metadata == nil) the
-// metadata block is re-extracted directly from the original input so that the
-// output is equally clean.
-//
-// Rust source: libsignal/rust/media/src/sanitize/mp4.rs
-// Java oracle: Mp4Sanitizer.java:L49–L78
+// sanitizeMP4 validates MP4 through SanitizeMP4 and emits only ftyp+moov and the original mdat span (Rust mp4san, Java Mp4Sanitizer).
 func sanitizeMP4(data []byte) (*ValidateResult, error) {
 	sm, err := SanitizeMP4(data)
 	if err != nil {
@@ -487,10 +460,7 @@ func sanitizeMP4(data []byte) (*ValidateResult, error) {
 		// Rewritten: SanitizeMP4 already produced clean ftyp+moov in sm.Metadata.
 		metadataBytes = sm.Metadata
 	} else {
-		// Already faststart: re-encode ftyp+moov from the parsed tree to strip
-		// any padding boxes (free, skip) that may be interleaved in the original.
-		// This ensures the output contains only ftyp+moov+mdat regardless of
-		// what other top-level boxes appear in the input.
+		// Already faststart: re-encode ftyp+moov to drop padding boxes.
 		f, parseErr := mp4.DecodeFile(bytes.NewReader(data), mp4.WithDecodeMode(mp4.DecModeLazyMdat))
 		if parseErr != nil {
 			return nil, &MediaValidationError{Detail: "MP4 re-parse error: " + parseErr.Error()}
@@ -498,12 +468,7 @@ func sanitizeMP4(data []byte) (*ValidateResult, error) {
 		if f.Ftyp == nil || f.Moov == nil {
 			return nil, &MediaValidationError{Detail: "MP4 missing ftyp or moov after validation"}
 		}
-		// Finding (MEDIUM): stripping free/skip boxes changes the byte distance
-		// between moov and mdat, so stco/co64 entries must be shifted by the
-		// same delta as in the moov-after-mdat path.  Route through
-		// rewriteMetadataWithOffsets so the shift (and stco→co64 promotion) is
-		// applied correctly.  When no padding was present, delta==0 and the
-		// function is a no-op on the offsets.
+		// Dropping free/skip boxes moves mdat, so stco/co64 entries are shifted by the same delta.
 		metadataBytes, err = rewriteMetadataWithOffsets(f.Ftyp, f.Moov, sm.DataOffset)
 		if err != nil {
 			return nil, &MediaValidationError{Detail: "MP4 metadata encode error: " + err.Error()}
@@ -527,9 +492,7 @@ func sanitizeMP4(data []byte) (*ValidateResult, error) {
 	}, nil
 }
 
-// findMoovOffset returns the byte offset of the first moov box in data by
-// scanning top-level ISO BMFF box headers.  Returns 0 if not found (caller
-// treats it as "start of buffer").
+// findMoovOffset returns the offset of the first top-level moov box, or 0.
 func findMoovOffset(data []byte) int64 {
 	boxes, err := scanBoxHeaders(data)
 	if err != nil {
@@ -543,21 +506,7 @@ func findMoovOffset(data []byte) int64 {
 	return 0
 }
 
-// sanitizeWebP performs structural validation of a WebP file, faithfully
-// mirroring the webpsan 0.5.3 state machine.
-//
-// The validation follows the exact state machine from webpsan/src/lib.rs:
-//  1. RIFF header + WEBP fourcc + MAX_FILE_LEN check
-//  2. First chunk must be VP8, VP8L, or VP8X
-//  3. VP8L: validate signature byte 0x2F and extract width/height
-//  4. VP8X: parse flags+reserved+canvas dims (OneBasedU24), then enforce
-//     ICCP→image→EXIF→XMP ordering with strict flag/presence checks
-//  5. After image data: known repeated chunks → MultipleChunks; ANMF →
-//     non-contiguous; unknown chunks → UnsupportedChunk (config-controlled)
-//  6. No trailing bytes past RIFF payload; odd-length pad byte must be 0x00
-//
-// Rust source: webpsan/src/lib.rs (sanitize_with_config, sanitize_extended,
-// sanitize_still, sanitize_animated)
+// sanitizeWebP validates a WebP file with the webpsan 0.5.3 state machine (webpsan/src/lib.rs).
 func sanitizeWebP(data []byte) (*ValidateResult, error) {
 	if err := validateWebPStructure(data); err != nil {
 		return nil, err
@@ -574,13 +523,7 @@ func sanitizeWebP(data []byte) (*ValidateResult, error) {
 	}, nil
 }
 
-// webpChunkReader is a cursor over a bounded RIFF payload region, providing
-// chunk-by-chunk iteration matching webpsan's ChunkReader contract.
-//
-// The reader enforces:
-//   - No reads past payloadEnd
-//   - Odd-length pad byte must be 0x00 (webpsan/src/reader.rs:232)
-//   - Exact payload consumption (no trailing bytes within the region)
+// webpChunkReader iterates chunks within a bounded RIFF payload, enforcing zero pad bytes and exact consumption (webpsan ChunkReader).
 type webpChunkReader struct {
 	data       []byte
 	payloadEnd int64
@@ -601,10 +544,7 @@ func (r *webpChunkReader) hasRemaining() bool {
 	return r.pos < r.payloadEnd
 }
 
-// readAnyHeader reads the next 8-byte chunk header and returns it.
-// Returns an error if the header is truncated or the chunk body would exceed
-// the payload boundary.
-// Mirrors webpsan ChunkReader::read_any_header.
+// readAnyHeader reads the next chunk header, failing if it or its body overruns the payload (webpsan read_any_header).
 func (r *webpChunkReader) readAnyHeader() (webpChunk, error) {
 	const headerLen = 8
 
@@ -684,10 +624,7 @@ func (r *webpChunkReader) chunkData(ch webpChunk) []byte {
 	return r.data[ch.dataStart:ch.dataEnd]
 }
 
-// validateWebPStructure faithfully mirrors the webpsan 0.5.3 sanitize_with_config
-// state machine.
-//
-// Oracle: webpsan/src/lib.rs:108–177 (sanitize_with_config)
+// validateWebPStructure ports webpsan 0.5.3 sanitize_with_config (webpsan/src/lib.rs:108-177).
 func validateWebPStructure(data []byte) error {
 	const riffHeaderLen = 12 // "RIFF" + 4-byte LE size + "WEBP"
 
@@ -695,20 +632,17 @@ func validateWebPStructure(data []byte) error {
 		return ErrInvalidWebP
 	}
 
-	// Validate "RIFF" magic.
-	// webpsan/src/lib.rs:110 — file_reader.read_header(RIFF)
+	// "RIFF" magic (webpsan lib.rs:110).
 	if !bytes.HasPrefix(data, riffMagic) {
 		return &MediaValidationError{Detail: "WebP: expected RIFF header"}
 	}
 
-	// Validate "WEBP" fourcc at offset 8.
-	// webpsan/src/lib.rs:111 — file_reader.parse_data() → WebpChunk
+	// "WEBP" fourcc at offset 8 (webpsan lib.rs:111).
 	if !bytes.Equal(data[8:12], webpMagic) {
 		return &MediaValidationError{Detail: "WebP: missing WEBP fourcc"}
 	}
 
-	// riffPayloadSize is the 4-byte LE field at offset 4. It covers everything
-	// after the 8-byte "RIFF+size" header (i.e., starting at the "WEBP" fourcc).
+	// riffPayloadSize covers everything after the 8-byte RIFF header.
 	riffPayloadSize := uint64(binary.LittleEndian.Uint32(data[4:8]))
 
 	// MAX_FILE_LEN check: webpsan/src/lib.rs:113–117
@@ -724,14 +658,12 @@ func validateWebPStructure(data []byte) error {
 		return &MediaValidationError{Detail: "WebP: declared RIFF size exceeds actual data length"}
 	}
 
-	// Reject extra unparsed input past the declared RIFF payload.
-	// webpsan/src/lib.rs:170–174 — ensure_attach!(!file_reader.has_remaining()?, ...)
+	// Reject input past the declared RIFF payload (webpsan lib.rs:170-174).
 	if declaredTotal < int64(len(data)) {
 		return &MediaValidationError{Detail: "WebP: trailing bytes after declared RIFF payload"}
 	}
 
-	// The RIFF payload starts at offset 12 (after "RIFF"+size+"WEBP").
-	// payloadEnd is the byte boundary of the RIFF content region.
+	// The RIFF payload starts at offset 12; payloadEnd is its end.
 	payloadEnd := declaredTotal
 
 	reader := &webpChunkReader{
@@ -792,11 +724,7 @@ func validateWebPStructure(data []byte) error {
 		if err := sanitizeWebPExtended(reader, vp8x); err != nil {
 			return err
 		}
-		// Extended files consume everything in the state machine; remaining
-		// chunks (trailing after XMP) fall through to the loop below.
-		// After sanitize_extended returns successfully, the reader is positioned
-		// past the last expected chunk; the trailing-chunk loop below handles any
-		// extra data within the RIFF payload.
+		// Chunks trailing the extended state machine are handled by the loop below.
 
 	default:
 		// webpsan/src/lib.rs:143–149
@@ -806,9 +734,7 @@ func validateWebPStructure(data []byte) error {
 		}
 	}
 
-	// After the image data, only unknown chunks may trail (for simple-format
-	// files). Known chunks that repeat → MultipleChunks; ANMF → non-contiguous.
-	// webpsan/src/lib.rs:154–168
+	// After the image data only unknown chunks may trail; repeated known chunks and ANMF are errors (webpsan lib.rs:154-168).
 	for reader.hasRemaining() {
 		ch, err := reader.readAnyHeader()
 		if err != nil {
@@ -840,17 +766,7 @@ type vp8xState struct {
 	canvasHeight uint32 // actual height (stored+1), 1..16384
 }
 
-// parseVP8XChunk parses the 10-byte VP8X chunk payload.
-//
-// Layout (webpsan/src/parse/vp8x.rs):
-//
-//	byte 0:   flags
-//	bytes 1-3: reserved (must be 0)
-//	bytes 4-6: canvas_width  as OneBasedU24 (stored = actual-1)
-//	bytes 7-9: canvas_height as OneBasedU24 (stored = actual-1)
-//
-// OneBasedU24: stored value is (actual-1), so actual = stored+1.
-// webpsan/src/parse/vp8x.rs:49–63
+// parseVP8XChunk parses the 10-byte VP8X payload: flags, 3 reserved zero bytes, and OneBasedU24 canvas width and height (webpsan vp8x.rs).
 func parseVP8XChunk(payload []byte) (vp8xState, error) {
 	if len(payload) != 10 {
 		return vp8xState{}, &MediaValidationError{Detail: "WebP: VP8X chunk must be exactly 10 bytes"}
@@ -867,12 +783,7 @@ func parseVP8XChunk(payload []byte) (vp8xState, error) {
 	storedW := uint32(payload[4]) | uint32(payload[5])<<8 | uint32(payload[6])<<16
 	storedH := uint32(payload[7]) | uint32(payload[8])<<8 | uint32(payload[9])<<16
 
-	// webpsan 0.5.3 uses NonZeroU32 for canvas dimensions: only the zero-value
-	// is rejected; there is no upper-dimension cap beyond the pixel-count check
-	// below.  storedW and storedH are parsed from 24-bit fields so their maximum
-	// is 0xFFFFFF; actual = stored+1 is always in [1, 16777216].
-	//
-	// webpsan/src/parse/vp8x.rs — OneBasedU24::parse (no dimension cap)
+	// Canvas dimensions are 1..16777216 with no cap beyond the pixel-count check, as webpsan OneBasedU24.
 
 	// Pixel count overflow check.
 	// webpsan/src/parse/vp8x.rs:57–60 — canvas_height.get().checked_mul(canvas_width.get())
@@ -885,21 +796,7 @@ func parseVP8XChunk(payload []byte) (vp8xState, error) {
 	return vp8xState{flags: payload[0], canvasWidth: w, canvasHeight: h}, nil
 }
 
-// validateVP8LHeader validates the VP8L bitstream header.
-//
-// VP8L header layout (webpsan/src/parse/vp8l.rs):
-//
-//	byte 0:    signature (must be 0x2F)
-//	bits 8–21: width-1 (14 bits, LE bit order)
-//	bits 22–35: height-1 (14 bits)
-//	bit 36:    alpha_is_used
-//	bits 37–39: version (must be 0)
-//
-// Width and height are extracted as (stored+1), each in range 1..16384.
-// The Go implementation validates the signature byte and version field only;
-// full bitstream decode is not feasible without a VP8L codec.
-//
-// webpsan/src/parse/vp8l.rs:64–85
+// validateVP8LHeader checks the VP8L signature byte and version field (webpsan vp8l.rs:64-85).
 func validateVP8LHeader(payload []byte) error {
 	if len(payload) < 5 {
 		return &MediaValidationError{Detail: "WebP: VP8L chunk too short for header"}
@@ -913,10 +810,7 @@ func validateVP8LHeader(payload []byte) error {
 		}
 	}
 
-	// Version field: bits 37-39 (within bytes 4-5), must be 0.
-	// The 5 header bytes encode: sig(8) + width(14) + height(14) + alpha(1) + version(3) = 40 bits.
-	// Version occupies the top 3 bits of byte 4 (bits 37-39 of the 40-bit window).
-	// webpsan/src/parse/vp8l.rs:81–82 — reader.read(3) after alpha bit
+	// Version is the top 3 bits of byte 4 and must be 0 (webpsan vp8l.rs:81-82).
 	version := (payload[4] >> 5) & 0x07
 	if version != 0 {
 		return &MediaValidationError{
@@ -927,17 +821,9 @@ func validateVP8LHeader(payload []byte) error {
 	return nil
 }
 
-// sanitizeWebPExtended implements the VP8X extended-file-format state machine,
-// faithfully porting webpsan/src/lib.rs:sanitize_extended.
-//
-// Order enforced (webpsan/src/lib.rs:179–205):
-//  1. ICCP chunk — present iff HAS_ICCP_CHUNK flag
-//  2. Image data — animated (ANIM + ≥1 ANMF) OR still (optional ALPH + VP8/VP8L)
-//  3. EXIF chunk — present iff HAS_EXIF_CHUNK flag
-//  4. XMP chunk  — present iff HAS_XMP_CHUNK flag
+// sanitizeWebPExtended enforces ICCP, image data, EXIF, XMP order with presence matching the VP8X flags (webpsan sanitize_extended).
 func sanitizeWebPExtended(reader *webpChunkReader, vp8x vp8xState) error {
-	// 1. ICCP — present iff HAS_ICCP flag.
-	// webpsan/src/lib.rs:180–184
+	// ICCP iff HAS_ICCP (webpsan lib.rs:180-184).
 	if vp8x.flags&vp8xFlagICCP != 0 {
 		ch, err := reader.readAnyHeader()
 		if err != nil {
@@ -965,8 +851,7 @@ func sanitizeWebPExtended(reader *webpChunkReader, vp8x vp8xState) error {
 		}
 	}
 
-	// 3. EXIF — present iff HAS_EXIF flag.
-	// webpsan/src/lib.rs:192–196
+	// EXIF iff HAS_EXIF (webpsan lib.rs:192-196).
 	if vp8x.flags&vp8xFlagEXIF != 0 {
 		ch, err := reader.readAnyHeader()
 		if err != nil {
@@ -1002,19 +887,11 @@ func sanitizeWebPExtended(reader *webpChunkReader, vp8x vp8xState) error {
 	return nil
 }
 
-// sanitizeWebPStill validates still-image data in an extended WebP file.
-//
-// webpsan/src/lib.rs:207–247 (sanitize_still)
-//
-// Order:
-//  1. Optional ALPH chunk — required iff HAS_ALPH flag
-//  2. VP8 or VP8L bitstream chunk (required; VP8L forbidden when ALPH present)
-//     When VP8L: dims must match canvas (webpsan enforces this)
+// sanitizeWebPStill validates optional ALPH (iff HAS_ALPH) then VP8 or VP8L matching the canvas (webpsan sanitize_still).
 func sanitizeWebPStill(reader *webpChunkReader, vp8x vp8xState) error {
 	var hasAlph bool
 
-	// 1. ALPH — present iff HAS_ALPH flag.
-	// webpsan/src/lib.rs:208–216
+	// ALPH iff HAS_ALPH (webpsan lib.rs:208-216).
 	if vp8x.flags&vp8xFlagAlpha != 0 {
 		ch, err := reader.readAnyHeader()
 		if err != nil {
@@ -1025,8 +902,7 @@ func sanitizeWebPStill(reader *webpChunkReader, vp8x vp8xState) error {
 				Detail: "WebP: InvalidChunkLayout: expected ALPH, got '" + ch.fourcc + "'",
 			}
 		}
-		// Validate ALPH image data if COMPRESS_LOSSLESS flag is set.
-		// alph.rs:39-47 — AlphChunk::sanitize_image_data.
+		// Validate lossless ALPH image data (webpsan alph.rs:39-47).
 		if err := validateALPHChunkData(reader.chunkData(ch), vp8x); err != nil {
 			return err
 		}
@@ -1053,8 +929,7 @@ func sanitizeWebPStill(reader *webpChunkReader, vp8x vp8xState) error {
 		}
 
 	case "VP8L":
-		// Lossless: VP8L must NOT appear when ALPH is present.
-		// webpsan/src/lib.rs:226–227 — ensure_matches_attach!(alph, None, ...)
+		// VP8L must not follow ALPH (webpsan lib.rs:226-227).
 		if hasAlph {
 			return &MediaValidationError{
 				Detail: "WebP: InvalidChunkLayout: VP8L not allowed with ALPH chunk",
@@ -1087,17 +962,9 @@ func sanitizeWebPStill(reader *webpChunkReader, vp8x vp8xState) error {
 	return nil
 }
 
-// sanitizeWebPAnimated validates animated WebP image data.
-//
-// webpsan/src/lib.rs:249–333 (sanitize_animated)
-//
-// Order:
-//  1. ANIM chunk (required)
-//  2. At least one ANMF frame (required)
-//  3. Each frame: optional ALPH (if HAS_ALPH and frame has it) + VP8/VP8L
+// sanitizeWebPAnimated validates ANIM then one or more ANMF frames (webpsan sanitize_animated).
 func sanitizeWebPAnimated(reader *webpChunkReader, vp8x vp8xState) error {
-	// 1. ANIM — required.
-	// webpsan/src/lib.rs:250–252
+	// ANIM is required (webpsan lib.rs:250-252).
 	ch, err := reader.readAnyHeader()
 	if err != nil {
 		return &MediaValidationError{Detail: "WebP: expected ANIM chunk: " + err.Error()}
@@ -1107,8 +974,7 @@ func sanitizeWebPAnimated(reader *webpChunkReader, vp8x vp8xState) error {
 			Detail: "WebP: InvalidChunkLayout: expected ANIM, got '" + ch.fourcc + "'",
 		}
 	}
-	// ANIM payload must be at least 6 bytes (4 bg_color + 2 loop_count).
-	// webpsan/src/parse/anim.rs:23 — ENCODED_LEN = u32::ENCODED_LEN + u16::ENCODED_LEN
+	// ANIM payload is at least 6 bytes (webpsan anim.rs:23).
 	if ch.dataEnd-ch.dataStart < 6 {
 		return &MediaValidationError{Detail: "WebP: ANIM chunk too short"}
 	}
@@ -1116,8 +982,7 @@ func sanitizeWebPAnimated(reader *webpChunkReader, vp8x vp8xState) error {
 		return err
 	}
 
-	// 2. At least one ANMF required.
-	// webpsan/src/lib.rs:254–258
+	// At least one ANMF (webpsan lib.rs:254-258).
 	nextFourCC, err := reader.peekFourCC()
 	if err != nil {
 		return err
@@ -1142,14 +1007,12 @@ func sanitizeWebPAnimated(reader *webpChunkReader, vp8x vp8xState) error {
 			return err
 		}
 
-		// ANMF payload must be at least 16 bytes: x(3)+y(3)+w(3)+h(3)+dur(3)+flags(1) = 16.
-		// webpsan/src/parse/anmf.rs:60–65 — ENCODED_LEN
+		// ANMF header is 16 bytes (webpsan anmf.rs:60-65).
 		if ch.dataEnd-ch.dataStart < 16 {
 			return &MediaValidationError{Detail: "WebP: ANMF chunk too short"}
 		}
 
-		// Build a child reader for the ANMF frame body (after the 16-byte header).
-		// webpsan/src/lib.rs:269 — reader.child_reader()
+		// Child reader for the frame body (webpsan lib.rs:269).
 		framePayload := &webpChunkReader{
 			data:       reader.data,
 			payloadEnd: ch.dataEnd,
@@ -1160,8 +1023,7 @@ func sanitizeWebPAnimated(reader *webpChunkReader, vp8x vp8xState) error {
 			return err
 		}
 
-		// Within each frame: optional ALPH + VP8/VP8L.
-		// webpsan/src/lib.rs:271–311
+		// Each frame: optional ALPH then VP8 or VP8L (webpsan lib.rs:271-311).
 		if err := sanitizeWebPFrame(framePayload, vp8x); err != nil {
 			return err
 		}
@@ -1189,16 +1051,11 @@ func sanitizeWebPAnimated(reader *webpChunkReader, vp8x vp8xState) error {
 	return nil
 }
 
-// sanitizeWebPFrame validates a single animation frame body.
-//
-// webpsan/src/lib.rs:271–311 (inside sanitize_animated ANMF loop)
-//
-// Frame body layout: optional ALPH (if HAS_ALPH and frame starts with ALPH) + VP8/VP8L.
+// sanitizeWebPFrame validates one frame body: optional ALPH then VP8 or VP8L (webpsan lib.rs:271-311).
 func sanitizeWebPFrame(frame *webpChunkReader, vp8x vp8xState) error {
 	var hasAlph bool
 
-	// Optional ALPH — only if HAS_ALPH flag set and the frame actually has one.
-	// webpsan/src/lib.rs:271–281 (alph peek)
+	// Optional ALPH when HAS_ALPH is set and the frame has one (webpsan lib.rs:271-281).
 	if vp8x.flags&vp8xFlagAlpha != 0 {
 		nextFourCC, err := frame.peekFourCC()
 		if err != nil {
@@ -1209,8 +1066,7 @@ func sanitizeWebPFrame(frame *webpChunkReader, vp8x vp8xState) error {
 			if err != nil {
 				return err
 			}
-			// Validate ALPH image data if COMPRESS_LOSSLESS flag is set.
-			// alph.rs:39-47 — AlphChunk::sanitize_image_data.
+			// Validate lossless ALPH image data (webpsan alph.rs:39-47).
 			if err := validateALPHChunkData(frame.chunkData(ch), vp8x); err != nil {
 				return err
 			}
@@ -1237,8 +1093,7 @@ func sanitizeWebPFrame(frame *webpChunkReader, vp8x vp8xState) error {
 		}
 
 	case "VP8L":
-		// VP8L not allowed when ALPH is present.
-		// webpsan/src/lib.rs:291–292
+		// VP8L must not follow ALPH (webpsan lib.rs:291-292).
 		if hasAlph {
 			return &MediaValidationError{
 				Detail: "WebP: InvalidChunkLayout: VP8L not allowed with ALPH chunk in ANMF",
@@ -1263,8 +1118,7 @@ func sanitizeWebPFrame(frame *webpChunkReader, vp8x vp8xState) error {
 		}
 
 	default:
-		// Unexpected chunk order (e.g. ALPH after VP8L).
-		// webpsan/src/lib.rs:306–310
+		// Unexpected chunk order (webpsan lib.rs:306-310).
 		if !hasAlph && ch.fourcc == "ALPH" {
 			// ALPH appeared after VP8/VP8L or out of order
 			return &MediaValidationError{
@@ -1279,22 +1133,7 @@ func sanitizeWebPFrame(frame *webpChunkReader, vp8x vp8xState) error {
 	return nil
 }
 
-// validateVP8LDimsMatchCanvas checks that the VP8L bitstream width/height match
-// the VP8X canvas dimensions.
-//
-// VP8L header bit layout (vp8l.rs:66-85, LE bit order):
-//
-//	bits  0– 7: signature (byte 0)
-//	bits  8–21: width-1 (14 bits)
-//	bits 22–35: height-1 (14 bits)
-//	bit  36:    alpha_is_used
-//	bits 37–39: version
-//
-// Width-1 spans bits 8-21: bytes 1-2 and 2 low bits of byte 3.
-// Height-1 spans bits 22-35: upper 6 bits of byte 3, all of byte 4, and 2 bits of byte 5.
-//
-// webpsan/src/parse/vp8l.rs:67–85
-// webpsan/src/lib.rs:228–235 and 294–301
+// validateVP8LDimsMatchCanvas checks the VP8L width and height equal the VP8X canvas (webpsan vp8l.rs:67-85, lib.rs:228-235).
 func validateVP8LDimsMatchCanvas(payload []byte, vp8x vp8xState) error {
 	if err := validateVP8LHeader(payload); err != nil {
 		return err
@@ -1303,19 +1142,7 @@ func validateVP8LDimsMatchCanvas(payload []byte, vp8x vp8xState) error {
 		return &MediaValidationError{Detail: "WebP: VP8L chunk too short"}
 	}
 
-	// Extract width-1 from bits 8-21 (LE bit order).
-	// Byte layout of the 5 header bytes, reading LE bits:
-	//   payload[0] = bits  0-7  (signature)
-	//   payload[1] = bits  8-15
-	//   payload[2] = bits 16-23
-	//   payload[3] = bits 24-31
-	//   payload[4] = bits 32-39
-	//
-	// width-1  = bits[8..22]  = payload[1] | (payload[2] & 0x3F) << 8
-	// height-1 = bits[22..36] = (payload[2] >> 6) | payload[3] << 2 | (payload[4] & 0x0F) << 10
-	//
-	// This matches the BitReader LE read pattern in vp8l.rs:
-	//   reader.read(14) for width, reader.read(14) for height.
+	// width-1 and height-1 are 14-bit little-endian fields at bits 8 and 22 (webpsan vp8l.rs).
 	widthMinus1 := uint32(payload[1]) | uint32(payload[2]&0x3F)<<8
 	heightMinus1 := uint32(payload[2]>>6) | uint32(payload[3])<<2 | uint32(payload[4]&0x0F)<<10
 
@@ -1330,17 +1157,7 @@ func validateVP8LDimsMatchCanvas(payload []byte, vp8x vp8xState) error {
 	return nil
 }
 
-// vp8lDimensions extracts width and height from the 5-byte VP8L header.
-// The caller must have already validated the header via validateVP8LHeader.
-// Returns width and height in the range [1, 16384].
-//
-// VP8L bit layout (LE bit order):
-//
-//	bits  0– 7: signature (byte 0)
-//	bits  8–21: width-1 (14 bits)
-//	bits 22–35: height-1 (14 bits)
-//
-// Matches vp8l.rs:76-78 — reader.read(14) for width, reader.read(14) for height.
+// vp8lDimensions returns width and height (1..16384) from a validated 5-byte VP8L header.
 func vp8lDimensions(payload []byte) (width, height uint32, err error) {
 	if len(payload) < 5 {
 		return 0, 0, &MediaValidationError{Detail: "WebP: VP8L chunk too short"}
@@ -1350,16 +1167,10 @@ func vp8lDimensions(payload []byte) (width, height uint32, err error) {
 	return widthMinus1 + 1, heightMinus1 + 1, nil
 }
 
-// alphCompressLossless is the ALPH chunk COMPRESS_LOSSLESS flag value.
-// alph.rs:32 — COMPRESS_LOSSLESS = 0b0000_0001
+// alphCompressLossless is the ALPH COMPRESS_LOSSLESS flag (webpsan alph.rs:32).
 const alphCompressLossless = 0x01
 
-// validateALPHChunkData validates ALPH chunk image data.
-// If the COMPRESS_LOSSLESS flag is set, the alpha plane is a VP8L lossless
-// image stream (without a 0x2F VP8L header) using vp8x canvas dimensions.
-//
-// alph.rs:39-47 — AlphChunk::sanitize_image_data.
-// ALPH chunk layout: byte 0 = flags, bytes 1.. = image stream.
+// validateALPHChunkData validates a lossless ALPH image stream at the canvas dimensions (webpsan alph.rs:39-47).
 func validateALPHChunkData(data []byte, vp8x vp8xState) error {
 	if len(data) == 0 {
 		return nil

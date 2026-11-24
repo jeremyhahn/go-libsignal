@@ -1,18 +1,4 @@
-// Package interop — Kyber-1024 Known-Answer Test (KAT).
-//
-// This test loads tests/interop/fixtures/kem/kyber1024_kat.json, which is
-// emitted by the Rust wire_emitter binary (make interop-wire-emit), and
-// verifies that the Go Kyber-1024 implementation produces the same shared
-// secret when decapsulating the Rust-emitted ciphertext with the Rust-emitted
-// secret key.
-//
-// If the fixture file is absent (pending regeneration), the test fails with a
-// clear message. Run `make interop-wire-emit` to populate the fixture.
-//
-// Rust reference: rust/protocol/src/kem.rs — KeyPair::generate,
-//
-//	PublicKey::encapsulate, SecretKey::decapsulate
-//	(libsignal v0.92.2, RUST_REV 98915c442d).
+// Kyber-1024 KAT: decapsulating the Rust-emitted ciphertext from fixtures/kem/kyber1024_kat.json gives Rust's shared secret; make interop-wire-emit regenerates the fixture.
 package interop
 
 import (

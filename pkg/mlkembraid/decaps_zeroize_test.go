@@ -7,17 +7,7 @@ import (
 	"testing"
 )
 
-// TestDecaps_ZeroizesTheDecapsulationKey is the source-level half of the #24
-// site-2 fix. The plain-heap seed copy that kem.NewSecretKey holds inside
-// Decaps is not observable from outside the function — sk is a local, its buffer
-// is unexported, and GC makes heap residency unmeasurable — so a test that only
-// calls Decaps and checks the shared secret (the round-trip tests do that)
-// proves nothing about whether the key is bounded.
-//
-// This asserts the property directly on the source: Decaps must defer
-// sk.Zeroize(). It is mutation-verifiable — delete the defer in
-// kem_interface.go and this test fails, which is exactly what a test of a
-// not-otherwise-observable property has to do to be worth keeping.
+// TestDecaps_ZeroizesTheDecapsulationKey checks in the source that Decaps defers sk.Zeroize, which no runtime test can observe.
 func TestDecaps_ZeroizesTheDecapsulationKey(t *testing.T) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "kem_interface.go", nil, 0)
@@ -68,10 +58,7 @@ func receiverTypeName(recv *ast.FieldList) string {
 	return ""
 }
 
-// defersCall reports whether fn's body contains a TOP-LEVEL `defer
-// recv.method()` statement. It deliberately does not descend into nested
-// closures or blocks: a defer buried in a closure that Decaps never invokes
-// would not bound the key, so only a defer in the function body itself counts.
+// defersCall reports whether fn's body itself, not a nested closure, defers recv.method().
 func defersCall(fn *ast.FuncDecl, recv, method string) bool {
 	if fn.Body == nil {
 		return false

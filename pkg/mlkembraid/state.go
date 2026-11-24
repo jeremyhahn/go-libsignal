@@ -191,10 +191,7 @@ func (s *State) Receive(msg *Message, kemImpl IncrementalKEM, chunkSize int) (ui
 	if msg.Epoch < s.lastReceivedEpoch {
 		return 0, nil, &ErrInvalidEpoch{Expected: s.lastReceivedEpoch, Received: msg.Epoch}
 	}
-	// Per Rust spqr states.rs: only Ct2Sampled accepts epoch+1 (next-epoch trigger).
-	// Every other state rejects msg.epoch > state.epoch with EpochOutOfRange.
-	// This matches `match msg.epoch.cmp(&state.epoch()) { Ordering::Greater => Err(...) }`
-	// in all non-Ct2Sampled arms of States::recv.
+	// Only Ct2Sampled accepts epoch+1; every other state rejects a later epoch with EpochOutOfRange, as Rust spqr does.
 	if s.kind == StateCt2Sampled {
 		// Ct2Sampled allows exactly epoch+1 (handled in receiveCt2Sampled);
 		// anything further ahead is still out of range.
@@ -435,11 +432,7 @@ func (s *State) receiveHeaderSent(msg *Message, _ IncrementalKEM, chunkSize int)
 	return receivingEpoch, nil, nil
 }
 
-// receiveCt1Received: Alice receives Ct2 chunks.
-// Per spec: receiving_epoch = state.epoch - 1, Transition (4) to EkSentCt1Received.
-// Even when ct2 arrives in a single chunk, we must transition through
-// EkSentCt1Received before completing, matching the spec's state machine
-// sequence: Ct1Received -> EkSentCt1Received -> NoHeaderReceived.
+// receiveCt1Received: Alice receives ct2 chunks, always passing through EkSentCt1Received (transition 4).
 func (s *State) receiveCt1Received(msg *Message, kemImpl IncrementalKEM, chunkSize int) (uint64, *OutputKey, error) {
 	receivingEpoch := s.epoch - 1
 
@@ -534,14 +527,7 @@ func (s *State) aliceCompleteCt2(_ *Message, kemImpl IncrementalKEM) (uint64, *O
 	}
 	defer crypto.Zeroize(outputKey)
 
-	// Clone the authenticator before Update so we can roll back if VfyCt fails.
-	// Without this, a forged ct2 that passes Decaps but fails VfyCt permanently
-	// advances the auth mac_key, desynchronizing Alice's and Bob's authenticators
-	// for all future epochs (Finding 2).
-	//
-	// Per protocol: auth.Update advances the mac_key to the same state Bob used when
-	// computing the MAC, so VfyCt MUST use the post-Update mac_key. The clone is only
-	// used for rollback; VfyCt always runs on the updated auth.
+	// VfyCt uses the updated authenticator; the clone only rolls back a forged ct2 so the MAC keys stay in sync.
 	preUpdateAuth, err := s.auth.Clone()
 	if err != nil {
 		return 0, nil, &ErrKEMOperation{Op: "aliceCompleteCt2/auth.Clone", Err: err}
@@ -611,15 +597,7 @@ func (s *State) sendNoHeaderReceived(_ IncrementalKEM) (*Message, uint64, *Outpu
 	return &Message{Epoch: s.epoch, Type: MessageTypeNone}, sendingEpoch, nil, nil
 }
 
-// sendHeaderReceived: Bob has header (ek_seed + hek) but does not yet have ek_vector.
-// Per spec Section 2.5 (HeaderReceived.Send): computes Encaps1 to initiate
-// the two-phase encapsulation. Since ML-KEM-1024 cannot produce ct1 without the
-// full ek, Encaps1 stores ek_seed and hek into an opaque encapsSecret token.
-// The actual crypto (ct1, ct2, shared_secret) is deferred to CompleteEncaps2
-// when ek_vector arrives. Bob sends None while waiting for ek_vector chunks.
-//
-// The encapsSecret is stored in bobEncapSecret so that receiveHeaderReceived
-// can call CompleteEncaps2 when the ek_vector decoder completes.
+// sendHeaderReceived: Bob runs Encaps1 into bobEncapSecret and sends nothing until the ek vector arrives (spec §2.5).
 func (s *State) sendHeaderReceived(kemImpl IncrementalKEM) (*Message, uint64, *OutputKey, error) {
 	sendingEpoch := s.epoch - 1
 
@@ -653,10 +631,7 @@ func (s *State) sendCt1Sampled(_ IncrementalKEM) (*Message, uint64, *OutputKey, 
 		return &Message{Epoch: s.epoch, Type: MessageTypeCt1, Data: chunk}, sendingEpoch, nil, nil
 	}
 	if s.ct1Encoder != nil {
-		// Wrap around for retransmission: intentionally re-sends chunks from
-		// the beginning when all unique chunks have been sent. This matches
-		// Rust's PolyEncoder wrapping behavior and provides redundancy for
-		// reliability when messages are lost or reordered.
+		// Wrap around and resend chunks from the start, as Rust's PolyEncoder does, for redundancy.
 		return &Message{Epoch: s.epoch, Type: MessageTypeCt1, Data: s.ct1Encoder.NextChunk()}, sendingEpoch, nil, nil
 	}
 	return &Message{Epoch: s.epoch, Type: MessageTypeNone}, sendingEpoch, nil, nil
@@ -842,20 +817,7 @@ func (s *State) receiveHeaderReceived(msg *Message, kemImpl IncrementalKEM, chun
 	return receivingEpoch, outputKey, nil
 }
 
-// receiveCt1Sampled: Bob in Ct1Sampled receives Ek, EkCt1Ack, or Ct1Ack.
-// Per spec Section 2.5:
-//   - Transition 10 (receives Ek): collect ek chunks; when ek complete,
-//     verify hek, transition to EkReceivedCt1Sampled (wait for ct1 ack).
-//   - Transition 8 (receives EkCt1Ack, ek incomplete): add ek chunk,
-//     transition to Ct1Acknowledged.
-//   - Transition 9 (receives EkCt1Ack, ek complete + acknowledged):
-//     verify hek, FullEncaps, compute MAC, create ct2_encoder,
-//     transition to Ct2Sampled.
-//   - Ct1Ack with ek already complete: transition directly to Ct2Sampled.
-//
-// When encapsulation was already completed (via bobCompleteEncapsulation from
-// HeaderReceived), the ct2Encoder is non-nil and re-encapsulation is skipped.
-// receiving_epoch = state.epoch - 1.
+// receiveCt1Sampled: Bob handles Ek (transition 10), EkCt1Ack (8, 9) or Ct1Ack (spec §2.5); a completed encapsulation is not repeated.
 func (s *State) receiveCt1Sampled(msg *Message, kemImpl IncrementalKEM, chunkSize int) (uint64, *OutputKey, error) {
 	receivingEpoch := s.epoch - 1
 
@@ -924,11 +886,7 @@ func (s *State) receiveCt1SampledEk(msg *Message, chunkSize int) (uint64, *Outpu
 	return receivingEpoch, nil, nil
 }
 
-// receiveCt1SampledEkCt1Ack handles Transitions 8 and 9:
-// Ct1Sampled receives EkCt1Ack.
-//   - Transition 8: ek_decoder NOT complete -> Ct1Acknowledged.
-//   - Transition 9: ek_decoder IS complete -> verify hek, FullEncaps,
-//     compute MAC, create ct2_encoder -> Ct2Sampled.
+// receiveCt1SampledEkCt1Ack: an incomplete ek goes to Ct1Acknowledged (8), a complete one encapsulates into Ct2Sampled (9).
 func (s *State) receiveCt1SampledEkCt1Ack(msg *Message, kemImpl IncrementalKEM, chunkSize int) (uint64, *OutputKey, error) {
 	receivingEpoch := s.epoch - 1
 	s.ct1Ack = true
@@ -1053,12 +1011,7 @@ func (s *State) receiveCt1Acknowledged(msg *Message, kemImpl IncrementalKEM, chu
 	}
 }
 
-// verifyEkVector verifies that ekVector (pk2) is consistent with the stored
-// bobEkSeed (pk1) and bobHek. Accepts both KEM implementations:
-//
-//   - Legacy (MLKEM768IncrementalKEM): hek = SHA3-256(ek_seed[0:32] || ekVector)
-//   - Incremental (IncrementalMLKEM768KEM): uses ValidatePKBytes(pk1, pk2) which
-//     checks SHA3-256(pk2 || pk1[:32]) == pk1[32:64].
+// verifyEkVector checks ekVector against bobEkSeed and bobHek for both KEM implementations.
 func (s *State) verifyEkVector(ekVector []byte) error {
 	if s.bobEkSeed == nil || s.bobHek == nil {
 		return &ErrInvalidState{
@@ -1086,11 +1039,7 @@ func (s *State) verifyEkVector(ekVector []byte) error {
 	})
 }
 
-// bobCompleteEncapsulationDeferred performs full encapsulation when Bob has both
-// ek_vector and ct1 acknowledgment, entering from Ct1Sampled, EkReceivedCt1Sampled,
-// or Ct1Acknowledged. Uses CompleteEncaps2 if bobEncapSecret is available,
-// otherwise falls back to FullEncaps with explicit hek verification.
-// Computes MAC over ct1||ct2, creates ct2_encoder, transitions to Ct2Sampled.
+// bobCompleteEncapsulationDeferred encapsulates once Bob has the ek vector and the ct1 ack, MACs ct1||ct2 and moves to Ct2Sampled.
 func (s *State) bobCompleteEncapsulationDeferred(kemImpl IncrementalKEM, chunkSize int) (uint64, *OutputKey, error) {
 	receivingEpoch := s.epoch - 1
 
@@ -1121,9 +1070,7 @@ func (s *State) bobCompleteEncapsulationDeferred(kemImpl IncrementalKEM, chunkSi
 		}}
 	}
 
-	// Always verify ekVector authenticity before encapsulating (Finding 3).
-	// The two-phase path (bobEncapSecret != nil) previously skipped this check,
-	// allowing a tampered ek_vector to silently produce a mismatched shared secret.
+	// Always verify the ek vector before encapsulating.
 	if err := s.verifyEkVector(ekVector); err != nil {
 		return 0, nil, err
 	}
@@ -1224,24 +1171,11 @@ func (s *State) bobCompleteEncapsulationDeferred(kemImpl IncrementalKEM, chunkSi
 	return receivingEpoch, &OutputKey{Epoch: currentEpoch, Key: outputSecret}, nil
 }
 
-// receiveCt2Sampled: Bob in Ct2Sampled sends ct2 and waits for next epoch.
-// Per spec Section 2.5 (Ct2Sampled.Receive): if msg.epoch == state.epoch + 1,
-// Transition (13) to KeysUnsampled with epoch+1.
-// receiving_epoch = state.epoch - 1.
+// receiveCt2Sampled: msg.epoch == state.epoch+1 starts the next epoch (transition 13).
 func (s *State) receiveCt2Sampled(msg *Message, _ IncrementalKEM, _ int) (uint64, *OutputKey, error) {
 	receivingEpoch := s.epoch - 1
 
-	// Check for Transition (13): next epoch has begun.
-	// Per Rust sparsepostquantumratchet states.rs Ct2Sampled arm: ANY message with
-	// epoch == state.epoch+1 triggers recv_next_epoch regardless of message type.
-	//
-	// Defense-in-depth note: tearing down the epoch on the FIRST message carrying
-	// epoch+1 (before Alice confirms key receipt) is intentional — it matches the
-	// Rust reference and prevents the receiver from accumulating stale epoch state.
-	// An attacker injecting a spoofed epoch+1 message can only cause Bob to advance
-	// his own epoch counter early; he cannot forge Alice's epoch advance (which
-	// requires a valid VfyCt MAC from Alice). This is an inherent property of the
-	// protocol design (see also Rust's ct2_sampled_receive in states.rs).
+	// Any message with epoch+1 starts the next epoch, as in Rust; a spoofed one only advances Bob's own counter.
 	if msg.Epoch == s.epoch+1 {
 		// Destroy secrets from the completed epoch before transitioning.
 		destroySecret(&s.bobCt1)
@@ -1268,11 +1202,7 @@ func (s *State) receiveCt2Sampled(msg *Message, _ IncrementalKEM, _ int) (uint64
 	return receivingEpoch, nil, nil
 }
 
-// bobCompleteEncapsulation performs the second phase of two-phase incremental
-// encapsulation when ek_vector is available. Routes through the kemCompleter
-// interface so that both MLKEM768IncrementalKEM and IncrementalMLKEM768KEM
-// complete correctly (Finding 1). Always verifies ekVector before encapsulating
-// regardless of which path (two-phase vs single-phase) is taken (Finding 3).
+// bobCompleteEncapsulation finishes two-phase encapsulation through kemCompleter, verifying the ek vector first.
 func (s *State) bobCompleteEncapsulation(kemImpl IncrementalKEM, chunkSize int) (*OutputKey, error) {
 	ekVectorData, err := s.ekDecoder.Message()
 	if err != nil {
@@ -1294,10 +1224,7 @@ func (s *State) bobCompleteEncapsulation(kemImpl IncrementalKEM, chunkSize int) 
 		}}
 	}
 
-	// Always verify ekVector authenticity before encapsulating (Finding 3).
-	// This applies to both the two-phase path (bobEncapSecret != nil) and the
-	// single-phase path, preventing a tampered ek_vector from producing a
-	// shared secret that Alice can never replicate.
+	// Always verify the ek vector before encapsulating, on both paths.
 	if err := s.bobEkVector.WithBytes(s.verifyEkVector); err != nil {
 		return nil, err
 	}

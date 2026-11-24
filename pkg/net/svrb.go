@@ -110,13 +110,7 @@ func (e *SvrBError) Is(target error) bool {
 	return e.Kind == t.Kind
 }
 
-// prioritizeError returns the higher-priority error of two SVRB errors.
-// The priority order (highest first) is:
-//  1. Structural errors (PreviousBackupDataInvalid, MetadataInvalid)
-//  2. Data errors (Decryption)
-//  3. Connection errors (Attestation, Protocol, RateLimited, Service,
-//     Connect, AllConnectionAttemptsFailed)
-//  4. Content errors (RestoreFailed, DataMissing)
+// prioritizeError returns the higher-priority error: structural, then decryption, then connection, then content.
 func prioritizeError(first, second *SvrBError) *SvrBError {
 	priorityOf := func(e *SvrBError) int {
 		switch e.Kind {
@@ -443,9 +437,7 @@ func (c *SvrBNetClient) Remove(ctx context.Context) error {
 	return err
 }
 
-// connectAll establishes connections to all SVRB servers using the
-// connector. It returns the successful transports and any errors
-// separately.
+// connectAll connects to every SVRB server and returns the transports and the errors separately.
 func (c *SvrBNetClient) connectAll(ctx context.Context) ([]SvrBTransport, []*SvrBError, error) {
 	results, err := c.connector.Connect(ctx)
 	if err != nil {

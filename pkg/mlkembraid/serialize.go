@@ -16,10 +16,7 @@ const (
 	// stateFixedHeaderSize is the size of the fixed header portion of State serialization.
 	stateFixedHeaderSize = 1 + 8 + 4 + 1 + 8 + 8 // stateKind + epoch + chunkSize + ct1Ack + headerMACEpoch + lastReceivedEpoch
 
-	// maxSecretLength is the upper bound on the byte length of a deserialized
-	// secret. ML-KEM secrets are at most a few hundred bytes (e.g., ML-KEM-768
-	// ciphertext is 1088 bytes, public key is 1184 bytes). A 4096-byte cap
-	// prevents unbounded allocation from malformed data.
+	// maxSecretLength caps a deserialized secret at 4096 bytes.
 	maxSecretLength = 4096
 )
 
@@ -402,13 +399,7 @@ func readOptionalSecret(data []byte) (*secret.Secret, int, error) {
 	return s, 5 + length, nil
 }
 
-// appendOptionalEncoder serializes an optional Encoder as:
-//
-//	hasEncoder(1) + [msgLen(4, BE) + msg(N) + sent(4, BE) + total(4, BE) + innerIdx(4, BE)]
-//
-// msg is the original (padded-if-needed) message that was passed to
-// polynomial.NewPolyEncoder. innerIdx is the next chunk index the inner
-// PolyEncoder will emit, allowing exact resume after deserialization.
+// appendOptionalEncoder writes hasEncoder(1) + [msgLen(4) msg sent(4) total(4) innerIdx(4)], big-endian, so the encoder resumes at innerIdx.
 func appendOptionalEncoder(buf []byte, e *Encoder) []byte {
 	if e == nil {
 		return append(buf, 0x00)
@@ -464,11 +455,7 @@ func readOptionalEncoder(data []byte) (*Encoder, int, error) {
 	innerIdx := readU32BE(data[at:])
 	at += 4
 
-	// Bound innerIdx by total to prevent attacker-controlled CPU-DoS.
-	// A serialized blob with innerIdx >> total would cause the fast-forward
-	// loop below to iterate up to 2^32 times before the legitimate chunks
-	// are emitted. Since innerIdx is the number of chunks already emitted
-	// from a (sent, total) encoder, any innerIdx > total is malformed.
+	// innerIdx above total is malformed and would make the fast-forward loop spin.
 	if innerIdx > uint32(total) {
 		return nil, 0, &ErrDeserialize{Reason: fmt.Sprintf("encoder innerIdx %d exceeds total %d", innerIdx, total)}
 	}
@@ -479,11 +466,7 @@ func readOptionalEncoder(data []byte) (*Encoder, int, error) {
 		return nil, 0, &ErrDeserialize{Reason: "encoder message invalid: " + err.Error()}
 	}
 
-	// Fast-forward the inner encoder to the saved chunk index by calling
-	// ChunkAt directly (avoids re-emitting chunks via NextChunk).
-	// We set idx by pre-advancing: call NextChunk innerIdx times.
-	// For large innerIdx this is cheap because ChunkAt is O(1) after the
-	// first polynomial interpolation.
+	// Fast-forward the inner encoder by calling NextChunk innerIdx times; ChunkAt is O(1) after the first interpolation.
 	for i := uint32(0); i < innerIdx; i++ {
 		inner.NextChunk()
 	}
@@ -495,13 +478,7 @@ func readOptionalEncoder(data []byte) (*Encoder, int, error) {
 	}, at, nil
 }
 
-// appendOptionalDecoder serializes an optional Decoder as:
-//
-//	hasDecoder(1) + [originalLen(4, BE) + received(4, BE) +
-//	numLoggedChunks(4, BE) + [chunkWireLen(2, BE) + chunkWireBytes(N)] * numLogged]
-//
-// The decoder's chunkLog (the exact wire bytes fed to AddChunk, in order)
-// is stored verbatim so deserialization can replay them.
+// appendOptionalDecoder writes hasDecoder(1) + [originalLen(4) received(4) numLogged(4) + (len(2) bytes) per logged chunk] so deserialization replays the chunk log.
 func appendOptionalDecoder(buf []byte, d *Decoder) []byte {
 	if d == nil {
 		return append(buf, 0x00)

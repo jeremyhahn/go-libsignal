@@ -30,11 +30,7 @@ type CompositeHeader struct {
 	SCKAMsg *mlkembraid.Message
 }
 
-// marshalCompositeHeader serializes a CompositeHeader into:
-//
-//	ecHeaderLen(4 BE) + ecHeader(N) + sckaWireMsg(M)
-//
-// where the sckaWireMsg includes the PQCounter as the chain_index.
+// marshalCompositeHeader encodes h as ecHeaderLen(4 BE) + ecHeader + SCKA message.
 func marshalCompositeHeader(h *CompositeHeader) ([]byte, error) {
 	if h == nil {
 		return nil, &ErrInvalidInput{Field: "header", Reason: "must not be nil"}

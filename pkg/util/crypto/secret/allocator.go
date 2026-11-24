@@ -19,12 +19,7 @@ type allocSlot struct{ a enclave.Allocator }
 var (
 	allocatorOnce sync.Once
 
-	// admission is nil until either the first locked allocation or a successful
-	// SetAllocator, whichever comes first. The first allocation seals it to
-	// unbudgeted; SetAllocator installs its Allocator only over nil. A single
-	// compare-and-swap therefore decides the race between the two: no
-	// allocation can run unbudgeted once SetAllocator has returned nil, and
-	// SetAllocator cannot succeed once any allocation has run without it.
+	// admission is set once by compare-and-swap, either to unbudgeted by the first allocation or by SetAllocator.
 	admission atomic.Pointer[allocSlot]
 )
 
@@ -43,9 +38,8 @@ var (
 // unbudgeted, and ErrAllocatorAlreadySet on any call after the first valid one.
 // The last two fail closed: the package stays as it was.
 //
-// Upstream: no Rust libsignal counterpart. Rust libsignal does not lock key
-// memory; this budget belongs to the go-enclave backing store. It was added by
-// go-libsignal#41 under the owner's Option (A) ruling.
+// Upstream: no Rust libsignal counterpart; Rust libsignal does not lock key
+// memory, and this budget belongs to the go-enclave backing store.
 func SetAllocator(maxBytes int64) error {
 	a, err := enclave.NewAllocator(maxBytes)
 	if err != nil {

@@ -212,10 +212,7 @@ func verifyCertificates(evidence *dcapEvidence, endorsements *sgxEndorsements, c
 	return nil
 }
 
-// verifyCRLs verifies CRL signatures and checks certificates against revocation lists.
-// Both pckCertCRL and pckProcCACRL are mandatory: a missing CRL is a hard error
-// (fail-closed), not a pass-through. This matches the Rust libsignal reference which
-// requires CRL_CHECK | CRL_CHECK_ALL and treats absent CRLs as invalid endorsements.
+// verifyCRLs checks CRL signatures and revocation; both CRLs are mandatory, as in Rust libsignal.
 func verifyCRLs(evidence *dcapEvidence, endorsements *sgxEndorsements) error {
 	// Fail closed on missing CRLs.  An attacker who strips CRL fields from
 	// the endorsement blob ends up here with nil pointers; we must reject, not skip.
@@ -246,11 +243,7 @@ func verifyCRLs(evidence *dcapEvidence, endorsements *sgxEndorsements) error {
 		return err
 	}
 
-	// Check PCK cert chain against the root CRL (Finding 2 fix).
-	// Rust (dcap.rs ~311) validates pck_cert_chain against a trust store that
-	// contains root_crl with CRL_CHECK_ALL.  The Go code previously only checked
-	// pckCertChain against pckCertCRL (the intermediate CRL); now we also check
-	// against pckProcCACRL so a cert revoked at the root level is caught.
+	// Check the PCK chain against the root CRL too, as dcap.rs does with CRL_CHECK_ALL.
 	for _, cert := range evidence.quote.support.pckCertChain {
 		if err := checkCertAgainstCRL(cert, endorsements.pckProcCACRL); err != nil {
 			return err
@@ -292,9 +285,7 @@ func verifyCRLs(evidence *dcapEvidence, endorsements *sgxEndorsements) error {
 	return nil
 }
 
-// verifyRootCRLAgainstIntelKey verifies the root CRL signature against
-// the Intel DCAP root public key. This matches the Rust reference behavior
-// of calling root_crl.verify(root_key) before trusting any CRL.
+// verifyRootCRLAgainstIntelKey verifies the root CRL signature against the Intel DCAP root key before any CRL is trusted.
 func verifyRootCRLAgainstIntelKey(crl *x509.RevocationList) error {
 	intelKey, err := parseIntelRootKey()
 	if err != nil {
@@ -442,17 +433,7 @@ func verifyEnclaveSignatures(evidence *dcapEvidence) error {
 	return nil
 }
 
-// verifyTCBStatus verifies the TCB status by comparing evidence SVN components
-// against TCB levels from endorsements.
-//
-// This follows the Intel DCAP TCB verification flow:
-// 1. Extract FMSPC and PCEID from the PCK certificate extension
-// 2. Verify they match the endorsement TCB info
-// 3. Compare SVN components against TCB levels to find matching status
-//
-// If full matching cannot be performed (e.g., PCK extension not parseable),
-// the function fails safe by returning tcbSWHardeningNeeded rather than
-// tcbUpToDate (fail-safe, not fail-open).
+// verifyTCBStatus matches the PCK extension's FMSPC, PCEID and SVNs against the endorsement TCB levels; it fails safe to tcbSWHardeningNeeded.
 func verifyTCBStatus(evidence *dcapEvidence, endorsements *sgxEndorsements) (tcbStandingType, []string, error) {
 	// Parse the TCB info JSON from endorsements to extract TCB levels.
 	if len(endorsements.tcbInfoRaw) == 0 {
@@ -536,20 +517,11 @@ func parsePCKExtension(evidence *dcapEvidence) (*pckExtensionData, error) {
 	return parseSGXExtensionASN1(sgxExtBytes)
 }
 
-// parseSGXExtensionASN1 performs a simplified parse of the SGX PCK extension
-// ASN.1 structure to extract FMSPC, PCEID, and TCB component SVNs.
-//
-// The extension contains a SEQUENCE of SEQUENCE(OID, value) pairs.
-// Known OIDs:
-//   - 1.2.840.113741.1.13.1.2 - TCB (nested SEQUENCE of component SVNs + PCESVN)
-//   - 1.2.840.113741.1.13.1.4 - FMSPC (OCTET STRING, 6 bytes)
-//   - 1.2.840.113741.1.13.1.3 - PCEID (OCTET STRING, 2 bytes)
+// parseSGXExtensionASN1 extracts FMSPC (.1.13.1.4), PCEID (.1.13.1.3) and TCB SVNs (.1.13.1.2) from the SGX PCK extension.
 func parseSGXExtensionASN1(data []byte) (*pckExtensionData, error) {
 	ext := &pckExtensionData{}
 
-	// Walk the outer SEQUENCE looking for known OIDs.
-	// This is a simplified ASN.1 walk that handles the specific structure
-	// found in Intel PCK certificates.
+	// Walk the outer SEQUENCE for the known OIDs.
 	items, err := parseASN1Sequence(data)
 	if err != nil {
 		return nil, &ASN1ParseError{Detail: "parsing SGX extension outer sequence", Err: err}
@@ -762,10 +734,7 @@ type tcbLevel struct {
 	advisoryIDs []string
 }
 
-// parseTCBLevels extracts TCB levels from TCB info JSON.
-// The JSON contains "tcbLevels" array with objects containing
-// "tcb" (with sgxtcbcompXXsvn and pcesvn fields) and "tcbStatus".
-// Returns an error if TCB levels use inconsistent format versions.
+// parseTCBLevels extracts the tcbLevels array from TCB info JSON; mixed format versions are an error.
 func parseTCBLevels(jsonStr string) ([]tcbLevel, error) {
 	// Find the tcbLevels array.
 	idx := strings.Index(jsonStr, `"tcbLevels"`)
@@ -835,10 +804,7 @@ func parseTCBLevels(jsonStr string) ([]tcbLevel, error) {
 	return levels, nil
 }
 
-// parseSingleTCBLevel parses a single TCB level JSON object.
-// Supports both v2 format (individual sgxtcbcomp01svn..sgxtcbcomp16svn fields)
-// and v3 format (sgxtcbcomponents array of {"svn": N} objects).
-// Returns the parsed level and whether the v3 format was used.
+// parseSingleTCBLevel parses one TCB level in v2 or v3 format and reports whether it was v3.
 func parseSingleTCBLevel(jsonStr string) (tcbLevel, bool) {
 	var level tcbLevel
 
@@ -999,8 +965,7 @@ func findTCBStanding(pckExt *pckExtensionData, levels []tcbLevel) (tcbStandingTy
 	return 0, nil, &TCBUnsupportedError{}
 }
 
-// inTCBLevel returns true if all PCK component SVNs are >= the TCB level's components
-// AND the PCK PCESVN is >= the level's PCESVN.
+// inTCBLevel reports whether every PCK component SVN and the PCESVN are at least the level's.
 func inTCBLevel(pckExt *pckExtensionData, level *tcbLevel) bool {
 	for i := 0; i < 16; i++ {
 		if pckExt.compsvn[i] < level.compsvn[i] {

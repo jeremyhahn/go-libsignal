@@ -145,9 +145,7 @@ func TestSendRecvBraidMultipleRoundTrips(t *testing.T) {
 	}
 }
 
-// TestSendRecvNoBraidSCKAPath tests that the package-level Send()/Recv()
-// works correctly for the chain-only path (no braid) using the Rust-compatible
-// SCKA wire format (Phase E). Both paths now produce/consume SCKA format.
+// TestSendRecvNoBraidSCKAPath checks package Send and Recv without a braid use the SCKA wire format.
 func TestSendRecvNoBraidSCKAPath(t *testing.T) {
 	sharedSecret := randomBytes(t, 32)
 	sharedCopy := make([]byte, 32)
@@ -369,11 +367,7 @@ func TestInitialStateWithBraidSelfSession(t *testing.T) {
 	}
 }
 
-// TestNegotiationPendingAndV0Behavior tests that pending states with MinVersion=V0
-// (opt-in downgrade, audit-required) correctly negotiate to V0 when an empty
-// message is received, and that V0 states return empty messages and nil keys.
-// This uses InitialStateWithParams explicitly, because the default InitialState
-// sets MinVersion=V1 (matching Rust's "require SPQR" policy).
+// TestNegotiationPendingAndV0Behavior checks MinVersion=V0 states negotiate to V0 on an empty message and then return empty messages and nil keys.
 func TestNegotiationPendingAndV0Behavior(t *testing.T) {
 	sharedSecret := randomBytes(t, 32)
 	sharedCopy := make([]byte, 32)

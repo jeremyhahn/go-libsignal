@@ -21,8 +21,7 @@ import (
 
 const maxFutureMessages = 25000
 
-// Per-chain skipped message key limit (MAX_MESSAGE_KEYS = 2000) is
-// enforced in state/record.SessionState.SetMessageKeys via FIFO eviction.
+// state/record SessionState.SetMessageKeys caps skipped keys at 2000 per chain by FIFO eviction.
 
 // maxUnacknowledgedSessionAge is the maximum age of an unacknowledged
 // pre-key session before it is considered stale. Set to 30 days to
@@ -204,10 +203,7 @@ func (d *Cipher) Encrypt(plaintext []byte) (protocol.CiphertextMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Zeroize message keys after they have been used for encryption.
-	// This is deferred so it runs even if subsequent steps return an error,
-	// limiting the window during which the plaintext-equivalent key material
-	// is live on the heap.
+	// Zeroize the message keys on every return.
 	defer messageKeys.Zeroize()
 
 	senderEphemeral := sessionState.SenderRatchetKey()
@@ -283,10 +279,7 @@ func (d *Cipher) Encrypt(plaintext []byte) (protocol.CiphertextMessage, error) {
 	// Old chain key material is automatically destroyed by NextKey() via go-enclave.
 	sessionState.SetSenderChainKey(nextChainKey)
 
-	// Identity trust check is performed after chain key advancement but before
-	// StoreSession. If the check fails, the in-memory session with the advanced
-	// chain key is discarded (never persisted). This matches the Rust reference
-	// ordering (session_cipher.rs) and is safe because the store is not updated.
+	// Check identity trust before StoreSession, so a failure never persists the advanced chain.
 	if d.identityStore != nil {
 		theirIdentityKey := sessionState.RemoteIdentityKey()
 		trusted, trustErr := d.identityStore.IsTrustedIdentity(d.remoteAddress, theirIdentityKey, store.DirectionSending)
@@ -441,15 +434,7 @@ func (d *Cipher) decryptWithRecordAndType(sessionRecord *record.Session, ciphert
 			return nil, nil, err
 		}
 
-		// M3: AddressMismatch short-circuit. An address-binding mismatch means
-		// the message's embedded (sender, recipient) pair does not match the
-		// expected local addresses. No previous session can resolve this — the
-		// binding is a property of the message, not the session state. Surface
-		// the typed error immediately so callers can distinguish a wrong-recipient
-		// delivery from a genuine decryption failure.
-		//
-		// Mirrors Rust session_management.rs:242 and the address-binding
-		// enforcement in triple_ratchet.rs TripleRatchet::decrypt.
+		// An address mismatch belongs to the message, so no previous session can fix it; return it at once, as Rust does.
 		if errors.Is(err, protocol.ErrAddressMismatch) {
 			return nil, nil, err
 		}
@@ -466,10 +451,7 @@ func (d *Cipher) decryptWithRecordAndType(sessionRecord *record.Session, ciphert
 			// Try decrypting the message with previous states
 			plaintext, messageKeys, err = d.DecryptWithState(state, ciphertext)
 			if err != nil {
-				// M1: DuplicateMessage short-circuit in previous states too.
-				// SPQR duplicate errors are NOT short-circuited here because
-				// a counter collision on a previous session is merely a
-				// wrong-session mismatch, not a genuine replay.
+				// A Double Ratchet duplicate returns at once; an SPQR duplicate in a previous state is only a wrong session.
 				if errors.Is(err, ErrDuplicateMessage) {
 					return nil, nil, err
 				}
@@ -520,12 +502,7 @@ func (d *Cipher) DecryptWithState(sessionState *record.State, ciphertextMessage 
 		return nil, nil, cloneErr
 	}
 
-	// The clone holds its own guarded buffers, and a failed decrypt throws it
-	// away. Release them rather than abandoning them: go-enclave reclaims
-	// nothing on its own, so otherwise every message that fails MAC
-	// verification would cost the process locked memory it never gets back.
-	// The commit below moves those buffers into sessionState, which is why the
-	// discard is disarmed on the success path.
+	// Release the clone's guarded buffers on failure, or each failed MAC leaks locked memory; success moves them into sessionState.
 	committed := false
 	defer func() {
 		if !committed {
@@ -538,40 +515,14 @@ func (d *Cipher) DecryptWithState(sessionState *record.State, ciphertextMessage 
 		return nil, nil, err
 	}
 
-	// Decryption succeeded -- commit the working state back to the original.
-	// Committing rather than copying releases the guarded material the commit
-	// supersedes, so a long-lived session does not accumulate a locked buffer
-	// per message it accepts.
+	// Commit the clone, releasing the guarded material it supersedes.
 	sessionState.CommitClone(workingState)
 	committed = true
 
 	return plaintext, messageKeys, nil
 }
 
-// decryptWithClonedState performs the actual decryption logic on a cloned
-// session state. All mutations happen on this copy; if any step fails, the
-// caller simply discards it.
-//
-// SPQR ordering note: Both Go and Rust advance SPQR state before MAC
-// verification. The structural difference is that Go advances SPQR state
-// during the skipped-key lookup path (early in this function), whereas Rust
-// advances SPQR state after chain key creation (further down the normal path).
-// The functional outcome is identical because both implementations operate on
-// cloned/working state that is discarded on failure:
-//
-//  1. This method operates on a cloned session state (see DecryptWithState).
-//     If MAC verification or decryption fails at any point, the clone is
-//     discarded and the original session state remains unchanged -- no SPQR
-//     state mutation is ever committed.
-//
-//  2. The clone-then-commit pattern provides the same rollback semantics as
-//     the Rust borrow checker's &mut requirement, ensuring that a failed
-//     decrypt attempt cannot corrupt the SPQR ratchet position regardless
-//     of which code path triggered the failure.
-//
-//  3. Advancing SPQR before MAC verification is necessary because the PQR
-//     salt is needed to derive the correct message keys for verification.
-//     Without advancing first, we cannot compute the expected MAC.
+// decryptWithClonedState decrypts on a cloned state the caller discards on failure; SPQR advances before MAC verification because the PQR salt is needed to derive the MAC key.
 func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMessage *protocol.SignalMessage) ([]byte, *message.Keys, error) {
 	messageVersion := ciphertextMessage.MessageVersion()
 	theirEphemeral := ciphertextMessage.SenderRatchetKey()
@@ -582,10 +533,7 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 	if sessionState.HasReceiverChain(theirEphemeral) && sessionState.HasMessageKeys(theirEphemeral, counter) {
 		skippedKeys := sessionState.RemoveMessageKeys(theirEphemeral, counter)
 
-		// The keys are no longer part of the clone, so discarding the clone no
-		// longer covers them. Release them on every exit that does not hand
-		// them to the caller — a message that matches a stored skipped key but
-		// fails authentication is attacker-supplied.
+		// These keys left the clone; release them on every exit that does not return them.
 		keysHandedOver := false
 		defer func() {
 			if !keysHandedOver && skippedKeys != nil {
@@ -593,13 +541,7 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 			}
 		}()
 
-		// Note: PQR state is advanced before MAC verification, which differs from
-		// Rust's ordering. This is safe because decryptWithClonedState operates on
-		// a cloned session state; if MAC verification fails, the clone is discarded
-		// and the original state remains unchanged.
-		//
-		// SPQR: If the stored key has seed material and the message carries PQR
-		// data, re-derive the message keys with the PQR salt from the SPQR ratchet.
+		// With seed material and PQR data, re-derive the message keys with the SPQR salt; the clone makes the early advance safe.
 		if seed := skippedKeys.SeedMaterial(); len(seed) > 0 {
 			// SeedMaterial returns an owned copy; wipe it on return.
 			defer crypto.Zeroize(seed)
@@ -630,11 +572,7 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 			}
 		}
 
-		// F15: Use VerifyMacWithAddresses when both local and remote addresses are
-		// known, enforcing address binding on pre-key decrypt. Mirrors Rust
-		// rust/protocol/src/session_management.rs:242 and
-		// rust/protocol/src/triple_ratchet.rs TripleRatchet::decrypt.
-		// MacKey returns an owned copy; wipe it when decrypt returns.
+		// With both addresses known, verify with address binding; wipe the MacKey copy on return.
 		skippedMacKey := skippedKeys.MacKey()
 		defer crypto.Zeroize(skippedMacKey)
 		if d.localAddress != nil && d.remoteAddress != nil {
@@ -673,8 +611,7 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 	// on the ones that return first — a duplicate message, for instance.
 	defer chainKey.Zeroize()
 
-	// SPQR: Derive the PQR salt for message key derivation if both the message
-	// carries PQR data and the session has active SPQR state.
+	// Derive the PQR salt when the message carries PQR data and SPQR is active.
 	var pqrSalt []byte
 	if pqrData := ciphertextMessage.PqRatchetKey(); len(pqrData) > 0 {
 		if pqrState := sessionState.PqRatchetState(); len(pqrState) > 0 {
@@ -682,11 +619,7 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 			defer crypto.Zeroize(pqrState)
 			newState, pqrKey, pqrErr := spqr.Recv(pqrState, pqrData)
 			if pqrErr != nil {
-				// SPQR duplicate errors can mean either a genuine replay (same
-				// session) or a wrong-session mismatch (different session reusing
-				// a similar SPQR counter). Check the Double Ratchet's own state:
-				// if the chain has already advanced past this counter and the
-				// message key was consumed, this is a genuine replay.
+				// An SPQR duplicate is a replay only if the Double Ratchet chain is already past this counter.
 				if isSpqrDuplicateErr(pqrErr) && chainKey.Index() > counter &&
 					!sessionState.HasMessageKeys(theirEphemeral, counter) {
 					return nil, nil, newDuplicateMessageError(chainKey.Index(), counter)
@@ -705,10 +638,7 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 		logger.Error("Unable to get or create message keys: ", keysCreateErr)
 		return nil, nil, keysCreateErr
 	}
-	// These keys are derived here and belong to nothing else. Release them on
-	// every exit that does not hand them to the caller — authentication has
-	// not happened yet, so the exits below are exactly the ones an attacker
-	// can drive.
+	// Release these unauthenticated keys on every exit that does not return them.
 	messageKeysHandedOver := false
 	defer func() {
 		if !messageKeysHandedOver && messageKeys != nil {
@@ -716,10 +646,7 @@ func (d *Cipher) decryptWithClonedState(sessionState *record.State, ciphertextMe
 		}
 	}()
 
-	// F15: Use VerifyMacWithAddresses when both local and remote addresses are
-	// known, enforcing address binding. Mirrors Rust
-	// rust/protocol/src/session_management.rs:242.
-	// MacKey returns an owned copy; wipe it when decrypt returns.
+	// With both addresses known, verify with address binding; wipe the MacKey copy on return.
 	macKey := messageKeys.MacKey()
 	defer crypto.Zeroize(macKey)
 	if d.localAddress != nil && d.remoteAddress != nil {
@@ -755,9 +682,7 @@ func getOrCreateMessageKeys(sessionState *record.State, theirEphemeral ecc.ECPub
 	if chainKey.Index() > counter {
 		if sessionState.HasMessageKeys(theirEphemeral, counter) {
 			storedKeys := sessionState.RemoveMessageKeys(theirEphemeral, counter)
-			// SPQR: Re-derive with PQR salt if the stored key has seed material.
-			// SeedMaterial returns an owned copy; wipe it on return, also
-			// when there is no PQR salt and the seed goes unused.
+			// Re-derive with the PQR salt if the stored key has seed material; wipe the seed copy on return.
 			seed := storedKeys.SeedMaterial()
 			defer crypto.Zeroize(seed)
 			if len(seed) > 0 && len(pqrSalt) > 0 {
@@ -788,16 +713,11 @@ func getOrCreateMessageKeys(sessionState *record.State, theirEphemeral ecc.ECPub
 		}
 	}
 
-	// Per-chain FIFO eviction: when the chain accumulates more than 2000
-	// entries, SetMessageKeys evicts the oldest key automatically, matching
-	// Rust's per-chain eviction. The state layer enforces the bound.
+	// SetMessageKeys evicts the oldest key past 2000 per chain.
 
 	hasSPQR := len(pqrSalt) > 0
 
-	// Walking the chain forward replaces chainKey with each derived key, and
-	// only the one that reaches SetReceiverChainKey below finds an owner.
-	// Release whatever the walk ends on if it does not get there; the caller's
-	// own release covers the key it passed in, and both are idempotent.
+	// Release the chain key the walk ends on unless SetReceiverChainKey takes it; both releases are idempotent.
 	walked := chainKey
 	defer func() {
 		if walked != nil {
@@ -825,8 +745,7 @@ func getOrCreateMessageKeys(sessionState *record.State, theirEphemeral ecc.ECPub
 		walked = chainKey
 	}
 
-	// Get message keys before advancing, since NextKey destroys the current key's
-	// guarded memory. Use PQR salt if provided for SPQR-enhanced derivation.
+	// Derive message keys, with the PQR salt if any, before NextKey destroys the current key.
 	msgKeys, err := chainKey.MessageKeysWithSalt(pqrSalt)
 	if err != nil {
 		return nil, err
@@ -840,12 +759,7 @@ func getOrCreateMessageKeys(sessionState *record.State, theirEphemeral ecc.ECPub
 	return msgKeys, nil
 }
 
-// getOrCreateChainKey will either return the existing chain key or
-// create a new one with the given session state and ephemeral key.
-//
-// The returned key is the caller's own guarded copy in both cases, never the
-// one the state holds. Ratcheting it forward with NextKey consumes it; a
-// caller that returns without doing so must release it.
+// getOrCreateChainKey returns the caller's own guarded copy of the existing or new chain key; release it unless NextKey consumes it.
 func getOrCreateChainKey(sessionState *record.State, theirEphemeral ecc.ECPublicKeyable) (*chain.Key, error) {
 
 	// If our session state already has a receiver chain, use their

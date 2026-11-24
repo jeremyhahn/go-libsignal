@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 19 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) requires it for the Sealed Sender
-// ephemeral keys, so the fips140only build tag drops this file from the FIPS
-// gate. `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): Sealed Sender ephemeral keys use X25519 (X3DH section 2.1).
 
 package sealed
 
@@ -906,14 +901,7 @@ func TestSealedSenderV2DecryptTamperedAuthTag(t *testing.T) {
 
 	bobServiceId, _ := protocol.ServiceIdFromString(protocol.ServiceIdKindACI, bobAddress.Name())
 
-	// The v2 binary format for 1 recipient with 1 device is:
-	// version(1) | recipientCount varint(1) | serviceId(17) | deviceCount varint(1) |
-	// deviceId varint(1) | regId(2) | C_i(32) | AT_i(16) | ephPub(32) | payload(...)
-	//
-	// Tamper with AT_i (auth tag): it starts after C_i.
-	// Offset: 1(version) + 1(recipientCount) + 17(serviceId) + 1(deviceCount) +
-	//         1(deviceId) + 2(regId) + 32(C_i) = 55
-	// AT_i is bytes [55..71)
+	// AT_i starts at byte 55 for one recipient with one device.
 	tampered := make([]byte, len(ciphertext))
 	copy(tampered, ciphertext)
 	authTagOffset := 1 + 1 + v2ServiceIdSize + 1 + 1 + 2 + v2EncryptedMKeySize
@@ -1345,15 +1333,7 @@ func TestSealedSenderV2DecryptPNISender(t *testing.T) {
 	}
 }
 
-// TestParseHugeRecipientCount_NoPanic is a regression test for the OOM /
-// makeslice panic that occurred when the recipientOrder slice was preallocated
-// with the raw attacker-controlled wire varint instead of preallocCap.
-//
-// A crafted message with a recipient count of 1<<32 (= 4 294 967 296) would
-// attempt to allocate >4 GB for the recipientOrder slice before the fix.
-// After the fix the preallocation is bounded by v2MaxPreallocRecipients (6000)
-// and the parser returns a *V2ParseError because the first per-recipient read
-// immediately exhausts the empty data buffer.
+// TestParseHugeRecipientCount_NoPanic checks a 1<<32 recipient count is a *V2ParseError, not a huge allocation.
 func TestParseHugeRecipientCount_NoPanic(t *testing.T) {
 	var buf [1 + binary.MaxVarintLen64]byte
 	buf[0] = SealedSenderV2VersionUUID

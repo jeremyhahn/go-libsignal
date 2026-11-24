@@ -1,14 +1,4 @@
-// Conformance test for message-backup frame HMAC-SHA256 parity.
-//
-// Drives the same HMAC-SHA256 primitive that pkg/backup.VerifyHMAC and
-// pkg/backup.FrameEncryptor use (crypto/hmac + crypto/sha256) against the
-// vectors extracted from rust/message-backup/src/frame/mac_read.rs::test::mac_read
-// at Rust libsignal commit 98915c442d.
-//
-// The Rust test verifies that MacReader<Hmac<Sha256>> accumulates exactly the
-// same HMAC as a direct Hmac<Sha256>::update call.  Here we pin the concrete
-// expected digest so any future change to the hash function, key schedule, or
-// input construction will cause this test to fail.
+// Message-backup HMAC-SHA256 against the Rust mac_read.rs vector, with a pinned digest.
 package interop
 
 import (

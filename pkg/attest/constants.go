@@ -109,8 +109,7 @@ var (
 	}
 )
 
-// expectedRaftConfigSVR2 maps MRENCLAVE values to their expected raft configs
-// for SVR2 bridging code.
+// expectedRaftConfigSVR2 maps MRENCLAVE values to their expected SVR2 raft configs.
 var expectedRaftConfigSVR2 = []struct {
 	mrenclave []byte
 	config    *RaftConfig

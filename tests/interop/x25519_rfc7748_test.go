@@ -1,23 +1,8 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 3 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the vectors are RFC 7748 sections 5.2 and 6.1, which exist to pin that
-// algorithm, so the fips140only build tag drops this file from the FIPS
-// gate. `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): RFC 7748 X25519 vectors, so the fips140only tag drops this file.
 
-// X25519 conformance test using the RFC 7748 reference vectors.
-//
-// X25519 (Curve25519 ECDH) is the foundational scalar-multiplication
-// primitive used by every Signal protocol DH step: identity-key DH,
-// signed-prekey DH, ephemeral DH, and the four DH handshakes inside
-// PQXDH. Go's pkg/ecc relies on golang.org/x/crypto/curve25519 for
-// these operations; this test validates the underlying primitive
-// against RFC 7748 §5.2 and §6.1.
-//
-// Vectors are reproduced verbatim from RFC 7748. They are NOT tracked
-// by the fixture manifest because the IETF RFC is the source of truth.
+// X25519 against RFC 7748 §5.2 and §6.1 vectors, kept outside the fixture manifest.
 
 package interop
 
@@ -53,12 +38,7 @@ var rfc7748Cases = []rfc7748Case{
 	},
 }
 
-// rfc7748AppendixA tests the iterated scalar multiplication that RFC 7748
-// §5.2 specifies for higher-confidence validation. We cap the iteration
-// count at 1 (the lowest published intermediate) and 1000 (the next
-// published intermediate) — the 1,000,000-iteration target is omitted
-// because it is too slow for a unit test and adds nothing the lower
-// counts do not (the same primitive is exercised).
+// rfc7748AppendixA checks the 1 and 1000 iteration results of RFC 7748 §5.2.
 type rfc7748IteratedCase struct {
 	Name        string
 	Iterations  int

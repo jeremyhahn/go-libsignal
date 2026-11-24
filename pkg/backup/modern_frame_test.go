@@ -7,9 +7,7 @@ import (
 	"testing"
 )
 
-// TestModernFormatRoundTrip verifies that EncryptFramesModern produces a
-// stream that DecryptFrames can decode, exercising the full modern
-// SBACKUP\x01 encode/decode path.
+// TestModernFormatRoundTrip checks DecryptFrames decodes EncryptFramesModern output.
 func TestModernFormatRoundTrip(t *testing.T) {
 	key := testKey()
 	defer key.Zeroize()
@@ -120,8 +118,7 @@ func TestModernFormatInvalidMetadata(t *testing.T) {
 	}
 }
 
-// TestModernFormatCloseToMagicRejected verifies that a stream starting with
-// "SBACKUP\x02" (close but not a valid magic) is rejected.
+// TestModernFormatCloseToMagicRejected checks "SBACKUP\x02" is rejected.
 func TestModernFormatCloseToMagicRejected(t *testing.T) {
 	key := testKey()
 	defer key.Zeroize()

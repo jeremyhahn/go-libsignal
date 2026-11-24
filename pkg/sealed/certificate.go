@@ -109,10 +109,7 @@ func DeserializeServerCertificate(data []byte) (*ServerCertificate, error) {
 	}, nil
 }
 
-// revokedServerCertificateKeyIDs contains server certificate key IDs that have
-// been revoked and must be rejected during validation. Per the Rust reference,
-// 0xDEADC357 is a test ID used to verify revocation logic. If a production
-// certificate is ever revoked, its key ID should be added here.
+// revokedServerCertificateKeyIDs lists rejected server certificate key IDs; 0xDEADC357 is the Rust test ID.
 var revokedServerCertificateKeyIDs = []uint32{0xDEADC357}
 
 // Validate checks that the server certificate is not revoked and that its
@@ -128,10 +125,7 @@ func (sc *ServerCertificate) Validate(trustRoot ecc.ECPublicKeyable) (bool, erro
 		}
 	}
 
-	// Rust's verify_signature converts the slice to a [u8; 64] via try_into()
-	// and returns false (not an error) on a length mismatch. Match that:
-	// a wrong-length signature is treated as a failed verification, not a
-	// structural error.
+	// A wrong-length signature fails verification rather than erroring, as Rust verify_signature.
 	if len(sc.signature) != 64 {
 		return false, nil
 	}
@@ -328,10 +322,7 @@ func DeserializeSenderCertificate(data []byte) (*SenderCertificate, error) {
 		senderE164 = &e164
 	}
 
-	// Resolve the sender UUID from the oneof field.
-	// Use a type switch on the oneof interface rather than comparing the string
-	// value to "": GetUuidString() returns "" both when the UuidString variant
-	// is unset AND when it is explicitly set to "", making == "" ambiguous.
+	// Use a type switch on the oneof: GetUuidString returns "" both when unset and when set to "".
 	var senderUUID string
 	switch uuidOneof := innerCert.GetSenderUuid().(type) {
 	case *sealedpb.SenderCertificate_Certificate_UuidString:

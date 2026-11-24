@@ -30,10 +30,7 @@ type LegacyCredentialConfig struct {
 	NumAttrs   int
 }
 
-// Legacy credential types with their storage and attribute counts.
-// These match the Rust zkgroup::crypto::credentials module where each
-// credential type draws a specific number of y-scalars from the SHO
-// and uses a specific number of Gy points.
+// Legacy credential configurations, as in Rust zkgroup::crypto::credentials.
 var (
 	LegacyAuthCredentialConfig               = LegacyCredentialConfig{StorageLen: 4, NumAttrs: 3}
 	LegacyProfileKeyCredentialConfig         = LegacyCredentialConfig{StorageLen: 4, NumAttrs: 4}
@@ -307,10 +304,7 @@ func LizardEncode(data [16]byte) *ristretto255.Element {
 	feBytes[0] &= 254 // clear low bit (make positive since Elligator on r and -r is the same)
 	feBytes[31] &= 63 // clear top 2 bits
 
-	// Map to Ristretto point using single Elligator.
-	// SetUniformBytes(a || b) computes MAP(a) + MAP(b).
-	// MAP(zeros) = identity in the Ristretto group, so
-	// SetUniformBytes(feBytes || zeros) = MAP(feBytes) + identity = MAP(feBytes).
+	// MAP(zeros) is the identity, so SetUniformBytes(fe || zeros) is MAP(fe).
 	var uniform [64]byte
 	copy(uniform[:32], feBytes[:])
 	// Second 32 bytes remain zero.

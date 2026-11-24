@@ -65,13 +65,7 @@ func NewGuardedECPrivateKeyFromSecret(s *secret.Secret32) *GuardedECPrivateKey {
 //
 // Implements ECPrivateKeyable.
 func (g *GuardedECPrivateKey) Serialize() [32]byte {
-	// The array is the value that leaves the borrow: it is copied inside it,
-	// and the caller zeroizes it after use.
-	//
-	// A destroyed (or missing) key is rejected: Serialize has no error
-	// return, and handing back zeros would let a caller sign or agree with
-	// an all-zero scalar. The generic consumers in this package check
-	// IsDestroyed first and return ErrGuardedKeyDestroyed instead.
+	// The caller zeroizes the copy; a destroyed key is rejected rather than returned as zeros.
 	var out [32]byte
 	if err := g.key.WithBytes(func(b []byte) error {
 		if len(b) != len(out) {

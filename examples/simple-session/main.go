@@ -249,10 +249,7 @@ func main() {
 		log.Fatalf("Alice ProcessBundle: %v", err)
 	}
 
-	// Alice encrypts "Hello, Bob!". Passing Alice's own address as localAddress
-	// activates address binding (SignalMessage field 6), which is what Rust
-	// libsignal always does when the local address is known; the two-argument
-	// NewCipher leaves the message unbound and open to address substitution.
+	// Passing Alice's own address binds the message to it (SignalMessage field 6), as Rust libsignal does.
 	aliceCipher := session.NewCipherWithLocalAddress(aliceBuilder, aliceAddress, bobAddress)
 	ciphertext, err := aliceCipher.Encrypt([]byte("Hello, Bob!"))
 	if err != nil {

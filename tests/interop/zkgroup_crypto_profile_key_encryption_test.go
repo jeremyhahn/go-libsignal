@@ -1,24 +1,4 @@
-// Interop test for zkgroup ProfileKeyEncryptionDomain parity.
-//
-// Source: rust/zkgroup/src/crypto/profile_key_encryption.rs:119-215
-// at Rust libsignal commit 98915c442d.
-//
-// Rust's test_profile_key_encryption() derives a KeyPair from
-// TEST_ARRAY_32_1 via Sho(HMAC-SHA256, b"Test_Profile_Key_Encryption"),
-// encrypts (profile_key=TEST_ARRAY_32_1, uid=TEST_ARRAY_16_1), and pins
-// the 64-byte ciphertext bytes.
-//
-// Go equivalent: zkcredential.DeriveKeyPair + kp.Encrypt(ProfileKeyStruct).
-//
-// NOTE: Profile-key decrypt (ProfileKeyEncryptionDomain::decrypt) is
-// internal to pkg/zkgroup and is not exported at the interop boundary; only
-// the higher-level GroupSecretParams.{Encrypt,Decrypt}ProfileKey are public.
-// This test verifies:
-//  1. DeriveKeyPair + Encrypt produce a 64-byte ciphertext (correct shape).
-//  2. EncodeCiphertext → DecodeCiphertext is a lossless round-trip.
-//  3. The encoded bytes match the Rust pinned value (logged; not a hard failure
-//     because SHO ratcheting divergence would produce a different but equally
-//     valid ciphertext).
+// Profile key encryption against Rust test_profile_key_encryption: a 64-byte ciphertext that round-trips through Encode and DecodeCiphertext; a byte mismatch with Rust is logged, not failed.
 package interop
 
 import (
@@ -56,12 +36,7 @@ type zkPKEExpect struct {
 	CiphertextHex string `json:"ciphertext_hex"`
 }
 
-// TestZKGroup_CryptoProfileKeyEncryption verifies that
-// zkcredential.DeriveKeyPair + kp.Encrypt(ProfileKeyStruct) produces a
-// structurally valid 64-byte ciphertext and that EncodeCiphertext →
-// DecodeCiphertext is lossless.
-//
-// Mirrors rust/zkgroup/src/crypto/profile_key_encryption.rs:test_profile_key_encryption.
+// TestZKGroup_CryptoProfileKeyEncryption checks DeriveKeyPair + Encrypt gives a 64-byte ciphertext that round-trips.
 func TestZKGroup_CryptoProfileKeyEncryption(t *testing.T) {
 	raw := loader.MustRead("zkgroup/crypto/profile_key_encryption.json")
 	var fix zkPKEFixture

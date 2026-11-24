@@ -1,19 +1,5 @@
 #!/usr/bin/env bash
-# refresh_fixtures.sh — re-copy every fixture in MANIFEST.toml from an
-# upstream Rust libsignal checkout into tests/interop/fixtures/.
-#
-# After running, the operator must:
-#   1. Re-run `make interop-fixtures-check` to confirm bytes round-trip.
-#   2. Update sha256/size in MANIFEST.toml to reflect the new bytes.
-#   3. Bump /RUST_REV to record the upstream commit being tracked.
-#
-# Usage:
-#   tests/interop/scripts/refresh_fixtures.sh /path/to/libsignal-checkout
-#
-# Exit codes:
-#   0  every fixture refreshed
-#   2  upstream tree missing or argument missing
-#   3  one or more upstream files missing under the given checkout
+# refresh_fixtures.sh <libsignal-checkout> recopies MANIFEST.toml fixtures; then update MANIFEST hashes and /RUST_REV and run make interop-fixtures-check.
 
 set -euo pipefail
 

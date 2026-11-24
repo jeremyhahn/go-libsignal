@@ -187,12 +187,7 @@ func TestAESCTR32BitCounterWrap(t *testing.T) {
 	var ksPost [aes.BlockSize]byte
 	block.Encrypt(ksPost[:], counterPost[:])
 
-	// With a 128-bit counter, the carry would propagate into byte 11,
-	// producing counterPost = [0,0,...,0,1,0,0,0,0] which would yield
-	// a different keystream than counter = [0,0,...,0,0,0,0,0,0].
-	//
-	// With our 32-bit counter, post-wrap counter is identical to counter 0,
-	// so ksPost should equal the keystream for counter 0.
+	// With a 32-bit counter the wrapped counter equals counter 0, so ksPost equals the counter-0 keystream.
 	var counterZero [aes.BlockSize]byte
 	var ksZero [aes.BlockSize]byte
 	block.Encrypt(ksZero[:], counterZero[:])

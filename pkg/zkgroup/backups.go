@@ -28,14 +28,7 @@ const (
 
 var backupCredentialLabel = []byte("20231003_Signal_BackupAuthCredential")
 
-// parseBackupLevel validates a u64 wire value as a BackupLevel enum variant.
-// Mirrors Rust's TryFrom<u64> for BackupLevel at
-// rust/zkgroup/src/api/backups/auth_credential.rs:68-78:
-//   - value must fit in a u8 (>255 rejected), then
-//   - the u8 must equal a valid variant (200=Free, 201=Paid).
-//
-// Previously Go silently truncated the u64 to a byte with no range or enum
-// check; this validator matches the Rust rejection semantics exactly.
+// parseBackupLevel accepts a u64 that fits a u8 and is a BackupLevel (200 Free, 201 Paid), as Rust TryFrom<u64> does.
 func parseBackupLevel(v uint64) (BackupLevel, error) {
 	if v > 255 {
 		return 0, &ZkGroupDeserializationFailure{TypeName: "BackupLevel"}
@@ -48,11 +41,7 @@ func parseBackupLevel(v uint64) (BackupLevel, error) {
 	return 0, &ZkGroupDeserializationFailure{TypeName: "BackupLevel"}
 }
 
-// parseBackupCredentialType validates a u64 wire value as a BackupCredentialType variant.
-// Mirrors Rust's TryFrom<u64> for BackupCredentialType at
-// rust/zkgroup/src/api/backups/auth_credential.rs:98-108:
-//   - value must fit in a u8, then
-//   - the u8 must equal a valid variant (1=Messages, 2=Media).
+// parseBackupCredentialType accepts a u64 that fits a u8 and is a BackupCredentialType (1 Messages, 2 Media).
 func parseBackupCredentialType(v uint64) (BackupCredentialType, error) {
 	if v > 255 {
 		return 0, &ZkGroupDeserializationFailure{TypeName: "BackupCredentialType"}

@@ -6,10 +6,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/mlkembraid"
 )
 
-// TestWireMessageEpochOffset verifies that sckaToChainEpoch / chainToSckaEpoch are
-// inverses of each other, and that a non-braid Send encodes epoch+1 in the SCKA wire
-// bytes. This is the explicit Phase E audit target: Go chains are 0-indexed, SCKA wire
-// is 1-indexed.
+// TestWireMessageEpochOffset checks sckaToChainEpoch and chainToSckaEpoch are inverses and that SCKA epochs are chain epochs plus one.
 func TestWireMessageEpochOffset(t *testing.T) {
 	// Verify sckaToChainEpoch / chainToSckaEpoch are inverses.
 	for _, chainEp := range []uint64{0, 1, 5, 100, 1<<63 - 1} {
@@ -49,8 +46,7 @@ func TestWireMessageEpochOffset(t *testing.T) {
 		t.Fatal("expected non-empty wire message after negotiation resolved")
 	}
 
-	// Parse the SCKA wire message using DeserializeSCKA and verify epoch = chain_epoch + 1.
-	// Chain epoch is 0 for the initial state; SCKA epoch must be 1.
+	// Chain epoch 0 is SCKA epoch 1.
 	msg, chainCounter, decErr := mlkembraid.DeserializeSCKA(pqrMsg)
 	if decErr != nil {
 		t.Fatalf("DeserializeSCKA: %v", decErr)

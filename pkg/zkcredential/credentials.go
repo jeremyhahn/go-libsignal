@@ -129,20 +129,12 @@ func (pk *CredentialPrivateKey) CredentialCore(
 	}, nil
 }
 
-// generateCredentialPrivateKeyFromSHO creates a new CredentialPrivateKey by
-// drawing scalars from an existing SHO instance. Unlike generateCredentialPrivateKey,
-// this does not create a new SHO — it consumes state from the provided one,
-// allowing multiple key pairs to be chained through a single SHO.
+// generateCredentialPrivateKeyFromSHO draws a CredentialPrivateKey from sho, so several keys can be chained through one SHO.
 func generateCredentialPrivateKeyFromSHO(sho *ShoExt) *CredentialPrivateKey {
 	return generateCredentialPrivateKeyFromSHOWithStorage(sho, NumSupportedAttrs)
 }
 
-// generateCredentialPrivateKeyFromSHOWithStorage creates a new CredentialPrivateKey
-// by drawing exactly storageLen y-scalars from the SHO. Legacy credential types
-// in zkgroup use fewer y-scalars than the modern zkcredential system (7). The
-// storageLen parameter controls how many scalars are drawn from the SHO, which
-// is critical for keeping the SHO state aligned with the Rust reference
-// implementation during chained key generation.
+// generateCredentialPrivateKeyFromSHOWithStorage draws exactly storageLen y-scalars, keeping the SHO aligned with Rust for legacy credential types.
 func generateCredentialPrivateKeyFromSHOWithStorage(sho *ShoExt, storageLen int) *CredentialPrivateKey {
 	system := GetSystemParams()
 	w := sho.MustGetScalar()
@@ -166,10 +158,7 @@ func generateCredentialPrivateKeyFromSHOWithStorage(sho *ShoExt, storageLen int)
 	}
 }
 
-// generateCredentialPrivateKeyFromSHOWithLegacyParams creates a new CredentialPrivateKey
-// using legacy system parameters for the W point computation. This matches the
-// Rust reference implementation where legacy credential key pairs use the
-// hardcoded legacy SystemParams generator points.
+// generateCredentialPrivateKeyFromSHOWithLegacyParams computes W from the legacy system parameters, as Rust does for legacy key pairs.
 func generateCredentialPrivateKeyFromSHOWithLegacyParams(sho *ShoExt, storageLen int, legacy *LegacySystemParams) *CredentialPrivateKey {
 	w := sho.MustGetScalar()
 	Wpoint := new(ristretto255.Element).ScalarMult(w, legacy.Gw)
@@ -192,10 +181,7 @@ func generateCredentialPrivateKeyFromSHOWithLegacyParams(sho *ShoExt, storageLen
 	}
 }
 
-// legacyCredentialPublicKeyFromPrivate derives a CredentialPublicKey from a
-// CredentialPrivateKey using the legacy hardcoded system parameters. This matches
-// the Rust reference implementation where legacy credential public keys are
-// computed using hardcoded generator points rather than SHO-derived ones.
+// legacyCredentialPublicKeyFromPrivate derives the public key from the legacy hardcoded system parameters.
 func legacyCredentialPublicKeyFromPrivate(priv *CredentialPrivateKey, numAttrs int, legacy *LegacySystemParams) *CredentialPublicKey {
 	// C_W = W + wprime * G_wprime  (using legacy G_wprime)
 	wprimeGwp := new(ristretto255.Element).ScalarMult(priv.Wprime, legacy.Gwprime)
@@ -287,13 +273,7 @@ func CredentialPublicKeyFromPrivate(priv *CredentialPrivateKey) *CredentialPubli
 	return credentialPublicKeyFromPrivateWithAttrs(priv, NumSupportedAttrs)
 }
 
-// credentialPublicKeyFromPrivateWithAttrs derives a CredentialPublicKey from a
-// CredentialPrivateKey using only numAttrs Gy points for the I computation.
-// Legacy credential types use fewer Gy points than the modern system.
-//
-// The I array always has NumSupportedAttrs-1 slots, but only the first
-// numAttrs-1 entries are populated. Legacy credential consumers only access
-// the entries they need via GetI(totalAttrCount).
+// credentialPublicKeyFromPrivateWithAttrs computes I from numAttrs Gy points, filling only the first numAttrs-1 slots; legacy consumers read them through GetI.
 func credentialPublicKeyFromPrivateWithAttrs(priv *CredentialPrivateKey, numAttrs int) *CredentialPublicKey {
 	system := GetSystemParams()
 
@@ -427,10 +407,7 @@ func generateSystemParams() *SystemParams {
 // system.
 const LegacyNumSupportedAttrs = 6
 
-// legacyCredentialSystemHardcoded contains the hardcoded system parameters from
-// the Rust reference implementation. These are 17 Ristretto255 points (544 bytes)
-// serialized in bincode struct field order:
-// G_w, G_wprime, G_x0, G_x1, G_y1..G_y6, G_m1..G_m5, G_V, G_z
+// legacyCredentialSystemHardcoded is Rust's 544-byte blob of 17 Ristretto255 points in bincode order: G_w, G_wprime, G_x0, G_x1, G_y1..G_y6, G_m1..G_m5, G_V, G_z.
 var legacyCredentialSystemHardcoded = [544]byte{
 	// G_w (bytes 0-31)
 	0x9a, 0xe7, 0xc8, 0xe5, 0xed, 0x77, 0x9b, 0x11, 0x4a, 0xe7, 0x70, 0x8a, 0xa2, 0xf7, 0x94, 0x67,

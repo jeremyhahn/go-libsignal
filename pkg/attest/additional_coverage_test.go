@@ -437,8 +437,7 @@ func TestParsePCKExtension_EmptyCertChain(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestParseASN1Sequence_LongFormLength(t *testing.T) {
-	// Build a SEQUENCE with a length that requires long-form encoding.
-	// We'll build 130 zero bytes of content and use the 2-byte long form.
+	// A SEQUENCE of 130 zero bytes needs the 2-byte long-form length.
 	content := make([]byte, 130) // 130 bytes
 	// Tag + long-form length (0x81, 0x82)
 	data := []byte{0x30, 0x81, 0x82}
@@ -460,8 +459,7 @@ func TestParseASN1Sequence_LongFormLength(t *testing.T) {
 func TestParseTCBFromASN1_InvalidIntegerSkipped(t *testing.T) {
 	ext := &pckExtensionData{}
 
-	// Build a TCB sequence where the value is an OCTET STRING (not INTEGER)
-	// The OID is valid but the value type is wrong, so extractASN1Integer returns -1.
+	// A valid OID whose value is an OCTET STRING, so extractASN1Integer returns -1.
 	oid := buildASN1OIDBytes(encodeOIDTCBComp(1))
 	// Use OCTET STRING instead of INTEGER for the value
 	wrongValue := buildASN1OctetString([]byte{0x05})
@@ -480,9 +478,7 @@ func TestParseTCBFromASN1_InvalidIntegerSkipped(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestParseASN1Sequence_ItemExceedsContent(t *testing.T) {
-	// Build a SEQUENCE where an item claims to be larger than the content.
-	// The loop should stop gracefully.
-	// Item claims length=10 but only 2 bytes follow.
+	// An item claiming length 10 with only 2 bytes left must stop the loop.
 	content := []byte{0x04, 0x0A, 0xAA, 0xBB} // OCTET STRING, length=10, only 2 bytes
 	data := []byte{0x30, byte(len(content))}
 	data = append(data, content...)

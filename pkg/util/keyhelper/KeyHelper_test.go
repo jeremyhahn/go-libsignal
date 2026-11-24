@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 17 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH requires X25519, so the fips140only tag drops this file.
 
 package keyhelper
 
@@ -38,15 +33,7 @@ func withFailingRand(fn func()) {
 	fn()
 }
 
-// signingSeedFailReader serves randomness from the real reader for every
-// request except the second one of exactly seedSize bytes, which it fails.
-//
-// The first seedSize-byte request is the Kyber key-pair seed and the second is
-// the nonce ecc.CalculateSignature draws, so this fails signing while letting
-// key generation succeed. Guarded key generation also draws randomness of its
-// own; failing by request size rather than by a byte budget keeps the injection
-// stable regardless of how much is consumed, and never leaves a caller with a
-// short read (crypto/rand treats that as fatal).
+// signingSeedFailReader fails only the second seedSize-byte read, the signing nonce, so key generation succeeds and signing fails.
 type signingSeedFailReader struct {
 	inner    io.Reader
 	seedSize int
@@ -450,20 +437,7 @@ func TestGenerateSignedPreKey_RandFailure_KeyGen(t *testing.T) {
 	})
 }
 
-// TestGenerateSignedPreKey_RandFailure_Signing tests the signing-failure error
-// path by calling ecc.CalculateSignature directly with a failing rand.Reader.
-//
-// GenerateSignedPreKey cannot be used to reach the signing failure path via
-// rand.Reader injection because ecc.GenerateKeyPair runs first and consumes
-// random bytes, and go-enclave's guard-page canary (inside GuardedECPrivateKey)
-// consumes an indeterminate number of additional bytes from the same reader
-// before CalculateSignature is reached. This makes it impossible to provide
-// exactly enough bytes for key generation but not for signing without relying
-// on go-enclave internals.
-//
-// Calling CalculateSignature directly with pre-generated keys and a failing
-// reader deterministically exercises the error path that GenerateSignedPreKey
-// propagates with "return nil, err" after the signing step.
+// TestGenerateSignedPreKey_RandFailure_Signing calls ecc.CalculateSignature with a failing reader, since guarded key generation reads an unknown amount first.
 func TestGenerateSignedPreKey_RandFailure_Signing(t *testing.T) {
 	identityKP, err := GenerateIdentityKeyPair()
 	if err != nil {

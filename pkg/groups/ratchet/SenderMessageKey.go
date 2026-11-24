@@ -35,16 +35,14 @@ func NewSenderMessageKey(iteration uint32, seed []byte) (*SenderMessageKey, erro
 
 	ivSecret, err := secret.New(ivCopy)
 	if err != nil {
-		// coverage-exempt: defensive OOM guard for the locked-memory allocation;
-		// cannot be unit-tested without modifying the host (see CLAUDE.md).
+		// coverage-exempt: locked-memory allocation failure cannot be induced in a unit test.
 		return nil, err
 	}
 
 	cipherKeySecret, err := secret.New(cipherKeyCopy)
 	if err != nil {
 		ivSecret.Destroy()
-		// coverage-exempt: defensive OOM guard for the locked-memory allocation;
-		// cannot be unit-tested without modifying the host (see CLAUDE.md).
+		// coverage-exempt: locked-memory allocation failure cannot be induced in a unit test.
 		return nil, err
 	}
 
@@ -52,8 +50,7 @@ func NewSenderMessageKey(iteration uint32, seed []byte) (*SenderMessageKey, erro
 	if err != nil {
 		ivSecret.Destroy()
 		cipherKeySecret.Destroy()
-		// coverage-exempt: defensive OOM guard for the locked-memory allocation;
-		// cannot be unit-tested without modifying the host (see CLAUDE.md).
+		// coverage-exempt: locked-memory allocation failure cannot be induced in a unit test.
 		return nil, err
 	}
 

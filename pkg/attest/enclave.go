@@ -81,14 +81,7 @@ func ClaimsFromAttestationData(publicKey []byte, groupConfig *RaftConfig) (*Clai
 // This is a simplified decoder that reads the protobuf wire format directly.
 func decodeRaftGroupConfig(data []byte) (*RaftConfig, error) {
 	config := &RaftConfig{}
-	// Field numbers from the .proto file:
-	// 1: group_id (fixed64)
-	// 2: min_voting_replicas (uint32)
-	// 3: max_voting_replicas (uint32)
-	// 4: super_majority (uint32)
-	// 5: db_version (enum/int32)
-	// 6: attestation_timeout (uint32)
-	// 7: simulated (bool)
+	// Proto fields: 1 group_id, 2 min_voting_replicas, 3 max_voting_replicas, 4 super_majority, 5 db_version, 6 attestation_timeout, 7 simulated.
 	offset := 0
 	for offset < len(data) {
 		tag, n := binary.Uvarint(data[offset:])

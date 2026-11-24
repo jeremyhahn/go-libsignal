@@ -10,14 +10,7 @@ import (
 const (
 	varintMaxLength = 10
 
-	// maxFrameSize is the maximum allowed declared frame size in bytes.
-	// Rust's VarintDelimitedReader accepts frames up to u32::MAX
-	// (rust/message-backup/src/parse.rs: read_raw_varint32 returns u32).
-	// We match that range here. The whole-stream io.LimitReader applied
-	// in DecryptFrames (maxBackupSize = 100 GiB) bounds actual memory
-	// use: a declared length larger than the remaining stream bytes causes
-	// io.ReadFull to return an UnexpectedEOF error rather than allocating
-	// the full declared amount.
+	// maxFrameSize matches Rust's u32 frame length; maxBackupSize bounds actual memory.
 	maxFrameSize = 1<<32 - 1 // u32::MAX = 4 294 967 295
 )
 
@@ -65,13 +58,7 @@ func (v *VarintDelimitedReader) ReadNext() ([]byte, error) {
 		return nil, &FrameTooLargeError{Size: uint64(length), Max: maxFrameSize}
 	}
 
-	// Read `length` bytes: first whatever is already buffered, then the
-	// remainder from the reader. The remainder is read incrementally rather
-	// than pre-allocating the attacker-declared `length`. maxFrameSize is
-	// u32::MAX (to match Rust's acceptance range), so a single make([]byte,
-	// length) would let one bogus frame header force a multi-GiB allocation
-	// before the (short) stream is even read. io.ReadAll over a bounded
-	// LimitReader instead grows in proportion to bytes actually delivered.
+	// Read incrementally so a bogus declared length cannot force a large allocation.
 	bufferedCount := length
 	if bufferedCount > v.bufLen {
 		bufferedCount = v.bufLen
@@ -110,11 +97,7 @@ func (v *VarintDelimitedReader) readNextVarint() (int, error) {
 		return 0, &ErrInvalidVarint{}
 	}
 
-	// Check the cap while val is still uint64, before any int() conversion.
-	// On 32-bit platforms int is 32 bits and values in [2^31, u32::MAX] would
-	// silently wrap to negative after int(val), triggering a false EOF. The
-	// math.MaxInt constant is platform-specific: 2^63-1 on 64-bit (so this
-	// check never fires there) and 2^31-1 on 32-bit (catches the overflow).
+	// Check the cap while val is uint64, so 32-bit platforms do not wrap to negative.
 	if val > uint64(maxVarintValue) {
 		return 0, &ErrVarintOverflow{Value: val, Max: uint64(maxVarintValue)}
 	}

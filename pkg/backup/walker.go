@@ -17,10 +17,7 @@ func (e *ErrScrambleInvalidBackup) Error() string {
 	return "backup: scramble: invalid backup: " + e.Reason
 }
 
-// myStoryUUID is the well-known UUID for "My Story" distribution lists.
-// Its distribution ID must NOT be scrambled.
-//
-// Rust libsignal ref: rust/message-backup/src/backup.rs MY_STORY_UUID
+// myStoryUUID is the "My Story" distribution list UUID, whose distribution ID is not scrambled.
 var myStoryUUID = []byte{
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -80,13 +77,7 @@ func ScrambleBackup(frames [][]byte) ([][]byte, error) {
 	return out, nil
 }
 
-// ---------------------------------------------------------------------------
-// BackupInfo frame (field 1=version, 2=backupTimeMs, 3=mediaRootBackupKey,
-//
-//	4=currentAppVersion, 5=firstAppVersion, 6=debugInfo)
-//
-// Scramble: randomize mediaRootBackupKey (field 3) and debugInfo (field 6).
-// ---------------------------------------------------------------------------
+// BackupInfo (1 version, 2 backupTimeMs, 3 mediaRootBackupKey, 4 currentAppVersion, 5 firstAppVersion, 6 debugInfo): randomize 3 and 6.
 
 func scrambleBackupInfo(s *Scrambler, raw []byte) ([]byte, error) {
 	return walkMessage(raw, func(fieldNum uint64, wireType uint64, value []byte) ([]byte, error) {
@@ -107,13 +98,7 @@ func scrambleBackupInfo(s *Scrambler, raw []byte) ([]byte, error) {
 	})
 }
 
-// ---------------------------------------------------------------------------
-// Frame proto — oneof item:
-//
-//	1=AccountData, 2=Recipient, 3=Chat, 4=ChatItem,
-//	5=StickerPack, 6=AdHocCall, 7=NotificationProfile, 8=ChatFolder
-//
-// ---------------------------------------------------------------------------
+// Frame oneof: 1 AccountData, 2 Recipient, 3 Chat, 4 ChatItem, 5 StickerPack, 6 AdHocCall, 7 NotificationProfile, 8 ChatFolder.
 
 func scrambleFrame(s *Scrambler, raw []byte) ([]byte, error) {
 	return walkMessage(raw, func(fieldNum uint64, wireType uint64, value []byte) ([]byte, error) {
@@ -140,15 +125,7 @@ func scrambleFrame(s *Scrambler, raw []byte) ([]byte, error) {
 	})
 }
 
-// ---------------------------------------------------------------------------
-// AccountData (fields: 1=profileKey bytes, 2=username string opt,
-//
-//	3=usernameLink msg, 4=givenName str, 5=familyName str,
-//	6=avatarUrlPath str, 7=donationSubscriberData msg, 9=accountSettings msg,
-//	10=backupsSubscriberData msg, 11=svrPin str, 13=bioText str,
-//	14=bioEmoji str, 15=keyTransparencyData bytes opt)
-//
-// ---------------------------------------------------------------------------
+// AccountData: 1 profileKey, 2 username, 3 usernameLink, 4 givenName, 5 familyName, 6 avatarUrlPath, 7 donationSubscriberData, 9 accountSettings, 10 backupsSubscriberData, 11 svrPin, 13 bioText, 14 bioEmoji, 15 keyTransparencyData.
 
 func scrambleAccountData(s *Scrambler, raw []byte) ([]byte, error) {
 	return walkMessage(raw, func(fieldNum uint64, wireType uint64, value []byte) ([]byte, error) {
@@ -252,11 +229,7 @@ func scrambleChatStyle(s *Scrambler, raw []byte) ([]byte, error) {
 	return walkMessage(raw, func(fieldNum uint64, _ uint64, value []byte) ([]byte, error) {
 		switch fieldNum {
 		case 2: // wallpaper oneof — field 1=wallpaperPreset enum, 2=wallpaperPhoto FilePointer
-			// We need to sub-walk to find which oneof branch it is.
-			// wallpaper oneof fields are encoded as a sub-message field of ChatStyle.
-			// Actually the oneof branches are direct fields of ChatStyle at field numbers:
-			// wallpaperPreset=2 (enum/varint), wallpaperPhoto=3 (message)
-			// So this case won't match — handled by fieldNum 3 below.
+			// Wallpaper oneof branches are ChatStyle fields 2 and 3; field 3 is handled below.
 			return value, nil
 		case 3: // wallpaperPhoto — FilePointer
 			return scrambleFilePointer(s, value)
@@ -297,12 +270,7 @@ func scrambleRecipient(s *Scrambler, raw []byte) ([]byte, error) {
 	})
 }
 
-// Contact: 1=aci bytes, 2=pni bytes, 3=username str, 4=e164 uint64,
-//
-//	9=profileKey bytes, 11=profileGivenName str, 12=profileFamilyName str,
-//	14=identityKey bytes, 16=nickname Name, 17=note str,
-//	18=systemGivenName str, 19=systemFamilyName str, 20=systemNickname str,
-//	22=keyTransparencyData bytes
+// Contact: 1 aci, 2 pni, 3 username, 4 e164, 9 profileKey, 11 profileGivenName, 12 profileFamilyName, 14 identityKey, 16 nickname, 17 note, 18-20 system names, 22 keyTransparencyData.
 func scrambleContact(s *Scrambler, raw []byte) ([]byte, error) {
 	return walkMessage(raw, func(fieldNum uint64, wireType uint64, value []byte) ([]byte, error) {
 		switch fieldNum {
@@ -371,11 +339,7 @@ func scrambleGroup(s *Scrambler, raw []byte) ([]byte, error) {
 	})
 }
 
-// GroupSnapshot: 2=title msg, 3=avatarUrl str, 4=disappearingMessagesTimer msg,
-//
-//	5=accessControl msg, 7=members repeated, 8=membersPendingProfileKey repeated,
-//	9=membersPendingAdminApproval repeated, 10=inviteLinkPassword bytes,
-//	11=description msg, 13=membersBanned repeated
+// GroupSnapshot: 2 title, 3 avatarUrl, 4 disappearingMessagesTimer, 5 accessControl, 7 members, 8 pendingProfileKey, 9 pendingAdminApproval, 10 inviteLinkPassword, 11 description, 13 membersBanned.
 func scrambleGroupSnapshot(s *Scrambler, raw []byte) ([]byte, error) {
 	return walkMessage(raw, func(fieldNum uint64, _ uint64, value []byte) ([]byte, error) {
 		switch fieldNum {
@@ -692,10 +656,7 @@ func scrambleText(s *Scrambler, raw []byte) ([]byte, error) {
 	})
 }
 
-// scrambleBodyText replaces the body with the constant replacement text,
-// preserving mention characters (U+FFFC) at their original byte positions.
-//
-// Rust libsignal ref: rust/message-backup/src/scramble.rs Visit<Scrambler> for proto::Text
+// scrambleBodyText replaces the body with the constant text, keeping U+FFFC mention characters at their byte positions.
 func scrambleBodyText(body []byte, hasBodyRanges bool) []byte {
 	if len(body) == 0 {
 		return body
@@ -770,10 +731,7 @@ func scrambleMessageAttachment(s *Scrambler, raw []byte) ([]byte, error) {
 	})
 }
 
-// FilePointer: 1=locatorInfo msg, 2=contentType str, 3=incrementalMac bytes,
-//
-//	4=incrementalMacChunkSize uint32, 5=fileName str, 6=width uint32, 7=height uint32,
-//	8=caption str, 9=blurHash str
+// FilePointer: 1 locatorInfo, 2 contentType, 3 incrementalMac, 4 incrementalMacChunkSize, 5 fileName, 6 width, 7 height, 8 caption, 9 blurHash.
 func scrambleFilePointer(s *Scrambler, raw []byte) ([]byte, error) {
 	return walkMessage(raw, func(fieldNum uint64, _ uint64, value []byte) ([]byte, error) {
 		switch fieldNum {
@@ -795,10 +753,7 @@ func scrambleFilePointer(s *Scrambler, raw []byte) ([]byte, error) {
 	})
 }
 
-// LocatorInfo: 1=key bytes, 2=integrityCheck oneof (3=encryptedDigest bytes, 4=plaintextHash bytes),
-//
-//	5=size uint32, 6=transitCdnKey str, 7=transitCdnNumber uint32,
-//	8=transitTierUploadTimestamp uint64, 9=mediaTierCdnNumber uint32, 10=localKey bytes
+// LocatorInfo: 1 key, 3 encryptedDigest or 4 plaintextHash, 5 size, 6 transitCdnKey, 7 transitCdnNumber, 8 transitTierUploadTimestamp, 9 mediaTierCdnNumber, 10 localKey.
 func scrambleLocatorInfo(s *Scrambler, raw []byte) ([]byte, error) {
 	return walkMessage(raw, func(fieldNum uint64, _ uint64, value []byte) ([]byte, error) {
 		switch fieldNum {
@@ -979,10 +934,7 @@ func scrambleSticker(s *Scrambler, raw []byte) ([]byte, error) {
 // ChatUpdateMessage
 // ---------------------------------------------------------------------------
 
-// ChatUpdateMessage: oneof update — 1=simpleUpdate, 2=groupChange, 3=expirationTimerChange,
-//
-//	4=profileChange, 5=threadMerge, 6=sessionSwitchover, 7=individualCall,
-//	8=groupCall, 9=learnedProfileChange, 10=pollTerminate, 11=pinMessage
+// ChatUpdateMessage oneof: 1 simpleUpdate, 2 groupChange, 3 expirationTimerChange, 4 profileChange, 5 threadMerge, 6 sessionSwitchover, 7 individualCall, 8 groupCall, 9 learnedProfileChange, 10 pollTerminate, 11 pinMessage.
 func scrambleChatUpdateMessage(s *Scrambler, raw []byte) ([]byte, error) {
 	return walkMessage(raw, func(fieldNum uint64, _ uint64, value []byte) ([]byte, error) {
 		switch fieldNum {
@@ -1325,10 +1277,7 @@ func scrambleTransactionDetails(s *Scrambler, raw []byte) ([]byte, error) {
 	})
 }
 
-// Transaction: 1=status enum, 2=mobileCoinIdentification MobileCoinTxoIdentification,
-//
-//	3=timestamp uint64, 4=blockIndex uint64, 5=blockTimestamp uint64,
-//	6=transaction bytes, 7=receipt bytes
+// Transaction: 1 status, 2 mobileCoinIdentification, 3 timestamp, 4 blockIndex, 5 blockTimestamp, 6 transaction, 7 receipt.
 func scrambleTransaction(s *Scrambler, raw []byte) ([]byte, error) {
 	return walkMessage(raw, func(fieldNum uint64, _ uint64, value []byte) ([]byte, error) {
 		switch fieldNum {
@@ -1539,11 +1488,7 @@ func scramblePollTerminateUpdate(s *Scrambler, raw []byte) ([]byte, error) {
 // walkMessage: raw protobuf wire walker
 // ---------------------------------------------------------------------------
 
-// fieldHandler is called for each length-delimited (wire type 2) field.
-// It receives the field number, wire type, and the raw field value bytes.
-// The returned bytes replace the original field value in the output.
-// Returning a non-nil error aborts the walk and propagates the error to
-// the caller of walkMessage.
+// fieldHandler returns the replacement value for one length-delimited field; an error aborts the walk.
 type fieldHandler func(fieldNum uint64, wireType uint64, value []byte) ([]byte, error)
 
 // varintHook overrides a specific varint field's value.
@@ -1557,11 +1502,7 @@ func withVarintHook(fieldNum uint64, fn func(uint64) uint64) varintHook {
 	return varintHook{fieldNum: fieldNum, fn: fn}
 }
 
-// walkMessage parses raw protobuf wire bytes, calls handler for each
-// length-delimited field, and rebuilds the message with replacement values.
-// Varint fields can be overridden via optional varintHook arguments.
-//
-// Wire types: 0=varint, 1=64-bit, 2=length-delimited, 5=32-bit.
+// walkMessage rebuilds a protobuf message, replacing length-delimited fields through handler and varints through optional hooks.
 func walkMessage(raw []byte, handler fieldHandler, hooks ...varintHook) ([]byte, error) {
 	hookMap := make(map[uint64]func(uint64) uint64, len(hooks))
 	for _, h := range hooks {

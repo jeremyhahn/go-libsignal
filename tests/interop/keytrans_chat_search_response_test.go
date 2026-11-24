@@ -1,24 +1,4 @@
-// Keytrans end-to-end search verification against the upstream Rust fixture.
-//
-// The fixture tests/interop/fixtures/net/chat_search_response.dat is a
-// protobuf-encoded SearchResponse (ChatSearchResponse) emitted by the Rust
-// libsignal staging configuration.  This test deserialises it, builds the
-// PublicConfig from the staging key material, and calls
-// pkg/keytrans.VerifySearch for the ACI entry to confirm that Go produces
-// the same result as Rust's staging tests:
-//
-//	rust/net/chat/src/api/keytrans.rs:770-816 (search_returns_data_not_requested,
-//	search_does_not_return_requested_data).
-//
-// The parameters come directly from the Rust test constants:
-//
-//	KEYTRANS_SIGNING_KEY_MATERIAL_STAGING  (rust/net/src/env.rs:363)
-//	KEYTRANS_VRF_KEY_MATERIAL_STAGING      (rust/net/src/env.rs:365)
-//	KEYTRANS_AUDITOR_KEY_MATERIAL_STAGING  (rust/net/src/env.rs:367-371)
-//	test_account::ACI                      (rust/net/chat/src/api/keytrans.rs:567)
-//	CHAT_SEARCH_RESPONSE_VALID_AT          (rust/net/tests/data/chat_response_valid_at.in)
-//
-// Upstream commit: 98915c442d
+// Keytrans search verification: VerifySearch on the Rust staging fixture fixtures/net/chat_search_response.dat with the staging key material and test ACI from rust/net.
 package interop
 
 import (
@@ -127,13 +107,7 @@ func buildStagingPublicConfig(t *testing.T) keytrans.PublicConfig {
 	}
 }
 
-// buildDistinguishedLastTreeHead constructs the LastTreeHead for the
-// distinguished tree at size 677 from the Rust test constants.
-// Rust: DISTINGUISHED_TREE_677_HEAD (protobuf TreeHead) +
-//
-//	DISTINGUISHED_TREE_677_ROOT (32-byte root hash).
-//
-// Source: rust/net/chat/src/api/keytrans.rs:625-629.
+// buildDistinguishedLastTreeHead builds the size-677 distinguished tree head from Rust's DISTINGUISHED_TREE_677_HEAD and _ROOT.
 func buildDistinguishedLastTreeHead(t *testing.T) *keytrans.LastTreeHead {
 	t.Helper()
 
@@ -835,13 +809,7 @@ func decodeUpdateValue(data []byte) (*keytrans.UpdateValue, error) {
 	return uv, nil
 }
 
-// TestKeytrans_ChatSearchResponse_LoadAndDeserialize verifies that the
-// chat_search_response.dat fixture can be deserialized into a ChatSearchResponse
-// and that its structure is well-formed (ACI response present, tree head present).
-// This catches bit-rot in the fixture and ensures the Go protowire decoder
-// handles the actual Rust-emitted binary format.
-//
-// Rust source: rust/net/chat/src/api/keytrans.rs:770-776
+// TestKeytrans_ChatSearchResponse_LoadAndDeserialize checks the fixture decodes with an ACI response and tree head.
 func TestKeytrans_ChatSearchResponse_LoadAndDeserialize(t *testing.T) {
 	raw := loader.MustRead("net/chat_search_response.dat")
 	if len(raw) == 0 {
@@ -875,18 +843,7 @@ func TestKeytrans_ChatSearchResponse_LoadAndDeserialize(t *testing.T) {
 	)
 }
 
-// TestKeytrans_ChatSearchResponse_VerifyACI performs end-to-end ACI search
-// verification using the staging PublicConfig and the pinned Rust fixture.
-//
-// This mirrors the Rust test at rust/net/chat/src/api/keytrans.rs:805-816 which
-// calls verify_chat_search_response with the ACI CondensedTreeSearchResponse and
-// stored_account_data=Some(test_account_data()). The Go test exercises the
-// equivalent path: VerifySearch on the ACI CondensedTreeSearchResponse with
-// LastTreeHead populated from STORED_ACCOUNT_DATA_681.
-//
-// The valid_at timestamp comes from rust/net/tests/data/chat_response_valid_at.in.
-// The stored account data hex is STORED_ACCOUNT_DATA_681 from
-// rust/net/chat/src/api/keytrans.rs:631-633.
+// TestKeytrans_ChatSearchResponse_VerifyACI verifies the ACI search with the staging config and LastTreeHead from STORED_ACCOUNT_DATA_681, as the Rust test does.
 func TestKeytrans_ChatSearchResponse_VerifyACI(t *testing.T) {
 	raw := loader.MustRead("net/chat_search_response.dat")
 	resp, err := decodeChatSearchResponse(raw)

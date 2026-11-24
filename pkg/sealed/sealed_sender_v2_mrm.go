@@ -8,10 +8,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/protocol"
 )
 
-// serializedRecipientViewVersion is the version byte at the head of a
-// SerializedRecipientView. Mirrors Java's
-// SealedSenderMultiRecipientMessage.SERIALIZED_RECIPIENT_VIEW_VERSION (0x01)
-// so values produced here can be consumed by Java callers and vice-versa.
+// serializedRecipientViewVersion (0x01) heads a SerializedRecipientView, as in Java.
 const serializedRecipientViewVersion byte = 0x01
 
 // serializedRecipientViewSize is the fixed size in bytes of a

@@ -691,10 +691,7 @@ func TestSPQRMaxSkippedKeys(t *testing.T) {
 	}
 	defer s.Zeroize()
 
-	// FIFO eviction: requesting a key that skips beyond maxSkippedKeys now
-	// succeeds. Oldest skipped keys are evicted silently, matching the Rust
-	// reference (sparsepostquantumratchet chain.rs KeyHistory::gc). The map
-	// should not exceed maxSkippedKeys after the call.
+	// Skipping past maxSkippedKeys succeeds by evicting the oldest keys (Rust chain.rs KeyHistory::gc); the map stays within maxSkippedKeys.
 	mk, decryptErr := s.Decrypt(0, maxSkippedKeys+2)
 	if decryptErr != nil {
 		t.Fatalf("expected FIFO eviction to allow decryption beyond maxSkippedKeys, got: %v", decryptErr)
@@ -1079,15 +1076,10 @@ func TestSPQRSelfSessionAllowsLargeForwardJump(t *testing.T) {
 	}
 	defer s.Zeroize()
 
-	// With FIFO eviction, a jump of maxJump+1 (25001) from recvCounter=0
-	// succeeds: the maxJump check passes (MaxUint32 limit), and the skip
-	// loop evicts old keys instead of rejecting. Verify no ErrMaxJump is
-	// returned and the result key count is capped at maxSkippedKeys.
+	// A jump of maxJump+1 succeeds with eviction; no ErrMaxJump, and the key count is capped at maxSkippedKeys.
 	mk, decryptErr := s.Decrypt(0, maxJump+1)
 	if decryptErr != nil {
-		// The only acceptable errors are ErrCounterExhausted or ErrMaxJump
-		// (if the check fires before eviction), but ErrMaxSkippedKeys must
-		// not appear since FIFO eviction replaces it.
+		// ErrCounterExhausted or ErrMaxJump are acceptable; ErrMaxSkippedKeys is not.
 		if _, ok := decryptErr.(*ErrMaxJump); ok {
 			t.Fatal("self-session should not reject with ErrMaxJump for jump of 25001 (maxJump=MaxUint32)")
 		}

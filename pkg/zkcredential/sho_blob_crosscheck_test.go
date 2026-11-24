@@ -1,32 +1,6 @@
 package zkcredential
 
-// INFO-1: SHO hardcoded-blob cross-check tests.
-//
-// The Go zkcredential package has two categories of system parameters:
-//
-//  1. MODERN SystemParams — derived deterministically from a SHO using the
-//     "Signal_ZKCredential_ConstantSystemParams_generate_20230410" label.
-//     generateSystemParams() is the Go implementation; the constants are
-//     never stored as a hardcoded byte blob in Go.
-//
-//  2. LEGACY LegacySystemParams — parsed from legacyCredentialSystemHardcoded,
-//     a verbatim copy of the 544-byte blob emitted by the Rust zkgroup crate's
-//     SYSTEM_PARAMS constant (rust/zkgroup/src/crypto/credentials.rs,
-//     "Signal_ZKGroup_20200424_Constant_Credentials_SystemParams_Generate").
-//     Go does not re-derive these from a SHO; it parses the blob directly and
-//     relies on the Rust blob being correct.
-//
-// These tests prove:
-//  a. generateSystemParams() is deterministic and every call produces
-//     byte-identical point encodings (no non-determinism in the SHO pipeline).
-//  b. legacyCredentialSystemHardcoded decodes to 17 valid ristretto255 points
-//     that re-encode to the SAME bytes, confirming blob integrity.
-//  c. The cached GetSystemParams() singleton matches a fresh generateSystemParams()
-//     call byte-for-byte, confirming the lazy-init path is correct.
-//
-// If (b) fails it is a bug: either the blob has been corrupted or the parser
-// is reading at the wrong offset. If (a) fails it indicates the SHO PRNG is
-// not deterministic for this label.
+// System parameter cross-checks: generateSystemParams is deterministic and equals the cached GetSystemParams, and the 544-byte legacy blob from Rust zkgroup decodes to 17 valid points that re-encode identically.
 
 import (
 	"encoding/hex"
@@ -40,10 +14,7 @@ func newRistrettoElement() *ristretto255.Element {
 	return ristretto255.NewIdentityElement()
 }
 
-// TestSystemParams_SHODerived_Deterministic asserts that generateSystemParams()
-// produces byte-identical point encodings across two calls.
-// This is the SHO cross-check for the MODERN parameters: both calls run the
-// same SHO pipeline and must emit the same points.
+// TestSystemParams_SHODerived_Deterministic checks two generateSystemParams calls give identical points.
 func TestSystemParams_SHODerived_Deterministic(t *testing.T) {
 	p1 := generateSystemParams()
 	p2 := generateSystemParams()
@@ -94,14 +65,7 @@ func TestSystemParams_Singleton_MatchesFresh(t *testing.T) {
 	}
 }
 
-// TestLegacySystemParams_BlobIntegrity verifies that legacyCredentialSystemHardcoded
-// (the verbatim Rust blob) decodes to 17 valid ristretto255 points, each of which
-// re-encodes to the SAME bytes. This is the "hardcoded blob cross-check" for the
-// LEGACY parameters: parseLegacySystemParams() is the only derivation we have in Go,
-// so we verify the blob is self-consistent.
-//
-// Rust source: rust/zkgroup/src/crypto/credentials.rs
-// (Signal_ZKGroup_20200424_Constant_Credentials_SystemParams_Generate)
+// TestLegacySystemParams_BlobIntegrity checks legacyCredentialSystemHardcoded decodes to 17 valid points that re-encode to the same bytes.
 func TestLegacySystemParams_BlobIntegrity(t *testing.T) {
 	blob := legacyCredentialSystemHardcoded[:]
 

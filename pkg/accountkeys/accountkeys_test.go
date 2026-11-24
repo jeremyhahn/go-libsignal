@@ -628,14 +628,9 @@ func TestNormalizePin(t *testing.T) {
 		{"devanagari digits", "\u0966\u0967\u0968\u0969", "0123"},
 		// Bengali digits ০১২৩
 		{"bengali digits", "\u09E6\u09E7\u09E8\u09E9", "0123"},
-		// "mixed digits": every rune is a Unicode digit (1, \u0662, \u0968, 3) so
-		// isAllDigits=true and transliteration still applies \u2192 "1223".
-		// This behavior is UNCHANGED by the all-digits gate.
+		// "mixed digits": every rune is a digit, so transliteration applies.
 		{"mixed digits", "1\u0662\u09683", "1223"},
-		// Regression: mixed text + non-ASCII digit must NOT transliterate.
-		// "abc\u0661def" has non-digit runes, so isAllDigits=false; '\u0661' (U+0661)
-		// is preserved as-is under NFKD (it does not decompose).
-		// Before the fix normalizePin("abc\u0661def") wrongly returned "abc1def".
+		// Text with a non-ASCII digit is not all digits, so the digit is kept.
 		{"mixed text non-ascii digit", "abc\u0661def", "abc\u0661def"},
 		// Non-digit unicode text stays as-is (but gets NFKD normalized)
 		{"unicode text", "caf\u00E9", "cafe\u0301"},

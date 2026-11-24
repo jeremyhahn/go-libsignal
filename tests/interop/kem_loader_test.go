@@ -1,16 +1,4 @@
-// Conformance test consumer for KEM byte-format parity, using the central
-// fixture loader rather than ad-hoc runtime.Caller path resolution.
-//
-// This test reads the upstream Rust libsignal ML-KEM-1024 and Kyber-1024 test
-// keys from tests/interop/fixtures/protocol/kem/ — paths that are tracked by
-// MANIFEST.toml and validated in CI via tests/interop/scripts/check_fixtures.sh.
-//
-// The existing kem_interop_test.go covers the same byte-parity property via
-// an ad-hoc loader; this file is the canonical pattern future port waves
-// must follow when adopting Rust-sourced fixtures.
-//
-// Rust reference: rust/protocol/src/kem.rs::test_serialize
-//   (https://github.com/signalapp/libsignal at commit pinned in /RUST_REV).
+// KEM byte-format parity through the central fixture loader, reading MANIFEST.toml-tracked keys (Rust kem.rs test_serialize at /RUST_REV).
 
 package interop
 
@@ -51,14 +39,7 @@ func TestKEMLoader_Kyber1024SerializeRoundTrip(t *testing.T) {
 	}
 }
 
-// TestKEMLoader_MLKEM1024SerializeRoundTrip verifies the byte-identical
-// round trip for ML-KEM-1024 public keys (type byte 0x0a) — which IS a
-// wire-relevant property because PKs are transmitted in pre-key bundles.
-// The secret-key portion is intentionally skipped: ML-KEM secret keys
-// never leave a device, so Rust's libcrux expanded 3168-byte SK form vs
-// Go's FIPS 203 64-byte seed form is a local-only representation choice,
-// not a wire-compat divergence. See fixtures/MANIFEST.toml for full
-// rationale.
+// TestKEMLoader_MLKEM1024SerializeRoundTrip round-trips ML-KEM-1024 public keys; secret keys never leave a device, so their form is not checked.
 func TestKEMLoader_MLKEM1024SerializeRoundTrip(t *testing.T) {
 	rawPK := loader.MustRead("protocol/kem/mlkem-pk.dat")
 	rawSK := loader.MustRead("protocol/kem/mlkem-sk.dat")
@@ -80,11 +61,6 @@ func TestKEMLoader_MLKEM1024SerializeRoundTrip(t *testing.T) {
 		t.Fatalf("MLKEM1024 PK round-trip mismatch:\n  got  len=%d\n  want len=%d", len(got), len(rawPK))
 	}
 
-	// MLKEM1024 secret-key round trip is *intentionally not asserted*. ML-KEM
-	// SKs never leave a device, so the libcrux-expanded 3168-byte form Rust
-	// uses for local storage and the FIPS 203 64-byte seed form Go uses are
-	// both legal representations of the same key material. This is a local
-	// state choice, not a wire format. We log the upstream body size as a
-	// diagnostic so the picture is recorded next to the test.
+	// ML-KEM secret keys are local state: Rust's 3168-byte and Go's 64-byte seed forms are both valid, so only the size is logged.
 	t.Logf("upstream mlkem-sk.dat body size: %d bytes (libcrux expanded form). Go uses the 64-byte FIPS 203 seed form for local storage; SKs are not transmitted, so this divergence is benign.", len(rawSK)-1)
 }

@@ -13,13 +13,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/groups/ratchet"
 )
 
-// Deserialize now returns structures carrying guarded material, so the byte
-// entry points own locked memory they did not own before. Nothing in go-enclave
-// reports how many locked buffers a process holds, so these tests read the
-// kernel's own accounting — VmLck in /proc/self/status — which is exactly the
-// resource an abandoned buffer consumes. That measurement is Linux-only.
-//
-// This mirrors the same harness in pkg/state/record for the 1:1 path.
+// These tests measure locked memory through VmLck in /proc/self/status, so they are Linux-only.
 
 // loadAttempts is how many loads each test performs. Enough that a leak of a
 // few pages per load is orders of magnitude above the tolerance, few enough to
@@ -114,13 +108,7 @@ func malformedStateStructure(t *testing.T, fill byte) *SenderKeyStateStructure {
 	return structure
 }
 
-// TestNewSenderKeyStateFromBytesReleasesTheDecodedStructure is the regression
-// test for the leak this conversion introduced: Deserialize hands back guarded
-// material, NewSenderKeyStateFromStructure clones out of it and deliberately
-// leaves the source alone, so the byte entry point owns the source and must
-// release it. Without that, every SUCCESSFUL load strands a duplicate set of
-// secrets — which is the dangerous shape, since it needs no malformed input at
-// all.
+// TestNewSenderKeyStateFromBytesReleasesTheDecodedStructure checks a successful load releases the decoded structure.
 func TestNewSenderKeyStateFromBytesReleasesTheDecodedStructure(t *testing.T) {
 	stateSerializer := newTestStateSerializer()
 
@@ -186,11 +174,7 @@ func TestNewSenderKeyFromBytesReleasesTheDecodedRecord(t *testing.T) {
 	})
 }
 
-// TestNewSenderKeyFromStructReleasesEarlierStates is the multi-state case: the
-// first state decodes into guarded clones, then a later one fails. Without the
-// cleanup, a peer supplying records whose LAST state is malformed strands every
-// preceding state's signing key, chain key and message keys — one record at a
-// time, with no successful load required.
+// TestNewSenderKeyFromStructReleasesEarlierStates checks a malformed last state releases the earlier states' keys.
 func TestNewSenderKeyFromStructReleasesEarlierStates(t *testing.T) {
 	recordSerializer, stateSerializer := newTestRecordSerializer(), newTestStateSerializer()
 

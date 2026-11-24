@@ -139,10 +139,7 @@ func KdfSckaCK(ck *secret.Secret, ctr uint32) (mk, nextCK *secret.Secret, err er
 	return keys[1], keys[0], nil
 }
 
-// splitLocked moves a KDF output into a locked scratch region at once,
-// wiping output, and splits it there into n keyLen-byte secrets. Each
-// secret.New moves its segment locked region to locked region, so no
-// unprotected copy of a segment exists during the split.
+// splitLocked moves a KDF output into locked memory, wiping output, and splits it into n keyLen-byte secrets without an unprotected copy.
 func splitLocked(output []byte, n int) (_ []*secret.Secret, err error) {
 	defer crypto.Zeroize(output)
 	if len(output) != n*keyLen {

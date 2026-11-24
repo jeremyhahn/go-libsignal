@@ -34,14 +34,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/state/store"
 )
 
-// effectiveLocalAddress returns local when both addresses are canonical
-// ServiceIds (enabling address-binding in the SignalMessage proto field 6),
-// and nil otherwise (falling back to the legacy unbound path). The remote
-// address is always passed directly to the cipher for session-store lookup;
-// only the local address governs whether binding is active.
-//
-// This is the single choke-point for the back-compat decision documented in
-// the package doc comment.
+// effectiveLocalAddress returns local when both addresses are canonical ServiceIds, enabling address binding, and nil otherwise.
 func effectiveLocalAddress(local, remote *protocol.SignalAddress) *protocol.SignalAddress {
 	if protocol.IsCanonicalServiceIdAddress(local) && protocol.IsCanonicalServiceIdAddress(remote) {
 		return local
@@ -214,16 +207,7 @@ func MessageDecryptPreKey(
 	)
 	cipher.SetIdentityStore(identityStore)
 
-	// DecryptPreKeyMessage calls deferred.Complete() internally and returns
-	// a non-nil deferred only on success. Calling Complete() a second time
-	// here was a double-commit bug: on a non-idempotent store (e.g., one
-	// that errors on the second RemovePreKey or MarkKyberPreKeyUsed call)
-	// a valid first-message decrypt would return a spurious error.
-	// Mirrors sealed/sealed_sender.go which discards the returned deferred
-	// for the same reason.
-	//
-	// Rust reference: session_cipher.rs message_decrypt_prekey only calls
-	// the side-effect functions once.
+	// DecryptPreKeyMessage already called Complete; calling it again would double-commit.
 	plaintext, _, err := cipher.DecryptPreKeyMessage(builder, ciphertext)
 	if err != nil {
 		return nil, err

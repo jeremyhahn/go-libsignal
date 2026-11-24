@@ -1,12 +1,4 @@
-// Interop tests for message-backup frames with invalid HMAC.
-//
-// Source: rust/message-backup/tests/res/test-cases/valid-encrypted/
-// legacy-account.binproto.encrypted (HMAC bytes mutated) at commit 98915c442d.
-//
-// Rust libsignal rejects these payloads in BackupReader::new_encrypted_compressed
-// before attempting decryption — the MAC check happens first. Go pkg/backup
-// FrameDecryptor follows the same order: HMAC verify → decrypt → decompress.
-// These tests confirm that DecryptFrames returns an error without panicking.
+// Message-backup frames with mutated HMAC bytes (Rust legacy-account fixture) must fail before decryption, without panicking.
 package interop
 
 import (

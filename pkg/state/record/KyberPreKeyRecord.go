@@ -92,11 +92,7 @@ func NewKyberPreKeyFromStructure(structure KyberPreKeyStructure, serializer Kybe
 		return nil, &KyberPreKeyDeserializeError{Operation: "failed to create kyber pre-key secret key", Err: skErr}
 	}
 
-	// Guard: the type tag embedded in the serialized public key must match the
-	// type used to construct the secret key. NewGuardedSecretKeyFromSecret
-	// receives publicKey.Type() explicitly, so secretKey.Type() == publicKey.Type()
-	// is always true here; this assertion catches future API changes that could
-	// break the invariant.
+	// The public key type must equal the secret key type.
 	if secretKey.Type() != publicKey.Type() {
 		secretKey.Destroy()
 		return nil, &ErrKyberPreKeyTypeMismatch{
@@ -189,10 +185,7 @@ func (k *KyberPreKey) Serialize() ([]byte, error) {
 	return k.serializer.Serialize(structure)
 }
 
-// structure builds the serializable form of the record, cloning the secret key
-// from the record's guarded memory into the structure's own guarded memory.
-// The caller owns the returned structure and must Zeroize it once the
-// serializer is done with it.
+// structure builds the serializable form with a guarded copy of the secret key; the caller zeroizes it.
 func (k *KyberPreKey) structure() (*KyberPreKeyStructure, error) {
 	cloned, err := k.keyPair.Secret.CloneSecret()
 	if err != nil {

@@ -6,17 +6,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
-// TestGuardPrivateKey covers the conversion both record layers use to move an
-// EC private key into guarded memory for serialization. It lives here rather
-// than in either caller because the per-package coverage profiles only count
-// what a package's own tests exercise.
-//
-// The key is built from fixed bytes rather than GenerateKeyPair. What is under
-// test is the serialize-and-guard conversion, not key agreement, and
-// GenerateKeyPair performs an X25519 scalar multiplication -- which
-// GODEBUG=fips140=only refuses, so generating here would drop this test out of
-// the FIPS gate for no coverage gained. NewGuardedECPrivateKey only clamps and
-// stores, so it is approved-mode clean.
+// TestGuardPrivateKey covers the serialize-and-guard conversion with fixed key bytes, so it runs in the FIPS gate.
 func TestGuardPrivateKey(t *testing.T) {
 	var raw [32]byte
 	for i := range raw {

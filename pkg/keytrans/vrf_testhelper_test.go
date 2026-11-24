@@ -40,8 +40,7 @@ func testVRFKeyPair(t *testing.T) (*VRFPublicKey, *edwards25519.Scalar) {
 	return vrfPk, sk
 }
 
-// testVRFProve generates a VRF proof for the given message using the private scalar.
-// Implements ECVRF-EDWARDS25519-SHA512-TAI (RFC 9381 Section 5.1).
+// testVRFProve generates an ECVRF-EDWARDS25519-SHA512-TAI proof (RFC 9381 §5.1).
 func testVRFProve(t *testing.T, pk *VRFPublicKey, sk *edwards25519.Scalar, msg []byte) []byte {
 	t.Helper()
 

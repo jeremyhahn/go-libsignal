@@ -40,26 +40,17 @@ message Request4 {
   }
   message Query {
   }
-  // RotateStart initiates an OPRF-key rotation. The server begins a
-  // rotation and applies the delta secret-shares.
-  //
-  // Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateStart
+  // RotateStart begins an OPRF-key rotation and applies the delta shares.
   message RotateStart {
     fixed32 version = 1;
     bytes oprf_secretshare_delta = 2;
     bytes encryption_secretshare_delta = 3;
   }
-  // RotateCommit commits a previously started rotation, making the new
-  // OPRF key permanent.
-  //
-  // Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateCommit
+  // RotateCommit makes the rotated OPRF key permanent.
   message RotateCommit {
     fixed32 version = 1;
   }
-  // RotateRollback aborts a previously started rotation and reverts to
-  // the previous OPRF key.
-  //
-  // Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateRollback
+  // RotateRollback aborts a rotation and restores the previous OPRF key.
   message RotateRollback {
     fixed32 version = 1;
   }

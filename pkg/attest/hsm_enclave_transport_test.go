@@ -1,25 +1,8 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 3 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the Noise_NK_25519_ChaChaPoly_SHA256 pattern Signal uses to reach its
-// SGX and HSM enclaves requires it, so the fips140only build tag drops this
-// file from the FIPS gate. `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): these tests use X25519 for Signal's Noise NK pattern.
 
-// HSM enclave transport round-trip tests.
-//
-// Ports the message-transport portion of Rust's test_hsm_enclave_happy_path
-// (rust/attest/tests/hsm_enclave.rs:14-57) which establishes the Noise NK
-// handshake and then verifies bidirectional message transport via the
-// resulting ClientConnection (Send/Recv).
-//
-// The existing hsm_enclave_test.go tests establish and complete the
-// handshake but do not exercise the post-handshake transport. This file
-// closes that gap.
-//
-// Rust source: rust/attest/tests/hsm_enclave.rs:14-57
-// Upstream commit: 98915c44
+// HSM enclave transport round trips, ported from rust/attest/tests/hsm_enclave.rs:14-57.
 package attest
 
 import (
@@ -29,12 +12,7 @@ import (
 	"github.com/flynn/noise"
 )
 
-// TestHSMClientConnection_SendRecv_ServerToClient verifies that after completing
-// a Noise NK handshake, the server can encrypt a message using its send cipher
-// and the client's ClientConnection.Recv decrypts it correctly.
-//
-// In Noise NK, after split: c1 = responder-send = client-recv cipher.
-// Rust ref: test_hsm_enclave_happy_path (server → client message, lines 37-42).
+// TestHSMClientConnection_SendRecv_ServerToClient checks the client decrypts a server message after a Noise NK handshake.
 func TestHSMClientConnection_SendRecv_ServerToClient(t *testing.T) {
 	cs := noiseCipherSuite()
 	responderKP, err := cs.GenerateKeypair(nil)
@@ -98,12 +76,7 @@ func TestHSMClientConnection_SendRecv_ServerToClient(t *testing.T) {
 	}
 }
 
-// TestHSMClientConnection_SendRecv_ClientToServer verifies that
-// ClientConnection.Send produces ciphertext the server-side transport can
-// decrypt, completing the bidirectional round-trip.
-//
-// In Noise NK, after split: c0 = initiator→responder = server's receive cipher.
-// Rust ref: test_hsm_enclave_happy_path (client → server message, lines 44-51).
+// TestHSMClientConnection_SendRecv_ClientToServer checks the server decrypts a client message.
 func TestHSMClientConnection_SendRecv_ClientToServer(t *testing.T) {
 	cs := noiseCipherSuite()
 	responderKP, err := cs.GenerateKeypair(nil)

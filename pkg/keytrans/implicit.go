@@ -98,10 +98,7 @@ func implicitFrontier(start, n uint64) ([]uint64, error) {
 	return frontier, nil
 }
 
-// monitoringFrontier returns the frontier nodes that still need to be monitored.
-// It finds the last frontier node present in entries and returns all subsequent
-// frontier nodes. Returns an error if no frontier entry matches, which indicates
-// invalid input since monitoring paths must always terminate at some frontier node.
+// monitoringFrontier returns the frontier nodes after the last one present in entries; no match is an error.
 func monitoringFrontier(frontier []uint64, entries map[uint64]struct{}) ([]uint64, error) {
 	idx := -1
 	for i := len(frontier) - 1; i >= 0; i-- {

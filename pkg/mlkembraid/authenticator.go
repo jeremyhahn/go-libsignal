@@ -174,22 +174,7 @@ func (a *Authenticator) Zeroize() {
 	}
 }
 
-// kdfAuth implements KDF_AUTH per the Rust reference implementation.
-//
-// Spec-vs-implementation divergence:
-// The ML-KEM Braid spec PDF defines KDF_AUTH as:
-//
-//	HKDF(salt=root_key, ikm=update_key, info=..., length=64)
-//
-// However, the Rust reference implementation (libsignal) uses different parameters:
-//
-//	HKDF(salt=zeros(32), ikm=root_key||update_key, info=PROTOCOL_INFO+":Authenticator Update"+ToBytes(epoch), length=64)
-//
-// We follow the Rust reference for wire compatibility with existing Signal clients.
-// This is a known divergence between the specification document and the authoritative
-// reference implementation.
-//
-// Returns 64 bytes: first 32 = new root_key, second 32 = new mac_key.
+// kdfAuth returns the new root_key and mac_key using Rust libsignal's KDF_AUTH parameters, which differ from the spec PDF, for wire compatibility.
 func kdfAuth(rootKey, updateKey []byte, epoch uint64) ([]byte, error) {
 	info := buildInfo(ProtocolInfo+":Authenticator Update", epoch)
 	// Rust reference: salt = zeros(32), ikm = rootKey || updateKey (concatenated).

@@ -69,11 +69,7 @@ func ReadEndorsementResponse(data []byte) (*EndorsementResponse, []byte, error) 
 	if len(data) < off+8 {
 		return nil, nil, &ErrEndorsementResponseTruncated{Need: off + 8, Got: len(data)}
 	}
-	// ReadBincodeU64Len guards against u64 >= 2^63 (negative after int cast)
-	// and against claims that exceed remaining data, matching Rust's
-	// reject_trailing_bytes behavior (rust/zkgroup/src/common/serialization.rs).
-	// This eliminates the narrowing-cast overflow in the diagnostic Need value
-	// that existed when the rejected attacker u64 was cast directly to int.
+	// ReadBincodeU64Len rejects lengths of 2^63 or more and lengths beyond the data.
 	nR, err := ReadBincodeU64Len(data, off, 32, "R")
 	if err != nil {
 		return nil, nil, &ErrEndorsementResponseTruncated{Need: off + 8, Got: len(data)}
