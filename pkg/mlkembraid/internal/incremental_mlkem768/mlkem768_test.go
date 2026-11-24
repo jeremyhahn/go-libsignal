@@ -243,10 +243,7 @@ func TestEncapsStateRoundTrip(t *testing.T) {
 // TestEncaps1RoundTrip tests that Encaps1 produces outputs with correct sizes and
 // that the ss is non-zero (basic sanity; full KAT requires Decaps which is not yet ported).
 func TestEncaps1RoundTrip(t *testing.T) {
-	// We use a known pk1 derived from a zero seed. This is not a real key pair;
-	// we only test that Encaps1 runs and produces correctly-sized outputs.
-	//
-	// Real key-round-trip test requires GenerateKey + Decaps, which are TODO(#10).
+	// pk1 from a zero seed is not a real key; this only checks output sizes.
 	var pk1 [PublicKey1Size]byte
 	// pk1[:32] = seed_for_A, pk1[32:] = H(ek). Use deterministic values.
 	for i := range pk1[:32] {

@@ -254,12 +254,7 @@ func TestDecryptFramesBadCiphertextAlignment(t *testing.T) {
 	}
 
 	data := buf.Bytes()
-	// Remove one byte from the middle (between IV and HMAC) to break
-	// ciphertext alignment. We need to re-compute the HMAC for the
-	// modified content to pass the HMAC check and reach the alignment check.
-	// Instead, use a minimal manually constructed input:
-	// IV (16 bytes) + ciphertext (1 byte, not multiple of 16) + HMAC (32 bytes)
-	// But the HMAC must be valid for this content.
+	// Minimal input: 16-byte IV, 1 ciphertext byte and a valid HMAC, to reach the alignment check.
 	iv := data[:AESIVSize]
 	// 1 byte of ciphertext - not a multiple of AES block size.
 	ct := []byte{0x42}

@@ -376,10 +376,7 @@ func (s *ProtobufSenderKeyDistributionMessageSerializer) Deserialize(serialized 
 		return nil, err
 	}
 
-	// Enforce required fields. Proto3 optional fields use pointer accessors;
-	// nil pointer means the field was absent in the serialized bytes.
-	// Bytes fields (chain_key, signing_key, distribution_uuid) are nil when absent.
-	// Mirrors Rust InvalidProtobufEncoding (rust/protocol/src/protocol.rs:748-800).
+	// Absent required fields (nil pointers or bytes) are rejected, as Rust InvalidProtobufEncoding (protocol.rs:748-800).
 	if pb.ChainId == nil {
 		return nil, &ErrInvalidProtobufEncoding{MessageType: "senderkey distribution message", Field: "chain_id"}
 	}

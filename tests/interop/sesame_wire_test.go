@@ -1,32 +1,8 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 3 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) requires X25519.
 
-// M4: Sesame device-list serialization interop fixture.
-//
-// SCOPE DETERMINATION: Sesame is NOT a standalone protocol in Rust libsignal.
-// The Rust codebase references "Sesame" as a session management pattern in
-// rust/protocol/src/session_management.rs but there is no separate serialization
-// format, dedicated crate, or Sesame-specific wire fixture emitter in Rust
-// libsignal at the pinned commit (98915c44).
-//
-// The Go pkg/sesame package implements a multi-device manager on top of the
-// Signal protocol session primitives.  Its internal state (DeviceRecord,
-// UserRecord, SessionWrapper) is Go-only and has no Rust counterpart to compare
-// against byte-for-byte.
-//
-// CONCLUSION: No Rust-emitted Sesame fixture can be produced.  This file
-// contains Go-only round-trip consistency tests that verify the Go Sesame
-// data model is self-consistent without cross-language comparison.
-//
-// If Rust libsignal ever adds a dedicated Sesame serialization format at the
-// wire level, this file should be replaced with a Rust fixture loader and a
-// `make interop-wire-emit` workflow entry.
+// Sesame round-trip tests; Rust libsignal has no Sesame serialization format, so these are Go-only.
 
 package interop_test
 

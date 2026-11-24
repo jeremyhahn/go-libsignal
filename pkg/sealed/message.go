@@ -17,8 +17,7 @@ type UnidentifiedSenderMessageContent struct {
 	groupID     []byte
 }
 
-// NewUnidentifiedSenderMessageContent creates a new USMC and serializes
-// it to protobuf.
+// NewUnidentifiedSenderMessageContent creates and serializes a USMC.
 func NewUnidentifiedSenderMessageContent(
 	msgType uint32,
 	sender *SenderCertificate,
@@ -60,8 +59,7 @@ func NewUnidentifiedSenderMessageContent(
 	}, nil
 }
 
-// DeserializeUnidentifiedSenderMessageContent reconstructs a USMC from
-// protobuf-encoded bytes.
+// DeserializeUnidentifiedSenderMessageContent parses a USMC from protobuf bytes.
 func DeserializeUnidentifiedSenderMessageContent(data []byte) (*UnidentifiedSenderMessageContent, error) {
 	pbMsg := &sealedpb.UnidentifiedSenderMessage_Message{}
 	if err := proto.Unmarshal(data, pbMsg); err != nil {
@@ -84,10 +82,7 @@ func DeserializeUnidentifiedSenderMessageContent(data []byte) (*UnidentifiedSend
 		return nil, ErrUnknownUSMCType
 	}
 
-	// Rust: rust/protocol/src/sealed_sender.rs:526-528 returns
-	// InvalidProtobufEncoding when the content field is absent. Enforce the
-	// same check here so malformed USMCs without a payload are rejected
-	// rather than silently accepted with nil contents.
+	// A USMC without content is InvalidProtobufEncoding, as in Rust.
 	if pbMsg.Content == nil {
 		return nil, &CertificateError{Detail: "USMC missing required content field"}
 	}

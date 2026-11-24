@@ -1,16 +1,4 @@
-// Conformance test: zkgroup raw SignatureKeyPair byte-identical to Rust.
-//
-// Mirrors rust/zkgroup/src/crypto/signature.rs::tests::test_signature:
-//
-//   1. let mut sho = Sho::new(b"Test_Signature", TEST_ARRAY_32);
-//   2. let key_pair = KeyPair::generate(&mut sho);
-//   3. let signature = key_pair.sign(TEST_ARRAY_32_1, &mut sho);
-//   4. assert signature == EXPECTED_HEX
-//
-// In Go, KeyPair::sign is a method on SignatureKeyPair that takes
-// randomness as an argument. Rust derives that randomness by squeezing
-// 32 more bytes from the SAME SHO that generate consumed; we replicate
-// that exact ordering so the byte output matches.
+// SignatureKeyPair must match Rust signature.rs test_signature; signing randomness comes from the same SHO after key generation.
 
 package interop
 
@@ -64,10 +52,7 @@ func TestZkgroup_SignatureKeyPair_KAT(t *testing.T) {
 		t.Fatalf("GenerateSignatureKeyPair: %v", err)
 	}
 
-	// Step 3: Squeeze the 32-byte signing randomness from the SAME SHO.
-	// This must come AFTER the GenerateSignatureKeyPair squeeze so the
-	// SHO transcript matches Rust's KeyPair::generate(...) +
-	// KeyPair::sign(message, sho) sequence.
+	// Squeeze signing randomness from the same SHO after key generation, as Rust does.
 	randomness := sho.SqueezeAndRatchet(32)
 
 	// Step 4: Sign and assert byte-equality.

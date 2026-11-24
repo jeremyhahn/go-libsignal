@@ -35,11 +35,7 @@ func NewSenderKeyFromBytes(serialized []byte, serializer SenderKeySerializer,
 func NewSenderKeyFromStruct(structure *SenderKeyStructure, serializer SenderKeySerializer,
 	stateSerializer SenderKeyStateSerializer) (*SenderKey, error) {
 
-	// Build our sender key states from structure. Each successful call allocates
-	// guarded clones, so a malformed later state must not abandon the earlier
-	// ones: without the cleanup below, a peer supplying records whose last state
-	// is invalid could strand every preceding state's signing key, chain key and
-	// message keys, one record at a time.
+	// Build the states, releasing earlier ones if a later state is malformed.
 	senderKeyStates := make([]*SenderKeyState, len(structure.SenderKeyStates))
 	handedOver := false
 	defer func() {
@@ -120,15 +116,7 @@ func (k *SenderKey) IsEmpty() bool {
 	return len(k.senderKeyStates) == 0
 }
 
-// AddSenderKeyState adds a new state to this senderkey record with the given
-// id, iteration, chainkey, and signature key.
-//
-// This implements the Rust reference add_sender_key_state deduplication logic:
-//  1. If a state with matching (chain_id, signing_key) already exists, remove
-//     it and re-insert at the front (preserving the EXISTING state's data).
-//  2. Remove any states with matching chain_id but DIFFERENT signing key.
-//  3. If exceeding MAX_SENDER_KEY_STATES, evict the oldest (last) state.
-//  4. Push new state to the front (index 0) so SenderKeyState() returns it.
+// AddSenderKeyState adds a state at the front, deduplicating by chain ID and signing key and evicting the oldest, as Rust add_sender_key_state.
 func (k *SenderKey) AddSenderKeyState(messageVersion uint32, id uint32, iteration uint32,
 	chainKey []byte, signatureKey ecc.ECPublicKeyable) {
 
@@ -193,11 +181,7 @@ func (k *SenderKey) Serialize() ([]byte, error) {
 	return k.serializer.Serialize(st)
 }
 
-// structure will return a simple serializable record structure.
-// This is used for serialization to persistently store a session record.
-// Each SenderKeyStateStructure is zeroized after the enclosing Serialize call
-// via the deferred Zeroize on the returned SenderKeyStructure.
-// On failure every state structure built so far is released before returning.
+// structure returns the serializable record structure; failures release every state structure built so far.
 func (k *SenderKey) structure() (_ *SenderKeyStructure, err error) {
 	structure := &SenderKeyStructure{
 		SenderKeyStates: make([]*SenderKeyStateStructure, len(k.senderKeyStates)),

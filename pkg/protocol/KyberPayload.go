@@ -1,18 +1,9 @@
 package protocol
 
-// KyberPreKeyID is a typed identifier for Kyber pre-keys at the protocol layer.
-// It mirrors the KyberPreKeyId newtype in the Rust reference at
-// rust/protocol/src/state/kyber_prekey.rs:18.
-//
-// The record layer (state/record) defines its own KyberPreKeyID over the same
-// underlying uint32 to avoid a circular import. Both represent the same wire value.
+// KyberPreKeyID identifies a Kyber pre-key at the protocol layer; state/record has its own type for the same wire value.
 type KyberPreKeyID uint32
 
-// KyberPayload bundles the Kyber pre-key ID with its encapsulation ciphertext,
-// mirroring the Rust KyberPayload type in protocol/src/protocol.rs.
-//
-// It is consumed by PreKeySignalMessage construction and passed as an optional
-// unit so that callers cannot accidentally supply one field without the other.
+// KyberPayload pairs a Kyber pre-key ID with its ciphertext so neither is supplied alone.
 type KyberPayload struct {
 	preKeyID   KyberPreKeyID
 	ciphertext []byte

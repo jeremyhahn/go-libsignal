@@ -996,12 +996,7 @@ func TestVerifyRootCertificate_UnrepresentableIntelKey(t *testing.T) {
 	certBytes, _ := x509.CreateCertificate(rand.Reader, template, template, &key1.PublicKey, key1)
 	cert, _ := x509.ParseCertificate(certBytes)
 
-	// verifyRootCertificate converts the Intel key through ECDH() before
-	// comparing it to the certificate's key, and must reject a key that
-	// conversion cannot represent. P-224 is a valid ECDSA curve that
-	// crypto/ecdh does not implement, so it exercises that branch through the
-	// supported API — an off-curve P-256 point is deliberately unconstructible
-	// via ecdsa.ParseUncompressedPublicKey.
+	// P-224 is a valid ECDSA curve crypto/ecdh cannot represent, so it exercises the rejection branch.
 	unrepresentableKey, err := ecdsa.GenerateKey(elliptic.P224(), rand.Reader)
 	if err != nil {
 		t.Fatalf("generating P-224 key: %v", err)
@@ -1117,9 +1112,7 @@ func TestVerifyTCBStatus_TCBInfoPresentButNoPCKExtension(t *testing.T) {
 }
 
 func TestVerifyTCBStatus_FMSPCMismatch(t *testing.T) {
-	// If we could parse the PCK extension and the FMSPC doesn't match, it should error.
-	// This tests the findTCBStanding path indirectly - but we can test with
-	// the parseSingleTCBLevel and inTCBLevel functions directly.
+	// Test the TCB matching helpers directly.
 	level, _ := parseSingleTCBLevel(`{"tcbStatus":"UpToDate","sgxtcbcomp01svn":4,"pcesvn":11}`)
 	if level.status != "UpToDate" {
 		t.Errorf("status = %q, want UpToDate", level.status)
@@ -1611,14 +1604,7 @@ func TestVerifyCRLs_RevokedCert(t *testing.T) {
 	}
 }
 
-// TestVerifyCRLs_NoRevocation verifies that when no cert is in pckCertCRL, the
-// function proceeds past the leaf-CRL revocation check and then enforces the
-// Intel-root-key check on pckProcCACRL.  With test keys (non-Intel), we expect
-// a RootCRLVerificationError rather than success.
-//
-// Before Finding-1 fix: verifyCRLs with nil pckProcCACRL silently returned nil.
-// After fix: nil pckProcCACRL → CRLMissingError; test-signed pckProcCACRL →
-// RootCRLVerificationError.  The function can no longer be short-circuited.
+// TestVerifyCRLs_NoRevocation checks that a test-signed pckProcCACRL fails the Intel root key check.
 func TestVerifyCRLs_NoRevocation(t *testing.T) {
 	key, cert := generateTestCertAndKeyForDcap(t)
 
@@ -1651,10 +1637,7 @@ func TestVerifyCRLs_NoRevocation(t *testing.T) {
 	}
 }
 
-// TestVerifyCRLs_NilCRLs is a regression test for Finding 1 (DCAP revocation
-// bypass via CRL stripping).  Before the fix, verifyCRLs with nil CRLs returned
-// nil (success), allowing a revoked PCK cert to pass attestation.  After the fix
-// it must return a CRLMissingError immediately.
+// TestVerifyCRLs_NilCRLs checks that missing CRLs return CRLMissingError.
 func TestVerifyCRLs_NilCRLs(t *testing.T) {
 	evidence := &dcapEvidence{
 		quote: &sgxQuote{
@@ -1872,18 +1855,7 @@ func TestPCKExtensionParseError_Message(t *testing.T) {
 	}
 }
 
-// TestFinding2_PCKChainCheckedAgainstRootCRL is a regression test for Finding 2:
-// PCK evidence chain was never checked against the root CRL (pckProcCACRL).
-// Before the fix, verifyCRLs only checked pckCertChain against pckCertCRL
-// (intermediate CRL), so a cert revoked by the root CA passed unchallenged.
-// The fix adds a loop that calls checkCertAgainstCRL(cert, pckProcCACRL) for
-// every cert in pckCertChain, mirroring Rust dcap.rs ~311 (CRL_CHECK_ALL on
-// the trust store containing root_crl).
-//
-// The full integration path through verifyCRLs cannot be exercised in unit tests
-// because verifyRootCRLAgainstIntelKey requires Intel-signed CRLs.  This test
-// directly validates the security property: a cert revoked in the root CRL is
-// detected by checkCertAgainstCRL — the call the fix adds for pckCertChain.
+// TestFinding2_PCKChainCheckedAgainstRootCRL checks that a cert revoked in the root CRL is detected by checkCertAgainstCRL.
 func TestFinding2_PCKChainCheckedAgainstRootCRL(t *testing.T) {
 	key, cert := generateTestCertAndKeyForDcap(t)
 

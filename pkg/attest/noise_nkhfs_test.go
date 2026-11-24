@@ -1,12 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 4 tests in this file exercise X25519 and ChaCha20-Poly1305. FIPS 140-3
-// does not approve that, but the
-// Noise_NKhfs_25519+Kyber1024_ChaChaPoly_SHA256 pattern names both (Noise
-// Protocol Framework rev 34), so the fips140only build tag drops this file
-// from the FIPS gate. `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): the Noise NKhfs pattern needs X25519 and ChaCha20-Poly1305, so the fips140only tag drops this file.
 
 // Copyright 2024 Signal Messenger, LLC.
 // SPDX-License-Identifier: AGPL-3.0-only
@@ -40,19 +34,7 @@ func newNKhfsResponder(staticPriv, staticPub []byte) *nkhfsResponder {
 	}
 }
 
-// processMessage1 parses the initiator's first message (-> e, es, e1),
-// generates the responder's ephemeral key, and derives the transport ciphers.
-//
-// Wire format consumed:
-//
-//	e.pub(32) + DecryptAndHash(e1.pub)(1568+16) + DecryptAndHash(payload)(len+16)
-//
-// Wire format produced:
-//
-//	e.pub(32) + EncryptAndHash(ekem1.ct)(1568+16) + EncryptAndHash(payload)(len+16)
-//
-// Returns: (msg2, sendCipher, recvCipher, handshakeHash, err).
-// sendCipher and recvCipher are from the responder's perspective.
+// processMessage1 is the test responder: it reads -> e, es, e1 and returns msg2, its send and receive ciphers, and the handshake hash.
 func (r *nkhfsResponder) processMessage1(msg1 []byte) ([]byte, *NKhfsCipherState, *NKhfsCipherState, []byte, error) {
 	const (
 		dhPubLen     = 32
@@ -134,9 +116,7 @@ func (r *nkhfsResponder) processMessage1(msg1 []byte) ([]byte, *NKhfsCipherState
 	}
 	kemSS, kemCt := kemEK.Encapsulate()
 
-	// Per Noise HFS spec: EncryptAndHash(kemCt) FIRST (using the key from ee),
-	// then MixKey(kemSS) to fold the KEM shared secret into the chaining key.
-	// The initiator inverts this: DecryptAndHash(encKemCt) first, then MixKey(kemSS).
+	// EncryptAndHash(kemCt) with the ee key, then MixKey(kemSS), per the Noise HFS spec.
 	encryptedKemCt, err := r.ss.encryptAndHash(kemCt)
 	if err != nil {
 		return nil, nil, nil, nil, err

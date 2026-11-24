@@ -1,18 +1,6 @@
 package incremental_mlkem768
 
-// KAT tests for GenerateKey, Encaps1, Encaps2, Decaps, ValidatePKBytes.
-//
-// Cross-validation strategy: use Go stdlib crypto/mlkem as the oracle.
-// For a fixed 64-byte seed (d || z), the stdlib's NewDecapsulationKey768
-// produces the same key material as our kemKeyGen. We verify:
-//   1. Our GenerateKey (random seed) produces a key that round-trips through
-//      Encaps1 + Encaps2 + Decaps and yields the same shared secret.
-//   2. A stdlib-generated key pair, when fed into our Encaps1/Encaps2, produces
-//      a ciphertext that the stdlib's Decapsulate accepts and matches.
-//   3. Our Decaps inverts a ciphertext produced by the stdlib encapsulate.
-//   4. ValidatePKBytes accepts well-formed keys and rejects malformed ones.
-//
-// Rust oracle: sparsepostquantumratchet::incremental_mlkem768::test::incremental_mlkem768_round_trip
+// KATs for GenerateKey, Encaps1, Encaps2, Decaps and ValidatePKBytes, cross-checked against crypto/mlkem.
 
 import (
 	"bytes"

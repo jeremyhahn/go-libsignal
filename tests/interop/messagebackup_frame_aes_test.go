@@ -1,15 +1,4 @@
-// Conformance test for message-backup frame AES-256-CBC parity.
-//
-// Drives the same AES-256-CBC + PKCS7 primitive that pkg/backup.FrameEncryptor
-// uses (crypto/aes + crypto/cipher.NewCBCEncrypter) against vectors extracted
-// from rust/message-backup/src/frame/aes_read.rs::test::aes_reader_round_trip_*
-// at Rust libsignal commit 98915c442d.
-//
-// The Rust tests use FAKE_KEY=[0xaf;32] and FAKE_IV=[0xbb;16] to
-// encrypt + PKCS7-pad four plaintexts (empty, short 26 B, med 256 B, long 1024 B)
-// with AES-256-CBC, then decrypt them and assert round-trip equality.  Here we
-// pin the concrete expected ciphertext so any change to the cipher mode, key
-// size, or padding scheme will cause this test to fail.
+// Message-backup AES-256-CBC with PKCS7 against Rust aes_read.rs round-trip vectors (key 0xaf, IV 0xbb), with pinned ciphertexts.
 package interop
 
 import (

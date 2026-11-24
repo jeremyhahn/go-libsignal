@@ -46,8 +46,7 @@ func (mt MessageType) String() string {
 	return fmt.Sprintf("Unknown(%d)", mt)
 }
 
-// SPQRVersion is the SPQR protocol version byte prepended to wire messages.
-// Matches Rust: Version::V1 = 1.
+// SPQRVersion is the version byte prepended to wire messages (Rust Version::V1).
 const SPQRVersion uint8 = 1
 
 // maxVarintLen is the maximum encoded varint length for u64 values.
@@ -74,16 +73,7 @@ type Message struct {
 	Data []byte
 }
 
-// SerializeSCKA serializes the message into the Rust SPQR wire format:
-//
-//	[version(1 byte)]
-//	[varint(epoch)]
-//	[varint(chain_index)]
-//	[message_type(1 byte)]
-//	[varint(chunk_index) + chunk_data(32 bytes)]  -- only for types with chunks
-//
-// The chain_index parameter is the SPQR chain counter for this message.
-// This matches Rust's v1::chunked::states::serialize::Message::serialize().
+// SerializeSCKA encodes version, varint epoch, varint chain_index, type and an optional chunk, as Rust SPQR v1 does.
 func (m *Message) SerializeSCKA(chainIndex uint32) []byte {
 	// Pre-allocate: 1 + 10 + 5 + 1 + 3 + 32 = ~52 bytes max
 	buf := make([]byte, 0, 52)
@@ -121,15 +111,7 @@ func (e *ErrSCKADecode) Error() string {
 	return fmt.Sprintf("mlkembraid: SCKA decode failed: %s", e.Reason)
 }
 
-// DeserializeSCKA parses a Rust SPQR wire format message:
-//
-//	[version(1 byte)]
-//	[varint(epoch)]
-//	[varint(chain_index)]
-//	[message_type(1 byte)]
-//	[varint(chunk_index) + chunk_data(32 bytes)]  -- only for types with chunks
-//
-// Returns the deserialized Message, the chain_index, and any error.
+// DeserializeSCKA parses a Rust SPQR wire message and returns it with its chain_index.
 func DeserializeSCKA(data []byte) (*Message, uint32, error) {
 	if len(data) == 0 {
 		return nil, 0, &ErrSCKADecode{Reason: "empty input"}

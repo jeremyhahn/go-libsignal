@@ -1,20 +1,4 @@
-// Package cipher provides symmetric encryption primitives used by the Signal
-// protocol. This file implements Hybrid Public Key Encryption (HPKE) using
-// X25519 + HKDF-SHA256 + AES-256-GCM in Base mode, matching the Rust
-// libsignal implementation.
-//
-// The implementation follows RFC 9180 and uses the Go standard library
-// crypto/hpke package.
-//
-// The wire format prepends a type byte to the ciphertext:
-//
-//	[type_byte | encapsulated_key | AEAD_ciphertext]
-//
-// Currently only one ciphertext type is defined:
-//
-//	0x01 = Base_X25519_HkdfSha256_Aes256Gcm
-//
-// Rust source: rust/crypto/src/hpke.rs — SignalHpkeCiphertextType::Base_X25519_HkdfSha256_Aes256Gcm = 1.
+// HPKE Base mode (RFC 9180) with X25519, HKDF-SHA256 and AES-256-GCM; wire format type byte 0x01 | enc | ciphertext, as rust/crypto/src/hpke.rs.
 package cipher
 
 import (
@@ -56,8 +40,7 @@ var (
 	// ErrHPKEUnknownType indicates an unrecognized ciphertext type byte.
 	ErrHPKEUnknownType = &ErrHPKE{kind: hpkeErrUnknownType}
 
-	// ErrHPKEReceiverZeroized indicates the receiver's key material has been
-	// destroyed and it can no longer perform decryption.
+	// ErrHPKEReceiverZeroized indicates the receiver's key material was destroyed.
 	ErrHPKEReceiverZeroized = &ErrHPKE{kind: hpkeErrReceiverZeroized}
 )
 
@@ -137,9 +120,7 @@ type hpkeSender struct {
 	publicKey hpke.PublicKey
 }
 
-// hpkeReceiver holds a parsed recipient private key for opening.
-// Call Zeroize when the receiver is no longer needed to clear private key
-// material from memory.
+// hpkeReceiver holds a recipient private key; call Zeroize when done.
 type hpkeReceiver struct {
 	privateKey   hpke.PrivateKey
 	privKeyBytes []byte
@@ -155,14 +136,7 @@ func NewHPKESender(recipientPub []byte) (HPKESender, error) {
 	return &hpkeSender{publicKey: pk}, nil
 }
 
-// Seal encrypts plaintext for the recipient using HPKE Base mode.
-//
-// The returned ciphertext has the format:
-//
-//	[0x01 | enc (32 bytes) | AEAD_ciphertext]
-//
-// where enc is the encapsulated key and AEAD_ciphertext is the AES-256-GCM
-// encrypted plaintext with authentication tag.
+// Seal encrypts plaintext for the recipient as 0x01 | enc (32 bytes) | AES-256-GCM ciphertext.
 func (s *hpkeSender) Seal(info, aad, plaintext []byte) ([]byte, error) {
 	enc, sender, err := hpke.NewSender(s.publicKey, hpke.HKDFSHA256(), hpke.AES256GCM(), info)
 	if err != nil {
@@ -183,10 +157,7 @@ func (s *hpkeSender) Seal(info, aad, plaintext []byte) ([]byte, error) {
 	return result, nil
 }
 
-// NewHPKEReceiver creates an HPKEReceiver for the given recipient private key.
-// The recipientPriv must be a 32-byte X25519 private key. The input bytes are
-// copied; the caller remains responsible for zeroizing the original slice.
-// Call Zeroize on the returned receiver when it is no longer needed.
+// NewHPKEReceiver copies a 32-byte X25519 private key into a receiver; call Zeroize on it when done.
 func NewHPKEReceiver(recipientPriv []byte) (HPKEReceiver, error) {
 	// Copy the private key bytes so we own the memory for zeroization.
 	privCopy := make([]byte, len(recipientPriv))
@@ -200,10 +171,7 @@ func NewHPKEReceiver(recipientPriv []byte) (HPKEReceiver, error) {
 	return &hpkeReceiver{privateKey: sk, privKeyBytes: privCopy}, nil
 }
 
-// Open decrypts a ciphertext produced by Seal using HPKE Base mode.
-//
-// It parses the type byte and encapsulated key from the ciphertext prefix,
-// then decrypts using AES-256-GCM.
+// Open decrypts a ciphertext produced by Seal.
 func (r *hpkeReceiver) Open(info, aad, ciphertext []byte) ([]byte, error) {
 	if r.privateKey == nil {
 		return nil, ErrHPKEReceiverZeroized
@@ -246,14 +214,7 @@ func (r *hpkeReceiver) Zeroize() {
 	r.privateKey = nil
 }
 
-// HPKESeal is a convenience function that encrypts plaintext for a recipient
-// public key using HPKE (X25519 + HKDF-SHA256 + AES-256-GCM) in Base mode.
-//
-// The recipientPub must be a 32-byte X25519 public key.
-//
-// Returns the encapsulated key (enc) and the AEAD ciphertext separately.
-// To produce the wire format used by Signal (with type byte prefix), use
-// NewHPKESender instead.
+// HPKESeal encrypts for a 32-byte X25519 public key and returns enc and the ciphertext separately; NewHPKESender gives the wire format.
 func HPKESeal(recipientPub []byte, info, aad, plaintext []byte) (enc, ciphertext []byte, err error) {
 	pk, err := newKEM().NewPublicKey(recipientPub)
 	if err != nil {
@@ -273,12 +234,7 @@ func HPKESeal(recipientPub []byte, info, aad, plaintext []byte) (enc, ciphertext
 	return enc, ct, nil
 }
 
-// HPKEOpen is a convenience function that decrypts ciphertext using HPKE
-// (X25519 + HKDF-SHA256 + AES-256-GCM) in Base mode.
-//
-// The recipientPriv must be a 32-byte X25519 private key. The enc parameter
-// is the encapsulated key returned by HPKESeal. The caller is responsible for
-// zeroizing recipientPriv when it is no longer needed.
+// HPKEOpen decrypts with a 32-byte X25519 private key and the enc from HPKESeal.
 func HPKEOpen(recipientPriv, enc []byte, info, aad, ciphertext []byte) ([]byte, error) {
 	// Make a local copy for parsing; zeroize it when done regardless of outcome.
 	privCopy := make([]byte, len(recipientPriv))
@@ -303,11 +259,7 @@ func HPKEOpen(recipientPriv, enc []byte, info, aad, ciphertext []byte) ([]byte, 
 	return plaintext, nil
 }
 
-// HPKEGenerateKeyPair generates a new X25519 key pair for use with HPKE.
-// Returns the private key (32 bytes) and public key (32 bytes).
-//
-// The caller is responsible for zeroizing the returned privateKey slice
-// (e.g., via crypto.Zeroize) when it is no longer needed.
+// HPKEGenerateKeyPair returns a new X25519 private and public key; the caller zeroizes the private key.
 func HPKEGenerateKeyPair() (privateKey, publicKey []byte, err error) {
 	sk, err := newKEM().GenerateKey()
 	if err != nil {

@@ -1,27 +1,8 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 1 test in this file exercises AES-256-GCM under a vector-supplied nonce.
-// FIPS 140-3 does not approve that, but the Wycheproof vectors fix the
-// nonce, so the fips140only build tag drops this file from the FIPS gate.
-// `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): the Wycheproof vectors fix the AES-GCM nonce.
 
-// Wycheproof AES-GCM Known-Answer-Tests run against pkg/cipher.AESGCMEncrypt
-// and pkg/cipher.AESGCMDecrypt, mirroring the conformance suite that Rust
-// libsignal runs in rust/crypto/tests/aes_gcm.rs against
-// signal_crypto::Aes256Gcm{Encryption,Decryption}.
-//
-// The fixture is a verbatim copy of rust/crypto/tests/data/aes_gcm_test.json
-// at the upstream commit recorded in /RUST_REV (sha256 enforced by
-// MANIFEST.toml). Results that pass here are guaranteed identical, byte for
-// byte, to results Rust produces against the same vectors.
-//
-// We currently only assert the AES-256 (key size = 256) and 96-bit-IV
-// vectors that Rust's signal_crypto exposes through Aes256Gcm{Encryption,
-// Decryption}. Other key sizes and IV widths exist in the corpus and are
-// skipped here for the same reason Rust skips them — they are outside the
-// API surface signal_crypto offers.
+// Wycheproof AES-GCM KATs from rust/crypto/tests/data/aes_gcm_test.json against AESGCMEncrypt and AESGCMDecrypt, limited to AES-256 with 96-bit IVs as Rust is.
 
 package interop
 
@@ -149,12 +130,7 @@ func TestAESGCM_Wycheproof(t *testing.T) {
 				case "invalid":
 					runInvalid++
 
-					// Two sub-cases mirror Rust's expectations:
-					//   1. Encryption with the same key/iv/aad/pt should NOT
-					//      produce the recorded tag (i.e. the recorded tag is
-					//      a forgery target).
-					//   2. Decryption of recorded ct||tag should fail with
-					//      auth-tag mismatch.
+					// Encrypting must not reproduce the recorded tag, and decrypting ct||tag must fail.
 					sealed, err := cipher.AESGCMEncrypt(key, iv, pt, aad)
 					if err == nil && len(sealed) >= len(wantTag) {
 						gotTag := sealed[len(sealed)-len(wantTag):]

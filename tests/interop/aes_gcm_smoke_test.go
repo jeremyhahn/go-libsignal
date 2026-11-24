@@ -1,19 +1,8 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 1 test in this file exercises AES-256-GCM under a vector-supplied nonce.
-// FIPS 140-3 does not approve that, but the Rust-emitted fixture pinned by
-// /RUST_REV fixes the nonce, so the fips140only build tag drops this file
-// from the FIPS gate. `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): the Rust fixture fixes the AES-GCM nonce, so the fips140only tag drops this file.
 
-// Conformance test: AES-256-GCM smoke vs Rust signal_crypto::Aes256GcmEncryption.
-//
-// Mirrors rust/crypto/tests/aes_gcm.rs::aes_gcm_smoke_test (NIST GCM
-// "Test Case 4" derivative). The fixture pins every hex literal; the
-// drift detector greps the upstream source.
-//
-// The test drives pkg/cipher.AESGCMEncrypt / AESGCMDecrypt.
+// AES-256-GCM smoke test against Rust aes_gcm_smoke_test, driving pkg/cipher.AESGCMEncrypt and AESGCMDecrypt.
 
 package interop
 

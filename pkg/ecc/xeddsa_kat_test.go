@@ -1,24 +1,10 @@
 package ecc
 
-// XEdDSA Known-Answer Test (KAT) ported from the Rust libsignal reference.
-// Source: rust/core/src/curve/curve25519.rs:242-296 (test_signature).
-//
-// The test pins exact byte vectors from the Rust implementation and verifies:
-//  1. The signature is accepted for the correct public key and message.
-//  2. Every single-bit flip in the 64-byte signature causes verification to fail.
-//
-// This guards against regressions in sign-bit embedding, scalar canonicalization,
-// and the Montgomery-to-Edwards conversion inside verify().
+// XEdDSA known-answer test from rust/core/src/curve/curve25519.rs test_signature, including every single-bit flip.
 
 import "testing"
 
-// TestXEdDSA_KAT_RustVector exercises the exact byte vectors from the Rust
-// libsignal test_signature KAT (curve25519.rs:242-296).
-//
-// alice_identity_public is the raw 32-byte Curve25519 public key.
-// The message is alice_ephemeral_public: a 33-byte DJB-prefixed public key
-// (0x05 || 32 bytes), matching the Rust &[&alice_ephemeral_public] call.
-// alice_signature is the 64-byte XEdDSA signature to verify.
+// TestXEdDSA_KAT_RustVector verifies the Rust test_signature vector over a 33-byte DJB-prefixed message.
 func TestXEdDSA_KAT_RustVector(t *testing.T) {
 	// Verbatim bytes from rust/core/src/curve/curve25519.rs:243-263.
 	aliceIdentityPublic := [32]byte{

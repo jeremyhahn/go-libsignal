@@ -54,10 +54,7 @@ func PadGzippedBucketed(data []byte) []byte {
 	return result
 }
 
-// AESCBCEncryptExport encrypts plaintext using AES-256-CBC with PKCS7 padding
-// for backup export. It delegates to the cipher package's AESCBCEncrypt.
-//
-// The key must be 32 bytes (AES-256). The iv must be 16 bytes.
+// AESCBCEncryptExport encrypts with AES-256-CBC and PKCS7 padding (32-byte key, 16-byte IV).
 func AESCBCEncryptExport(key, iv, plaintext []byte) ([]byte, error) {
 	ciphertext, err := libcipher.AESCBCEncrypt(key, iv, plaintext)
 	if err != nil {

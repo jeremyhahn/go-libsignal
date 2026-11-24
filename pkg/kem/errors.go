@@ -89,11 +89,7 @@ func (e *DecapsulationError) Unwrap() error {
 	return e.Err
 }
 
-// KeyTypeMismatchError indicates a key type does not match the expected algorithm.
-//
-// Both Expected and Actual carry KeyType byte values, matching Rust's
-// WrongKEMKeyType(u8, u8) (error.rs:101). KeyKind names the role of the
-// mismatched key (e.g., "secret key", "ciphertext") for human-readable output.
+// KeyTypeMismatchError indicates a key of the wrong KeyType, like Rust WrongKEMKeyType; KeyKind names the key's role.
 type KeyTypeMismatchError struct {
 	Expected KeyType
 	Actual   KeyType

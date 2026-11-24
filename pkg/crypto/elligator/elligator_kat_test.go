@@ -1,28 +1,6 @@
 package elligator
 
-// Elligator-Ristretto cross-package consistency tests.
-//
-// Rust libsignal has NO standalone Elligator KATs for this primitive:
-//   - rust/poksho/src/ does not test Elligator directly.
-//   - rust/zkgroup/src/crypto/profile_key_struct.rs uses
-//     RistrettoPoint::from_uniform_bytes_single_elligator, which is the
-//     forward map only.
-//   - The curve25519-dalek-signal Lizard / elligator_ristretto_flavor_inverse
-//     function has no upstream test vectors published at the pinned commit
-//     (98915c44).
-//
-// Therefore these tests verify INTERNAL CONSISTENCY (Go round-trip properties)
-// rather than cross-implementation byte-exact KAT parity:
-//
-//  1. Forward Elligator map via ristretto255.SetUniformBytes followed by
-//     ElligatorRistrettoFlavorInverse must recover a preimage that maps back
-//     to the same ristretto point.
-//  2. Every candidate returned with a set bit in the mask must map forward to
-//     the original point.
-//  3. Non-canonical / invalid encodings must return ok=false.
-//
-// If/when Rust libsignal publishes KAT vectors for this primitive, this file
-// should be replaced with a byte-exact cross-implementation test.
+// Elligator-ristretto round-trip consistency tests; upstream publishes no KAT vectors for the inverse.
 
 import (
 	"crypto/sha256"

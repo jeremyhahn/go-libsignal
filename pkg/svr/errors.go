@@ -38,24 +38,13 @@ var ErrBadResponse = &Error{kind: errBadResponse}
 // ErrNoUsableVersion indicates that no auth version was usable across all servers.
 var ErrNoUsableVersion = &Error{kind: errNoUsableVersion}
 
-// ErrNumServers is a sentinel matched by errors.Is for server-count mismatch
-// errors. Use newNumServersError to construct an error with the exact counts.
-//
-// Rust libsignal ref: rust/svrb/src/lib.rs Error
+// ErrNumServers matches server-count mismatch errors built by newNumServersError.
 var ErrNumServers = &Error{kind: errNumServers}
 
-// ErrBadResponseStatus is a sentinel matched by errors.Is for non-OK
-// response-status errors. Use newBadResponseStatusError to construct an error
-// with the specific status code.
-//
-// Rust libsignal ref: rust/svrb/src/lib.rs Error
+// ErrBadResponseStatus matches non-OK status errors built by newBadResponseStatusError.
 var ErrBadResponseStatus = &Error{kind: errBadResponseStatus}
 
-// ErrRestoreFailed is a sentinel matched by errors.Is for restore failures.
-// Use newRestoreFailedError to construct an error with the tries-remaining
-// count; inspect the count via (*Error).TriesRemaining().
-//
-// Rust libsignal ref: rust/svrb/src/lib.rs Error::RestoreFailed
+// ErrRestoreFailed matches restore failures; (*Error).TriesRemaining gives the count.
 var ErrRestoreFailed = &Error{kind: errRestoreFailed}
 
 // ErrEmptyPIN indicates the PIN was empty.
@@ -84,25 +73,13 @@ const (
 	StatusError           ResponseStatus = 4
 	StatusRestore1Missing ResponseStatus = 5
 	StatusVersionMismatch ResponseStatus = 6
-	// StatusNotRotating indicates a rotation-phase request arrived but no
-	// rotation is currently in progress.
-	//
-	// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.Status.NOT_ROTATING
+	// StatusNotRotating: a rotation-phase request arrived with no rotation in progress.
 	StatusNotRotating ResponseStatus = 7
-	// StatusAlreadyRotating indicates a RotateStart was received while a
-	// rotation is already in progress.
-	//
-	// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.Status.ALREADY_ROTATING
+	// StatusAlreadyRotating: RotateStart arrived during a rotation.
 	StatusAlreadyRotating ResponseStatus = 8
-	// StatusMerkleFailure indicates the server failed a Merkle tree integrity
-	// check during rotation.
-	//
-	// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.Status.MERKLE_FAILURE
+	// StatusMerkleFailure: a Merkle integrity check failed during rotation.
 	StatusMerkleFailure ResponseStatus = 9
-	// StatusDuplicateVersion indicates the version supplied in a RotateStart
-	// request already exists in the server's Merkle tree.
-	//
-	// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.Status.DUPLICATE_VERSION
+	// StatusDuplicateVersion: the RotateStart version already exists in the Merkle tree.
 	StatusDuplicateVersion ResponseStatus = 10
 )
 

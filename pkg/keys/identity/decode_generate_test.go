@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 3 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) requires X25519.
 
 package identity
 
@@ -72,8 +67,7 @@ func TestGenerateKeyPair_Success(t *testing.T) {
 	}
 }
 
-// TestGenerateKeyPair_Unique verifies two consecutive calls produce distinct
-// key material (the CSPRNG is actually being used).
+// TestGenerateKeyPair_Unique checks two calls produce distinct keys.
 func TestGenerateKeyPair_Unique(t *testing.T) {
 	a, err := GenerateKeyPair()
 	if err != nil {

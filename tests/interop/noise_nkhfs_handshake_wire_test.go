@@ -1,48 +1,8 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 1 test in this file exercises HKDF-SHA256 under an empty key. FIPS 140-3
-// does not approve that, but the Noise Protocol Framework rev 34 section 5.2
-// defines Split() as HKDF(ck, zerolen, 2), so the fips140only build tag
-// drops this file from the FIPS gate. `make test` and `make coverage` still
-// run it.
+// FIPS 140-3 exemption (docs/FIPS.md): Noise rev 34 §5.2 defines Split() as HKDF with an empty key.
 
-// LOW J: Noise NKhfs interop fixture.
-//
-// FIXTURE FEASIBILITY ASSESSMENT (Rust upstream 98915c44):
-//
-// Rust libsignal's NKhfs implementation is in rust/attest/src/client_connection.rs
-// and uses the snow crate via a custom CryptoResolver defined in
-// rust/attest/src/snow_resolver.rs.
-//
-// A deterministic Rust fixture requires injecting a seeded RNG into every
-// random key generation step.  The snow Resolver interface provides a
-// resolve_rng() hook, but the Kyber1024::encapsulate implementation in
-// snow_resolver.rs (lines 277–279) bypasses the provided RNG entirely and
-// calls rand_core::OsRng directly:
-//
-//   rand_core::OsRng.try_fill_bytes(&mut randomness)
-//       .expect("system RNG should always be available");
-//
-// This makes the KEM ciphertext non-deterministic from outside the crate
-// regardless of how resolve_rng() is configured.  Patching snow_resolver.rs
-// to accept a seeded RNG would constitute a non-trivial modification to the
-// upstream source that is outside the scope of this fixture work.
-//
-// CONCLUSION: No Rust-emitted NKhfs fixture can be produced at pinned commit
-// 98915c44 without patching the upstream snow_resolver.rs.
-//
-// ALTERNATIVE APPROACH: The symmetric-state sub-components of NKhfs are fully
-// deterministic given fixed inputs (static key, protocol name, ephemeral DH
-// result, KEM shared secret).  The tests below exercise those components with
-// hardcoded inputs, validating the hash/HKDF schedule independently of the
-// random key generation.  A separate Go-only full-handshake round-trip test
-// confirms that initiator and responder reach symmetric transport keys.
-//
-// If the upstream snow_resolver.rs is ever patched to accept a seeded RNG, the
-// wire_emitter.rs should be extended with an emit_noise_nkhfs function and this
-// file should be replaced with a fixture-driven conformance test.
+// Noise NKhfs tests. Rust's snow_resolver Kyber1024::encapsulate draws from OsRng, so no deterministic Rust fixture exists; these tests check the symmetric-state schedule with fixed inputs and a Go-only full handshake.
 
 package interop_test
 
@@ -64,25 +24,12 @@ func noiseHKDF2(ck, ikm []byte) ([]byte, error) {
 	return out, err
 }
 
-// noiseInitHash computes the initial Noise symmetric-state hash for the
-// NKhfs protocol name, matching the Noise spec rule:
-//
-//	if len(protocolName) > HASHLEN: h = HASH(protocolName)
-//	else:                           h = protocolName padded with zeros
-//
-// "Noise_NKhfs_25519+Kyber1024_ChaChaPoly_SHA256" is 46 bytes > 32,
-// so h = SHA256(protocolName) and ck = h.
+// noiseInitHash returns the initial Noise hash: the 46-byte protocol name exceeds HASHLEN, so h = SHA256(name) and ck = h.
 func noiseInitHash(protocolName string) [32]byte {
 	return sha256.Sum256([]byte(protocolName))
 }
 
-// TestNKhfsSymmetricState_InitialHash verifies that the initial handshake hash
-// for "Noise_NKhfs_25519+Kyber1024_ChaChaPoly_SHA256" is SHA256 of the name,
-// matching the Noise spec and the Go pkg/attest implementation.
-//
-// This is a deterministic cross-check: the expected value is computed at test
-// time from the protocol name, not from a Rust fixture, because the symmetric
-// hash initialization is fully deterministic from the protocol name alone.
+// TestNKhfsSymmetricState_InitialHash checks the initial hash is SHA256 of the protocol name.
 func TestNKhfsSymmetricState_InitialHash(t *testing.T) {
 	const protocolName = "Noise_NKhfs_25519+Kyber1024_ChaChaPoly_SHA256"
 
@@ -100,12 +47,7 @@ func TestNKhfsSymmetricState_InitialHash(t *testing.T) {
 	}
 }
 
-// TestNKhfsSymmetricState_MixHash verifies the MixHash operation:
-//
-//	h = SHA256(h || data)
-//
-// This exercises the pre-message step (h = SHA256(h || remoteStaticPub))
-// with a deterministic input.
+// TestNKhfsSymmetricState_MixHash checks h = SHA256(h || data) on the pre-message step.
 func TestNKhfsSymmetricState_MixHash(t *testing.T) {
 	const protocolName = "Noise_NKhfs_25519+Kyber1024_ChaChaPoly_SHA256"
 	h := noiseInitHash(protocolName)
@@ -136,12 +78,7 @@ func TestNKhfsSymmetricState_MixHash(t *testing.T) {
 	}
 }
 
-// TestNKhfsSymmetricState_MixKey verifies the MixKey operation:
-//
-//	(ck, k) = HKDF(ck, ikm)
-//
-// This is the core key schedule step in Noise.  Given a fixed ck and a fixed
-// DH result as ikm, the output is fully deterministic.
+// TestNKhfsSymmetricState_MixKey checks (ck, k) = HKDF(ck, ikm) for fixed inputs.
 func TestNKhfsSymmetricState_MixKey(t *testing.T) {
 	// Start from the initial state (ck = SHA256(protocolName)).
 	const protocolName = "Noise_NKhfs_25519+Kyber1024_ChaChaPoly_SHA256"
@@ -268,14 +205,7 @@ func TestNKhfsSymmetricState_KeyScheduleChain(t *testing.T) {
 	}
 }
 
-// TestNKhfsChaChaPolyNonce verifies the nonce encoding used in the NKhfs cipher state:
-// the 64-bit counter is encoded as little-endian in bytes [4:12] of a 12-byte nonce,
-// matching the Noise spec and Rust chacha20poly1305 library behavior.
-//
-// See rust/attest/src/snow_resolver.rs CipherChaChaPoly::encrypt (lines 166–168):
-//
-//	let mut nonce_bytes = [0u8; 12];
-//	copy_slices!(&nonce.to_le_bytes(), &mut nonce_bytes[4..]);
+// TestNKhfsChaChaPolyNonce checks the 64-bit counter is little-endian in bytes 4..12 of the nonce, as in Rust snow_resolver.
 func TestNKhfsChaChaPolyNonce(t *testing.T) {
 	cases := []struct {
 		n    uint64
@@ -345,27 +275,6 @@ func TestNKhfsProtocolNameConstants(t *testing.T) {
 //
 // This test always passes.  It exists as executable documentation.
 func TestNKhfsWireFormatLimitation(t *testing.T) {
-	// rust/attest/src/snow_resolver.rs Kyber1024::encapsulate (pinned 98915c44):
-	//
-	//   fn encapsulate(&self, pubkey: &[u8], ...) -> Result<(usize, usize), SnowError> {
-	//       let mut randomness = [0u8; 32];
-	//       rand_core::OsRng
-	//           .try_fill_bytes(&mut randomness)
-	//           .expect("system RNG should always be available");
-	//       let (ciphertext, shared_secret) = mlkem1024::encapsulate(&mlkem_pubkey, randomness);
-	//       ...
-	//   }
-	//
-	// OsRng is used directly, bypassing the CryptoResolver::resolve_rng() hook.
-	// This makes the KEM ciphertext non-deterministic without patching upstream.
-	//
-	// To produce a Rust fixture in the future:
-	//   1. Patch snow_resolver.rs to accept a seeded RNG in Kyber1024::encapsulate.
-	//   2. Add an emit_noise_nkhfs function to tests/interop/rust/src/bin/wire_emitter.rs
-	//      that seeds the resolver with ChaCha20Rng(0xC0DECAFE) (matching the existing
-	//      wire_emitter seeding convention).
-	//   3. Extend tests/interop/fixtures/attest/ with the emitted JSON.
-	//   4. Replace this file with a fixture-driven conformance test using the same
-	//      fixture loader pattern as kem_interop_test.go.
+	// Rust Kyber1024::encapsulate uses OsRng directly, so its ciphertext cannot be reproduced without patching upstream.
 	t.Logf("NKhfs Rust fixture limitation confirmed: OsRng in snow_resolver.rs:277 bypasses resolver RNG injection")
 }

@@ -94,12 +94,7 @@ func TestSenderMessageKeyStructIsAnIndependentClone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSenderMessageKey: %v", err)
 	}
-	// Digests, not copies. Retaining the plaintext to compare against would put
-	// key material on the ordinary heap for the length of the test — the exact
-	// exposure this change closes, committed by the test that polices it. A
-	// SHA-256 digest identifies the material without being it. (Needed here and
-	// not in the chain-key test above because that one compares against a source
-	// literal, which is already in the binary.)
+	// Compare SHA-256 digests so the test keeps no plaintext key copy on the heap.
 	ivDigest := sha256.Sum256(key.Iv())
 	cipherDigest := sha256.Sum256(key.CipherKey())
 	seedDigest := sha256.Sum256(key.Seed())

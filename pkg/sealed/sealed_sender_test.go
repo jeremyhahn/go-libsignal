@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 24 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) requires it for the Sealed Sender
-// ephemeral keys, so the fips140only build tag drops this file from the FIPS
-// gate. `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): Sealed Sender ephemeral keys use X25519 (X3DH section 2.1).
 
 package sealed
 
@@ -747,9 +742,7 @@ func TestSealedSenderDecryptUnsupportedMessageType(t *testing.T) {
 }
 
 func TestSealedSenderFullEncryptDecryptWhisperMessage(t *testing.T) {
-	// Test the MESSAGE (whisper) code path in SealedSenderDecrypt.
-	// First, establish a session with a PreKey message, then send a second
-	// message which will be a regular whisper message (non-PreKey).
+	// Establish a session with a PreKey message, then decrypt a regular whisper message.
 	serializer := serialize.NewProtobufSerializer()
 
 	trustRoot := newTestTrustRoot(t)
@@ -995,9 +988,7 @@ func TestGetRecipientIdentityKeyMissingIdentity(t *testing.T) {
 	}
 }
 
-// knownIdentityStore implements store.IdentityKey and surfaces previously-saved
-// identities through GetIdentity, satisfying the compile-time mandate used by
-// getRecipientIdentityKey.
+// knownIdentityStore implements store.IdentityKey and returns saved identities from GetIdentity.
 type knownIdentityStore struct {
 	keyPair         *identity.KeyPair
 	knownIdentities map[string]*identity.Key
@@ -1284,11 +1275,7 @@ func TestSealedSenderDecryptExpiredCertificate(t *testing.T) {
 }
 
 func TestSealedSenderEncryptSenderKeyType(t *testing.T) {
-	// The SealedSenderEncrypt function maps protocol ciphertext types to USMC types.
-	// The SENDERKEY_TYPE case (line 78-79) is not reachable through normal encrypt
-	// because session cipher only produces PREKEY_TYPE or WHISPER_TYPE. But we can
-	// directly test the USMC with SENDERKEY_MESSAGE type through SealedSenderEncryptFromUSMC
-	// and verify it round-trips correctly via decrypt.
+	// Encrypt never produces SENDERKEY_TYPE, so round-trip a SENDERKEY_MESSAGE USMC through SealedSenderEncryptFromUSMC.
 	trustRoot := newTestTrustRoot(t)
 	serverCert, serverKey := newTestServerCertificate(t, trustRoot)
 
@@ -1330,9 +1317,7 @@ func TestSealedSenderEncryptSenderKeyType(t *testing.T) {
 }
 
 func TestSealedSenderDecryptBadInnerPreKeyMessage(t *testing.T) {
-	// Cover the error path when the USMC contains an invalid PreKey message
-	// at line 362 of SealedSenderDecrypt. We build a USMC with PREKEY_MESSAGE
-	// type but garbage contents, encrypt it, and try full decrypt.
+	// A PREKEY_MESSAGE USMC with garbage contents must fail full decrypt.
 	trustRoot := newTestTrustRoot(t)
 	serverCert, serverKey := newTestServerCertificate(t, trustRoot)
 
@@ -1370,8 +1355,7 @@ func TestSealedSenderDecryptBadInnerPreKeyMessage(t *testing.T) {
 }
 
 func TestSealedSenderDecryptBadInnerWhisperMessage(t *testing.T) {
-	// Cover the error path when the USMC contains an invalid Whisper message
-	// at line 387 of SealedSenderDecrypt.
+	// A MESSAGE USMC with garbage contents must fail full decrypt.
 	trustRoot := newTestTrustRoot(t)
 	serverCert, serverKey := newTestServerCertificate(t, trustRoot)
 

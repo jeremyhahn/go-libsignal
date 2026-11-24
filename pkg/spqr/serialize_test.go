@@ -8,9 +8,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
-// TestSerializeDeserializeRoundTrip verifies that Serialize/Deserialize round-trips
-// a fully initialized SPQR state without data loss. Both functions now delegate to
-// the proto codec (MarshalStateProto / UnmarshalStateProto).
+// TestSerializeDeserializeRoundTrip checks a fully initialized state round-trips.
 func TestSerializeDeserializeRoundTrip(t *testing.T) {
 	sharedSecret := randomBytes(t, 32)
 	sharedCopy := make([]byte, 32)
@@ -170,8 +168,7 @@ func TestSerializeDeserializeRoundTrip_AllDirections(t *testing.T) {
 	}
 }
 
-// TestSerializeEmptyState verifies that a freshly initialized SPQR with no
-// messages sent serializes and deserializes correctly.
+// TestSerializeEmptyState checks a fresh state round-trips.
 func TestSerializeEmptyState(t *testing.T) {
 	sharedSecret := randomBytes(t, 32)
 	s, err := Init(sharedSecret, DirectionA2B, maxJump)
@@ -262,14 +259,7 @@ func TestSerializeWithSkippedKeys(t *testing.T) {
 	}
 	defer restored.Zeroize()
 
-	// Note: the proto chain codec does not round-trip skipped keys (they live in
-	// the chain's Prev field which the current proto codec encodes as nil).
-	// The functional correctness test below confirms that the restored state can
-	// still derive keys that alice produced; the skipped-key optimization is an
-	// implementation detail not yet surfaced in the proto wire format.
-	//
-	// What we can verify: the restored state has the correct recv counter and
-	// can derive keys forward from there.
+	// Check the restored state has the right recv counter and derives Alice's keys.
 	if restored.epoch != bob.epoch {
 		t.Errorf("epoch mismatch: got %d, want %d", restored.epoch, bob.epoch)
 	}
@@ -410,11 +400,7 @@ func TestErrorStringsSerialize(t *testing.T) {
 	}
 }
 
-// TestV0DisabledSerializesAsEmptyBytes verifies FINDING-PROTO-2:
-// A V0-disabled SPQR (negotiated to V0) must serialize to empty bytes,
-// matching Rust's empty_state() convention (lib.rs:45-47). Previously, Go
-// emitted a VersionNegotiation{AuthKey:nil} sentinel that Rust would
-// misinterpret as a pending negotiation with a zero-byte auth key.
+// TestV0DisabledSerializesAsEmptyBytes checks a V0-disabled state serializes to empty bytes, as Rust empty_state does.
 func TestV0DisabledSerializesAsEmptyBytes(t *testing.T) {
 	sharedSecret := randomBytes(t, 32)
 	sharedCopy := make([]byte, 32)
@@ -478,9 +464,7 @@ func TestV0DisabledSerializesAsEmptyBytes(t *testing.T) {
 	}
 }
 
-// TestDeserializeEmptyBytesIsV0 verifies that deserializing empty bytes
-// produces a V0-disabled (PQR-off) SPQR, matching Rust's decode_state
-// (lib.rs:470-473) which treats empty bytes as PqRatchetState{inner:None}.
+// TestDeserializeEmptyBytesIsV0 checks empty bytes decode to a V0-disabled state, as in Rust decode_state.
 func TestDeserializeEmptyBytesIsV0(t *testing.T) {
 	s, err := Deserialize([]byte{})
 	if err != nil {
@@ -499,8 +483,7 @@ func TestDeserializeEmptyBytesIsV0(t *testing.T) {
 	}
 }
 
-// TestDeserializeNilBytesIsV0 verifies that deserializing nil bytes also
-// produces a V0-disabled SPQR.
+// TestDeserializeNilBytesIsV0 checks nil bytes decode to a V0-disabled state.
 func TestDeserializeNilBytesIsV0(t *testing.T) {
 	s, err := Deserialize(nil)
 	if err != nil {
@@ -513,8 +496,7 @@ func TestDeserializeNilBytesIsV0(t *testing.T) {
 	}
 }
 
-// TestCurrentVersionOfPending verifies FINDING-API-2: CurrentVersionOf returns
-// StillNegotiating for a newly created pending state.
+// TestCurrentVersionOfPending checks CurrentVersionOf returns StillNegotiating for a new pending state.
 func TestCurrentVersionOfPending(t *testing.T) {
 	sharedSecret := randomBytes(t, 32)
 	state, err := InitialStateWithParams(Params{
@@ -586,8 +568,7 @@ func TestCurrentVersionOfV0(t *testing.T) {
 	}
 }
 
-// TestNewTypedErrors verifies FINDING-ERR-1: the new typed error types from
-// errors.go produce correctly-formatted non-empty error strings.
+// TestNewTypedErrors checks the typed errors format non-empty messages.
 func TestNewTypedErrors(t *testing.T) {
 	tests := []struct {
 		name string

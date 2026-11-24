@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 11 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) requires it for the Sealed Sender
-// ephemeral keys, so the fips140only build tag drops this file from the FIPS
-// gate. `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): Sealed Sender ephemeral keys use X25519 (X3DH section 2.1).
 
 package sealed
 
@@ -343,8 +338,7 @@ func TestParseSealedSenderV2SentMessage_ExcludedRecipientInMap(t *testing.T) {
 
 	bobSID, _ := protocol.ServiceIdFromString(protocol.ServiceIdKindACI, bobAddress.Name())
 
-	// Encrypt with Bob as BOTH a destination AND an excluded recipient so the
-	// wire message has one active entry + one excluded entry.
+	// Bob is both a destination and excluded, giving one active and one excluded entry.
 	ciphertext, err := SealedSenderMultiRecipientEncrypt(
 		[]*protocol.SignalAddress{bobAddress},
 		[]*record.Session{bobSession},

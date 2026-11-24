@@ -27,17 +27,7 @@ func GenerateIdentityKeyPair() (*identity.KeyPair, error) {
 	return identity.NewKeyPair(publicKey, keyPair.PrivateKey()), nil
 }
 
-// GeneratePreKeys generates a list of PreKeys. Clients should do this at
-// install time, and subsequently any time the list of PreKeys stored on
-// the server runs low.
-//
-// PreKey IDs follow the Java reference formula
-// id = ((start-1+i) % (medium.MaxValue-1)) + 1 (signed arithmetic), which
-// honors the start offset so successive batches do not collide and wraps at
-// medium.MaxValue. start=0 reproduces the historical zero-based sequence
-// [0, 1, ..., count-1]; start=K (K>=1) yields [K, K+1, ...].
-//
-// Java ref: libsignal-protocol-java KeyHelper.generatePreKeys.
+// GeneratePreKeys generates count pre-keys with IDs ((start-1+i) % (medium.MaxValue-1)) + 1, as Java KeyHelper does; start 0 gives 0..count-1.
 func GeneratePreKeys(start int, count int, serializer record.PreKeySerializer) ([]*record.PreKey, error) {
 	var preKeys []*record.PreKey
 	for i := 0; i < count; i++ {
@@ -81,13 +71,7 @@ func GenerateSignedPreKey(identityKeyPair *identity.KeyPair, signedPreKeyID uint
 	return record.NewSignedPreKey(signedPreKeyID, timestamp, keyPair, signature, serializer), nil
 }
 
-// GenerateRegistrationID generates a registration ID. Clients should only do
-// this once, at install time. Registration IDs are in the range [1, 16380],
-// matching the Java reference implementation (% 16380 + 1). Values 0 and
-// 16381–16383 are never emitted; 0 is the "unset" sentinel and the upper
-// three values are excluded for compatibility with the Java implementation.
-//
-// Java ref: libsignal-protocol-java KeyHelper.generateRegistrationId.
+// GenerateRegistrationID returns a registration ID in [1, 16380], as Java KeyHelper does; generate it once at install.
 func GenerateRegistrationID() uint32 {
 	var n uint32
 	if err := binary.Read(rand.Reader, binary.LittleEndian, &n); err != nil {
@@ -111,10 +95,7 @@ func GenerateSenderKey() ([]byte, error) {
 	return randBytes, nil
 }
 
-// GenerateSenderKeyID generates a random sender key chain ID.
-// Rust uses `(csprng.random::<u32>()) >> 1`, producing a 31-bit value
-// (~2 billion possible values). This is intentionally different from
-// GenerateRegistrationID (14-bit), which serves a distinct protocol concept.
+// GenerateSenderKeyID returns a random 31-bit sender key chain ID, as Rust does.
 func GenerateSenderKeyID() uint32 {
 	var n uint32
 	if err := binary.Read(rand.Reader, binary.LittleEndian, &n); err != nil {
@@ -127,10 +108,7 @@ func GenerateSenderKeyID() uint32 {
 
 //---------- Kyber Pre-Key Stuff -----------
 
-// GenerateKyberPreKey generates a Kyber-1024 pre-key, signs the public key with
-// the given identity signing key, and returns the resulting record. The secret
-// key is generated straight into locked memory and is owned by the
-// returned record from then on.
+// GenerateKyberPreKey generates a Kyber-1024 pre-key in locked memory and signs its public key with the identity key.
 func GenerateKyberPreKey(signingKey ecc.ECPrivateKeyable, id uint32, serializer record.KyberPreKeySerializer) (*record.KyberPreKey, error) {
 	kyberKEM := kem.NewGuardedKyber1024()
 	keyPair, err := kyberKEM.Generate()

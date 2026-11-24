@@ -72,10 +72,7 @@ const (
 	HTTPVersion2
 )
 
-// ConnectionConfig contains the parameters needed to connect to a Signal
-// service endpoint.
-//
-// Rust ref: rust/net/src/env.rs — ConnectionConfig.
+// ConnectionConfig holds the parameters to connect to a Signal service endpoint (Rust env.rs ConnectionConfig).
 type ConnectionConfig struct {
 	// Hostname is the domain name of the resource.
 	Hostname string
@@ -99,10 +96,7 @@ type ConnectionConfig struct {
 	Proxy *ConnectionProxyConfig
 }
 
-// KeyTransConfig holds the raw key material for Signal's key-transparency tree.
-// All values are 32-byte Ed25519 public key bytes.
-//
-// Rust ref: rust/net/src/env.rs — KeyTransConfig.
+// KeyTransConfig holds the 32-byte Ed25519 keys of Signal's key-transparency tree (Rust env.rs KeyTransConfig).
 type KeyTransConfig struct {
 	// SigningKeyMaterial is the Ed25519 signing key for the tree head signature.
 	SigningKeyMaterial [32]byte
@@ -158,10 +152,7 @@ func DefaultWSConfig() WSConfig {
 	}
 }
 
-// Env contains the complete configuration for connecting to a Signal server
-// environment (production or staging).
-//
-// Rust ref: rust/net/src/env.rs — Env.
+// Env is the configuration for a Signal server environment (Rust env.rs Env).
 type Env struct {
 	// CDSI is the Contact Discovery Service enclave endpoint.
 	CDSI EnclaveEndpoint
@@ -179,13 +170,11 @@ type Env struct {
 	KeyTrans KeyTransConfig
 }
 
-// SvrBEnv contains the current and previous SVRB enclave endpoints.
-// Multiple endpoints support enclave rotation.
+// SvrBEnv holds the current and previous SVRB enclave endpoints.
 type SvrBEnv struct {
 	// Current contains the currently active SVRB endpoints.
 	Current []*EnclaveEndpoint
-	// Previous contains previously active SVRB endpoints that are still
-	// used for migration/restore.
+	// Previous holds earlier SVRB endpoints still used for restore.
 	Previous []*EnclaveEndpoint
 }
 
@@ -197,10 +186,7 @@ func (s *SvrBEnv) CurrentAndPrevious() []*EnclaveEndpoint {
 	return result
 }
 
-// newTLSVersion allocates a fresh *TLSVersion so that each ConnectionConfig
-// literal gets an independent pointer. This prevents callers from mutating a
-// single shared instance and accidentally affecting all other configs that
-// share the same backing value.
+// newTLSVersion returns a fresh *TLSVersion so configs never share one.
 func newTLSVersion(v TLSVersion) *TLSVersion { return &v }
 
 // newHTTPVersion allocates a fresh *HTTPVersion for the same reason as
@@ -210,10 +196,7 @@ func newHTTPVersion(v HTTPVersion) *HTTPVersion { return &v }
 // KeyTrans configuration constants — verbatim hex literals from Rust
 // rust/net/src/env.rs KEYTRANS_*_PROD / KEYTRANS_*_STAGING.
 
-// KeyTransConfigProduction holds the key-transparency verification keys for
-// the Signal production environment.
-//
-// Rust ref: rust/net/src/env.rs — KEYTRANS_CONFIG_PROD.
+// KeyTransConfigProduction holds the production key-transparency keys (Rust KEYTRANS_CONFIG_PROD).
 var KeyTransConfigProduction = KeyTransConfig{
 	SigningKeyMaterial: [32]byte{
 		0xa3, 0x97, 0x30, 0x67, 0x98, 0x43, 0x82, 0xcf,
@@ -249,10 +232,7 @@ var KeyTransConfigProduction = KeyTransConfig{
 	},
 }
 
-// KeyTransConfigStaging holds the key-transparency verification keys for
-// the Signal staging environment.
-//
-// Rust ref: rust/net/src/env.rs — KEYTRANS_CONFIG_STAGING.
+// KeyTransConfigStaging holds the staging key-transparency keys (Rust KEYTRANS_CONFIG_STAGING).
 var KeyTransConfigStaging = KeyTransConfig{
 	SigningKeyMaterial: [32]byte{
 		0xac, 0x0d, 0xe1, 0xfd, 0x7f, 0x33, 0x55, 0x2b,
@@ -583,14 +563,7 @@ var (
 	}
 )
 
-// cloneDomainConfig returns a DomainConfig that is a deep copy of src with
-// independent allocations for every pointer and slice field:
-//   - MinTLSVersion and HTTPVersion are freshly-allocated pointers.
-//   - Connect.Proxy is a freshly-allocated *ConnectionProxyConfig (value copy).
-//   - IPv4 and IPv6 are independent slice copies (new backing arrays).
-//
-// This ensures each returned Env is fully isolated: mutating any field of one
-// Env cannot affect another Env or the package-level configuration constants.
+// cloneDomainConfig deep-copies src so each Env is independent of the package defaults.
 func cloneDomainConfig(src DomainConfig) DomainConfig {
 	dst := src
 	if src.Connect.MinTLSVersion != nil {
@@ -608,13 +581,7 @@ func cloneDomainConfig(src DomainConfig) DomainConfig {
 	return dst
 }
 
-// deepCopyKeyTransConfig returns a KeyTransConfig whose AuditorKeyMaterials
-// slice is a freshly-allocated copy of the one in src. SigningKeyMaterial and
-// VRFKeyMaterial are fixed-size arrays and are copied by value automatically.
-// Without this deep copy, assigning a KeyTransConfig by value would share the
-// backing array of AuditorKeyMaterials with the package-level constant,
-// allowing a caller to silently corrupt the global default for all future
-// calls to Production() / Staging().
+// deepCopyKeyTransConfig copies AuditorKeyMaterials so callers cannot change the package defaults.
 func deepCopyKeyTransConfig(src KeyTransConfig) KeyTransConfig {
 	auditors := make([][32]byte, len(src.AuditorKeyMaterials))
 	copy(auditors, src.AuditorKeyMaterials)

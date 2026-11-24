@@ -16,10 +16,7 @@ import (
 // serializeV4Resolved with skipped keys (covers loop body in serializeV4Resolved)
 // ============================================================================
 
-// TestSerializeWithSkippedKeysProtoRoundTrip exercises the Serialize path with
-// skipped keys present. The proto codec encodes skipped keys in the recv.prev
-// field as (be32 idx | 32 B key) records (Rust KeyHistory format). On round-trip,
-// the skipped key must be present in the deserialized SPQR.skippedKeys map.
+// TestSerializeWithSkippedKeysProtoRoundTrip checks skipped keys survive the proto round trip (recv.prev records of be32 index and 32-byte key).
 func TestSerializeWithSkippedKeysProtoRoundTrip(t *testing.T) {
 	ss := randomBytes(t, 32)
 	kem := mlkembraid.NewMLKEM768IncrementalKEM()
@@ -124,9 +121,7 @@ func TestSerializeDestroyedSkippedKeyProto(t *testing.T) {
 // V4 resolved trailing data with braid (covers serialize.go lines ~1224-1226)
 // ============================================================================
 
-// TestDeserializeV4ResolvedTrailingDataWithBraid tests V4 resolved deserialization
-// when there are trailing bytes AFTER valid braid state, covering the
-// `if braid != nil { braid.Zeroize() }` path in deserializeV4Resolved.
+// TestDeserializeV4ResolvedTrailingDataWithBraid checks trailing bytes after a valid braid state are rejected and the braid zeroized.
 func TestDeserializeV4ResolvedTrailingDataWithBraid(t *testing.T) {
 	ss := randomBytes(t, 32)
 	kem := mlkembraid.NewMLKEM768IncrementalKEM()
@@ -444,10 +439,7 @@ func TestErrBraidTooLargeError(t *testing.T) {
 // Serialize error path: braid.State() == nil triggers ErrSerialize
 // ============================================================================
 
-// TestSerializeWithNilBraidStateReturnsErrSerialize verifies that Serialize
-// wraps proto-marshal failures in ErrSerialize. A SPQR with a braid whose
-// state is nil triggers the guard in spqrToProto and causes MarshalStateProto
-// to return an error, which Serialize must wrap in ErrSerialize.
+// TestSerializeWithNilBraidStateReturnsErrSerialize checks a braid with nil state makes Serialize return ErrSerialize.
 func TestSerializeWithNilBraidStateReturnsErrSerialize(t *testing.T) {
 	rkBytes := make([]byte, keyLen)
 	rk, err := secret.New(rkBytes)
@@ -455,8 +447,7 @@ func TestSerializeWithNilBraidStateReturnsErrSerialize(t *testing.T) {
 		t.Fatalf("secret.New: %v", err)
 	}
 
-	// Build a minimal SPQR with a braid whose State() returns nil.
-	// mlkembraid.BraidFromState(nil, ...) creates such a braid.
+	// mlkembraid.BraidFromState(nil, ...) gives a braid whose State is nil.
 	nilStateBraid := mlkembraid.BraidFromState(nil, mlkembraid.NewMLKEM768IncrementalKEM(), mlkembraid.DefaultChunkSize)
 	s := &SPQR{
 		chains:      make(map[uint64]*EpochChain),
@@ -603,11 +594,7 @@ func TestCurrentVersionOf_DeserializeError(t *testing.T) {
 // advanceEpoch: epoch overflow pre-check (Issue 1 fix)
 // ============================================================================
 
-// TestAdvanceEpochOverflowPreCheck verifies that advanceEpoch returns
-// ErrEpochOverflow when the epoch counter is at math.MaxUint64, and that it
-// does so WITHOUT mutating state (no new chain, no root key change).
-// Before the fix, the overflow check came AFTER KdfSckaRK and root key
-// destruction, leaking freshly derived chain keys on overflow.
+// TestAdvanceEpochOverflowPreCheck checks advanceEpoch at MaxUint64 returns ErrEpochOverflow without changing the root key or chains.
 func TestAdvanceEpochOverflowPreCheck(t *testing.T) {
 	ss := randomBytes(t, 32)
 	s, err := Init(ss, DirectionA2B, maxJump)
@@ -619,8 +606,7 @@ func TestAdvanceEpochOverflowPreCheck(t *testing.T) {
 	// Force the epoch to MaxUint64 to trigger overflow.
 	s.epoch = math.MaxUint64
 
-	// Capture the root key bytes BEFORE the call so we can verify it is
-	// unchanged after the (correctly rejected) overflow attempt.
+	// Capture the root key to check it is unchanged.
 	rkBefore := secrettest.Digest(t, s.rootKey)
 
 	chainCountBefore := len(s.chains)

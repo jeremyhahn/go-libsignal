@@ -8,8 +8,7 @@ import (
 	mp4 "github.com/Eyevinn/mp4ff/mp4"
 )
 
-// buildMinimalJPEG returns a structurally valid JPEG byte slice with one APP1
-// (EXIF) marker so that metadata stripping is exercised.
+// buildMinimalJPEG returns a valid JPEG with one APP1 (EXIF) marker.
 func buildMinimalJPEG() []byte {
 	var buf bytes.Buffer
 	buf.Write([]byte{0xFF, 0xD8}) // SOI
@@ -118,8 +117,7 @@ func buildMP4WithLayout(mdatFirst bool) []byte {
 	return buf.Bytes()
 }
 
-// TestSanitize_JPEG_BackCompat verifies that Sanitize routes JPEG data to
-// goextensions.Sanitize and returns MetadataStripped=true.
+// TestSanitize_JPEG_BackCompat checks Sanitize routes JPEG to goextensions with MetadataStripped.
 func TestSanitize_JPEG_BackCompat(t *testing.T) {
 	data := buildMinimalJPEG()
 
@@ -264,15 +262,13 @@ func TestSanitize_TooShort_BackCompat(t *testing.T) {
 	if err == nil {
 		t.Fatal("Sanitize(1 byte) should return an error")
 	}
-	// Single byte: not detected as goextensions type (needs >= 3 for JPEG);
-	// Validate returns ErrDataTooShort for len < 3.
+	// One byte is too short for JPEG detection; Validate returns ErrDataTooShort.
 	if err != ErrDataTooShort {
 		t.Errorf("expected ErrDataTooShort, got %T: %v", err, err)
 	}
 }
 
-// TestSanitize_MediaType_JPEG verifies that Sanitize sets MediaType to
-// MediaTypeJPEG (not MediaTypeUnknown) for JPEG inputs.
+// TestSanitize_MediaType_JPEG checks Sanitize sets MediaTypeJPEG for JPEG input.
 func TestSanitize_MediaType_JPEG(t *testing.T) {
 	data := buildMinimalJPEG()
 	result, err := Sanitize(data)
@@ -310,8 +306,7 @@ func TestSanitize_MediaType_GIF(t *testing.T) {
 	}
 }
 
-// TestSanitizeReader_JPEG verifies that SanitizeReader routes JPEG through
-// goextensions.Sanitize: MetadataStripped=true, MediaType=MediaTypeJPEG.
+// TestSanitizeReader_JPEG checks SanitizeReader routes JPEG through goextensions.
 func TestSanitizeReader_JPEG(t *testing.T) {
 	data := buildMinimalJPEG()
 	result, err := SanitizeReader(bytes.NewReader(data))

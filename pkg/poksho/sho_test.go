@@ -254,10 +254,7 @@ func TestShoClone_Divergence(t *testing.T) {
 	}
 }
 
-// TestShoClone_AbsorbingModeNoSideEffect verifies that Clone() in ABSORBING
-// mode does NOT mutate the original. This is the critical fix for ZK-C1: the
-// old implementation forced a ratchet on the original, which changed its state.
-// Rust's #[derive(Clone)] produces a true deep copy with no side effects.
+// TestShoClone_AbsorbingModeNoSideEffect checks Clone in absorbing mode leaves the original unchanged, as Rust's derived Clone.
 func TestShoClone_AbsorbingModeNoSideEffect(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -279,7 +276,7 @@ func TestShoClone_AbsorbingModeNoSideEffect(t *testing.T) {
 			// Clone mid-absorb.
 			clone := s.Clone()
 
-			// Original must still be in ABSORBING mode (not ratcheted).
+			// Original must still be in absorbing mode.
 			if s.mode != modeAbsorbing {
 				t.Fatal("Clone() must not change the original's mode")
 			}
@@ -287,7 +284,7 @@ func TestShoClone_AbsorbingModeNoSideEffect(t *testing.T) {
 				t.Fatal("Clone() must not nil out the original's hasher")
 			}
 
-			// Clone must also be in ABSORBING mode.
+			// Clone must also be in absorbing mode.
 			if clone.mode != modeAbsorbing {
 				t.Fatal("clone must be in ABSORBING mode")
 			}
@@ -314,9 +311,7 @@ func TestShoClone_AbsorbingModeNoSideEffect(t *testing.T) {
 	}
 }
 
-// TestShoClone_AbsorbingModeDivergence verifies that after cloning in
-// ABSORBING mode, feeding different data into original and clone produces
-// different outputs.
+// TestShoClone_AbsorbingModeDivergence checks original and clone diverge on different input.
 func TestShoClone_AbsorbingModeDivergence(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -347,9 +342,7 @@ func TestShoClone_AbsorbingModeDivergence(t *testing.T) {
 	}
 }
 
-// TestShoClone_AbsorbingModeOriginalUnchanged verifies that cloning in
-// ABSORBING mode does not alter the original's final output compared to
-// a reference SHO that was never cloned.
+// TestShoClone_AbsorbingModeOriginalUnchanged checks cloning does not change the original's output.
 func TestShoClone_AbsorbingModeOriginalUnchanged(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -383,13 +376,7 @@ func TestShoClone_AbsorbingModeOriginalUnchanged(t *testing.T) {
 }
 
 func TestShoMultipleAbsorbs_StreamingAccumulation(t *testing.T) {
-	// Multiple absorbs without ratchet should accumulate data into the same
-	// hasher. Absorb("hello") + Absorb("world") should differ from
-	// Absorb("helloworld") because in Rust, the former is two separate
-	// update() calls which IS equivalent to one update("helloworld").
-	// Wait -- actually in Rust, multiple absorbs without ratchet DO just
-	// concatenate. HMAC.update("hello"); HMAC.update("world") == HMAC.update("helloworld").
-	// So they SHOULD be equal.
+	// Absorbs without a ratchet concatenate, as HMAC updates do in Rust.
 	s1 := NewShoHmacSha256("test")
 	s1.Absorb([]byte("hello"))
 	s1.Absorb([]byte("world"))
@@ -493,12 +480,7 @@ func TestShoConsecutiveSqueezes_DifferentOutput(t *testing.T) {
 	}
 }
 
-// TestSqueezeAndRatchet_AutoRatchetsFromAbsorbing is a regression test for the
-// fix that adds an absorbing-mode guard to SqueezeAndRatchet. Before the fix,
-// calling SqueezeAndRatchet while still in ABSORBING mode would silently squeeze
-// pre-ratchet state, producing a different result than an explicit
-// Absorb → Ratchet → SqueezeAndRatchet sequence. After the fix both paths must
-// produce identical output.
+// TestSqueezeAndRatchet_AutoRatchetsFromAbsorbing checks SqueezeAndRatchet from absorbing mode equals an explicit Ratchet first.
 func TestSqueezeAndRatchet_AutoRatchetsFromAbsorbing(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

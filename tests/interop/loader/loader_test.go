@@ -7,14 +7,7 @@ import (
 	"testing"
 )
 
-// TestRead_KnownFixturesMatchManifest verifies that loader.Read returns the
-// exact bytes recorded in MANIFEST.toml for a representative selection of
-// fixtures. This is the loader's smoke test; it confirms the path resolution
-// works AND catches any silent re-encoding (e.g. CRLF translation) the file
-// system might apply.
-//
-// The manifest itself is enforced by tests/interop/scripts/check_fixtures.sh
-// in CI; this test is the in-process counterpart for `go test`.
+// TestRead_KnownFixturesMatchManifest checks loader.Read returns the MANIFEST.toml bytes for sample fixtures, catching path or line-ending errors.
 func TestRead_KnownFixturesMatchManifest(t *testing.T) {
 	cases := []struct {
 		path           string

@@ -7,10 +7,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 )
 
-// knownServerCertificateEntry holds a pre-provisioned server certificate
-// along with its associated trust root public key. These are well-known
-// certificates that can be referenced by ID in SenderCertificate protobufs
-// instead of embedding the full certificate bytes.
+// knownServerCertificateEntry is a well-known server certificate and its trust root, referenced by ID.
 type knownServerCertificateEntry struct {
 	// trustRoot is the XEd25519 public key (33 bytes with type prefix) that
 	// signed this server certificate.
@@ -19,14 +16,7 @@ type knownServerCertificateEntry struct {
 	certData []byte
 }
 
-// knownServerCertificateData contains the raw certificate data for well-known
-// server certificates, keyed by their key ID. These values are extracted from
-// the Rust reference implementation's KNOWN_SERVER_CERTIFICATES constant.
-//
-// Each entry contains:
-//   - Key ID (uint32)
-//   - Trust root public key (33 bytes, XEd25519 with 0x05 type prefix)
-//   - Serialized ServerCertificate protobuf bytes
+// knownServerCertificateData holds Rust KNOWN_SERVER_CERTIFICATES: key ID, 33-byte trust root and ServerCertificate bytes.
 var knownServerCertificateData = map[uint32]knownServerCertificateEntry{
 	// Staging trust root certificate (key ID 2).
 	2: {

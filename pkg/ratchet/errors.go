@@ -38,10 +38,7 @@ var (
 	// the Kyber ciphertext required for PQXDH decapsulation.
 	ErrMissingKyberCiphertext error = &ErrMissingKyberCiphertextError{}
 
-	// ErrNonCanonicalBaseKey is returned when the receiver detects that the
-	// sender's base key is not in canonical form (not torsion-free or not
-	// in the reduced scalar range). This matches the Rust check in
-	// initialize_bob_session.
+	// ErrNonCanonicalBaseKey is returned when the sender's base key is not canonical, as Rust initialize_bob_session checks.
 	ErrNonCanonicalBaseKey error = &ErrNonCanonicalBaseKeyError{}
 
 	// ErrNilBaseKey is returned when TheirBaseKey is nil in ReceiverParameters,

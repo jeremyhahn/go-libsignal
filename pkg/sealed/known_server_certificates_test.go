@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 4 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) requires it for the Sealed Sender
-// ephemeral keys, so the fips140only build tag drops this file from the FIPS
-// gate. `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): Sealed Sender ephemeral keys use X25519 (X3DH section 2.1).
 
 package sealed
 

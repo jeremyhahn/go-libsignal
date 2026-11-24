@@ -1,26 +1,10 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 7 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) requires X25519.
 
 package record_test
 
-// findings_regression_test.go contains targeted regression tests for the
-// review findings fixed in this package:
-//
-//   Finding 5 (MEDIUM): PreKeyRecord and SignedPreKeyRecord deserialized with
-//     ecc.NewDjbECPublicKey(bytehelper.SliceToArray(...)) which truncated the
-//     33-byte serialized key form to [0x05 || 31 bytes], corrupting the key.
-//     Fixed by switching to ecc.DecodePoint, which correctly strips the 0x05
-//     type byte and preserves all 32 raw key bytes.
-//
-//   Finding 6 (LOW): SessionState.SetSenderBaseKey had the same truncation bug.
-//     Fixed to use ecc.DecodePoint. HasSessionState comparisons now compare
-//     correct 33-byte forms against each other.
+// Regression tests for decoding 33-byte EC public keys with ecc.DecodePoint in PreKeyRecord, SignedPreKeyRecord and SetSenderBaseKey.
 
 import (
 	"bytes"
@@ -31,13 +15,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/bytehelper"
 )
 
-// TestPreKeyRecord_SerializeRoundTrip_CorrectPublicKey verifies Finding 5 for
-// PreKeyRecord: a round-trip through Serialize → NewPreKeyFromBytes must yield
-// a public key whose SerializedPublicKey() (33 bytes: 0x05 + 32 key bytes)
-// exactly matches the original key pair's public key serialization. Before the
-// fix, the deserialized key was corrupted (SliceToArray kept the 0x05 prefix
-// byte and dropped the last key byte, yielding a 34-byte Serialize output
-// instead of 33).
+// TestPreKeyRecord_SerializeRoundTrip_CorrectPublicKey checks a round-tripped PreKeyRecord keeps the original 33-byte public key.
 func TestPreKeyRecord_SerializeRoundTrip_CorrectPublicKey(t *testing.T) {
 	ser := newSerializer()
 	kp := genKP(t)

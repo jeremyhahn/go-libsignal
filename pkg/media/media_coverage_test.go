@@ -222,8 +222,7 @@ func TestValidate_MP4_ValidFull(t *testing.T) {
 	}
 }
 
-// TestMediaTypeString_AllVariants covers the JPEG/PNG/GIF/Unknown String()
-// and MIMEType() arms that the main test misses.
+// TestMediaTypeString_AllVariants covers the JPEG, PNG, GIF and Unknown String and MIMEType cases.
 func TestMediaTypeString_AllVariants(t *testing.T) {
 	tests := []struct {
 		mt   MediaType
@@ -275,12 +274,7 @@ func TestSanitizeReader_IOError(t *testing.T) {
 // value returns ErrUnsupportedMediaType before reaching the default.
 // This is already covered by TestValidate_Errors/unknown_type above.
 
-// TestValidateMP4_NoMdat verifies that an MP4 file with no mdat box is
-// rejected by the fail-closed core.
-//
-// Java oracle: Mp4Sanitizer.java — mdat is required; missing mdat returns
-// ErrMissingMdat. The old passthrough (encodeMP4Faststart) permitted no-mdat
-// inputs; the new fail-closed core does not.
+// TestValidateMP4_NoMdat checks an MP4 without mdat is rejected with ErrMissingMdat.
 func TestValidateMP4_NoMdat(t *testing.T) {
 	// Build ftyp + moov only, no mdat.
 	ftyp := mp4.NewFtyp("isom", 0x200, []string{"isom"})
@@ -306,16 +300,7 @@ func TestValidateMP4_NoMdat(t *testing.T) {
 	}
 }
 
-// TestValidate_MP4_FreeBoxNotPassedThrough verifies that a free/skip box
-// between ftyp and moov is NOT present in the validated output.
-//
-// The fail-closed core reconstructs output from ftyp+moov+mdat only — it does
-// not pass through arbitrary top-level boxes. This is the mp4san semantics:
-// only the validated metadata (ftyp+moov) and the original mdat span are
-// emitted.
-//
-// Java oracle: Mp4Sanitizer.java — output is strictly Metadata||mdat; no
-// unknown or padding boxes are forwarded.
+// TestValidate_MP4_FreeBoxNotPassedThrough checks the output is only ftyp, moov and mdat, as mp4san emits.
 func TestValidate_MP4_FreeBoxNotPassedThrough(t *testing.T) {
 	ftyp := mp4.NewFtyp("isom", 0x200, []string{"isom"})
 	free := mp4.NewFreeBox([]byte{0x00, 0x00}) // 2-byte padding

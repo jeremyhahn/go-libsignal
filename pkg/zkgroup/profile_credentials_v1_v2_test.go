@@ -10,18 +10,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/zkcredential"
 )
 
-// buildV1Bytes constructs a valid V1/V2 presentation byte slice with the given
-// version byte, 8 Ristretto255 points, a poksho_proof payload, and two
-// ciphertexts. This mirrors the Rust bincode layout exactly.
-//
-// Wire layout:
-//
-//	[0]       version byte
-//	[1..257]  8 × 32-byte compressed Ristretto255 points
-//	[257..265] 8-byte LE u64: proof length
-//	[265..N]  proof bytes
-//	[N..N+64] uid_enc_ciphertext (EA1 ∥ EA2)
-//	[N+64..]  profile_key_enc_ciphertext (EA1 ∥ EA2)
+// buildV1Bytes builds a V1/V2 presentation: version, 8 points, u64-LE proof length, proof, uid ciphertext (64) and profile key ciphertext.
 func buildLegacyPresentationBytes(version byte, points [8]*ristretto255.Element, proof []byte, uidCT, pkCT *zkcredential.Ciphertext) []byte {
 	var buf bytes.Buffer
 	buf.WriteByte(version)

@@ -1,7 +1,4 @@
-# Multi-stage Dockerfile for SPQR live interop testing.
-#
-# Stage 1: build the Rust interop CLI binary.
-# Stage 2: run the Go interop test suite with the Rust binary available.
+# SPQR live interop: build the Rust interop CLI, then run the Go interop tests with it.
 
 # ---------------------------------------------------------------------------
 # Stage 1: Rust build

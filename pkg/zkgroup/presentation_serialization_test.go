@@ -6,13 +6,7 @@ import (
 	"testing"
 )
 
-// TestSerializeReceiptCredentialPresentation_RoundTrip verifies that a
-// ReceiptCredentialPresentation can be serialized and deserialized without
-// data loss. Exercises the full path from CreateReceiptCredentialPresentation
-// through the serializer.
-//
-// Rust reference: rust/zkgroup/tests/receipt_flow.rs:test_api
-// Wire layout: rust/zkgroup/src/api/receipts/receipt_credential_presentation.rs
+// TestSerializeReceiptCredentialPresentation_RoundTrip checks a presentation round-trips through the serializer.
 func TestSerializeReceiptCredentialPresentation_RoundTrip(t *testing.T) {
 	var r0, r1, r2, r3 RandomnessBytes
 	for i := range r0 {
@@ -486,18 +480,7 @@ func buildValidPresentationBlob(t *testing.T) []byte {
 	return SerializeBackupAuthCredentialPresentation(presentation)
 }
 
-// TestDeserializeBackupAuthCredentialPresentation_InvalidLevel_Regression is a
-// regression test for the bug where BackupLevel was read as a u64 and cast
-// directly to byte, silently truncating (e.g. 256→0) with no enum validation.
-//
-// Wire layout: reserved(1) + backup_level(8) + credential_type(8) + …
-// Level occupies bytes [1:9].
-//
-// Before the fix: value 256 truncated to BackupLevel(0), no error returned for
-// the full blob.  After the fix: rejected immediately with a deserialization error.
-//
-// Rust reference: TryFrom<u64> for BackupLevel at
-// rust/zkgroup/src/api/backups/auth_credential.rs:68-78.
+// TestDeserializeBackupAuthCredentialPresentation_InvalidLevel_Regression checks a backup level above 255 (bytes 1..9) is rejected, not truncated.
 func TestDeserializeBackupAuthCredentialPresentation_InvalidLevel_Regression(t *testing.T) {
 	validBlob := buildValidPresentationBlob(t)
 
@@ -505,7 +488,7 @@ func TestDeserializeBackupAuthCredentialPresentation_InvalidLevel_Regression(t *
 		name     string
 		levelU64 uint64
 	}{
-		// value > 255 was previously truncated (256 → 0) and passed through
+		// Values above 255 must not truncate.
 		{"gt_255_truncates_to_0", 256},
 		{"gt_255_large", 0xFFFF},
 		{"max_uint64", ^uint64(0)},

@@ -18,16 +18,7 @@ func NewKey(publicKey ecc.ECPublicKeyable) *Key {
 	return &identityKey
 }
 
-// NewKeyFromBytes generates a new IdentityKey from a raw 32-byte Curve25519
-// public key. The offset parameter is unused and retained for API compatibility.
-//
-// NOTE: this constructor is infallible and performs no curve-point validation.
-// A caller can construct a Key from 32 arbitrary bytes; any invalid-point
-// failure will surface at first use (e.g. key agreement or signature verify).
-// Rust's IdentityKey::decode returns Result<Self> via PublicKey::try_from which
-// validates the point immediately (rust/protocol/src/identity_key.rs:50-54).
-// If you need fail-fast validation, parse via ecc.DecodePoint and wrap the
-// result with NewKey instead.
+// NewKeyFromBytes wraps a raw 32-byte Curve25519 key without validation (offset is unused); use ecc.DecodePoint for fail-fast checks.
 func NewKeyFromBytes(publicKey [32]byte, offset int) Key {
 	identityKey := Key{
 		publicKey: ecc.NewDjbECPublicKey(publicKey),
@@ -36,14 +27,7 @@ func NewKeyFromBytes(publicKey [32]byte, offset int) Key {
 	return identityKey
 }
 
-// Decode parses a DjbType-prefixed (0x05) Curve25519 public key from a byte
-// slice. It checks the type byte and key length, returning an error for
-// malformed input. Full curve-point validation is deferred to first
-// cryptographic use (key agreement or signature verify), matching Rust's
-// PublicKey::deserialize at curve.rs:84-105 (called transitively by
-// IdentityKey::decode at rust/protocol/src/identity_key.rs:50). Unlike
-// NewKeyFromBytes, this function is fallible and rejects wrong type bytes
-// or insufficient-length inputs.
+// Decode parses a 0x05-prefixed Curve25519 public key, checking type and length; point validation waits for first use, as in Rust.
 func Decode(value []byte) (*Key, error) {
 	pub, err := ecc.DecodePoint(value, 0)
 	if err != nil {

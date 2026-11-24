@@ -12,12 +12,7 @@ import (
 	"time"
 )
 
-// Auth represents a username/password combination for Signal service
-// authentication.
-//
-// When returned by the chat server's /auth endpoints:
-//   - username is "hex(uid)"
-//   - password is "timestamp:hex(otp(uid, timestamp, secret))"
+// Auth is a Signal service username (hex uid) and password (timestamp:hex otp).
 type Auth struct {
 	Username string
 	Password string
@@ -30,10 +25,7 @@ const otpLength = 20
 // shared secret. The password is derived as a time-based OTP using
 // HMAC-SHA256.
 func AuthFromUIDAndSecret(uid [16]byte, secret [32]byte) Auth {
-	// The secret parameter is received by value: Go copies the caller's array
-	// on function entry. The deferred loop zeroizes only this function-local
-	// copy. The caller's original array is not modified and must be zeroized
-	// by the caller if it contains sensitive material.
+	// secret is a copy; this zeroizes only the copy, and the caller zeroizes its own.
 	defer func() {
 		for i := range secret {
 			secret[i] = 0

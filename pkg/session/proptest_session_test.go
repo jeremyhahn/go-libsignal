@@ -1,67 +1,10 @@
 //go:build proptest && !fips140only
 
-// Two tags, for two unrelated reasons.
-//
-// proptest: these four tests take 167s of pkg/session's 213s -- 79% of the
-// package -- which left the 900s per-binary cap only 4.4x above a host
-// measured varying up to 8.7x between runs, and that margin is what took the
-// Test job down on 2026-08-21 (#30). They run in their own target and their
-// own CI job, on every PR, with their own budget. Raising GOTEST_TIMEOUT was
-// the alternative and is worse: it governs every suite including the FIPS
-// gate, and the Go timeout is what names the package and dumps goroutines
-// where the job timeout reports nothing.
-//
-// !fips140only: FIPS 140-3 exemption -- see docs/FIPS.md. 4 tests in this
-// file exercise X25519. FIPS 140-3 does not approve that, but the X3DH
-// specification (section 2.1) and the Double Ratchet specification
-// (section 5.2) require it.
-//
-// `make test` no longer runs these; `make test-proptest` does, in CI on every
-// PR. `make coverage` does NOT, and deliberately: measured on the split,
-// pkg/session reports 89.4% with the tag and 89.4% without it. These are
-// differential and property tests over paths the unit tests already cover, so
-// they add no unique statements -- passing -tags proptest to the coverage loop
-// would buy nothing and put 167s back into the Coverage job.
+// proptest: slow property tests run by make test-proptest in their own CI job, not by make test or coverage; !fips140only: X25519 exemption (docs/FIPS.md).
 
 package session_test
 
-// proptest_session_test.go — property-based ports of the 4 Rust proptests in
-// rust/protocol/src/session_management.rs (commit 98915c44).
-//
-// Rust source: libsignal rust/protocol/src/session_management.rs
-//
-// Proptest mapping:
-//
-//	proptest_event_model_matches_legacy (line 2554)
-//	  → TestProptest_EventModelMatchesLegacy
-//	  Go invariant: any random sequence of bidirectional send/receive actions
-//	  produces correctly decrypted plaintexts. The Rust test compared a new
-//	  codepath against a legacy one; Go has one unified path, so we assert the
-//	  end-to-end correctness invariant (the meaningful part) directly.
-//	  FAITHFUL REPRODUCTION: partial — the new-vs-legacy comparison is not
-//	  reproducible; the session-correctness invariant is.
-//
-//	proptest_legacy_handover_to_new (line 2624)
-//	  → TestProptest_LegacyHandoverToNew
-//	  Go invariant: a random sequence of messages followed by a session
-//	  re-key followed by more messages all round-trip correctly. The Rust
-//	  test exercised legacy→new transition; Go maps this to the session
-//	  archive/re-establish continuity invariant.
-//	  FAITHFUL REPRODUCTION: partial — same justification as above.
-//
-//	proptest_delayed_message_via_previous_session (line 2745)
-//	  → TestProptest_DelayedMessageViaPreviousSession
-//	  FAITHFUL REPRODUCTION: complete — the scenario (encrypt on session A,
-//	  establish session B, then deliver the delayed session-A message) maps
-//	  1-to-1 to the Go session API.
-//
-//	proptest_ciphertext_equality (line 2997)
-//	  → TestProptest_CiphertextEquality
-//	  Go invariant: for any random sequence of bidirectional actions, every
-//	  encrypt call produces a ciphertext that the receiver can decrypt to
-//	  recover the original plaintext. The Rust test compared new-vs-legacy
-//	  byte equality; without a legacy path the invariant is decryptability.
-//	  FAITHFUL REPRODUCTION: partial — same justification as above.
+// Property-based ports of the four Rust proptests in session_management.rs; new-vs-legacy comparisons become session-correctness invariants.
 
 import (
 	"bytes"
@@ -125,7 +68,7 @@ func newSessionPair(t *testing.T, rt *rapid.T, serializer *serialize.Serializer)
 		rt.Fatal("bob init decrypt:", err)
 	}
 
-	// Bob ACKs so Alice's session is no longer unacknowledged (Whispers only).
+	// Bob acknowledges so Alice sends Whispers only.
 	ack, err := bobCipher.Encrypt([]byte("ack"))
 	if err != nil {
 		rt.Fatal("bob ack encrypt:", err)
@@ -195,23 +138,7 @@ func (sp *sessionPair) recv(rt *rapid.T, fromAlice bool, ctBytes []byte) []byte 
 
 // ---- property tests ----
 
-// TestProptest_EventModelMatchesLegacy ports proptest_event_model_matches_legacy
-// (rust/protocol/src/session_management.rs:2554).
-//
-// Rust strategy: Vec<(bool, Event)> len 0..40 where Event ∈ {Archive, Snapshot,
-// Restore, Receive, Drop, Shuffle, Send{count}}.
-//
-// Go invariant (session-correctness subset): for any random sequence of
-// bidirectional send/receive pairs, every plaintext round-trips correctly.
-// The Archive/Snapshot/Restore/Drop/Shuffle events from the Rust strategy
-// exercise internal bookkeeping on DualParticipant which has no Go equivalent
-// (the Go session cipher manages that state opaquely). The Send+Receive kernel
-// — that any message encrypted by one side is decryptable by the other — is
-// the portable invariant.
-//
-// Faithfulness note: the new-vs-legacy comparison is not reproducible in Go
-// (one unified implementation). The session-correctness invariant is faithfully
-// reproduced.
+// TestProptest_EventModelMatchesLegacy ports proptest_event_model_matches_legacy (session_management.rs:2554): random send/receive sequences round-trip.
 func TestProptest_EventModelMatchesLegacy(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		serializer := serialize.NewJSONSerializer()
@@ -244,20 +171,7 @@ func TestProptest_EventModelMatchesLegacy(t *testing.T) {
 	})
 }
 
-// TestProptest_LegacyHandoverToNew ports proptest_legacy_handover_to_new
-// (rust/protocol/src/session_management.rs:2624).
-//
-// Rust strategy: seed u64, legacy_actions Vec<(bool,bytes)> 1..10,
-// new_actions Vec<(bool,bytes)> 1..10. Runs legacy enc+dec then new enc+dec.
-//
-// Go invariant: a session that has exchanged N messages (phase 1) and then
-// undergoes a bundle re-key (session transition, analogous to "new code takes
-// over") continues to encrypt and decrypt correctly in phase 2. Both phases use
-// the same Go implementation; the invariant is session-state continuity across
-// a re-key boundary.
-//
-// Faithfulness note: partial — new-vs-legacy byte comparison not reproducible;
-// session-continuity invariant faithfully reproduced.
+// TestProptest_LegacyHandoverToNew ports proptest_legacy_handover_to_new (session_management.rs:2624): messages round-trip across a re-key.
 func TestProptest_LegacyHandoverToNew(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		serializer := serialize.NewJSONSerializer()
@@ -447,23 +361,7 @@ func TestProptest_LegacyHandoverToNew(t *testing.T) {
 	})
 }
 
-// TestProptest_DelayedMessageViaPreviousSession ports
-// proptest_delayed_message_via_previous_session
-// (rust/protocol/src/session_management.rs:2745).
-//
-// Rust strategy: seed u64, pre_actions Vec<(bool,bytes)> 0..6,
-// post_actions Vec<(bool,bytes)> 0..6, delayed_plaintext bytes 1..64.
-//
-// Scenario (identical to Rust):
-//  1. pre_actions: exchange messages on session A.
-//  2. Alice encrypts a delayed Whisper on session A (not yet delivered).
-//  3. Alice processes a new bundle from Bob → session B (archives A).
-//  4. Session B is established with a round-trip PreKeySignalMessage exchange.
-//  5. post_actions: exchange messages on session B.
-//  6. The delayed session-A message is delivered to Bob.
-//     Bob must find it in previous_sessions (A') and decrypt it.
-//
-// FAITHFUL REPRODUCTION: complete.
+// TestProptest_DelayedMessageViaPreviousSession ports proptest_delayed_message_via_previous_session (session_management.rs:2745): a delayed session-A message decrypts after session B is established.
 func TestProptest_DelayedMessageViaPreviousSession(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		serializer := serialize.NewJSONSerializer()
@@ -651,21 +549,7 @@ func TestProptest_DelayedMessageViaPreviousSession(t *testing.T) {
 	})
 }
 
-// TestProptest_CiphertextEquality ports proptest_ciphertext_equality
-// (rust/protocol/src/session_management.rs:2997).
-//
-// Rust strategy: seed u64, actions Vec<(bool,bytes)> 1..20. Runs new and
-// legacy encrypt from the same RNG clone and asserts byte-identical output.
-//
-// Go invariant: for any random sequence of bidirectional Whisper actions
-// (1..20), every ciphertext produced by Encrypt is correctly decryptable
-// by the receiver, recovering the exact plaintext. The Rust test's
-// new==legacy byte comparison is not reproducible (no legacy path in Go);
-// the decryptability invariant — which the byte comparison implies — is
-// faithfully reproduced.
-//
-// Faithfulness note: partial — new-vs-legacy byte comparison not
-// reproducible; decryptability invariant faithfully reproduced.
+// TestProptest_CiphertextEquality ports proptest_ciphertext_equality (session_management.rs:2997): every ciphertext decrypts to its plaintext.
 func TestProptest_CiphertextEquality(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
 		serializer := serialize.NewJSONSerializer()

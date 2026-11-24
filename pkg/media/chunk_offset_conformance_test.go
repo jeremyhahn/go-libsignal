@@ -1,24 +1,6 @@
 package media
 
-// chunk_offset_conformance_test.go — conformance tests for Finding #1:
-// stco/co64 chunk-offset rewriting when moov is relocated before mdat
-// (faststart normalization).
-//
-// ISO BMFF §8.7.5: stco/co64 chunk offsets are absolute byte offsets from the
-// start of the file.  When moov is relocated to precede mdat, every offset in
-// every stbl's stco/co64 must be shifted by:
-//
-//	delta = (new mdat box start) - (original mdat box start)
-//	      = len(ftyp) + len(new moov) - original_mdat_start_pos
-//
-// This test file builds a synthetic MP4 containing a real stbl with stco
-// entries pointing at sample data inside the original mdat, runs SanitizeMP4,
-// then reconstructs the file from the returned metadata and mdat span, parses
-// it with mp4ff, and asserts that each chunk offset resolves correctly.
-//
-// A second test forces stco→co64 promotion by placing the original mdat at a
-// position such that the original stco entries are large enough that adding the
-// relocation delta would overflow uint32.
+// Conformance tests for stco/co64 chunk offsets after moov is moved before mdat (ISO BMFF §8.7.5), including co64 promotion.
 
 import (
 	"bytes"
@@ -29,18 +11,7 @@ import (
 	mp4 "github.com/Eyevinn/mp4ff/mp4"
 )
 
-// buildMP4WithStco builds a synthetic MP4 in mdat-first layout:
-//
-//	ftyp | mdat (payload bytes) | moov (containing stbl with stco pointing at payload)
-//
-// sampleOffsets are absolute byte offsets inside the mdat payload (relative to
-// the file start).  Each offset must point at a valid byte within the mdat payload.
-//
-// The ftyp is the standard 20-byte Java-oracle ftyp (isom/isom).
-// The moov contains: moov→trak→mdia→minf→stbl→stco.
-// This mirrors the Java oracle Mp4SanitizerTest.moov() structure.
-//
-// Java oracle: Mp4SanitizerTest.java:L126–L157
+// buildMP4WithStco builds ftyp | mdat | moov with stco entries at the given absolute offsets (as Java Mp4SanitizerTest.moov).
 func buildMP4WithStco(payload []byte, absoluteChunkOffsets []uint32) []byte {
 	ftyp := javaFtyp() // 20 bytes
 
@@ -61,12 +32,7 @@ func buildMP4WithStco(payload []byte, absoluteChunkOffsets []uint32) []byte {
 	return buf.Bytes()
 }
 
-// buildMoovWithStco builds a minimal moov box containing:
-//
-//	moov → trak → mdia → minf → stbl → stco(entries)
-//
-// The stco box contains the provided absolute chunk offsets.
-// Box sizes are computed bottom-up.
+// buildMoovWithStco builds moov → trak → mdia → minf → stbl → stco with the given offsets.
 func buildMoovWithStco(chunkOffsets []uint32) []byte {
 	// stco: 8-byte header + 4 (version/flags) + 4 (entry_count) + 4*n (offsets)
 	stcoPayloadLen := 4 + 4 + 4*len(chunkOffsets)
@@ -180,33 +146,12 @@ func buildMoovWithCo64(chunkOffsets []uint64) []byte {
 	return buf.Bytes()
 }
 
-// TestFinding1_StcoOffsetRewriting verifies that SanitizeMP4 correctly adjusts
-// stco chunk offsets when moov is relocated before mdat.
-//
-// Test plan:
-//  1. Build a mdat-first MP4 with stco entries pointing at specific byte offsets
-//     inside the mdat payload.
-//  2. Run SanitizeMP4; expect non-nil Metadata (relocation occurred).
-//  3. Reconstruct the file as Metadata || input[DataOffset:DataOffset+DataLength].
-//  4. Parse the reconstructed file with mp4ff.
-//  5. Assert that the stco offsets in the parsed file resolve to the correct
-//     sample data within the reconstructed mdat.
-//
-// Java oracle: Mp4SanitizerTest.java:L64–L73 (testMinimalMp4 structure);
-// ISO BMFF §8.7.5 chunk-offset box.
+// TestFinding1_StcoOffsetRewriting checks stco offsets still point at their samples after SanitizeMP4 relocates moov.
 func TestFinding1_StcoOffsetRewriting(t *testing.T) {
 	// Sample payload: 8 bytes, two 4-byte "chunks" at positions 0 and 4.
 	payload := []byte{0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88}
 
-	// ftyp is 20 bytes. mdat box = 8 (header) + 8 (payload) = 16 bytes.
-	// In the original mdat-first file:
-	//   offset 0:  ftyp (20 bytes)
-	//   offset 20: mdat box (16 bytes)
-	//   offset 36: moov
-	//
-	// The mdat payload starts at offset 28 (20 + 8).
-	// Chunk 1 is at payload byte 0 → absolute offset 28.
-	// Chunk 2 is at payload byte 4 → absolute offset 32.
+	// ftyp at 0 (20 bytes), mdat at 20 (16 bytes); chunks at absolute offsets 28 and 32.
 	mdatPayloadStart := uint32(20 + 8) // ftyp(20) + mdat_header(8)
 	chunkOffsets := []uint32{
 		mdatPayloadStart,     // chunk 1 at payload[0]
@@ -267,10 +212,7 @@ func TestFinding1_StcoOffsetRewriting(t *testing.T) {
 	}
 }
 
-// TestFinding1_Co64OffsetRewriting verifies that SanitizeMP4 correctly adjusts
-// co64 (64-bit) chunk offsets when moov is relocated before mdat.
-//
-// ISO BMFF §8.7.5 co64 (Chunk Large Offset Box).
+// TestFinding1_Co64OffsetRewriting checks co64 offsets after moov relocation (ISO BMFF §8.7.5).
 func TestFinding1_Co64OffsetRewriting(t *testing.T) {
 	payload := []byte{0xAA, 0xBB, 0xCC, 0xDD}
 
@@ -322,23 +264,7 @@ func TestFinding1_Co64OffsetRewriting(t *testing.T) {
 	}
 }
 
-// TestFinding1_StcoToCoPromotion verifies that stco->co64 promotion occurs
-// when the chunk offset + relocation delta would overflow uint32.
-//
-// Layout analysis:
-//
-//	ftyp(20) | mdat(8+4=12) | moov
-//
-// moov size with 1-entry stco = 60 bytes (see buildMoovWithStco).
-// original mdat start = 20 (right after ftyp).
-// new mdat start = 20 (ftyp) + 60 (moov) = 80.
-// delta = 80 - 20 = 60.
-//
-// After promotion co64(24 bytes) replaces stco(20 bytes), moov grows to 64.
-// new mdat start = 20 + 64 = 84; delta = 84 - 20 = 64.
-// nearMax = 0xFFFFFFF0: 0xFFFFFFF0 + 64 = 4294967344 > math.MaxUint32 -> promotion.
-//
-// ISO BMFF §8.7.5; Finding #1 stco->co64 promotion cycle.
+// TestFinding1_StcoToCoPromotion checks stco is promoted to co64 when offset plus delta (64) overflows uint32.
 func TestFinding1_StcoToCoPromotion(t *testing.T) {
 	// nearMax + delta(60) = 0xFFFFFFF0 + 60 = 4294967344 > 4294967295 (MaxUint32)
 	nearMax := uint32(0xFFFFFFF0)
@@ -404,13 +330,7 @@ func TestFinding1_NoOffsetRewritingForFaststartLayout(t *testing.T) {
 	ftyp := javaFtyp() // 20 bytes
 
 	payload := []byte{0xDE, 0xAD, 0xBE, 0xEF}
-	// In moov-first layout:
-	//   offset 0:  ftyp (20)
-	//   offset 20: moov
-	//   offset 20+moovLen: mdat
-	//
-	// We don't know moovLen yet, so we compute a dummy offset for the stco.
-	// The actual value doesn't matter for the noop test — we just verify Metadata=nil.
+	// Moov-first layout: the stco offset value does not matter, only that Metadata is nil.
 	moovBytes := buildMoovWithStco([]uint32{0x1234}) // placeholder offset
 
 	mdatSize := uint32(8 + len(payload))
@@ -434,32 +354,9 @@ func TestFinding1_NoOffsetRewritingForFaststartLayout(t *testing.T) {
 	}
 }
 
-// TestCompoundedMdat_MoovAfterMdat_StcoOffsetRewriting is a regression test for
-// the moov-after-mdat branch of sanitizeMP4Compounded.  The original code
-// concatenated raw ftyp||moov bytes without adjusting stco/co64 entries, leaving
-// absolute chunk offsets stale after moov is relocated before mdat.
-//
-// Layout under test:
-//
-//	ftyp(20) | mdat_header(8, size=0) | payload(8) | moov(60, stco→offset 28)
-//
-// After SanitizeMP4WithCompoundedMdat the sanitized file layout is:
-//
-//	Metadata(ftyp+moov) | mdat_header | payload
-//
-// ISO BMFF §8.7.5 requires every stco/co64 entry to equal the byte position of
-// the corresponding chunk in the SANITIZED file.  The test verifies that:
-//  1. stco[0] == originalChunkOffset + (len(Metadata) - originalMdatOffset)
-//  2. reconstructed[stco[0]] == payload[0]  (byte-level correctness)
-//
-// Rust mp4san oracle; ISO BMFF §8.7.5.
+// TestCompoundedMdat_MoovAfterMdat_StcoOffsetRewriting checks stco offsets are shifted in the compounded-mdat path.
 func TestCompoundedMdat_MoovAfterMdat_StcoOffsetRewriting(t *testing.T) {
-	// Build ftyp(20) | mdat_header(8,size=0) | payload(8) | moov(60).
-	//
-	//   offset  0: ftyp — 20 bytes
-	//   offset 20: mdat box header (size=0) — 8 bytes
-	//   offset 28: mdat payload — 8 bytes   ← chunk 0 lives here
-	//   offset 36: moov with one-entry stco pointing at offset 28
+	// ftyp(20) | mdat header(8, size=0) | payload(8, chunk 0 at 28) | moov(60).
 	payload := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}
 
 	// mdat header with size=0 (compounded form).  [0:4] left zero by make.
@@ -576,11 +473,7 @@ func TestFinding1_EmptyStco(t *testing.T) {
 	}
 }
 
-// TestFinding2_InfiniteLoopGuard verifies that SanitizeMP4WithCompoundedMdat
-// rejects cumulativeMdatBoxSize < 8, which previously caused an infinite loop.
-//
-// Java oracle: Mp4Sanitizer.java:L83–L115 (sanitizeFileWithCompoundedMdatBoxes).
-// Finding #2.
+// TestFinding2_InfiniteLoopGuard checks cumulativeMdatBoxSize < 8 is rejected (Java Mp4Sanitizer sanitizeFileWithCompoundedMdatBoxes).
 func TestFinding2_InfiniteLoopGuard(t *testing.T) {
 	input := append(javaFtyp(), javaMoov()...)
 	for _, size := range []int{-1, 0, 1, 7} {

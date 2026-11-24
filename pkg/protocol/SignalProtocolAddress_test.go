@@ -37,12 +37,7 @@ func TestSignalAddressString(t *testing.T) {
 	}
 }
 
-// TestSignalAddress_String_LegacySeparator is a regression test that explicitly
-// asserts the "~" separator in address.String() output. This documents the
-// intentional divergence from Rust libsignal's "." separator: String() is
-// display-only (no wire format uses it), and "~" preserves backwards
-// compatibility with go-libsignal address.String() values that callers may
-// have persisted as map keys or in storage.
+// TestSignalAddress_String_LegacySeparator checks String uses the "~" separator, kept for stored keys.
 func TestSignalAddress_String_LegacySeparator(t *testing.T) {
 	addr := NewSignalAddress("Alice", 1)
 	got := addr.String()
@@ -157,28 +152,13 @@ func TestSerializeAddresses_BothNil(t *testing.T) {
 // verify path returns ErrAddressMismatch instead of panicking when a caller
 // receives a bound message but does not have both local addresses available.
 func TestVerifyMacWithAddresses_NilLocalAddresses(t *testing.T) {
-	// Build a SignalMessage with the address-binding field set, then attempt
-	// verification with nil sender and nil recipient — should return
-	// ErrAddressMismatch, not panic.
-	// We rely on the fact that any non-empty Addresses field triggers the
-	// re-serialize-and-compare branch in VerifyMacWithAddresses; the actual
-	// MAC bytes are irrelevant because the MAC check runs first against the
-	// real macKey, but if the structure has no Addresses, the binding branch
-	// is skipped entirely. Use a stub structure to drive only the panic path
-	// via the public constructor + a doctored Addresses slice.
-	//
-	// Address binding is opportunistic: SerializeAddresses returns nil for
-	// non-ServiceId or out-of-range inputs (matching Rust serialize_addresses),
-	// and the verify path must tolerate nil inputs without panicking rather
-	// than dereferencing them. The test confirms NO PANIC on nil/nil input.
+	// Verifying with nil sender and recipient must return ErrAddressMismatch, not panic.
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("VerifyMacWithAddresses with nil addresses panicked: %v", r)
 		}
 	}()
-	// Smallest viable invocation — direct call into SerializeAddresses with
-	// nil values, which is what the verify path does. The panic case Codex
-	// flagged is the SerializeAddresses dereference, which we now guard.
+	// Call SerializeAddresses with nil values directly, as the verify path does.
 	if buf := SerializeAddresses(nil, nil); buf != nil {
 		t.Fatalf("expected nil from SerializeAddresses(nil, nil), got %d bytes", len(buf))
 	}

@@ -12,10 +12,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
-// Restore1 is the first phase of a two-phase SVR restore. It sends a blinded
-// point to each server and receives back OPRF evaluations and auth elements
-// for version negotiation. The input is held in guarded memory and must be
-// destroyed via Zeroize() when no longer needed.
+// Restore1 is the first SVR restore phase, sending a blinded point to each server; its guarded input must be Zeroized.
 type Restore1 struct {
 	serverIDs []uint64
 	input     *secret.Secret
@@ -34,9 +31,7 @@ func (r *Restore1) Zeroize() {
 	zeroScalar(r.blind)
 }
 
-// NewRestore1 creates a new first-phase restore request set for the given
-// servers. The password is used to derive the OPRF input. A random blinding
-// scalar is generated internally.
+// NewRestore1 returns first-phase restore requests for servers from password with random blinding.
 func NewRestore1(serverIDs []uint64, password []byte) (*Restore1, error) {
 	if len(serverIDs) == 0 {
 		return nil, ErrBadData
@@ -89,12 +84,7 @@ func NewRestore1(serverIDs []uint64, password []byte) (*Restore1, error) {
 	}, nil
 }
 
-// Restore2 processes the first-phase responses and produces second-phase
-// requests containing Schnorr-like authentication proofs.
-//
-// responses1 contains the serialized Response4 from each server.
-// handshakeHashes contains the TLS handshake hash for each server connection,
-// used as a channel binding in the Schnorr proof.
+// Restore2 turns first-phase responses into second-phase requests with Schnorr proofs bound to each server's TLS handshake hash.
 func (r *Restore1) Restore2(responses1 [][]byte, handshakeHashes [][]byte) (*Restore2Result, error) {
 	n := len(r.serverIDs)
 	if len(responses1) != n || len(handshakeHashes) != n {
@@ -150,8 +140,7 @@ func (r *Restore1) Restore2(responses1 [][]byte, handshakeHashes [][]byte) (*Res
 		return nil, err
 	}
 
-	// Sum the OPRF elements from all servers:
-	//   SUM = sum(P * k_i + H * z_i) = P * k_oprf + H * 0 = P * k_oprf
+	// SUM = sum(P*k_i + H*z_i) = P*k_oprf.
 	sum := ristretto255.NewIdentityElement()
 	for _, auth := range auths {
 		elem, err := decodeElement(auth.GetElement())
@@ -284,10 +273,7 @@ func (r *Restore1) authsWithVersion(version uint32, responses []*svrpb.Response4
 	return out, nil
 }
 
-// Restore2Result is the second phase of a two-phase SVR restore. It holds the
-// second-phase requests and, after processing server responses, reconstructs
-// the original encryption key. The input is held in guarded memory and must
-// be destroyed via Zeroize() when no longer needed.
+// Restore2Result is the second SVR restore phase; its guarded input must be Zeroized.
 type Restore2Result struct {
 	serverIDs []uint64
 	input     *secret.Secret
@@ -307,10 +293,7 @@ func (r *Restore2Result) Zeroize() {
 	}
 }
 
-// Restore processes the second-phase responses and reconstructs the encryption
-// key by XOR-combining the encryption secret shares from all servers. The
-// returned secret is in guarded memory and must be destroyed by the caller
-// when no longer needed.
+// Restore XORs the servers' encryption shares into the key, returned in guarded memory for the caller to destroy.
 func (r *Restore2Result) Restore(responses2 [][]byte) (*secret.Secret, error) {
 	n := len(r.serverIDs)
 	if len(responses2) != n {
@@ -363,13 +346,7 @@ func (r *Restore2Result) Restore(responses2 [][]byte) (*secret.Secret, error) {
 	return encryptionKeyFromSecrets(sEnc, kAuth), nil
 }
 
-// RestoreFull performs a complete two-phase restore as a convenience wrapper.
-// It takes the first-phase responses and handshake hashes, produces second-
-// phase requests via a callback, and returns the final encryption key in
-// guarded memory. The caller must destroy the returned secret when done.
-//
-// The sendRequests callback receives the second-phase requests and must return
-// the corresponding server responses.
+// RestoreFull runs both restore phases, sending second-phase requests through sendRequests, and returns the guarded key for the caller to destroy.
 func RestoreFull(
 	serverIDs []uint64,
 	password []byte,

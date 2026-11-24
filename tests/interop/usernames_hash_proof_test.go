@@ -1,19 +1,4 @@
-// Usernames ZK proof and scalar hash KAT interop test.
-//
-// Drives pkg/usernames against known-answer fixtures extracted from
-// rust/usernames/src/username.rs (inline tests at lines 135-266).
-//
-// scalar_kats: verify that Hash() for each fixture username produces the
-// expected 32-byte hash byte-for-byte. The _z9_ vector anchors that
-// nickname_scalar == 74656 (Rust valid_nickname_scalar test at line 355).
-//
-// proof_kats: verify that Proof(randomness) produces the exact bytes
-// encoded in the fixture, and that VerifyProof(proof, hash) succeeds.
-// Proof generation uses the same poksho ZK statement as Rust, so proof
-// bytes must match regardless of platform.
-//
-// Rust source: rust/usernames/src/username.rs:135-266
-// Upstream commit: 98915c44
+// Usernames KATs from rust/usernames/src/username.rs: Hash matches each fixture byte for byte, and Proof(randomness) reproduces the fixture proof, which VerifyProof accepts.
 package interop
 
 import (
@@ -61,12 +46,7 @@ func usernameStr(nickname string, discriminator uint64) string {
 	return fmt.Sprintf("%s.%02d", nickname, discriminator)
 }
 
-// TestUsernames_ScalarHash verifies that Hash() for each fixture username
-// produces the expected 32-byte hash byte-for-byte.
-// Also anchors that the _z9_ nickname encodes nickname_scalar = 74656 via
-// its fixture hash, which was generated with that scalar value.
-//
-// Rust ref: username.rs valid_nickname_scalar (line 355), valid_usernames (line 365).
+// TestUsernames_ScalarHash checks Hash for each fixture username; the _z9_ hash pins nickname_scalar 74656.
 func TestUsernames_ScalarHash(t *testing.T) {
 	raw := loader.MustRead("usernames/proof_known_answers.json")
 

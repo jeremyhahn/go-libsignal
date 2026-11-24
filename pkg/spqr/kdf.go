@@ -10,19 +10,13 @@ import (
 )
 
 const (
-	// ChainStartInfo is the HKDF info string for session initialization.
-	// Note the double space before "Start" which matches the Rust reference.
-	// Verified byte-identical to signalapp/SparsePostQuantumRatchet v1.5.1
-	// at src/chain.rs:334.
+	// ChainStartInfo is the HKDF info for session start; the double space before Start matches Rust SPQR v1.5.1.
 	ChainStartInfo = "Signal PQ Ratchet V1 Chain  Start"
 	// ChainAddEpochInfo is the HKDF info string for adding a new epoch.
 	// Verified byte-identical to SparsePostQuantumRatchet v1.5.1
 	// src/chain.rs:360.
 	ChainAddEpochInfo = "Signal PQ Ratchet V1 Chain Add Epoch"
-	// ChainNextInfo is the HKDF info label for chain key stepping.
-	// The full info is: counter_be32 || ChainNextInfo.
-	// Verified byte-identical to SparsePostQuantumRatchet v1.5.1
-	// src/chain.rs:237.
+	// ChainNextInfo is the chain-step HKDF label; the info is counter_be32 || ChainNextInfo.
 	ChainNextInfo = "Signal PQ Ratchet V1 Chain Next"
 
 	// kdfOutputLen is the total output length: RK(32) + CKs(32) + CKr(32).
@@ -63,8 +57,7 @@ func KdfSckaInit(sharedSecret []byte) (rk, cks, ckr *secret.Secret, err error) {
 	return keys[0], keys[1], keys[2], nil
 }
 
-// KdfSckaRK derives a new root key, send chain key, and receive chain key
-// from the current root key and an SCKA output using HKDF-SHA256.
+// KdfSckaRK derives the next root key and send and receive chain keys from the root key and an SCKA output with HKDF-SHA256.
 func KdfSckaRK(rk *secret.Secret, sckaOutput []byte) (newRK, newCKs, newCKr *secret.Secret, err error) {
 	if rk == nil || rk.IsDestroyed() {
 		return nil, nil, nil, &ErrInvalidInput{
@@ -97,16 +90,7 @@ func KdfSckaRK(rk *secret.Secret, sckaOutput []byte) (newRK, newCKs, newCKr *sec
 	return keys[0], keys[1], keys[2], nil
 }
 
-// KdfSckaCK derives a next chain key and message key from the current chain
-// key and counter using HKDF-SHA256, matching the Rust reference implementation.
-//
-// HKDF parameters (aligned with Rust libsignal):
-//   - salt:  zeros(32)
-//   - ikm:   chain_key (32 bytes)
-//   - info:  counter_be32 || "Signal PQ Ratchet V1 Chain Next"
-//   - length: 64
-//
-// Output split: nextCK(32) || mk(32)
+// KdfSckaCK derives nextCK(32) || mk(32) by HKDF-SHA256 with a zero salt and info counter_be32 || "Signal PQ Ratchet V1 Chain Next".
 func KdfSckaCK(ck *secret.Secret, ctr uint32) (mk, nextCK *secret.Secret, err error) {
 	if ck == nil || ck.IsDestroyed() {
 		return nil, nil, &ErrInvalidInput{
@@ -139,10 +123,7 @@ func KdfSckaCK(ck *secret.Secret, ctr uint32) (mk, nextCK *secret.Secret, err er
 	return keys[1], keys[0], nil
 }
 
-// splitLocked moves a KDF output into a locked scratch region at once,
-// wiping output, and splits it there into n keyLen-byte secrets. Each
-// secret.New moves its segment locked region to locked region, so no
-// unprotected copy of a segment exists during the split.
+// splitLocked moves a KDF output into locked memory, wiping output, and splits it into n keyLen-byte secrets without an unprotected copy.
 func splitLocked(output []byte, n int) (_ []*secret.Secret, err error) {
 	defer crypto.Zeroize(output)
 	if len(output) != n*keyLen {

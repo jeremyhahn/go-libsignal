@@ -127,12 +127,7 @@ func TestDecryptAndGetKeyContainsSessionError(t *testing.T) {
 
 // ================== DecryptAndGetKey: LoadSession error after ContainsSession ==================
 
-// TestDecryptAndGetKeyLoadSessionError verifies that DecryptAndGetKey returns
-// an error when LoadSession fails after ContainsSession succeeds.
-// This exercises SessionCipher.go:302-304.
-//
-// errLoadSessionStore.ContainsSession delegates to inner, which has the
-// session stored (returns true). But LoadSession always returns an error.
+// TestDecryptAndGetKeyLoadSessionError checks DecryptAndGetKey errors when LoadSession fails after ContainsSession succeeds.
 func TestDecryptAndGetKeyLoadSessionError(t *testing.T) {
 	ser := serialize.NewProtobufSerializer()
 	remoteAddress := protocol.NewSignalAddress("alice", 1)

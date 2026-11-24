@@ -1,29 +1,10 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 5 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) and the Double Ratchet
-// specification (section 5.2) require it, so the fips140only build tag drops
-// this file from the FIPS gate. `make test` and `make coverage` still run
-// it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH and the Double Ratchet require X25519, so the fips140only tag drops this file.
 
 package tests
 
-// session_extras_test.go extends session_test.go with additional scenarios
-// ported from rust/protocol/tests/session.rs at commit 98915c442d.
-//
-// Scenarios already covered by session_test.go:
-//   - TestSessionBuilder       → test_basic_prekey (session.rs:30)
-//   - TestSessionRoundtrip     → run_session_interaction (session.rs:2576)
-//   - TestSessionOutOfOrder    → out-of-order receive (session.rs context)
-//
-// New scenarios ported here:
-//   - TestSession_BadSignedPreKeySignature → test_bad_signed_pre_key_signature (session.rs:399)
-//   - TestSession_OptionalOneTimePrekey    → test_optional_one_time_prekey (session.rs:696)
-//   - TestSession_ZeroPreKeyID            → test_zero_is_a_valid_prekey_id (session.rs:2005)
-//   - TestSession_BadMessageBundle        → test_bad_message_bundle (session.rs:596)
-//   - TestSession_DuplicateMessageRejected→ test_duplicate_message_error_returned (session.rs:3194)
+// Additional ports of Rust session.rs scenarios not covered by session_test.go.
 
 import (
 	"testing"
@@ -35,13 +16,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/optional"
 )
 
-// TestSession_BadSignedPreKeySignature verifies that a PreKeyBundle with a
-// corrupted signed-pre-key signature is rejected by ProcessBundle.
-//
-// Mirrors rust/protocol/tests/session.rs:399 (test_bad_signed_pre_key_signature).
-// The Rust test tries all 512 single-bit flips in the signature; here we
-// flip one bit (byte 0 MSB) and verify rejection, then confirm the good
-// bundle is still accepted.
+// TestSession_BadSignedPreKeySignature checks a bundle with one flipped signature bit is rejected and the good one accepted (Rust session.rs:399).
 func TestSession_BadSignedPreKeySignature(t *testing.T) {
 	serializer := newSerializer()
 	alice := newUser("Alice", 1, serializer)
@@ -271,13 +246,7 @@ func TestSession_BadMessageBundle(t *testing.T) {
 	}
 }
 
-// TestSession_DuplicateMessageRejected verifies that decrypting the same
-// PreKeySignalMessage twice returns an error on the second attempt.
-//
-// Mirrors rust/protocol/tests/session.rs:3194 (test_duplicate_message_error_returned).
-// In Rust, the duplicate check applies to any message type; here we exercise it
-// via PreKeySignalMessage since Alice's first outbound message after ProcessBundle
-// is always a PreKeySignalMessage (the session is unacknowledged).
+// TestSession_DuplicateMessageRejected checks a second decrypt of the same PreKeySignalMessage fails (Rust session.rs:3194).
 func TestSession_DuplicateMessageRejected(t *testing.T) {
 	serializer := newSerializer()
 	alice := newUser("Alice", 1, serializer)

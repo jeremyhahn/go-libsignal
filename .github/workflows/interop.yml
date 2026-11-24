@@ -1,12 +1,4 @@
-# Upstream-tree interop checks (devops.md §5).
-#
-# Both jobs here need a full checkout of upstream Rust libsignal at the commit
-# pinned in /RUST_REV, and the live suite additionally compiles it. That is tens
-# of minutes on a serial Gitea runner, and the pin is immutable — a push that
-# touches neither /RUST_REV nor the harness cannot change the outcome. So this
-# runs weekly, on demand, and on pushes that touch the pin or the harness,
-# rather than on every push. The fast half of the fixture gate (sha256 against
-# MANIFEST.toml, no network) stays in ci.yml's `test` job.
+# Upstream-tree interop checks against the Rust libsignal commit in /RUST_REV; weekly, on demand, and on pushes touching the pin or the harness.
 
 name: Interop
 
@@ -67,15 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      # The directory layout here is load-bearing, not incidental.
-      # tests/interop/rust/Cargo.toml carries path dependencies on
-      # ../../../../libsignal/rust/{protocol,zkgroup,core} — four levels up from
-      # the crate, i.e. a `libsignal` directory beside the repository checkout.
-      # Nothing provisioned it before, so `make interop-live-build` resolved it
-      # only on a developer machine that happened to have upstream cloned as a
-      # sibling, and failed everywhere else. Checking out under go-libsignal/
-      # and cloning upstream to libsignal/ reproduces that layout from the
-      # pinned commit, deterministically.
+      # tests/interop/rust/Cargo.toml needs upstream libsignal beside the checkout, so check out under go-libsignal/ and clone upstream to libsignal/.
       - uses: actions/checkout@v6
         with:
           path: go-libsignal
@@ -129,8 +113,7 @@ jobs:
         working-directory: go-libsignal
         run: make interop-live
 
-  # devops.md §1: one required check per workflow, listing every job explicitly
-  # and failing closed. join(needs.*.result) evaluates empty on Gitea.
+  # One required check listing every job explicitly and failing closed.
   interop-gate:
     name: Interop Gate
     runs-on: ubuntu-latest

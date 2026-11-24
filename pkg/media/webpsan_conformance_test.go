@@ -1,27 +1,6 @@
 package media
 
-// webpsan_conformance_test.go — Go port of all webpsan 0.5.3 test cases.
-//
-// Oracle: webpsan/src/lib.rs (test module, lines 377–779)
-// Builder oracle: webpsan/src/util/test/webp.rs
-//
-// Each test case is labeled with the Rust source function name and the line
-// range it maps to. Where the test is a "sanitize_ok" assertion in Rust, the
-// Go test asserts nil error. Where it is "sanitize_invalid" or
-// "sanitize_non_compliant", the test asserts a non-nil error.
-//
-// The Go implementation achieves ZERO parity gap with webpsan 0.5.3:
-//   - VP8L full bitstream decode (lossless.go): implements the complete
-//     LosslessImage::read validator including transforms, prefix codes,
-//     color cache, back-references, and all error conditions.
-//   - ALPH bitstream decode: when COMPRESS_LOSSLESS flag is set, the alpha
-//     plane's VP8L image stream is fully validated.
-//
-// One structural difference (not a parity gap):
-//   - file_extra_data test: webpsan manipulates the TestWebp struct's data_len
-//     field independently of the actual byte buffer (simulating a mis-declared
-//     RIFF size). This is reproduced by appending real trailing bytes instead,
-//     which exercises the same rejection path.
+// Go port of the webpsan 0.5.3 tests (webpsan/src/lib.rs); file_extra_data appends real trailing bytes instead of faking data_len.
 
 import (
 	"bytes"
@@ -40,17 +19,10 @@ var defaultVP8Data = []byte{
 	52, 0, 0, 13, 192, 0, 254, 251, 253, 80, 0, 0,
 }
 
-// defaultVP8LData matches DEFAULT_VP8L_DATA in webpsan exactly.
-// webpsan/src/util/test/webp.rs:121-131
-// Encodes: signature=0x2F, width-1=0 (14 bits), height-1=0 (14 bits), alpha=0, version=0,
-// followed by a minimal valid lossless image stream for a 1×1 pixel image.
-// This is the CONFORMANCE ANCHOR for VP8L accept tests.
+// defaultVP8LData is webpsan DEFAULT_VP8L_DATA, a 1x1 lossless image (util/test/webp.rs:121-131).
 var defaultVP8LData = []byte{0x2f, 0x00, 0x00, 0x00, 0x00, 0x88, 0x88, 0x08}
 
-// defaultAlphImageData matches DEFAULT_ALPH_DATA in webpsan exactly.
-// webpsan/src/util/test/webp.rs:134-139
-// A minimal valid lossless image stream for a 1×1 alpha plane (no 0x2F header).
-// This is the CONFORMANCE ANCHOR for ALPH accept tests.
+// defaultAlphImageData is webpsan DEFAULT_ALPH_DATA, a 1x1 alpha plane (util/test/webp.rs:134-139).
 var defaultAlphImageData = []byte{0x88, 0x88, 0x08}
 
 // writeChunk serializes a RIFF chunk: fourcc(4) + LE-size(4) + data + optional pad.
@@ -72,17 +44,7 @@ func writeVP8Chunk(buf *bytes.Buffer) { writeChunk(buf, "VP8 ", defaultVP8Data) 
 // writeVP8LChunk writes a VP8L chunk using defaultVP8LData.
 func writeVP8LChunk(buf *bytes.Buffer) { writeChunk(buf, "VP8L", defaultVP8LData) }
 
-// writeVP8XChunk writes a VP8X chunk with given flags and zero canvas dims (1×1).
-// flags byte layout — webpsan/src/parse/vp8x.rs:24-29:
-//
-//	0x20 = HAS_ICCP_CHUNK
-//	0x10 = HAS_ALPH_CHUNK
-//	0x08 = HAS_EXIF_CHUNK
-//	0x04 = HAS_XMP_CHUNK
-//	0x02 = IS_ANIMATED
-//
-// Canvas width and height are encoded as OneBasedU24 (stored = actual-1).
-// webpsan/src/parse/vp8x.rs:49-63
+// writeVP8XChunk writes a VP8X chunk with the given flags (ICCP 0x20, ALPH 0x10, EXIF 0x08, XMP 0x04, ANIM 0x02) and a 1x1 canvas.
 func writeVP8XChunk(buf *bytes.Buffer, flags byte, storedW, storedH uint32) {
 	payload := make([]byte, 10)
 	payload[0] = flags
@@ -96,16 +58,13 @@ func writeVP8XChunk(buf *bytes.Buffer, flags byte, storedW, storedH uint32) {
 	writeChunk(buf, "VP8X", payload)
 }
 
-// writeAnimChunk writes an ANIM chunk: bg_color(4LE) + loop_count(2LE).
-// webpsan/src/parse/anim.rs:23 — ENCODED_LEN = 6
+// writeAnimChunk writes a 6-byte ANIM chunk (webpsan anim.rs:23).
 func writeAnimChunk(buf *bytes.Buffer) {
 	payload := make([]byte, 6) // background_color=0, loop_count=0
 	writeChunk(buf, "ANIM", payload)
 }
 
-// writeAnmfChunk writes an ANMF frame chunk containing the provided frame body.
-// ANMF header: x(3)+y(3)+width(3)+height(3)+duration(3)+flags(1) = 16 bytes.
-// webpsan/src/parse/anmf.rs:60-65
+// writeAnmfChunk writes an ANMF chunk: 16-byte header then the frame body (webpsan anmf.rs:60-65).
 func writeAnmfChunk(buf *bytes.Buffer, frameBody []byte) {
 	header := make([]byte, 16) // x=0,y=0,width=0(stored=0→actual=1),height=0,dur=0,flags=0
 	payload := make([]byte, 0, 16+len(frameBody))
@@ -114,8 +73,7 @@ func writeAnmfChunk(buf *bytes.Buffer, frameBody []byte) {
 	writeChunk(buf, "ANMF", payload)
 }
 
-// writeAlphChunk writes an ALPH chunk: flags(1) + image data.
-// webpsan/src/parse/alph.rs:52-53 — ENCODED_LEN = AlphFlags::ENCODED_LEN = 1
+// writeAlphChunk writes an ALPH chunk: flags byte then image data.
 func writeAlphChunk(buf *bytes.Buffer, flagsByte byte) {
 	payload := make([]byte, 1+len(defaultAlphImageData))
 	payload[0] = flagsByte
@@ -132,10 +90,7 @@ func writeEXIFChunk(buf *bytes.Buffer) { writeChunk(buf, "EXIF", []byte{0x49, 0x
 // writeXMPChunk writes a minimal XMP chunk.
 func writeXMPChunk(buf *bytes.Buffer) { writeChunk(buf, "XMP ", []byte{0x3C, 0x78, 0x6D, 0x70}) }
 
-// buildRIFF wraps chunk bytes with the RIFF+size+WEBP header.
-// The RIFF size field covers "WEBP"(4) + len(chunks), matching the webpsan
-// test builder in webpsan/src/util/test/webp.rs:222-225.
-// Total file = "RIFF"(4) + LE(riffSize)(4) + "WEBP"(4) + chunks.
+// buildRIFF wraps chunks in RIFF, size and WEBP, as webpsan's test builder.
 func buildRIFF(chunks []byte) []byte {
 	riffSize := uint32(4 + len(chunks)) // 4 for "WEBP"
 	out := make([]byte, 0, 12+len(chunks))
@@ -148,8 +103,7 @@ func buildRIFF(chunks []byte) []byte {
 	return out
 }
 
-// buildWebPSanitizeOk builds a RIFF/WEBP file from the given payload chunks
-// (already serialized, not including the leading "WEBP" fourcc).
+// buildWebPSanitizeOk builds a RIFF/WEBP file from serialized chunks.
 func buildWebPPayload(chunks *bytes.Buffer) []byte {
 	return buildRIFF(chunks.Bytes())
 }
@@ -174,8 +128,7 @@ func assertWebPRejected(t *testing.T, data []byte) {
 // Ported webpsan tests — webpsan/src/lib.rs test module (lines 377–779).
 // ---------------------------------------------------------------------------
 
-// TestWebpsan_NotRiff — webpsan test `not_riff` (lib.rs:389-395)
-// Non-RIFF chunk type as the outermost container → InvalidChunkLayout.
+// TestWebpsan_NotRiff ports not_riff (lib.rs:389-395): a non-RIFF container is rejected.
 func TestWebpsan_NotRiff(t *testing.T) {
 	// Replace the "RIFF" header with "TeSt" — this violates the outermost check.
 	data := make([]byte, 20)
@@ -187,8 +140,7 @@ func TestWebpsan_NotRiff(t *testing.T) {
 	assertWebPRejected(t, data)
 }
 
-// TestWebpsan_NotWebp — webpsan test `not_webp` (lib.rs:397-403)
-// RIFF container with a non-WEBP fourcc → InvalidInput.
+// TestWebpsan_NotWebp ports not_webp (lib.rs:397-403): a non-WEBP fourcc is rejected.
 func TestWebpsan_NotWebp(t *testing.T) {
 	data := make([]byte, 20)
 	copy(data[0:4], "RIFF")
@@ -199,24 +151,17 @@ func TestWebpsan_NotWebp(t *testing.T) {
 	assertWebPRejected(t, data)
 }
 
-// TestWebpsan_FileLenZero — webpsan test `file_len_zero` (lib.rs:405-412)
-// RIFF size field = 0 means payload ends immediately after the size field.
-// With only the "WEBP" fourcc needing to be read, this yields a truncated-chunk error.
+// TestWebpsan_FileLenZero ports file_len_zero (lib.rs:405-412): RIFF size 0 leaves no room for WEBP.
 func TestWebpsan_FileLenZero(t *testing.T) {
 	// Build a RIFF header declaring size=0, which means no WEBP fourcc fits.
 	data := make([]byte, 8)
 	copy(data[0:4], "RIFF")
 	binary.LittleEndian.PutUint32(data[4:8], 0)
-	// Actual file is 8 bytes; declared total = 8+0 = 8 bytes = actual.
-	// No WEBP fourcc is present within the declared region → parser sees 0
-	// payload bytes, but needs at least 4 for "WEBP".
+	// Declared and actual size are 8 bytes, with no room for the WEBP fourcc.
 	assertWebPRejected(t, data)
 }
 
-// TestWebpsan_FileLenInvalid — webpsan test `file_len_invalid` (lib.rs:423-430)
-// RIFF size > MAX_FILE_LEN (u32::MAX - 2 = 0xFFFFFFFD) → InvalidInput.
-// webpsan/src/lib.rs:64 — MAX_FILE_LEN = u32::MAX - 2
-// webpsan/src/lib.rs:113-117 — ensure_attach!(len <= MAX_FILE_LEN.into(), ...)
+// TestWebpsan_FileLenInvalid ports file_len_invalid (lib.rs:423-430): RIFF size above MAX_FILE_LEN is rejected.
 func TestWebpsan_FileLenInvalid(t *testing.T) {
 	data := make([]byte, 12)
 	copy(data[0:4], "RIFF")
@@ -240,8 +185,7 @@ func TestWebpsan_FileLenMaxValid(t *testing.T) {
 	copy(data[0:4], "RIFF")
 	binary.LittleEndian.PutUint32(data[4:8], maxWebPFileLen) // exactly at limit
 	copy(data[8:12], "WEBP")
-	// This will fail with "declared RIFF size exceeds actual data length",
-	// which means the MAX_FILE_LEN guard passed.
+	// A size-mismatch error means the MAX_FILE_LEN guard passed.
 	err := SanitizeWebP(data)
 	if err == nil {
 		t.Error("expected error (declared > actual), got nil")
@@ -252,9 +196,7 @@ func TestWebpsan_FileLenMaxValid(t *testing.T) {
 	}
 }
 
-// TestWebpsan_FileExtraData — webpsan test `file_extra_data` (lib.rs:432-441)
-// Trailing bytes after the declared RIFF payload → ExtraUnparsedInput.
-// webpsan/src/lib.rs:170-174 — ensure_attach!(!file_reader.has_remaining()?, ...)
+// TestWebpsan_FileExtraData ports file_extra_data (lib.rs:432-441): trailing bytes are rejected.
 func TestWebpsan_FileExtraData(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8LChunk(&chunks)
@@ -263,12 +205,10 @@ func TestWebpsan_FileExtraData(t *testing.T) {
 	assertWebPRejected(t, withExtra)
 }
 
-// TestWebpsan_ImageDataMissing — webpsan test `image_data_missing` (lib.rs:443-450)
-// Empty RIFF payload (no chunks after WEBP fourcc) → InvalidChunkLayout.
+// TestWebpsan_ImageDataMissing ports image_data_missing (lib.rs:443-450): no chunks after WEBP is rejected.
 func TestWebpsan_ImageDataMissing(t *testing.T) {
 	data := buildRIFF([]byte{}) // payload = only "WEBP" implied by buildRIFF...
-	// buildRIFF prepends "WEBP" inside the RIFF payload, so this is fine:
-	// the RIFF payload = "WEBP" + nothing. The reader sees no first chunk.
+	// The RIFF payload is "WEBP" and nothing else.
 	assertWebPRejected(t, data)
 }
 
@@ -300,9 +240,7 @@ func TestWebpsan_Vp8xLossy(t *testing.T) {
 	assertWebPAccepted(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xLossyAlphaLossless — webpsan test `vp8x_lossy_alpha_lossless` (lib.rs:464-469)
-// Extended: VP8X(HAS_ALPH) + ALPH(COMPRESS_LOSSLESS) + VP8 → accepted.
-// webpsan/src/lib.rs:207-246 (sanitize_still: ALPH before VP8/VP8L)
+// TestWebpsan_Vp8xLossyAlphaLossless ports vp8x_lossy_alpha_lossless (lib.rs:464-469): VP8X + lossless ALPH + VP8 is accepted.
 func TestWebpsan_Vp8xLossyAlphaLossless(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagAlpha, 0, 0)
@@ -311,8 +249,7 @@ func TestWebpsan_Vp8xLossyAlphaLossless(t *testing.T) {
 	assertWebPAccepted(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xLossyAlphaUncompressed — webpsan test `vp8x_lossy_alpha_uncompressed` (lib.rs:471-476)
-// Extended: VP8X(HAS_ALPH) + ALPH(no compression) + VP8 → accepted.
+// TestWebpsan_Vp8xLossyAlphaUncompressed ports vp8x_lossy_alpha_uncompressed (lib.rs:471-476): accepted.
 func TestWebpsan_Vp8xLossyAlphaUncompressed(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagAlpha, 0, 0)
@@ -331,9 +268,7 @@ func TestWebpsan_Vp8xLossless(t *testing.T) {
 	assertWebPAccepted(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xLosslessAlpha — webpsan test `vp8x_lossless_alpha` (lib.rs:482-489)
-// Extended: VP8X(HAS_ALPH) + ALPH + VP8L → REJECTED (VP8L not allowed with ALPH).
-// webpsan/src/lib.rs:226-227 — ensure_matches_attach!(alph, None, ..., WhileParsingChunk(VP8L))
+// TestWebpsan_Vp8xLosslessAlpha ports vp8x_lossless_alpha (lib.rs:482-489): ALPH + VP8L is rejected.
 func TestWebpsan_Vp8xLosslessAlpha(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagAlpha, 0, 0)
@@ -342,9 +277,7 @@ func TestWebpsan_Vp8xLosslessAlpha(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAnimated — webpsan test `vp8x_animated` (lib.rs:491-493)
-// Animated: VP8X(IS_ANIMATED) + ANIM + ANMF + ANMF → accepted.
-// webpsan/src/lib.rs:249-333 (sanitize_animated)
+// TestWebpsan_Vp8xAnimated ports vp8x_animated (lib.rs:491-493): ANIM + two ANMF is accepted.
 func TestWebpsan_Vp8xAnimated(t *testing.T) {
 	var frame bytes.Buffer
 	writeVP8LChunk(&frame)
@@ -358,9 +291,7 @@ func TestWebpsan_Vp8xAnimated(t *testing.T) {
 	assertWebPAccepted(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAnimatedEmpty — webpsan test `vp8x_animated_empty` (lib.rs:495-501)
-// Animated with no ANMF frames → MissingRequiredChunk(ANMF).
-// webpsan/src/lib.rs:254-258
+// TestWebpsan_Vp8xAnimatedEmpty ports vp8x_animated_empty (lib.rs:495-501): no ANMF is MissingRequiredChunk.
 func TestWebpsan_Vp8xAnimatedEmpty(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagAnim, 0, 0)
@@ -369,8 +300,7 @@ func TestWebpsan_Vp8xAnimatedEmpty(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAnimatedLossless — webpsan test `vp8x_animated_lossless` (lib.rs:503-511)
-// Animated: VP8X(IS_ANIMATED) + ANIM + 2×ANMF(VP8L) → accepted.
+// TestWebpsan_Vp8xAnimatedLossless ports vp8x_animated_lossless (lib.rs:503-511): accepted.
 func TestWebpsan_Vp8xAnimatedLossless(t *testing.T) {
 	var frame bytes.Buffer
 	writeVP8LChunk(&frame)
@@ -384,8 +314,7 @@ func TestWebpsan_Vp8xAnimatedLossless(t *testing.T) {
 	assertWebPAccepted(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAnimatedLossy — webpsan test `vp8x_animated_lossy` (lib.rs:513-519)
-// Animated: VP8X(IS_ANIMATED) + ANIM + 2×ANMF(VP8) → accepted.
+// TestWebpsan_Vp8xAnimatedLossy ports vp8x_animated_lossy (lib.rs:513-519): accepted.
 func TestWebpsan_Vp8xAnimatedLossy(t *testing.T) {
 	var frame bytes.Buffer
 	writeVP8Chunk(&frame)
@@ -415,9 +344,7 @@ func TestWebpsan_Vp8xAnimatedLossyLossless(t *testing.T) {
 	assertWebPAccepted(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAnimatedLosslessAlpha — webpsan test `vp8x_animated_lossless_alpha` (lib.rs:529-537)
-// Animated(HAS_ALPH): ANMF frames with ALPH+VP8L → REJECTED (VP8L+ALPH forbidden).
-// webpsan/src/lib.rs:291-292
+// TestWebpsan_Vp8xAnimatedLosslessAlpha ports vp8x_animated_lossless_alpha (lib.rs:529-537): ALPH + VP8L frames are rejected.
 func TestWebpsan_Vp8xAnimatedLosslessAlpha(t *testing.T) {
 	var frame bytes.Buffer
 	writeAlphChunk(&frame, 0x01)
@@ -431,8 +358,7 @@ func TestWebpsan_Vp8xAnimatedLosslessAlpha(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAnimatedLossyAlpha — webpsan test `vp8x_animated_lossy_alpha` (lib.rs:539-545)
-// Animated(HAS_ALPH): ANMF frames with ALPH+VP8 → accepted.
+// TestWebpsan_Vp8xAnimatedLossyAlpha ports vp8x_animated_lossy_alpha (lib.rs:539-545): accepted.
 func TestWebpsan_Vp8xAnimatedLossyAlpha(t *testing.T) {
 	var frame bytes.Buffer
 	writeAlphChunk(&frame, 0x01)
@@ -446,9 +372,7 @@ func TestWebpsan_Vp8xAnimatedLossyAlpha(t *testing.T) {
 	assertWebPAccepted(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAnimatedAlphaNoAlpha — webpsan test `vp8x_animated_alpha_no_alpha` (lib.rs:547-555)
-// Animated(HAS_ALPH): first frame has ALPH+VP8, second has only VP8 → accepted.
-// webpsan/src/lib.rs:271-281 (ALPH is optional within each frame even when HAS_ALPH is set)
+// TestWebpsan_Vp8xAnimatedAlphaNoAlpha ports vp8x_animated_alpha_no_alpha (lib.rs:547-555): ALPH is optional per frame.
 func TestWebpsan_Vp8xAnimatedAlphaNoAlpha(t *testing.T) {
 	var frameWithAlpha bytes.Buffer
 	writeAlphChunk(&frameWithAlpha, 0x01)
@@ -465,8 +389,7 @@ func TestWebpsan_Vp8xAnimatedAlphaNoAlpha(t *testing.T) {
 	assertWebPAccepted(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAnimatedNoAlphaAlpha — webpsan test `vp8x_animated_no_alpha_alpha` (lib.rs:557-565)
-// Animated(HAS_ALPH): first frame VP8 only, second ALPH+VP8 → accepted.
+// TestWebpsan_Vp8xAnimatedNoAlphaAlpha ports vp8x_animated_no_alpha_alpha (lib.rs:557-565): accepted.
 func TestWebpsan_Vp8xAnimatedNoAlphaAlpha(t *testing.T) {
 	var frameNoAlpha bytes.Buffer
 	writeVP8Chunk(&frameNoAlpha)
@@ -483,10 +406,7 @@ func TestWebpsan_Vp8xAnimatedNoAlphaAlpha(t *testing.T) {
 	assertWebPAccepted(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAnimatedAlphMissing — webpsan test `vp8x_animated_alph_missing` (lib.rs:567-573)
-// Animated(HAS_ALPH): single frame with VP8L (no ALPH) → accepted.
-// HAS_ALPH means ALPH may appear, not that it must.
-// webpsan/src/lib.rs:271-281 (alph is optional within ANMF even with HAS_ALPH flag)
+// TestWebpsan_Vp8xAnimatedAlphMissing ports vp8x_animated_alph_missing (lib.rs:567-573): HAS_ALPH permits but does not require ALPH.
 func TestWebpsan_Vp8xAnimatedAlphMissing(t *testing.T) {
 	var frame bytes.Buffer
 	writeVP8LChunk(&frame)
@@ -498,9 +418,7 @@ func TestWebpsan_Vp8xAnimatedAlphMissing(t *testing.T) {
 	assertWebPAccepted(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAnimatedAlphWrongOrder — webpsan test `vp8x_animated_alph_wrong_order` (lib.rs:575-582)
-// Animated: ANMF frame with VP8L then ALPH (wrong order) → InvalidChunkLayout.
-// webpsan/src/lib.rs:313-331 (ALPH after bitstream is a MultipleChunks error in ANMF)
+// TestWebpsan_Vp8xAnimatedAlphWrongOrder ports vp8x_animated_alph_wrong_order (lib.rs:575-582): ALPH after VP8L is rejected.
 func TestWebpsan_Vp8xAnimatedAlphWrongOrder(t *testing.T) {
 	var frame bytes.Buffer
 	writeVP8LChunk(&frame)
@@ -513,10 +431,7 @@ func TestWebpsan_Vp8xAnimatedAlphWrongOrder(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAnimatedUnexpectedAlph — webpsan test `vp8x_animated_unexpected_alph` (lib.rs:584-592)
-// Animated (no HAS_ALPH flag): frame has ALPH+VP8L → InvalidChunkLayout.
-// webpsan/src/lib.rs:283-311 (reads any header; ALPH without HAS_ALPH flag =
-// invalid chunk order as it's not the VP8/VP8L expected next)
+// TestWebpsan_Vp8xAnimatedUnexpectedAlph ports vp8x_animated_unexpected_alph (lib.rs:584-592): ALPH without HAS_ALPH is rejected.
 func TestWebpsan_Vp8xAnimatedUnexpectedAlph(t *testing.T) {
 	var frame bytes.Buffer
 	writeAlphChunk(&frame, 0x01)
@@ -538,10 +453,7 @@ func TestWebpsan_Vp8xImageDataMissing(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xUnexpectedAlph — webpsan test `vp8x_unexpected_alph` (lib.rs:602-609)
-// Extended (no HAS_ALPH): VP8X + ALPH + VP8L → InvalidChunkLayout.
-// webpsan/src/lib.rs:218-246 (no HAS_ALPH → sanitize_still reads bitstream directly;
-// seeing ALPH is "expected image data, got ALPH" error)
+// TestWebpsan_Vp8xUnexpectedAlph ports vp8x_unexpected_alph (lib.rs:602-609): ALPH without HAS_ALPH is rejected.
 func TestWebpsan_Vp8xUnexpectedAlph(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, 0x00, 0, 0) // no HAS_ALPH
@@ -550,9 +462,7 @@ func TestWebpsan_Vp8xUnexpectedAlph(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xUnexpectedAnim — webpsan test `vp8x_unexpected_anim` (lib.rs:611-618)
-// Extended (no IS_ANIMATED): VP8X + ANIM + ANMF → InvalidChunkLayout.
-// sanitize_still reads the next chunk; ANIM is not VP8/VP8L → error.
+// TestWebpsan_Vp8xUnexpectedAnim ports vp8x_unexpected_anim (lib.rs:611-618): ANIM without IS_ANIMATED is rejected.
 func TestWebpsan_Vp8xUnexpectedAnim(t *testing.T) {
 	var frame bytes.Buffer
 	writeVP8Chunk(&frame)
@@ -564,8 +474,7 @@ func TestWebpsan_Vp8xUnexpectedAnim(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xUnexpectedAnmf — webpsan test `vp8x_unexpected_anmf` (lib.rs:620-627)
-// Extended (no IS_ANIMATED): VP8X + ANMF only → InvalidChunkLayout.
+// TestWebpsan_Vp8xUnexpectedAnmf ports vp8x_unexpected_anmf (lib.rs:620-627): ANMF without IS_ANIMATED is rejected.
 func TestWebpsan_Vp8xUnexpectedAnmf(t *testing.T) {
 	var frame bytes.Buffer
 	writeVP8Chunk(&frame)
@@ -576,10 +485,7 @@ func TestWebpsan_Vp8xUnexpectedAnmf(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAlphMissing — webpsan test `vp8x_alph_missing` (lib.rs:629-636)
-// Extended (HAS_ALPH): VP8X + VP8L (no ALPH chunk) → InvalidChunkLayout.
-// sanitize_still: read_header(ALPH) but finds VP8L → expected ALPH error.
-// webpsan/src/lib.rs:208-216
+// TestWebpsan_Vp8xAlphMissing ports vp8x_alph_missing (lib.rs:629-636): HAS_ALPH without ALPH in a still image is rejected.
 func TestWebpsan_Vp8xAlphMissing(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagAlpha, 0, 0)
@@ -587,10 +493,7 @@ func TestWebpsan_Vp8xAlphMissing(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAnimMissing — webpsan test `vp8x_anim_missing` (lib.rs:638-645)
-// Extended (IS_ANIMATED): VP8X + ANMF (no ANIM) → InvalidChunkLayout.
-// sanitize_animated reads ANIM first; sees ANMF → expected ANIM error.
-// webpsan/src/lib.rs:250-252
+// TestWebpsan_Vp8xAnimMissing ports vp8x_anim_missing (lib.rs:638-645): ANMF without ANIM is rejected.
 func TestWebpsan_Vp8xAnimMissing(t *testing.T) {
 	var frame bytes.Buffer
 	writeVP8Chunk(&frame)
@@ -601,9 +504,7 @@ func TestWebpsan_Vp8xAnimMissing(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAnimAnmfMissing — webpsan test `vp8x_anim_anmf_missing` (lib.rs:647-654)
-// Extended (IS_ANIMATED): VP8X + ANIM only (no ANMF) → MissingRequiredChunk(ANMF).
-// webpsan/src/lib.rs:254-258
+// TestWebpsan_Vp8xAnimAnmfMissing ports vp8x_anim_anmf_missing (lib.rs:647-654): ANIM alone is MissingRequiredChunk.
 func TestWebpsan_Vp8xAnimAnmfMissing(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagAnim, 0, 0)
@@ -611,9 +512,7 @@ func TestWebpsan_Vp8xAnimAnmfMissing(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xICCP — webpsan test `vp8x_iccp` (lib.rs:656-659)
-// Extended (HAS_ICCP): VP8X + ICCP + VP8L → accepted.
-// webpsan/src/lib.rs:180-184
+// TestWebpsan_Vp8xICCP ports vp8x_iccp (lib.rs:656-659): accepted.
 func TestWebpsan_Vp8xICCP(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagICCP, 0, 0)
@@ -622,9 +521,7 @@ func TestWebpsan_Vp8xICCP(t *testing.T) {
 	assertWebPAccepted(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xEXIF — webpsan test `vp8x_exif` (lib.rs:661-664)
-// Extended (HAS_EXIF): VP8X + VP8L + EXIF → accepted.
-// webpsan/src/lib.rs:192-196
+// TestWebpsan_Vp8xEXIF ports vp8x_exif (lib.rs:661-664): accepted.
 func TestWebpsan_Vp8xEXIF(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagEXIF, 0, 0)
@@ -644,8 +541,7 @@ func TestWebpsan_Vp8xXMP(t *testing.T) {
 	assertWebPAccepted(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAllMeta — webpsan test `vp8x_all_meta` (lib.rs:671-675)
-// Extended (HAS_ICCP|HAS_EXIF|HAS_XMP): VP8X + ICCP + VP8L + EXIF + XMP → accepted.
+// TestWebpsan_Vp8xAllMeta ports vp8x_all_meta (lib.rs:671-675): ICCP, VP8L, EXIF and XMP are accepted.
 func TestWebpsan_Vp8xAllMeta(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagICCP|vp8xFlagEXIF|vp8xFlagXMP, 0, 0)
@@ -670,9 +566,7 @@ func TestWebpsan_Vp8xWrongOrder(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAlphWrongOrder — webpsan test `vp8x_alph_wrong_order` (lib.rs:685-691)
-// Extended: VP8X + VP8L + ALPH (ALPH after bitstream) → InvalidChunkLayout.
-// webpsan/src/lib.rs (after image data, ALPH in trailing loop → MultipleChunks)
+// TestWebpsan_Vp8xAlphWrongOrder ports vp8x_alph_wrong_order (lib.rs:685-691): ALPH after the bitstream is rejected.
 func TestWebpsan_Vp8xAlphWrongOrder(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, 0x00, 0, 0)
@@ -681,9 +575,7 @@ func TestWebpsan_Vp8xAlphWrongOrder(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xICCPWrongOrder — webpsan test `vp8x_iccp_wrong_order` (lib.rs:693-699)
-// Extended: VP8X + VP8L + ICCP (ICCP after image data) → InvalidChunkLayout.
-// The trailing-chunk loop sees ICCP → MultipleChunks.
+// TestWebpsan_Vp8xICCPWrongOrder ports vp8x_iccp_wrong_order (lib.rs:693-699): ICCP after image data is rejected.
 func TestWebpsan_Vp8xICCPWrongOrder(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, 0x00, 0, 0)
@@ -692,10 +584,7 @@ func TestWebpsan_Vp8xICCPWrongOrder(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xEXIFWrongOrder — webpsan test `vp8x_exif_wrong_order` (lib.rs:701-711)
-// Case 1: VP8X + EXIF + VP8L → InvalidChunkLayout (EXIF before image data).
-// Case 2: VP8X + VP8L + XMP + EXIF → InvalidChunkLayout (EXIF after XMP).
-// webpsan/src/lib.rs:192-196 (EXIF must follow image data, before XMP)
+// TestWebpsan_Vp8xEXIFWrongOrder ports vp8x_exif_wrong_order (lib.rs:701-711): EXIF before the image or after XMP is rejected.
 func TestWebpsan_Vp8xEXIFWrongOrder(t *testing.T) {
 	t.Run("exif_before_image", func(t *testing.T) {
 		var chunks bytes.Buffer
@@ -724,9 +613,7 @@ func TestWebpsan_Vp8xXMPWrongOrder(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xICCPMissing — webpsan test `vp8x_iccp_missing` (lib.rs:721-728)
-// Extended (HAS_ICCP): VP8X + VP8L (no ICCP) → InvalidChunkLayout.
-// sanitize_extended reads ICCP first but finds VP8L.
+// TestWebpsan_Vp8xICCPMissing ports vp8x_iccp_missing (lib.rs:721-728): HAS_ICCP without ICCP is rejected.
 func TestWebpsan_Vp8xICCPMissing(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagICCP, 0, 0)
@@ -734,8 +621,7 @@ func TestWebpsan_Vp8xICCPMissing(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xEXIFMissing — webpsan test `vp8x_exif_missing` (lib.rs:730-737)
-// Extended (HAS_EXIF): VP8X + VP8L (no EXIF) → MissingRequiredChunk(EXIF).
+// TestWebpsan_Vp8xEXIFMissing ports vp8x_exif_missing (lib.rs:730-737): HAS_EXIF without EXIF is MissingRequiredChunk.
 func TestWebpsan_Vp8xEXIFMissing(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagEXIF, 0, 0)
@@ -752,9 +638,7 @@ func TestWebpsan_Vp8xXMPMissing(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xICCPUnexpected — webpsan test `vp8x_iccp_unexpected` (lib.rs:748-755)
-// Extended (no HAS_ICCP): VP8X + ICCP + VP8L → InvalidChunkLayout.
-// sanitize_extended skips ICCP block; sanitize_still finds ICCP instead of VP8/VP8L.
+// TestWebpsan_Vp8xICCPUnexpected ports vp8x_iccp_unexpected (lib.rs:748-755): ICCP without HAS_ICCP is rejected.
 func TestWebpsan_Vp8xICCPUnexpected(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, 0x00, 0, 0) // no HAS_ICCP
@@ -763,9 +647,7 @@ func TestWebpsan_Vp8xICCPUnexpected(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xEXIFUnexpected — webpsan test `vp8x_exif_unexpected` (lib.rs:757-764)
-// Extended (no HAS_EXIF): VP8X + VP8L + EXIF → rejected.
-// After image data, EXIF in trailing loop → MultipleChunks.
+// TestWebpsan_Vp8xEXIFUnexpected ports vp8x_exif_unexpected (lib.rs:757-764): EXIF without HAS_EXIF is rejected.
 func TestWebpsan_Vp8xEXIFUnexpected(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, 0x00, 0, 0) // no HAS_EXIF
@@ -806,8 +688,7 @@ func TestWebpsan_LosslessMaxImageData(t *testing.T) {
 // Additional structural correctness tests (supplement the ported cases).
 // ---------------------------------------------------------------------------
 
-// TestWebpsan_Vp8xAllFlagsAllChunks verifies full extended layout:
-// ICCP + VP8 + EXIF + XMP with all four metadata flags set.
+// TestWebpsan_Vp8xAllFlagsAllChunks checks ICCP, VP8, EXIF and XMP with all four flags set.
 func TestWebpsan_Vp8xAllFlagsAllChunks(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagICCP|vp8xFlagEXIF|vp8xFlagXMP, 0, 0)
@@ -853,13 +734,7 @@ func TestWebpsan_PadByteZeroRequired(t *testing.T) {
 	assertWebPRejected(t, data)
 }
 
-// TestWebpsan_VP8XCanvasPixelOverflow verifies that VP8X chunk with canvas
-// dimensions whose product overflows uint32 is rejected.
-// webpsan/src/parse/vp8x.rs:57-60 — checked_mul overflow check.
-//
-// webpsan 0.5.3 has no per-dimension cap; only the pixel-count overflow check
-// rejects oversized canvases.  Use storedW = storedH = 0xFFFF (65535) so that
-// actual = 65536 and 65536 * 65536 = 4,294,967,296 > 0xFFFFFFFF.
+// TestWebpsan_VP8XCanvasPixelOverflow checks a 65536x65536 canvas, whose pixel count overflows uint32, is rejected (webpsan vp8x.rs:57-60).
 func TestWebpsan_VP8XCanvasPixelOverflow(t *testing.T) {
 	// storedW = storedH = 0xFFFF → actual = 65536 → pixel count 65536²>u32::MAX.
 	overSize := uint32(0xFFFF)
@@ -911,9 +786,7 @@ func TestWebpsan_VP8LTooShort(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_AnmfMissingImageData verifies that an ANMF frame with no image
-// chunk (only the 16-byte ANMF header, no VP8/VP8L inside) is rejected.
-// sanitizeWebPFrame: "WebP: ANMF frame missing image data"
+// TestWebpsan_AnmfMissingImageData checks an ANMF frame with no image chunk is rejected.
 func TestWebpsan_AnmfMissingImageData(t *testing.T) {
 	// Empty frame body (no VP8/VP8L inside the ANMF payload).
 	var chunks bytes.Buffer
@@ -923,9 +796,7 @@ func TestWebpsan_AnmfMissingImageData(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_AnmfFrameInvalidChunk verifies that an ANMF frame body that
-// starts with an unexpected chunk type (not ALPH/VP8/VP8L) is rejected.
-// sanitizeWebPFrame default case: "expected image data in ANMF, got …"
+// TestWebpsan_AnmfFrameInvalidChunk checks an ANMF body starting with a non-image chunk is rejected.
 func TestWebpsan_AnmfFrameInvalidChunk(t *testing.T) {
 	var frameBody bytes.Buffer
 	// ICCP inside frame body — totally unexpected.
@@ -938,9 +809,7 @@ func TestWebpsan_AnmfFrameInvalidChunk(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_AnimChunkTooShort verifies that an ANIM chunk shorter than 6
-// bytes is rejected.
-// webpsan/src/parse/anim.rs:23 — ENCODED_LEN = 6.
+// TestWebpsan_AnimChunkTooShort checks an ANIM chunk under 6 bytes is rejected.
 func TestWebpsan_AnimChunkTooShort(t *testing.T) {
 	// Build an ANIM chunk with only 4 bytes (too short).
 	shortAnim := []byte{0x00, 0x00, 0x00, 0x00} // 4 bytes, need 6
@@ -949,8 +818,7 @@ func TestWebpsan_AnimChunkTooShort(t *testing.T) {
 	writeVP8XChunk(&chunks, vp8xFlagAnim, 0, 0)
 	writeChunk(&chunks, "ANIM", shortAnim)
 
-	// We still need at least one ANMF to pass that check, but the ANIM
-	// length check fires first.
+	// One ANMF is still needed, but the ANIM length check fires first.
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
@@ -967,9 +835,7 @@ func TestWebpsan_VP8XSizeNot10(t *testing.T) {
 	}
 }
 
-// TestWebpsan_VP8LDimsMismatchInANMF verifies that a VP8L frame within an
-// ANMF whose dimensions don't match the VP8X canvas dims is rejected.
-// webpsan/src/lib.rs:294-301 — FrameDimensionsMismatch in animated path.
+// TestWebpsan_VP8LDimsMismatchInANMF checks a VP8L frame not matching the canvas is rejected (webpsan lib.rs:294-301).
 func TestWebpsan_VP8LDimsMismatchInANMF(t *testing.T) {
 	// VP8X canvas = 2×2 (storedW=1, storedH=1).
 	vp8xPayload := make([]byte, 10)
@@ -988,9 +854,7 @@ func TestWebpsan_VP8LDimsMismatchInANMF(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_AnmfFrameNoAlphFlag verifies that an ANMF frame with an ALPH
-// chunk when HAS_ALPH is not set is rejected.
-// sanitizeWebPFrame default branch: unexpected ALPH with no flag.
+// TestWebpsan_AnmfFrameNoAlphFlag checks ALPH in a frame without HAS_ALPH is rejected.
 func TestWebpsan_AnmfFrameNoAlphFlag(t *testing.T) {
 	var frameBody bytes.Buffer
 	writeAlphChunk(&frameBody, 0x00) // unexpected ALPH
@@ -1009,8 +873,7 @@ func TestWebpsan_SanitizeWebPNilInput(t *testing.T) {
 	}
 }
 
-// TestWebpsan_Vp8xAnimatedWithICCPFlag verifies animated file with ICCP:
-// VP8X(IS_ANIMATED|HAS_ICCP) + ICCP + ANIM + ANMF → accepted.
+// TestWebpsan_Vp8xAnimatedWithICCPFlag checks VP8X(IS_ANIMATED|HAS_ICCP) + ICCP + ANIM + ANMF is accepted.
 func TestWebpsan_Vp8xAnimatedWithICCPFlag(t *testing.T) {
 	var frame bytes.Buffer
 	writeVP8Chunk(&frame)
@@ -1023,8 +886,7 @@ func TestWebpsan_Vp8xAnimatedWithICCPFlag(t *testing.T) {
 	assertWebPAccepted(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xStillWithAllMetaFlags verifies still image with all flags:
-// VP8X(HAS_ICCP|HAS_ALPH|HAS_EXIF|HAS_XMP) + ICCP + ALPH + VP8 + EXIF + XMP → accepted.
+// TestWebpsan_Vp8xStillWithAllMetaFlags checks a still image with every flag and chunk is accepted.
 func TestWebpsan_Vp8xStillWithAllMetaFlags(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagICCP|vp8xFlagAlpha|vp8xFlagEXIF|vp8xFlagXMP, 0, 0)
@@ -1036,13 +898,9 @@ func TestWebpsan_Vp8xStillWithAllMetaFlags(t *testing.T) {
 	assertWebPAccepted(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_TruncatedChunkInPeek verifies that a RIFF payload ending with
-// fewer than 8 bytes remaining (not enough for a chunk header) is rejected.
-// This exercises the peekFourCC truncated-header error path.
+// TestWebpsan_TruncatedChunkInPeek checks a payload ending with under 8 bytes is rejected.
 func TestWebpsan_TruncatedChunkInPeek(t *testing.T) {
-	// VP8X + ANIM + truncated ANMF header (only 4 bytes).
-	// The animated state machine peeks for ANMF after ANIM.
-	// With 4 bytes remaining (not 8), peekFourCC returns a truncation error.
+	// VP8X + ANIM + a 4-byte ANMF header, so peekFourCC reports truncation.
 	vp8xPayload := make([]byte, 10)
 	vp8xPayload[0] = vp8xFlagAnim
 
@@ -1070,9 +928,7 @@ func TestWebpsan_TruncatedChunkInPeek(t *testing.T) {
 	assertWebPRejected(t, buf.Bytes())
 }
 
-// TestWebpsan_Vp8xExtendedICCPError verifies that a VP8X(HAS_ICCP) file where
-// the chunk after VP8X is not ICCP is rejected.
-// sanitizeWebPExtended: expected ICCP, got something else.
+// TestWebpsan_Vp8xExtendedICCPError checks HAS_ICCP with a non-ICCP next chunk is rejected.
 func TestWebpsan_Vp8xExtendedICCPError(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagICCP, 0, 0)
@@ -1081,9 +937,7 @@ func TestWebpsan_Vp8xExtendedICCPError(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xExtendedEXIFError verifies that a VP8X(HAS_EXIF) file where
-// the chunk after the image is not EXIF is rejected.
-// sanitizeWebPExtended: expected EXIF, got something else.
+// TestWebpsan_Vp8xExtendedEXIFError checks HAS_EXIF with a non-EXIF chunk after the image is rejected.
 func TestWebpsan_Vp8xExtendedEXIFError(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagEXIF, 0, 0)
@@ -1093,9 +947,7 @@ func TestWebpsan_Vp8xExtendedEXIFError(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xExtendedXMPError verifies that a VP8X(HAS_XMP) file where
-// the chunk after EXIF is not XMP is rejected.
-// sanitizeWebPExtended: expected XMP, got something else.
+// TestWebpsan_Vp8xExtendedXMPError checks HAS_XMP with a non-XMP chunk after EXIF is rejected.
 func TestWebpsan_Vp8xExtendedXMPError(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagEXIF|vp8xFlagXMP, 0, 0)
@@ -1106,9 +958,7 @@ func TestWebpsan_Vp8xExtendedXMPError(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xAnimatedExpectedANIMError verifies that when IS_ANIMATED is
-// set, the chunk after VP8X must be ANIM; anything else is rejected.
-// sanitizeWebPAnimated: expected ANIM, got VP8.
+// TestWebpsan_Vp8xAnimatedExpectedANIMError checks IS_ANIMATED with a non-ANIM next chunk is rejected.
 func TestWebpsan_Vp8xAnimatedExpectedANIMError(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagAnim, 0, 0)
@@ -1117,8 +967,7 @@ func TestWebpsan_Vp8xAnimatedExpectedANIMError(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Vp8xStillExpectedAlphError verifies that when HAS_ALPH is set,
-// the chunk after VP8X must be ALPH; anything else is rejected.
+// TestWebpsan_Vp8xStillExpectedAlphError checks HAS_ALPH with a non-ALPH next chunk is rejected.
 func TestWebpsan_Vp8xStillExpectedAlphError(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, vp8xFlagAlpha, 0, 0)
@@ -1144,9 +993,7 @@ func TestWebpsan_StillVP8LDimsMismatch(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_StillExpectedImageError verifies that after optional ALPH the
-// next chunk must be VP8 or VP8L; anything else is rejected.
-// sanitizeWebPStill: "expected image data, got …"
+// TestWebpsan_StillExpectedImageError checks a non-image chunk after optional ALPH is rejected.
 func TestWebpsan_StillExpectedImageError(t *testing.T) {
 	var chunks bytes.Buffer
 	writeVP8XChunk(&chunks, 0x00, 0, 0)
@@ -1155,8 +1002,7 @@ func TestWebpsan_StillExpectedImageError(t *testing.T) {
 	assertWebPRejected(t, buildWebPPayload(&chunks))
 }
 
-// TestWebpsan_Validate_RejectsJPEG verifies that Validate rejects JPEG input
-// (routed to goextensions, not handled by Validate).
+// TestWebpsan_Validate_RejectsJPEG checks Validate rejects JPEG, which goextensions handles.
 func TestWebpsan_Validate_RejectsJPEG(t *testing.T) {
 	jpegData := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01}
 	_, err := Validate(jpegData)

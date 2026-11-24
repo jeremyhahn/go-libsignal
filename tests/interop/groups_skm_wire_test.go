@@ -1,30 +1,4 @@
-// Conformance test: SenderKeyMessage wire parity vs Rust libsignal.
-//
-// The fixture contains the full SenderKeyDistributionMessage bytes (which carry
-// the chain key and signing public key) and the encrypted SenderKeyMessage
-// expected bytes. The signing key *private* key is NOT in the fixture inputs,
-// so the 64-byte Ed25519 signature on the SenderKeyMessage cannot be reproduced.
-//
-// Assertion strategy: DECRYPT-AND-MATCH (decrypt the ciphertext inside the
-// Rust-emitted SenderKeyMessage and verify the recovered plaintext equals the
-// fixture plaintext).
-//
-//  1. Deserialize the expected SenderKeyMessage from expected.serialized.
-//  2. Rebuild the SenderChainKey from the SKDM's chain_key at iteration 0.
-//  3. Derive the SenderMessageKey (iteration 0) from the SenderChainKey.
-//  4. Use the SenderMessageKey's IV and CipherKey to decrypt the ciphertext
-//     field of the SenderKeyMessage with AES-256-CBC.
-//  5. Assert the decrypted bytes equal the fixture plaintext.
-//
-// Additionally:
-//  - Verify the distribution ID, chain ID (key ID), and iteration embedded in
-//    the SenderKeyMessage match the fixture inputs.
-//  - Verify the message version byte is 0x33 (version 3 in high nibble).
-//
-// Full bytes-equal on the SenderKeyMessage would require the signing key private
-// key to be added to the fixture; if added in a future RUST_REV bump, upgrade.
-//
-// Rust upstream: rust/protocol/src/group_cipher.rs (libsignal v0.92.2)
+// SenderKeyMessage parity: decrypt the Rust message with the SKDM chain key and match the plaintext, IDs, iteration and version 0x33; the fixture lacks the signing key.
 
 package interop
 
@@ -59,9 +33,7 @@ type groupsSKMWireFixture struct {
 	} `json:"vectors"`
 }
 
-// TestGroupsSKMWire decrypts the ciphertext field inside the Rust-emitted
-// SenderKeyMessage using the chain key from the SKDM and asserts the recovered
-// plaintext matches the fixture.
+// TestGroupsSKMWire decrypts the Rust SenderKeyMessage with the SKDM chain key and checks the plaintext.
 func TestGroupsSKMWire(t *testing.T) {
 	raw := loader.MustRead("wire/senderkey_message.json")
 
@@ -115,9 +87,7 @@ func TestGroupsSKMWire(t *testing.T) {
 			// Rebuild the SenderChainKey at the SKDM's iteration.
 			chainKey := ratchet.NewSenderChainKey(skdm.Iteration(), skdm.ChainKey())
 
-			// Derive the SenderMessageKey for iteration == skm.Iteration().
-			// If the SKDM iteration equals the SKM iteration, use the first message key.
-			// If the SKM is ahead, advance the chain accordingly.
+			// Derive the message key for skm.Iteration(), advancing the chain if needed.
 			skmIteration := skm.Iteration()
 			skdmIteration := skdm.Iteration()
 
@@ -143,7 +113,7 @@ func TestGroupsSKMWire(t *testing.T) {
 					err, skm.Ciphertext(), msgKey.Iv(), msgKey.CipherKey())
 			}
 
-			// DECRYPT-AND-MATCH: the recovered plaintext must equal the fixture plaintext.
+			// The recovered plaintext must equal the fixture plaintext.
 			if !bytes.Equal(gotPlaintext, wantPlaintext) {
 				t.Errorf("decrypted plaintext mismatch:\n  got  %x\n  want %x",
 					gotPlaintext, wantPlaintext)
@@ -151,8 +121,7 @@ func TestGroupsSKMWire(t *testing.T) {
 
 			// Verify the iteration field.
 			if skm.Iteration() != skdm.Iteration() {
-				// The message is at the same iteration as the SKDM since this is
-				// the first message in the chain.
+				// This first message shares the SKDM's iteration.
 				t.Logf("note: SKM iteration=%d, SKDM iteration=%d",
 					skm.Iteration(), skdm.Iteration())
 			}

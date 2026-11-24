@@ -1,15 +1,7 @@
 // Copyright 2024 Signal Messenger, LLC.
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package attest provides encryption / decryption of messages for established
-// Noise protocol sessions used in Signal's attestation-based enclave
-// communication.
-//
-// Once a noise handshake has already completed (using the constant pattern
-// provided below), messages can be encrypted into one or more noise transport
-// messages for sending with ClientConnection.Send. Likewise a single received
-// message consisting internally of one or more noise transport messages can be
-// decrypted with ClientConnection.Recv.
+// Package attest encrypts and decrypts messages over completed Noise sessions with Signal's attested enclaves.
 package attest
 
 import (
@@ -78,10 +70,7 @@ type ClientConnection struct {
 	recvCipher noiseCipher
 }
 
-// Send wraps a plaintext message to be sent, returning the ciphertext.
-//
-// Matches Rust libsignal attest/src/client_connection.rs ClientConnection::send:
-// empty input produces an empty output (zero chunks iterated, empty Vec returned).
+// Send encrypts a plaintext; empty input gives empty output, as Rust ClientConnection::send.
 func (c *ClientConnection) Send(plaintext []byte) ([]byte, error) {
 	// div_ceil(len, max) * overhead — matches Rust capacity calculation.
 	// For empty input this evaluates to 0, so we allocate nothing.
@@ -111,8 +100,7 @@ type destroyable interface {
 	Destroy()
 }
 
-// Destroy zeroizes the key material held by the cipher states, if they support it.
-// This should be called when the ClientConnection is no longer needed.
+// Destroy zeroizes the cipher states' key material.
 func (c *ClientConnection) Destroy() {
 	if d, ok := c.sendCipher.(destroyable); ok {
 		d.Destroy()

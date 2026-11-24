@@ -23,11 +23,7 @@ func newAESBlock(s *secret.Secret) (cipher.Block, error) {
 	return block, err
 }
 
-// newHMAC builds an HMAC-SHA256 from the key in s inside a WithBytes borrow.
-// hmac.New copies the key into its own pads, so the view does not outlive
-// the borrow. A nil, empty or destroyed key is refused: WithBytes calls fn
-// with a nil view for a nil or zero Secret, and an HMAC under an empty key
-// would let anyone forge a valid tag.
+// newHMAC builds an HMAC-SHA256 from the key in s; a nil, empty or destroyed key is refused.
 func newHMAC(s *secret.Secret) (hash.Hash, error) {
 	var mac hash.Hash
 	err := s.WithBytes(func(key []byte) error {

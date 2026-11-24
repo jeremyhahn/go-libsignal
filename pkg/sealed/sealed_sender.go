@@ -29,11 +29,7 @@ const (
 	// hkdfOutputLen is the total HKDF output size: chain_key(32) + cipher_key(32) + mac_key(32).
 	hkdfOutputLen = 96
 
-	// v1SaltPrefix is the prefix prepended to the two public keys when
-	// constructing the HKDF salt for sealed sender v1. Per the Rust
-	// reference (EphemeralKeys::calculate / StaticKeys::calculate), the
-	// salt is "UnidentifiedDelivery" || their_pub || eph_pub; this
-	// constant is NOT the HKDF info parameter (which is always empty).
+	// v1SaltPrefix starts the v1 HKDF salt "UnidentifiedDelivery" || their_pub || eph_pub; the info is empty.
 	v1SaltPrefix = "UnidentifiedDelivery"
 )
 
@@ -46,9 +42,7 @@ type SealedSenderDecryptionResult struct {
 	Message    []byte
 }
 
-// SealedSenderEncrypt encrypts a message using the sealed sender v1 protocol.
-// It first encrypts the plaintext using a session cipher, then wraps it in a
-// USMC structure, and finally applies the sealed sender encryption layer.
+// SealedSenderEncrypt encrypts with the session cipher, wraps the result in a USMC and seals it with sealed sender v1.
 func SealedSenderEncrypt(
 	destination *protocol.SignalAddress,
 	senderCert *SenderCertificate,
@@ -56,19 +50,14 @@ func SealedSenderEncrypt(
 	sessionStore store.Session,
 	identityStore store.IdentityKey,
 ) ([]byte, error) {
-	// Guard the certificate before dereferencing it for the sender address
-	// below: a nil cert must surface as a typed CertificateError rather than a
-	// nil-pointer panic (the inner USMC build would reject it anyway).
+	// A nil certificate is a CertificateError, not a panic.
 	if senderCert == nil {
 		return nil, &CertificateError{Detail: "sealed sender encrypt: nil sender certificate"}
 	}
 
 	serializer := serialize.NewProtobufSerializer()
 
-	// Build the sender's own address so the inner SignalMessage's addresses
-	// field (proto field 6) is populated, enabling address binding.
-	// Mirrors Rust sealed_sender_encrypt which forwards the sender address as
-	// local to message_encrypt: rust/protocol/src/sealed_sender.rs:2056-2069.
+	// Pass the sender address so the inner SignalMessage carries address binding, as Rust sealed_sender_encrypt does.
 	senderAddr := protocol.NewSignalAddress(senderCert.SenderUUID(), senderCert.SenderDevice())
 
 	sessionBuilder := session.NewBuilder(
@@ -112,12 +101,7 @@ func SealedSenderEncrypt(
 	return SealedSenderEncryptFromUSMC(destination, usmc, identityStore)
 }
 
-// SealedSenderEncryptFromUSMC encrypts a pre-built USMC for a single recipient
-// using the sealed sender v1 protocol.
-//
-// The protocol performs a two-layer encryption:
-//  1. Encrypt our identity public key using an ephemeral ECDH exchange.
-//  2. Encrypt the USMC payload using a second ECDH exchange with our identity key.
+// SealedSenderEncryptFromUSMC seals a USMC for one recipient with v1: one ECDH layer hides our identity key, a second encrypts the USMC.
 func SealedSenderEncryptFromUSMC(
 	destination *protocol.SignalAddress,
 	usmc *UnidentifiedSenderMessageContent,
@@ -235,8 +219,7 @@ func SealedSenderEncryptFromUSMC(
 	}
 	defer keys2Secret.Destroy()
 
-	// keys2[:32] is chain_key2 (unused)
-	// Step 5: Encrypt the USMC serialized with AES-CTR, append truncated HMAC.
+	// keys2[:32] is the unused chain key; encrypt the USMC with AES-CTR and append the truncated HMAC.
 	var encryptedMessageWithMAC []byte
 	err = keys2Secret.WithBytes(func(keys2 []byte) error {
 		cipherKey2, macKey2 := keys2[32:64], keys2[64:96]
@@ -271,13 +254,7 @@ func SealedSenderEncryptFromUSMC(
 	return result, nil
 }
 
-// SealedSenderDecryptToUSMC decrypts a sealed sender message to extract
-// the UnidentifiedSenderMessageContent. This performs the reverse of the
-// two-layer encryption without validating the sender certificate.
-//
-// For v2 messages (version 0x22 or 0x23), use SealedSenderV2DecryptToUSMC
-// instead, which requires the recipient's ServiceId. This function dispatches
-// to v2 when a recipientServiceId is provided via the optional parameter.
+// SealedSenderDecryptToUSMC unseals a message to its USMC without validating the sender certificate; a recipient ServiceId selects the v2 sent format.
 func SealedSenderDecryptToUSMC(
 	ciphertext []byte,
 	identityStore store.IdentityKey,
@@ -289,13 +266,7 @@ func SealedSenderDecryptToUSMC(
 
 	version := ciphertext[0]
 
-	// Handle v2 messages. The v2 protocol has two formats:
-	// - Sent format (multi-recipient): requires a ServiceId to locate per-recipient data
-	// - Received format (single-recipient): server has already extracted per-recipient data
-	//
-	// When a ServiceId is provided, use the sent format parser (SealedSenderV2DecryptToUSMC).
-	// When no ServiceId is provided, use the received format parser
-	// (SealedSenderV2DecryptReceivedToUSMC), which is what clients normally receive.
+	// v2: with a ServiceId parse the multi-recipient sent format, otherwise the received format clients normally get.
 	if version == SealedSenderV2VersionUUID || version == SealedSenderV2VersionServiceId {
 		if len(recipientServiceId) == 0 {
 			return SealedSenderV2DecryptReceivedToUSMC(ciphertext, identityStore)
@@ -448,10 +419,7 @@ func SealedSenderDecryptToUSMC(
 		return nil, usmcErr
 	}
 
-	// Verify the decrypted static key matches the sender's identity key in the
-	// certificate. This prevents an attacker from replacing the sender certificate
-	// inside the encrypted USMC with a different identity. The Rust reference
-	// performs this check with message_key_bytes.ct_eq(&usmc.sender()?.key()?.serialize()).
+	// The decrypted static key must equal the certificate's identity key, as in Rust.
 	senderKeyBytes := usmc.Sender().Key().Serialize()
 	if subtle.ConstantTimeCompare(staticKeyBytes, senderKeyBytes) != 1 {
 		return nil, ErrSenderKeyMismatch
@@ -512,14 +480,7 @@ func SealedSenderDecryptWithKyber(
 		return nil, &CertificateError{Detail: "sender certificate validation failed"}
 	}
 
-	// Step 3: Check for self-send.
-	// A message is considered a self-send if the sender's UUID OR E164
-	// matches the local identity AND the device ID matches.
-	//
-	// Byte-for-byte parity with Rust libsignal v0.92.2 (RUST_REV
-	// 98915c442d): rust/protocol/src/sealed_sender.rs:2025-2033 applies
-	// the same `(is_local_uuid || is_local_e164) && device_id == local`
-	// predicate before returning SealedSenderSelfSend.
+	// A self-send is a local UUID or E164 with the local device ID, as in Rust.
 	isLocalUUID := senderCert.SenderUUID() == localUUID
 	isLocalE164 := false
 	if localE164 != nil && *localE164 != "" {
@@ -565,10 +526,7 @@ func SealedSenderDecryptWithKyber(
 			return nil, err
 		}
 
-		// Build local address so the inner SignalMessage verify uses
-		// VerifyMacWithAddresses (address binding). Mirrors Rust
-		// rust/protocol/src/sealed_sender.rs:2056-2069 which forwards
-		// Some(local_address) to message_decrypt_prekey.
+		// Pass the local address so the inner verify checks address binding, as Rust does.
 		localAddress := protocol.NewSignalAddress(localUUID, localDeviceID)
 
 		sessionBuilder := buildSessionBuilder()
@@ -588,12 +546,7 @@ func SealedSenderDecryptWithKyber(
 			return nil, err
 		}
 
-		// Build local address so the inner SignalMessage verify uses
-		// VerifyMacWithAddresses (address binding), matching the PREKEY
-		// branch above. Messages that carry no address-binding field still
-		// verify — VerifyMacWithAddresses accepts an empty binding for
-		// backward compatibility — so this only closes the
-		// address-substitution downgrade for senders that do bind.
+		// Pass the local address here too; messages without a binding field still verify.
 		localAddress := protocol.NewSignalAddress(localUUID, localDeviceID)
 
 		sessionBuilder := buildSessionBuilder()
@@ -634,17 +587,7 @@ func truncatedHMAC(key, data []byte) []byte {
 	return full[:macTruncateLen]
 }
 
-// getRecipientIdentityKey retrieves the recipient's identity public key from
-// the identity store using the GetIdentity method required by store.IdentityKey.
-//
-// Compile-time guarantee: every store.IdentityKey implementation must provide
-// GetIdentity, so there is no silent runtime fallback. If the store has no
-// record for the address, GetIdentity returns (nil, nil) and this function
-// returns IdentityStoreError to the caller.
-//
-// Rust libsignal counterpart: rust/protocol/src/sealed_sender.rs — the
-// recipient public key is obtained directly from the identity store trait via
-// get_identity which is mandated on IdentityKeyStore.
+// getRecipientIdentityKey returns the recipient's identity key from the store, or IdentityStoreError when none is recorded.
 func getRecipientIdentityKey(
 	address *protocol.SignalAddress,
 	identityStore store.IdentityKey,

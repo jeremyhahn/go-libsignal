@@ -1,14 +1,4 @@
-// Package main demonstrates a minimal Alice-to-Bob single-message exchange
-// using the Signal Protocol X3DH key agreement and Double Ratchet encryption.
-//
-// Flow:
-//  1. Generate identity key pairs and pre-key bundles for Alice and Bob.
-//  2. Alice builds a session by processing Bob's pre-key bundle (X3DH).
-//  3. Alice encrypts "Hello, Bob!" producing a PreKeySignalMessage.
-//  4. Bob processes the PreKeySignalMessage to establish his side of the session.
-//  5. Bob decrypts and recovers the plaintext.
-//
-// Run: GOWORK=off go run ./examples/simple-session/
+// Package main exchanges one X3DH and Double Ratchet message from Alice to Bob; run with GOWORK=off go run ./examples/simple-session/.
 package main
 
 import (
@@ -249,10 +239,7 @@ func main() {
 		log.Fatalf("Alice ProcessBundle: %v", err)
 	}
 
-	// Alice encrypts "Hello, Bob!". Passing Alice's own address as localAddress
-	// activates address binding (SignalMessage field 6), which is what Rust
-	// libsignal always does when the local address is known; the two-argument
-	// NewCipher leaves the message unbound and open to address substitution.
+	// Passing Alice's own address binds the message to it (SignalMessage field 6), as Rust libsignal does.
 	aliceCipher := session.NewCipherWithLocalAddress(aliceBuilder, aliceAddress, bobAddress)
 	ciphertext, err := aliceCipher.Encrypt([]byte("Hello, Bob!"))
 	if err != nil {

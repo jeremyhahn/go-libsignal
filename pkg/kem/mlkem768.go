@@ -6,12 +6,7 @@ import (
 	crypto "github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 )
 
-// MLKEM768KEM implements the KEM interface using NIST ML-KEM-768 (FIPS 203).
-// It uses Go's standard library crypto/mlkem package for a standards-conformant
-// implementation.
-//
-// Rust source: libsignal/rust/protocol/src/kem.rs — mlkem768 feature
-// (libcrux_ml_kem::mlkem768).
+// MLKEM768KEM implements KEM with ML-KEM-768 (FIPS 203) from crypto/mlkem.
 type MLKEM768KEM struct{}
 
 // NewMLKEM768KEM returns a new MLKEM768KEM instance.

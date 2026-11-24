@@ -1,16 +1,4 @@
-// Package main demonstrates SenderKey group messaging with three participants.
-//
-// Flow:
-//  1. Alice creates a group session and obtains a SenderKeyDistributionMessage (SKDM).
-//  2. Alice distributes the SKDM to Bob and Charlie (they each call Process).
-//  3. Alice encrypts "Hello, group!" with her GroupCipher.
-//  4. Bob and Charlie each independently decrypt the message.
-//
-// The example uses a single distribution ID shared by all participants. The
-// SenderKeyName binds the group ID (derived from the distribution UUID) to
-// the sender's SignalAddress, ensuring each sender's key chain is independent.
-//
-// Run: GOWORK=off go run ./examples/group-messaging/
+// Package main demonstrates SenderKey group messaging with three participants; run: GOWORK=off go run ./examples/group-messaging/
 package main
 
 import (

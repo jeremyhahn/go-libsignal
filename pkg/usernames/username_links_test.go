@@ -121,15 +121,7 @@ func TestUsernameLinksLongestValid(t *testing.T) {
 	}
 }
 
-// TestDecodeUsernameData_SkipsFixed64WireType verifies that the protobuf
-// decoder skips wire type 1 (64-bit fixed) unknown fields instead of
-// returning an error, matching PROST's unknown-field behaviour.
-// This guards against future upstream additions of fixed-width fields to
-// UsernameData breaking backward compatibility.
-//
-// The tag byte must fit in a single byte; field numbers 1-15 with wire
-// types 0-7 all encode as a single byte: (fieldNum<<3)|wireType.
-// Field 3, wire type 1 encodes as byte 0x19.
+// TestDecodeUsernameData_SkipsFixed64WireType checks unknown fixed64 fields (tag 0x19) are skipped, as prost does.
 func TestDecodeUsernameData_SkipsFixed64WireType(t *testing.T) {
 	// Build a protobuf message with:
 	//   field 1 (string username, wire type 2, tag=0x0a): "ab.01"
@@ -153,11 +145,7 @@ func TestDecodeUsernameData_SkipsFixed64WireType(t *testing.T) {
 	}
 }
 
-// TestDecodeUsernameData_SkipsFixed32WireType verifies that the protobuf
-// decoder skips wire type 5 (32-bit fixed) unknown fields instead of
-// returning an error, matching PROST's unknown-field behaviour.
-//
-// Field 3, wire type 5 encodes as byte 0x1d.
+// TestDecodeUsernameData_SkipsFixed32WireType checks unknown fixed32 fields (tag 0x1d) are skipped, as prost does.
 func TestDecodeUsernameData_SkipsFixed32WireType(t *testing.T) {
 	var buf []byte
 	// tag for field 1, wire type 2: (1<<3)|2 = 0x0a
@@ -210,12 +198,7 @@ func TestDecodeUsernameData_TruncatedFixed32(t *testing.T) {
 	}
 }
 
-// TestDecodeUsernameData_VarintLengthOverflow verifies that a crafted protobuf
-// field whose varint-encoded length is 2^63 (0x80 × 9 + 0x01) returns a
-// ProtobufError instead of panicking. Before the fix, int(2^63) is the minimum
-// int64 value (-9223372036854775808), which made the bounds check
-// "i+int(length) > len(data)" evaluate to false (bypassed) and then caused
-// data[i : i+int(length)] to panic with a high<low slice index.
+// TestDecodeUsernameData_VarintLengthOverflow checks a length of 2^63 returns a ProtobufError, not a panic.
 func TestDecodeUsernameData_VarintLengthOverflow(t *testing.T) {
 	// Build a minimal protobuf message:
 	//   field 1 (string, wire type 2, tag 0x0a): length = 2^63, no payload

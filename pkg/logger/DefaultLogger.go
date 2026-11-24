@@ -72,14 +72,7 @@ func (d *defaultLogger) Error(caller, msg string) {
 	d.log("ERROR", caller, msg)
 }
 
-// Configure takes a configuration string separated by commas
-// that contains all the callers that should be logged. This
-// allows granular logging of different go files.
-//
-// Example:
-//
-//	logger.Configure("RootKey.go,Curve.go")
-//	logger.Configure("all")
+// Configure sets the comma-separated caller files to log, or "all", e.g. logger.Configure("RootKey.go,Curve.go").
 func (d *defaultLogger) Configure(settings string) {
 	d.namespaces = strings.Split(settings, ",")
 }

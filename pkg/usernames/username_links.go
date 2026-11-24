@@ -14,18 +14,11 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
-// CreateForUsername encrypts a username into a username link.
-//
-// If entropy is nil, random entropy is generated. The entropy used and the
-// encrypted buffer are returned. The encrypted buffer can be decrypted with
-// DecryptUsername using the same entropy.
+// CreateForUsername encrypts username into a link, using random entropy if nil, and returns the entropy and the buffer.
 func CreateForUsername(username string, entropy []byte) ([UsernameLinkEntropySize]byte, []byte, error) {
 	const aesBlockSize = 16
 
-	// Encode username data: simple length-prefixed format.
-	// We use a minimal protobuf-compatible encoding:
-	// field 1 (string): tag=0x0a, then varint length, then bytes
-	// field 2 (bytes): tag=0x12, then varint length, then padding bytes
+	// Protobuf encoding: field 1 username (0x0a), field 2 padding (0x12).
 	paddingLen := (aesBlockSize * 3) - len(username)
 	if paddingLen < 0 {
 		paddingLen = 0
@@ -203,11 +196,7 @@ func pkcs7Unpad(data []byte) ([]byte, error) {
 	return data[:len(data)-padLen], nil
 }
 
-// --- Simple protobuf-like encoding for UsernameData ---
-// UsernameData has two fields:
-//   field 1 (string): username
-//   field 2 (bytes): padding
-// We use standard protobuf encoding.
+// UsernameData protobuf encoding: field 1 username, field 2 padding.
 
 func encodeUsernameData(username string, paddingLen int) []byte {
 	var buf []byte
@@ -262,10 +251,7 @@ func decodeUsernameData(data []byte) (string, error) {
 				return "", err
 			}
 			i += n
-			// Guard against varint values >= 2^63: int(length) would be
-			// negative, bypassing the bounds check and causing a slice panic.
-			// Compare in uint64 so the check is always correct regardless of
-			// the sign of the cast.
+			// Compare in uint64 so a length of 2^63 or more cannot pass the bounds check.
 			if length > uint64(len(data)-i) {
 				return "", &ProtobufError{Detail: "field extends past end of data"}
 			}

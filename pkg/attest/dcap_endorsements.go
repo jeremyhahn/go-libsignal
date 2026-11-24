@@ -71,8 +71,7 @@ type qeTcbLevel struct {
 	tcbStatus string
 }
 
-// tcbStatus returns the TCB status for the given ISVSVN.
-// It finds the first level where the given ISVSVN >= the level's ISVSVN.
+// tcbStatus returns the status of the first level whose ISVSVN the given ISVSVN meets.
 func (e *enclaveIdentity) tcbStatusForISVSVN(isvsvn uint16) (string, error) {
 	for _, level := range e.tcbLevels {
 		if isvsvn >= level.isvsvn {
@@ -526,12 +525,7 @@ func toCamelCase(s string) string {
 	return s
 }
 
-// parseCRL parses a DER-encoded CRL.
-// Empty data is a typed error: the Rust libsignal reference (dcap/revocation_list.rs)
-// treats absent CRL fields as a hard failure, not a pass-through. Callers must
-// supply both CRLs from the endorsements; an attacker stripping them is rejected here.
-// The Authority Key Identifier and CRL Number extensions are mandatory per the
-// Rust reference (revocation_list.rs requires AKI + CRL-number before trusting any CRL).
+// parseCRL parses a DER CRL; empty data, or a missing AKI or CRL Number, is an error, as in Rust libsignal.
 func parseCRL(data []byte) (*x509.RevocationList, error) {
 	if len(data) == 0 {
 		return nil, &CRLMissingError{Detail: "CRL data is empty"}

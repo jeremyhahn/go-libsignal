@@ -5,10 +5,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// plaintextContextIdentifierByte tags a serialized PlaintextContent. Mirrors
-// PlaintextContent::PLAINTEXT_CONTEXT_IDENTIFIER_BYTE in
-// rust/protocol/src/protocol.rs (RUST_REV 98915c4). Pinned at 0xC0 so callers
-// cannot pass an arbitrary Content proto off as PlaintextContent.
+// plaintextContextIdentifierByte (0xC0) tags a serialized PlaintextContent.
 const plaintextContextIdentifierByte byte = 0xC0
 
 // PlaintextContent is a message type for unencrypted content (type 8).
@@ -30,9 +27,7 @@ func NewPlaintextContent(body []byte) *PlaintextContent {
 	}
 }
 
-// NewPlaintextContentFromBytes parses a previously serialized PlaintextContent.
-// The bytes must begin with the 0xC0 identifier byte; otherwise an
-// UnrecognizedMessageVersionError is returned, matching Rust's TryFrom.
+// NewPlaintextContentFromBytes parses PlaintextContent bytes; without the 0xC0 prefix it returns UnrecognizedMessageVersionError.
 func NewPlaintextContentFromBytes(serialized []byte) (*PlaintextContent, error) {
 	if len(serialized) < 1 {
 		return nil, &ContentTooShortError{MessageType: "plaintext content"}
@@ -65,13 +60,7 @@ func (p *PlaintextContent) Type() uint32 {
 	return PLAINTEXT_TYPE
 }
 
-// PlaintextContentFromDEM wraps a DecryptionErrorMessage in a PlaintextContent
-// envelope. The resulting bytes are:
-//
-//	[0xC0 identifier] || proto.Marshal(Content{decryption_error_message: dem.Serialize()}) || [0x80 padding]
-//
-// Mirrors Rust's From<DecryptionErrorMessage> for PlaintextContent at
-// rust/protocol/src/protocol.rs:837-851.
+// PlaintextContentFromDEM wraps a DecryptionErrorMessage as 0xC0 || Content proto || 0x80 padding.
 func PlaintextContentFromDEM(dem *DecryptionErrorMessage) (*PlaintextContent, error) {
 	demBytes, err := dem.Serialize()
 	if err != nil {

@@ -190,15 +190,7 @@ func TestRollback_ErrStateCorrupted_UnwrapsErrors(t *testing.T) {
 
 // ─── Finding 4: bidirectional and epoch-transition tests ─────────────────────
 
-// TestEncryptDecrypt_Bidirectional verifies true bidirectional message exchange:
-// both Alice→Bob and Bob→Alice messages are encrypted and decrypted correctly,
-// delivered in interleaved order.
-//
-// All messages from both sides are pre-encrypted before any delivery. This is
-// required because the ML-KEM Braid SCKA handshake has intermediate states where
-// braid.Send() fails once the braid has partially advanced. Pre-encrypting
-// ensures Bob's Encrypt calls happen while his braid is still in its initial
-// NoHeaderReceived state, which can always Send (returns probe chunks).
+// TestEncryptDecrypt_Bidirectional delivers interleaved messages both ways, encrypting all first while Bob's braid can still send.
 func TestEncryptDecrypt_Bidirectional(t *testing.T) {
 	alice, bob, _ := newUnidirectionalPair(t)
 
@@ -304,17 +296,7 @@ func TestEncryptDecrypt_Bidirectional_OutOfOrder(t *testing.T) {
 	}
 }
 
-// TestEpochTransition_ViaInjection exercises the epoch-transition path by
-// injecting a PQ epoch advance. After the advance, Encrypt and Decrypt must
-// succeed and rollback across the epoch boundary must also work.
-//
-// Why injection and not completing the braid handshake in-process: the ML-KEM
-// Braid SCKA produces an OutputKey only after a complete Alice→Bob→Alice→Bob
-// ciphertext exchange including Braid chunks. Completing this requires the
-// session layer to carry braid chunks — infrastructure not present in the unit
-// test ECCipher. Injection via advancePQEpoch exercises every code path that
-// the real epoch advance triggers: advancePQEpoch, chain-key replacement,
-// counter reset, and snapshot restore across the epoch boundary.
+// TestEpochTransition_ViaInjection injects an epoch advance, since the test ECCipher cannot carry a full braid exchange, and checks encrypt, decrypt and rollback across it.
 func TestEpochTransition_ViaInjection(t *testing.T) {
 	alice, bob, _ := newUnidirectionalPair(t)
 

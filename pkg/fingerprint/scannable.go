@@ -89,10 +89,7 @@ func DeserializeScannable(data []byte) (*Scannable, error) {
 	return s, nil
 }
 
-// Compare verifies that a scanned fingerprint (from the remote party) matches
-// this fingerprint. The remote party's local fingerprint should equal our
-// remote fingerprint, and vice versa. Comparison uses constant-time operations
-// to avoid timing side channels.
+// Compare checks in constant time that the scanned fingerprint mirrors this one.
 func (s *Scannable) Compare(scannedData []byte) (bool, error) {
 	combined := &fingerprintpb.CombinedFingerprints{}
 	if err := proto.Unmarshal(scannedData, combined); err != nil {

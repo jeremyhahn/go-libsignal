@@ -2,10 +2,7 @@ package identity
 
 import "fmt"
 
-// ErrInvalidIdentityKeyPairProtoType is the typed error for an invalid
-// IdentityKeyPairStructure protobuf encoding.
-//
-// Rust source: rust/protocol/src/identity_key.rs — TryFrom<&[u8]> for IdentityKeyPair
+// ErrInvalidIdentityKeyPairProtoType is returned for an invalid IdentityKeyPairStructure encoding.
 type ErrInvalidIdentityKeyPairProtoType struct{}
 
 func (e *ErrInvalidIdentityKeyPairProtoType) Error() string {
@@ -15,10 +12,7 @@ func (e *ErrInvalidIdentityKeyPairProtoType) Error() string {
 // ErrInvalidIdentityKeyPairProto is returned when proto.Unmarshal fails.
 var ErrInvalidIdentityKeyPairProto error = &ErrInvalidIdentityKeyPairProtoType{}
 
-// ErrInvalidIdentityKeyPairPublicKeyType is the typed error for an invalid
-// public key inside an IdentityKeyPairStructure.
-//
-// Rust source: rust/protocol/src/identity_key.rs — TryFrom<&[u8]> for IdentityKeyPair
+// ErrInvalidIdentityKeyPairPublicKeyType is returned for an invalid public key in an IdentityKeyPairStructure.
 type ErrInvalidIdentityKeyPairPublicKeyType struct {
 	Err error
 }
@@ -31,10 +25,7 @@ func (e *ErrInvalidIdentityKeyPairPublicKeyType) Unwrap() error {
 	return e.Err
 }
 
-// ErrInvalidIdentityKeyPairPrivateKeyType is the typed error for an invalid
-// private key inside an IdentityKeyPairStructure.
-//
-// Rust source: rust/protocol/src/identity_key.rs — TryFrom<&[u8]> for IdentityKeyPair
+// ErrInvalidIdentityKeyPairPrivateKeyType is returned for an invalid private key in an IdentityKeyPairStructure.
 type ErrInvalidIdentityKeyPairPrivateKeyType struct {
 	Got int
 }

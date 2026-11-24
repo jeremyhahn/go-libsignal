@@ -7,26 +7,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/zkcredential"
 )
 
-// SerializeReceiptCredentialPresentation serializes a ReceiptCredentialPresentation
-// to the Rust bincode wire format, producing byte-for-byte identical output to
-// Rust's bincode::serialize on the same struct.
-//
-// Wire layout (matches Rust ReceiptCredentialPresentation at
-// rust/zkgroup/src/api/receipts/receipt_credential_presentation.rs):
-//
-//	[0x00]            reserved byte (ReservedByte)
-//	[32]              C_x0 (compressed Ristretto255 point)
-//	[32]              C_x1
-//	[32]              C_y1
-//	[32]              C_y2
-//	[32]              C_V
-//	[8 LE u64]        poksho_proof Vec<u8> length
-//	[len]             poksho_proof bytes
-//	[8 LE u64]        receipt_expiration_time (Timestamp = u64)
-//	[8 LE u64]        receipt_level (ReceiptLevel = u64)
-//	[16]              receipt_serial_bytes ([u8; 16])
-//
-// Total for standard proofs: 329 bytes (matches RECEIPT_CREDENTIAL_PRESENTATION_LEN).
+// SerializeReceiptCredentialPresentation encodes p as 329 bytes of Rust bincode: reserved byte, five points, proof, expiration, level, serial.
 func SerializeReceiptCredentialPresentation(p *ReceiptCredentialPresentation) []byte {
 	proofLen := len(p.PokshoProof)
 	out := make([]byte, 0, 1+5*32+8+proofLen+8+8+16)
@@ -165,18 +146,7 @@ func DeserializeReceiptCredentialPresentation(data []byte) (*ReceiptCredentialPr
 	}, nil
 }
 
-// SerializeBackupAuthCredentialPresentation serializes a
-// BackupAuthCredentialPresentation to Rust bincode wire format.
-//
-// Wire layout (matches Rust BackupAuthCredentialPresentation at
-// rust/zkgroup/src/api/backups/auth_credential.rs:271-278):
-//
-//	[0x00]         version byte (ReservedByte)
-//	[8 LE u64]     backup_level (BackupLevel serialized as u64)
-//	[8 LE u64]     credential_type (BackupCredentialType serialized as u64)
-//	[8 LE u64]     redemption_time (Timestamp = u64)
-//	[PresentationProof bincode] Cx0+Cx1+CV + Cy vec (LE u64 len + points) + poksho_proof vec
-//	[16]           backup_id ([u8; 16])
+// SerializeBackupAuthCredentialPresentation encodes p as Rust bincode: version byte, level, type, time, proof, backup ID.
 func SerializeBackupAuthCredentialPresentation(p *BackupAuthCredentialPresentation) []byte {
 	proofBytes := zkcredential.EncodePresentationProofBincode(p.Proof)
 	out := make([]byte, 0, 1+8+8+8+len(proofBytes)+16)
@@ -258,16 +228,7 @@ func DeserializeBackupAuthCredentialPresentation(data []byte) (*BackupAuthCreden
 	}, nil
 }
 
-// SerializeCallLinkAuthCredentialPresentation serializes a
-// CallLinkAuthCredentialPresentation to Rust bincode wire format.
-//
-// Wire layout (matches Rust CallLinkAuthCredentialPresentation at
-// rust/zkgroup/src/api/call_links/auth_credential.rs:103-109):
-//
-//	[0x00]         reserved byte
-//	[PresentationProof bincode] proof
-//	[64]           ciphertext (EA1[32] || EA2[32])
-//	[8 LE u64]     redemption_time (Timestamp)
+// SerializeCallLinkAuthCredentialPresentation encodes p as Rust bincode: reserved byte, proof, ciphertext, redemption time.
 func SerializeCallLinkAuthCredentialPresentation(p *CallLinkAuthCredentialPresentation) []byte {
 	proofBytes := zkcredential.EncodePresentationProofBincode(p.Proof)
 	ciphertextBytes := zkcredential.EncodeCiphertext(p.Ciphertext)
@@ -329,16 +290,7 @@ func DeserializeCallLinkAuthCredentialPresentation(data []byte) (*CallLinkAuthCr
 	}, nil
 }
 
-// SerializeCreateCallLinkCredentialPresentation serializes a
-// CreateCallLinkCredentialPresentation to Rust bincode wire format.
-//
-// Wire layout (matches Rust CreateCallLinkCredentialPresentation at
-// rust/zkgroup/src/api/call_links/create_credential.rs:184-191):
-//
-//	[0x00]         reserved byte
-//	[64]           user_id ciphertext (EA1[32] || EA2[32])
-//	[8 LE u64]     timestamp (Timestamp)
-//	[PresentationProof bincode] proof
+// SerializeCreateCallLinkCredentialPresentation encodes p as Rust bincode: reserved byte, user ID ciphertext, timestamp, proof.
 func SerializeCreateCallLinkCredentialPresentation(p *CreateCallLinkCredentialPresentation) []byte {
 	ciphertextBytes := zkcredential.EncodeCiphertext(p.UserID)
 	proofBytes := zkcredential.EncodePresentationProofBincode(p.Proof)

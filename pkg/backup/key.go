@@ -32,22 +32,13 @@ const (
 	messageBackupEncryptDST       = "20250708_SIGNAL_BACKUP_ENCRYPT_MESSAGE_BACKUP:"
 )
 
-// MessageBackupKey holds the HMAC and AES keys used to encrypt and decrypt
-// backup frames. It is derived from a BackupKey and BackupID.
-// Call Zeroize when the MessageBackupKey is no longer needed.
+// MessageBackupKey holds the HMAC and AES keys for backup frames, derived from a BackupKey and BackupID; call Zeroize when done.
 type MessageBackupKey struct {
 	HMACKey *secret.Secret
 	AESKey  *secret.Secret
 }
 
-// NewMessageBackupKey constructs a MessageBackupKey directly from raw 32-byte
-// HMAC and AES key material. Both slices must be exactly 32 bytes. The bytes
-// are copied into guarded memory; the caller may zeroize its own copies after
-// this call returns.
-//
-// This constructor is provided so interop tests and callers that hold raw key
-// material can construct a MessageBackupKey without going through the full
-// HKDF derivation path.
+// NewMessageBackupKey copies raw 32-byte HMAC and AES keys into guarded memory, bypassing HKDF derivation.
 func NewMessageBackupKey(hmacKey, aesKey []byte) (*MessageBackupKey, error) {
 	if len(hmacKey) != HMACKeyLen {
 		return nil, &ErrInvalidKeyLength{Field: "hmacKey", Got: len(hmacKey), Want: HMACKeyLen}
@@ -89,9 +80,7 @@ func (mk *MessageBackupKey) Zeroize() {
 	}
 }
 
-// BackupKey is the intermediate key derived from an AccountEntropyPool.
-// It is used to derive BackupIDs and MessageBackupKeys.
-// Call Zeroize when the BackupKey is no longer needed.
+// BackupKey is derived from an AccountEntropyPool and derives BackupIDs and MessageBackupKeys; call Zeroize when done.
 type BackupKey struct {
 	key *secret.Secret
 }
@@ -174,10 +163,7 @@ func (bk *BackupKey) DeriveBackupID(aci protocol.ServiceId) (*BackupID, error) {
 	return &BackupID{id: id}, nil
 }
 
-// DeriveMessageBackupKey derives a MessageBackupKey from a BackupKey and BackupID.
-// If forwardSecrecyToken is non-nil, it is used as the HKDF salt with the newer
-// DST; otherwise the legacy DST is used with no salt. The resulting key contains
-// the HMAC key (first 32 bytes) and AES key (next 32 bytes).
+// DeriveMessageBackupKey derives the HMAC and AES keys; a non-nil forwardSecrecyToken is the HKDF salt with the newer DST.
 func DeriveMessageBackupKey(bk *BackupKey, id *BackupID, forwardSecrecyToken []byte) (*MessageBackupKey, error) {
 	var salt []byte
 	var dst string

@@ -5,11 +5,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/poksho"
 )
 
-// ShoExt wraps a poksho.SHO and provides convenience methods for generating
-// ristretto255 group elements (points and scalars) from the SHO state.
-//
-// This mirrors the Rust ShoExt trait which extends ShoApi with get_point and
-// get_scalar methods.
+// ShoExt wraps a poksho.SHO to derive ristretto255 points and scalars (Rust ShoExt).
 type ShoExt struct {
 	*poksho.SHO
 }
@@ -64,12 +60,7 @@ func (s *ShoExt) MustGetPoint() *ristretto255.Element {
 	return p
 }
 
-// PointFromSingleElligator maps 32 bytes to a ristretto255 point using a single
-// Elligator map. This matches Rust's RistrettoPoint::from_uniform_bytes_single_elligator.
-//
-// The implementation uses SetUniformBytes(data || zeros) which computes
-// MAP(data) + MAP(zeros) = MAP(data) + identity = MAP(data), achieving
-// a single Elligator map without requiring a dedicated library function.
+// PointFromSingleElligator maps 32 bytes to a point with one Elligator map, via SetUniformBytes(data || zeros) (Rust from_uniform_bytes_single_elligator).
 func PointFromSingleElligator(input []byte) (*ristretto255.Element, error) {
 	if len(input) != 32 {
 		return nil, &ErrSingleElligatorInputSize{Got: len(input)}

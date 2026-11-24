@@ -67,13 +67,7 @@ var ErrDecryptionErrorMessageDeserialize = &Error{kind: errDecryptionErrorMessag
 // does not match the expected (sender, recipient) reserialization.
 var ErrAddressMismatch = &Error{kind: errAddressMismatch}
 
-// ErrInvalidArgumentPlaintext is returned by DecryptionErrorMessageForOriginal
-// when the caller passes PLAINTEXT_TYPE as the original message type. Rust returns
-// SignalProtocolError::InvalidArgument in this case; plaintext content is not
-// encrypted and therefore cannot produce a meaningful ratchet key for re-delivery.
-//
-// Mirrors Rust libsignal_protocol SignalProtocolError::InvalidArgument at
-// rust/protocol/src/protocol.rs:898-900.
+// ErrInvalidArgumentPlaintext is returned by DecryptionErrorMessageForOriginal for a plaintext original message, as Rust does.
 var ErrInvalidArgumentPlaintext = &Error{kind: errInvalidArgumentPlaintext}
 
 func (e *Error) Error() string {
@@ -208,21 +202,10 @@ func (e *ServiceIdParseError) Unwrap() error {
 	return e.Err
 }
 
-// ErrInvalidServiceIdLength indicates a ServiceId binary encoding has an
-// invalid length. For the variable-width format: ACI must be exactly 16 bytes;
-// PNI must be exactly 17 bytes (0x01 tag || 16-byte UUID).
-//
-// Mirrors Rust libsignal_core ServiceId::parse_from_service_id_binary at
-// rust/core/src/address.rs:230-245.
+// ErrInvalidServiceIdLength indicates a binary ServiceId that is not 16 (ACI) or 17 (PNI) bytes.
 var ErrInvalidServiceIdLength = &ServiceIdParseError{Detail: "invalid ServiceId binary length"}
 
-// ErrInvalidServiceIdString indicates a ServiceId string has an invalid format.
-// Accepted formats: bare hyphenated UUID (→ ACI), "ACI:<hyphenated-uuid>" (→ ACI,
-// legacy Go form), or "PNI:<hyphenated-uuid>" (→ PNI). The lowercase "aci:" prefix
-// and un-hyphenated (32-char) forms are rejected.
-//
-// Mirrors Rust libsignal_core ServiceId::parse_from_service_id_string at
-// rust/core/src/address.rs:263-279.
+// ErrInvalidServiceIdString indicates a ServiceId string that is not a hyphenated UUID, ACI:<uuid> or PNI:<uuid>.
 var ErrInvalidServiceIdString = &ServiceIdParseError{Detail: "invalid ServiceId string"}
 
 // ErrInvalidDeviceID indicates a device ID is outside the valid range 1-127.

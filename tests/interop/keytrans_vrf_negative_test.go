@@ -1,20 +1,4 @@
-// Keytrans VRF negative-case conformance test.
-//
-// Asserts that VRFPublicKey.ProofToHash REJECTS every corrupted-proof vector
-// in keytrans/vrf_negative_proofs.json. This mirrors Rust's
-// test_proof_to_hash_fails (rust/keytrans/src/vrf.rs:230-242) which for
-// each of the 3 RFC 9381 TAI test vectors:
-//
-//	(a) changes the message to "a" (0x61) and asserts error, and
-//	(b) for every byte i, XORs it with 1 and asserts error.
-//
-// The fixture encodes a representative subset of (a) and (b) mutations
-// (14 vectors total) to keep fixture size manageable while providing full
-// coverage of each proof region: gamma (bytes 0-31), c scalar (32-47),
-// and s scalar (48-79).
-//
-// Rust source: rust/keytrans/src/vrf.rs:230-242
-// Upstream commit: 98915c44
+// Keytrans VRF negative cases: ProofToHash rejects the 14 corrupted proofs in keytrans/vrf_negative_proofs.json, covering gamma, c and s, as Rust test_proof_to_hash_fails does.
 package interop
 
 import (

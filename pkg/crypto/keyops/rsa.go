@@ -2,11 +2,7 @@ package keyops
 
 import "crypto"
 
-// RSASigner wraps crypto.Signer for RSA operations used in device transfer
-// certificate generation. By embedding crypto.Signer, this interface is
-// directly compatible with Go's standard library, PKCS#11 tokens, TPM2
-// key handles, and other hardware security modules that implement
-// crypto.Signer.
+// RSASigner is a crypto.Signer for device transfer certificates, so PKCS#11, TPM2 and HSM signers fit.
 type RSASigner interface {
 	crypto.Signer
 

@@ -469,13 +469,7 @@ func TestIsCompleteFlag(t *testing.T) {
 		t.Errorf("first decoded mismatch")
 	}
 
-	// Rust: after decoding, is_complete is true and decoded_message returns None.
-	// In our Go port we return (nil, false) on second call.
-	// Note: Rust's decoded_message doesn't set is_complete — the caller must do so.
-	// We match: IsComplete is NOT set automatically, so multiple calls are allowed.
-	// This is correct: Rust's decoded_message checks is_complete but does not set it.
-	// The caller (v1.rs or sesame layer) sets is_complete. We skip that state machine
-	// here; the test just verifies we return a correct message every time.
+	// Rust decoded_message does not set is_complete, so repeated calls return the message each time.
 	got2, ok2 := dec.DecodedMessage()
 	if !ok2 {
 		t.Fatal("second DecodedMessage: not ok (is_complete should not be set automatically)")

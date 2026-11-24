@@ -1827,7 +1827,7 @@ func TestSendWithServerLoop_StaleDevices(t *testing.T) {
 		return &ServerResponse{
 			Accepted:   true,
 			UserExists: true,
-			OldDevices: []uint32{2}, // Device 2 no longer registered.
+			OldDevices: []uint32{2}, // Device 2 is unregistered.
 		}, nil
 	}
 

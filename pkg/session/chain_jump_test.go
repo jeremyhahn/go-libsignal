@@ -2,29 +2,7 @@
 
 package session_test
 
-// chain_jump_test.go — ports test_chain_jump_over_limit from the Rust upstream.
-//
-// Rust source: rust/protocol/tests/session.rs:245
-// Rust commit: 98915c44
-//
-// Scenario:
-//   Alice and Bob establish a PQXDH session. Alice sends MAX_FORWARD_JUMPS+1
-//   messages (25,001) without Bob decrypting any of them — advancing her sender
-//   chain counter 25,001 steps. She then sends one more message (the 25,002nd).
-//   When Bob attempts to decrypt that last message the chain-key advancement
-//   would require jumping 25,001 steps past his receiver-chain index, which
-//   exceeds the maxFutureMessages cap of 25,000. The decrypt must return
-//   session.ErrTooFarIntoFuture.
-//
-// Constant (rust/protocol/src/consts.rs:8):
-//   pub const MAX_FORWARD_JUMPS: usize = 25_000;
-//
-// The Go equivalent is maxFutureMessages = 25000 in pkg/session/SessionCipher.go.
-//
-// Expected runtime: ~60–120 s on a modern workstation (25,002 AEAD operations).
-// Invoke with:
-//
-//	GOWORK=off go test -race -count=1 -tags=slow -run TestRust_ChainJumpOverLimit ./pkg/session/...
+// Port of Rust test_chain_jump_over_limit (session.rs:245): 25,002 messages exceed MAX_FORWARD_JUMPS 25,000; run with -tags=slow.
 
 import (
 	"testing"
@@ -38,13 +16,7 @@ import (
 // (rust/protocol/src/consts.rs:8) and Go's maxFutureMessages in SessionCipher.go.
 const maxForwardJumps = 25_000
 
-// TestRust_ChainJumpOverLimit ports test_chain_jump_over_limit
-// (rust/protocol/tests/session.rs:245).
-//
-// Alice sends MAX_FORWARD_JUMPS+1 messages that Bob never decrypts, then sends
-// one more. Bob's attempt to decrypt that final message must fail with
-// session.ErrTooFarIntoFuture because the required chain-key advance
-// (25_001 steps) exceeds the 25_000 cap.
+// TestRust_ChainJumpOverLimit checks decrypting a message 25,001 steps ahead fails.
 func TestRust_ChainJumpOverLimit(t *testing.T) {
 	serializer := serialize.NewJSONSerializer()
 
@@ -121,16 +93,7 @@ func TestRust_ChainJumpOverLimit(t *testing.T) {
 		t.Fatalf("parse too_far as PreKeySignalMessage: %v", err)
 	}
 
-	// Bob attempts to decrypt the inner WhisperMessage. The chain-key advance
-	// required (25_001 steps) exceeds the 25_000 cap; this must fail.
-	//
-	// Rust assertion: decrypt(...).is_err()
-	// The Rust test does not specify which error, only that one is returned.
-	// In Go the rejection may come from either:
-	//   - session.ErrTooFarIntoFuture (Double Ratchet chain-key jump limit), or
-	//   - the SPQR ratchet's own maxJump guard (also 25_000, fires first when
-	//     PQ ratchet state is present in the session).
-	// Both represent the same semantic: the message is too far ahead to decrypt.
+	// Either ErrTooFarIntoFuture or the SPQR maxJump guard may reject it; Rust only requires an error.
 	bobCipher := session.NewCipher(bob.sessionBuilder, alice.address)
 	_, decryptErr := bobCipher.Decrypt(tooFarPreKey.WhisperMessage())
 	if decryptErr == nil {

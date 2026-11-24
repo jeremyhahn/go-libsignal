@@ -13,10 +13,7 @@ type Secret32 struct {
 	inner *Secret
 }
 
-// NewSecret32 creates a Secret32 from a 32-byte array. The data parameter is
-// received by value (Go copies it on function entry), so the caller's source
-// array is not zeroized by this function. Callers must zeroize their own array
-// after calling NewSecret32 if it contains sensitive key material.
+// NewSecret32 returns a Secret32 holding data; the caller zeroizes its own array.
 func NewSecret32(data [32]byte) (*Secret32, error) {
 	s, err := New(data[:])
 	if err != nil {
@@ -27,12 +24,7 @@ func NewSecret32(data [32]byte) (*Secret32, error) {
 	return &Secret32{inner: s}, nil
 }
 
-// NewSecret32FromSlice creates a Secret32 from a byte slice, validating that
-// the length is exactly 32 bytes. The source slice is zeroized as part of the
-// move into locked memory.
-//
-// Returns ErrNilInput if data is nil, or ErrSecretSizeMismatch if the length
-// is not 32.
+// NewSecret32FromSlice moves a 32-byte slice into a Secret32, zeroizing it; it returns ErrNilInput or ErrSecretSizeMismatch.
 func NewSecret32FromSlice(data []byte) (*Secret32, error) {
 	if data == nil {
 		return nil, &Error{kind: errNilInput}
@@ -99,10 +91,7 @@ func (s *Secret32) IsDestroyed() bool {
 	return s == nil || s.inner.IsDestroyed()
 }
 
-// Clone creates an independent deep copy of the secret in new guarded memory.
-//
-// Returns ErrSecretDestroyed if the source has been destroyed, or
-// ErrSecretAlloc if the allocation fails.
+// Clone copies the secret into new locked memory; it returns ErrSecretDestroyed or ErrSecretAlloc.
 func (s *Secret32) Clone() (*Secret32, error) {
 	cloned, err := s.inner.Clone()
 	if err != nil {

@@ -2,16 +2,7 @@ package record
 
 import "encoding/json"
 
-// The JSON test serializers live here, in an UNTAGGED file, rather than beside
-// the tests that first needed them.
-//
-// They were declared in SenderKeyState_test.go and SenderKeyRecord_test.go,
-// both of which carry `//go:build !fips140only` because they also hold X25519
-// tests. The serializers themselves are `encoding/json` and nothing else, so
-// they have no business being dropped from the FIPS build — but while they sat
-// in those files, any test that needed one had to be exempt too, whatever it
-// was actually testing. Moving them here means the exemption covers only the
-// tests that genuinely need it.
+// The JSON test serializers live in this untagged file so FIPS builds keep the tests that use them.
 
 // jsonSenderKeyStateSerializer is a test serializer for SenderKeyState.
 type jsonSenderKeyStateSerializer struct{}

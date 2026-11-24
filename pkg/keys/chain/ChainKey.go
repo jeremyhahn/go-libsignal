@@ -15,10 +15,7 @@ import (
 var messageKeySeed = []byte{0x01}
 var chainKeySeed = []byte{0x02}
 
-// NewKey returns a new chain key with the given kdf, key, and index.
-// The key material is moved into locked memory and the source
-// slice is zeroized by go-enclave. Panics if the locked-memory allocation fails
-// (fatal condition).
+// NewKey returns a chain key whose material moves into locked memory; panics if that allocation fails.
 func NewKey(kdf kdf.HKDF, key []byte, index uint32) *Key {
 	guardedKey, err := secret.New(key)
 	if err != nil {
@@ -31,14 +28,7 @@ func NewKey(kdf kdf.HKDF, key []byte, index uint32) *Key {
 	}
 }
 
-// NewKeyFromStruct will return a chain key built from the given structure.
-// The key is cloned from the structure's guarded memory straight into the
-// returned key's own guarded memory, so the material never lands on the Go
-// heap and the source structure is left intact for its owner to Zeroize.
-//
-// Returns *MissingKeyError if the structure carries no key material — a chain
-// key is mandatory, and decoding one that is absent or already destroyed must
-// fail rather than yield a Key nothing can ratchet.
+// NewKeyFromStruct clones the key guarded-to-guarded; a missing key returns *MissingKeyError.
 func NewKeyFromStruct(structure *KeyStructure, kdf kdf.HKDF) (*Key, error) {
 	if structure == nil || structure.Key.IsZero() {
 		return nil, &MissingKeyError{}
@@ -54,10 +44,7 @@ func NewKeyFromStruct(structure *KeyStructure, kdf kdf.HKDF) (*Key, error) {
 	}, nil
 }
 
-// NewStructFromKey will return a chain key structure for serialization.
-// The key is cloned guarded-to-guarded, so serialization no longer stages the
-// chain key on the heap. Callers must call Zeroize() on the returned structure
-// once the serializer has consumed it.
+// NewStructFromKey returns a serializable copy in guarded memory; the caller Zeroizes it.
 func NewStructFromKey(key *Key) (*KeyStructure, error) {
 	cloned, err := key.key.Clone()
 	if err != nil {
@@ -69,10 +56,7 @@ func NewStructFromKey(key *Key) (*KeyStructure, error) {
 	}, nil
 }
 
-// KeyStructure is a serializeable structure for chain keys. The key is held in
-// guarded memory: it crosses the storage boundary, and a chain key on the
-// plain heap can be swapped out or captured in a core dump, which zeroizing it
-// afterwards does not undo.
+// KeyStructure is the serializable form of a chain key, held in guarded memory.
 type KeyStructure struct {
 	Key   secret.Secret
 	Index uint32
@@ -164,9 +148,7 @@ func (c *Key) MessageKeysWithSalt(pqrSalt []byte) (*message.Keys, error) {
 	return deriveMessageKeysFromSeed(c.kdf, inputKeyMaterial, pqrSalt, c.Index())
 }
 
-// MessageKeysWithSeed derives message keys and attaches the seed material to the
-// result, enabling later re-derivation with a different HKDF salt (e.g., SPQR).
-// This is used for skipped message keys in SPQR sessions.
+// MessageKeysWithSeed derives message keys and keeps the seed for SPQR re-derivation of skipped keys.
 func (c *Key) MessageKeysWithSeed() (*message.Keys, error) {
 	inputKeyMaterial, err := c.baseMaterial(messageKeySeed)
 	if err != nil {
@@ -186,10 +168,7 @@ func (c *Key) MessageKeysWithSeed() (*message.Keys, error) {
 	return keys, nil
 }
 
-// DeriveMessageKeysFromSeed performs the HKDF derivation from raw seed material
-// with an optional PQR salt. This is used to re-derive skipped message keys when
-// the original message arrives with SPQR post-quantum ratchet data.
-// The inputKeyMaterial slice is consumed (moved into guarded memory).
+// DeriveMessageKeysFromSeed derives message keys from seed material with an optional PQR salt, consuming inputKeyMaterial.
 func DeriveMessageKeysFromSeed(kdfFunc kdf.HKDF, inputKeyMaterial []byte, pqrSalt []byte, index uint32) (*message.Keys, error) {
 	return deriveMessageKeysFromSeed(kdfFunc, inputKeyMaterial, pqrSalt, index)
 }

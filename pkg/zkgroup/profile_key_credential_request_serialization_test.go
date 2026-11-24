@@ -5,12 +5,7 @@ import (
 	"testing"
 )
 
-// TestProfileKeyCredentialRequest_SerializeRoundTrip verifies that a request
-// produced by the client survives serialize→deserialize unchanged, both at the
-// byte level and cryptographically: the deserialized request must issue a
-// credential the client can receive/unblind. Because issuance verifies the
-// request's poksho proof, a correct round-trip proves the wire encoding
-// preserves the public key, ciphertext, and proof exactly.
+// TestProfileKeyCredentialRequest_SerializeRoundTrip checks a round-tripped request is byte-identical and still issues a credential the client receives.
 func TestProfileKeyCredentialRequest_SerializeRoundTrip(t *testing.T) {
 	var randomness RandomnessBytes
 	for i := range randomness {
@@ -58,9 +53,7 @@ func TestProfileKeyCredentialRequest_SerializeRoundTrip(t *testing.T) {
 		t.Fatal("serialize is not stable across a deserialize round trip")
 	}
 
-	// Cryptographic round trip: the DESERIALIZED request AND a DESERIALIZED
-	// commitment must issue a valid credential that the original client context
-	// can receive. The commitment round-trips through its wire format too.
+	// The deserialized request and commitment must issue a credential the original client receives.
 	commitmentWire := SerializeProfileKeyCommitment(profileKey.GetCommitment(aci))
 	if len(commitmentWire) != profileKeyCommitmentSize {
 		t.Fatalf("commitment wire size = %d, want %d", len(commitmentWire), profileKeyCommitmentSize)
@@ -83,9 +76,7 @@ func TestProfileKeyCredentialRequest_SerializeRoundTrip(t *testing.T) {
 		t.Fatalf("issuance on deserialized request failed: %v", err)
 	}
 
-	// Round-trip the response through its wire format too, then have the client
-	// receive the credential from the DESERIALIZED response. This validates the
-	// full server→client wire path.
+	// The client receives the credential from the deserialized response.
 	respWire := SerializeExpiringProfileKeyCredentialResponse(response)
 	if len(respWire) <= expiringProfileKeyCredentialResponseFixedSize {
 		t.Fatalf("serialized response too short: %d bytes", len(respWire))

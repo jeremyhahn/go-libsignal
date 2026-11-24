@@ -295,13 +295,7 @@ func TestDecodeToExtended(t *testing.T) {
 	})
 }
 
-// TestElligatorInv_BranchlessFoundFlagEquivalence is a regression test for the
-// constant-time refactor of elligatorInv. It verifies that the branchless
-// integer expression `sIsZero | (wasSquare &^ sIsZero)` is mathematically
-// identical to the old boolean `sIsZero==1 || (wasSquare==1 && sIsZero!=1)` for
-// every combination of the two 0/1 input flags. This exhaustive truth-table
-// proof guarantees the refactor introduces no behavioral change in the found flag
-// (and therefore no change in the mask produced by ElligatorRistrettoFlavorInverse).
+// TestElligatorInv_BranchlessFoundFlagEquivalence checks the branchless found flag over every input combination.
 func TestElligatorInv_BranchlessFoundFlagEquivalence(t *testing.T) {
 	cases := []struct {
 		sIsZero   int

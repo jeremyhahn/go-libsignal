@@ -2,8 +2,7 @@ package net
 
 import "fmt"
 
-// CdsiSerializeError is returned when a CDSI fixed-length serialization or
-// deserialization operation fails.
+// CdsiSerializeError reports a failed CDSI fixed-length (de)serialization.
 type CdsiSerializeError struct {
 	// Field identifies which DTO field caused the error.
 	Field string

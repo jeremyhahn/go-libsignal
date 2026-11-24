@@ -1,14 +1,4 @@
-// Enclave-to-Raft config mapping verification.
-//
-// For every SVR2 enclave ID defined in constants.go, asserts that
-// SVR2NewHandshakeWithRaftConfigLookup resolves to the correct RaftConfig
-// entry (GroupID, MinVotingReplicas, MaxVotingReplicas, DBVersion, etc.).
-//
-// This mirrors the EXPECTED_RAFT_CONFIG_SVR2 lookup table defined in
-// rust/attest/src/constants.rs and ensures the Go mapping does not drift.
-//
-// Rust source: rust/attest/src/constants.rs (EXPECTED_RAFT_CONFIG_SVR2)
-// Upstream commit: 98915c44
+// Checks every SVR2 enclave ID resolves to its RaftConfig as in rust/attest/src/constants.rs EXPECTED_RAFT_CONFIG_SVR2.
 package attest
 
 import (
@@ -75,9 +65,7 @@ func TestSVR2_EnclaveToRaftConfig_Lookup(t *testing.T) {
 	}
 }
 
-// TestSVR2_UnknownEnclave_LookupFails verifies that a random MRENCLAVE value
-// returns ok=false from SVR2LookupGroupID, ensuring unknown enclaves are
-// explicitly rejected rather than silently mapping to a wrong config.
+// TestSVR2_UnknownEnclave_LookupFails checks an unknown MRENCLAVE is rejected.
 func TestSVR2_UnknownEnclave_LookupFails(t *testing.T) {
 	unknown := make([]byte, 32)
 	for i := range unknown {

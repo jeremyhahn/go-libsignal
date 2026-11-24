@@ -1,14 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// These 10 tests were split out of dcap_coverage_test.go. They drive the
-// Noise_NK_25519_ChaChaPoly_SHA256 and Noise_NKhfs_25519+Kyber1024_ChaChaPoly_SHA256
-// handshakes Signal uses to reach its enclaves, both X25519 by construction,
-// and crypto/ecdh rejects X25519 under GODEBUG=fips140=only. Keeping them
-// here lets the fips140only build tag drop just these while the other 63
-// tests in dcap_coverage_test.go -- DCAP quote parsing, X.509 and P-256 --
-// stay inside the FIPS gate.
+// FIPS 140-3 exemption (docs/FIPS.md): these tests drive X25519 Noise handshakes, which fips140=only rejects.
 
 package attest
 

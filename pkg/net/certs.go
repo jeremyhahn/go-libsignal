@@ -63,16 +63,7 @@ func (e *CertPinError) Unwrap() error {
 	return e.Err
 }
 
-// CertificatePinner provides certificate pinning functionality for Signal
-// service connections. Implementations verify that the TLS certificate chain
-// includes an expected root certificate.
-//
-// IMPORTANT: Production callers MUST provide their own CertificatePinner
-// implementation with embedded Signal root certificates. The default
-// implementation (DefaultCertificatePinner) does not embed any Signal or
-// Google proxy root certificates and will reject all non-native TLS
-// connections (fail-closed). See StaticCertificatePinner for the recommended
-// production pattern using go:embed with DER certificate files.
+// CertificatePinner returns TLS configs pinned to Signal roots; production callers supply one with embedded roots, such as NewEmbeddedCertificatePinner.
 type CertificatePinner interface {
 	// PinCertificates returns a tls.Config configured with the appropriate
 	// root certificate pool for the given RootCertificates type.
@@ -80,46 +71,10 @@ type CertificatePinner interface {
 	PinCertificates(certs RootCertificates) *tls.Config
 }
 
-// DefaultCertificatePinner is a baseline CertificatePinner that deliberately
-// FAILS CLOSED for Signal and proxy certificate types.
-//
-// SECURITY WARNING: This implementation does NOT embed any Signal root
-// certificates. For RootCertificatesSignal and RootCertificatesProxyG, it
-// returns a tls.Config with an empty certificate pool, which causes all TLS
-// handshakes to fail. This is intentional: it prevents silent fallback to
-// system roots when no pinned certificates are configured.
-//
-// For production use, callers MUST replace this with a StaticCertificatePinner
-// (or custom implementation) that embeds the required DER certificates:
-//   - Signal:  signal.cer
-//   - Proxy G: GIAG2.cer, GSR2.cer, GSR4.cer, GTSR1.cer, GTSR2.cer,
-//     GTSR3.cer, GTSR4.cer
-//
-// The Rust reference (libsignal/rust/net/src/certs.rs) embeds these
-// certificates at compile time via include_bytes! and returns them from
-// static constants SIGNAL_ROOT_CERTIFICATES and PROXY_G_ROOT_CERTIFICATES.
-// Go callers should embed the same DER files using go:embed and construct
-// a StaticCertificatePinner.
-//
-// Example:
-//
-//	//go:embed res/signal.cer
-//	var signalRootCert []byte
-//
-//	pinner := &StaticCertificatePinner{
-//	    SignalCerts: [][]byte{signalRootCert},
-//	    ProxyCerts:  [][]byte{giag2, gsr2, gsr4, gtsr1, gtsr2, gtsr3, gtsr4},
-//	}
+// DefaultCertificatePinner embeds no roots and fails closed for Signal and proxy connections; use a StaticCertificatePinner with the embedded DER roots.
 type DefaultCertificatePinner struct{}
 
-// PinCertificates returns a tls.Config based on the certificate type.
-// For RootCertificatesNative, returns nil (use system roots).
-// For RootCertificatesSignal and RootCertificatesProxyG, returns a config
-// with an empty cert pool, which causes TLS handshake to FAIL rather than
-// silently falling back to system roots (fail-closed).
-//
-// See DefaultCertificatePinner documentation for why this MUST be replaced
-// in production.
+// PinCertificates returns nil for native roots and an empty-pool config, which fails every handshake, for Signal and proxy roots.
 func (d *DefaultCertificatePinner) PinCertificates(certs RootCertificates) *tls.Config {
 	switch certs {
 	case RootCertificatesNative:
@@ -134,15 +89,7 @@ func (d *DefaultCertificatePinner) PinCertificates(certs RootCertificates) *tls.
 	}
 }
 
-// StaticCertificatePinner is a CertificatePinner that uses caller-provided
-// DER-encoded root certificates for Signal and Google proxy connections.
-// This is the recommended pattern for production use, where the caller
-// embeds the DER certificate files using go:embed.
-//
-// The Rust reference embeds the following certificate files:
-//   - Signal:  signal.cer
-//   - Proxy G: GIAG2.cer, GSR2.cer, GSR4.cer, GTSR1.cer, GTSR2.cer,
-//     GTSR3.cer, GTSR4.cer
+// StaticCertificatePinner pins caller-provided DER roots for Signal and Google proxy connections.
 type StaticCertificatePinner struct {
 	// SignalCerts contains DER-encoded root certificates for Signal services.
 	SignalCerts [][]byte
@@ -210,13 +157,7 @@ func (e *EmbeddedPinnerError) Unwrap() error {
 	return e.Err
 }
 
-// NewEmbeddedCertificatePinner returns a StaticCertificatePinner pre-loaded
-// with the Signal and Google proxy root CA certificates embedded at compile
-// time by the embeddedcerts subpackage.
-//
-// This is the recommended production CertificatePinner. It mirrors the Rust
-// libsignal SIGNAL_ROOT_CERTIFICATES and PROXY_G_ROOT_CERTIFICATES constants
-// defined in rust/net/src/certs.rs.
+// NewEmbeddedCertificatePinner returns a StaticCertificatePinner with the embedded Signal and Google proxy roots (Rust rust/net/src/certs.rs).
 func NewEmbeddedCertificatePinner() (*StaticCertificatePinner, error) {
 	signalCAs, err := embeddedcerts.SignalCAs()
 	if err != nil {

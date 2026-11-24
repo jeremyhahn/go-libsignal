@@ -1,25 +1,8 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 1 test in this file exercises ChaCha20-Poly1305. FIPS 140-3 does not
-// approve that, but the vectors are RFC 7539 section 2.8.2 and appendix A.5,
-// which exist to pin that algorithm, so the fips140only build tag drops this
-// file from the FIPS gate. `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): the RFC 7539 vectors pin ChaCha20-Poly1305.
 
-// ChaCha20-Poly1305 conformance test using the RFC 7539 reference vectors.
-//
-// ChaCha20-Poly1305 is the AEAD cipher used in the Noise NKhfs handshake
-// (pkg/attest, pkg/net) for SVR/SVRB/CDSI enclave sessions. The Rust
-// reference relies on the chacha20poly1305 / snow / chacha20 crates,
-// which are validated against RFC 7539. This test mirrors that
-// validation against Go's stdlib golang.org/x/crypto/chacha20poly1305.
-// A pass guarantees Go's AEAD primitive used pervasively by the
-// attestation layer is byte-identical to the IETF spec.
-//
-// Vectors are reproduced verbatim from RFC 7539 §2.8.2 and Appendix A.5.
-// They are NOT tracked by the fixture manifest because the IETF RFC is
-// the source of truth for them.
+// ChaCha20-Poly1305 conformance, the Noise NKhfs AEAD of enclave sessions, with the RFC 7539 §2.8.2 and A.5 vectors.
 
 package interop
 
@@ -105,11 +88,7 @@ var rfc7539Cases = []rfc7539Case{
 	},
 }
 
-// TestChaCha20Poly1305_RFC7539 runs the Wycheproof-equivalent IETF
-// reference vectors through Go's stdlib chacha20poly1305 and asserts
-// byte-identical Seal output (ciphertext concatenated with 16-byte tag).
-// Negative paths verify Open rejects a one-bit flip in tag, ciphertext,
-// or AAD.
+// TestChaCha20Poly1305_RFC7539 checks Seal output against the RFC vectors and that Open rejects a flipped bit in tag, ciphertext or AAD.
 func TestChaCha20Poly1305_RFC7539(t *testing.T) {
 	for _, tc := range rfc7539Cases {
 		t.Run(tc.Name, func(t *testing.T) {

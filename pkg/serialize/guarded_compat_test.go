@@ -15,12 +15,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
-// The persisted-state private key fields moved from plain []byte into guarded
-// memory. encoding/json renders a []byte as a base64 string (or null when it
-// is nil), and *secret.Secret is encoded the same way, so stored records keep
-// their exact byte layout. The literals below are that layout: they must both
-// load into the guarded structures and be reproduced verbatim when those
-// structures are written back out.
+// Guarded private key fields encode as the same base64 or null JSON as []byte; these literals must load and re-encode verbatim.
 
 const (
 	legacyPreKeyJSON       = `{"ID":5,"PublicKey":"AQ==","PrivateKey":"Ag=="}`
@@ -30,12 +25,7 @@ const (
 		`"RemoteIdentityPublic":null,"RemoteRegistrationID":0,"RootKey":"AQI=","SenderBaseKey":null,` +
 		`"SenderChain":null,"SessionVersion":3,"PqRatchetState":"CQ=="}`
 
-	// The chain key and the message key components made the same move, one
-	// commit later. This literal is the layout the []byte fields produced,
-	// captured from the tree immediately before the conversion. It carries both
-	// message-key forms deliberately: the derived form, where SeedMaterial is
-	// absent entirely (the field's omitempty, now omitzero), and the seed-only
-	// form, where the other three are present as null.
+	// Chain and message key layout, with both message-key forms: derived (no SeedMaterial) and seed-only (others null).
 	legacyChainStateJSON = `{"LocalIdentityPublic":null,"LocalRegistrationID":0,"NeedsRefresh":false,` +
 		`"PendingKeyExchange":null,"PendingPreKey":null,"PreviousCounter":0,` +
 		`"ReceiverChains":[{"SenderRatchetKeyPublic":"BQI=","SenderRatchetKeyPrivate":null,` +
@@ -453,16 +443,7 @@ func TestJSONStateSerializerDecodeOverPopulatedStructure(t *testing.T) {
 	}
 }
 
-// The sender-key (group messaging) structures made the same move: the signing
-// private key, the sender chain key, and each sender message key's IV, cipher
-// key and seed. These literals are the layout the []byte fields produced,
-// captured from the tree immediately before that conversion.
-//
-// The fixture carries both message-key shapes on purpose: one fully populated,
-// and one seed-only, where the other two fields render as null. The protobuf
-// schema for a sender message key carries only iteration and seed, so the IV
-// and cipher key appear in the JSON literal and not the wire one — which is
-// exactly the sort of asymmetry a hand-written expectation gets wrong.
+// Sender-key layouts with a full and a seed-only message key; IV and cipher key appear in JSON but not in the protobuf form.
 const (
 	legacySenderKeyStateJSON = `{"Keys":[{"Iteration":1,"IV":"QQ==","CipherKey":"Qg==","Seed":"Qw=="},` +
 		`{"Iteration":2,"IV":null,"CipherKey":null,"Seed":"RA=="}],"KeyID":7,"MessageVersion":3,` +

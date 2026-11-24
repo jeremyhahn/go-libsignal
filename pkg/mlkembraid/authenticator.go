@@ -14,8 +14,7 @@ const (
 	authKeySize = 32
 )
 
-// Authenticator provides a ratcheted MAC-based authenticator for the SCKA protocol.
-// Per spec Section 2.4, it maintains a root_key and derives mac_keys via KDF_AUTH.
+// Authenticator is the SCKA ratcheted MAC authenticator: a root_key deriving mac_keys via KDF_AUTH (spec §2.4).
 type Authenticator struct {
 	rootKey *secret.Secret
 	macKey  *secret.Secret
@@ -174,22 +173,7 @@ func (a *Authenticator) Zeroize() {
 	}
 }
 
-// kdfAuth implements KDF_AUTH per the Rust reference implementation.
-//
-// Spec-vs-implementation divergence:
-// The ML-KEM Braid spec PDF defines KDF_AUTH as:
-//
-//	HKDF(salt=root_key, ikm=update_key, info=..., length=64)
-//
-// However, the Rust reference implementation (libsignal) uses different parameters:
-//
-//	HKDF(salt=zeros(32), ikm=root_key||update_key, info=PROTOCOL_INFO+":Authenticator Update"+ToBytes(epoch), length=64)
-//
-// We follow the Rust reference for wire compatibility with existing Signal clients.
-// This is a known divergence between the specification document and the authoritative
-// reference implementation.
-//
-// Returns 64 bytes: first 32 = new root_key, second 32 = new mac_key.
+// kdfAuth returns the new root_key and mac_key using Rust libsignal's KDF_AUTH parameters, which differ from the spec PDF, for wire compatibility.
 func kdfAuth(rootKey, updateKey []byte, epoch uint64) ([]byte, error) {
 	info := buildInfo(ProtocolInfo+":Authenticator Update", epoch)
 	// Rust reference: salt = zeros(32), ikm = rootKey || updateKey (concatenated).
@@ -219,8 +203,7 @@ func (a *Authenticator) macWith(label []byte, epoch uint64, data []byte) ([]byte
 	return mac, nil
 }
 
-// KDFOK implements KDF_OK per spec Section 2.2:
-// HKDF(salt=zeros(32), ikm=shared_secret, info=PROTOCOL_INFO+":SCKA Key"+ToBytes(epoch), length=32)
+// KDFOK implements KDF_OK (spec §2.2): HKDF(zeros, shared_secret, PROTOCOL_INFO+":SCKA Key"+epoch, 32).
 func KDFOK(sharedSecret []byte, epoch uint64) ([]byte, error) {
 	salt := make([]byte, 32)
 	info := buildInfo(ProtocolInfo+":SCKA Key", epoch)

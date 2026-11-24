@@ -6,10 +6,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 )
 
-// alternateIdentityPrefix1 is the first domain-separation prefix for
-// alternate-identity signatures: 32 bytes of 0xFF.
-// Mirrors Rust ALTERNATE_IDENTITY_SIGNATURE_PREFIX_1 in
-// rust/protocol/src/identity_key.rs.
+// alternateIdentityPrefix1 is 32 bytes of 0xFF (Rust ALTERNATE_IDENTITY_SIGNATURE_PREFIX_1).
 var alternateIdentityPrefix1 = func() []byte {
 	b := make([]byte, 32)
 	for i := range b {
@@ -18,10 +15,7 @@ var alternateIdentityPrefix1 = func() []byte {
 	return b
 }()
 
-// alternateIdentityPrefix2 is the second domain-separation prefix:
-// the ASCII bytes of "Signal_PNI_Signature".
-// Mirrors Rust ALTERNATE_IDENTITY_SIGNATURE_PREFIX_2 in
-// rust/protocol/src/identity_key.rs.
+// alternateIdentityPrefix2 is "Signal_PNI_Signature" (Rust ALTERNATE_IDENTITY_SIGNATURE_PREFIX_2).
 var alternateIdentityPrefix2 = []byte("Signal_PNI_Signature")
 
 // buildAltIdentityMessage constructs the message to sign/verify for alternate-identity
@@ -36,12 +30,7 @@ func buildAltIdentityMessage(other *Key) []byte {
 	return msg
 }
 
-// SignAlternateIdentity signs the other identity's serialized public key with
-// this keypair using the Signal_PNI_Signature DST. Mirrors Rust
-// IdentityKeyPair::sign_alternate_identity (rust/protocol/src/identity_key.rs:138).
-//
-// randomness must be 64 bytes of cryptographically secure random data.
-// Use SignAlternateIdentityRandom for automatic randomness.
+// SignAlternateIdentity signs the other identity's public key with 64 bytes of randomness (Rust sign_alternate_identity).
 func (kp *KeyPair) SignAlternateIdentity(other *Key, randomness [64]byte) ([]byte, error) {
 	if other == nil {
 		return nil, ErrNilOtherKey
@@ -64,10 +53,7 @@ func (kp *KeyPair) SignAlternateIdentityRandom(other *Key) ([]byte, error) {
 	return kp.SignAlternateIdentity(other, randomness)
 }
 
-// VerifyAlternateIdentity verifies a signature produced by SignAlternateIdentity.
-// Returns nil on a valid signature, a typed error on any mismatch.
-// Mirrors Rust IdentityKey::verify_alternate_identity
-// (rust/protocol/src/identity_key.rs:60).
+// VerifyAlternateIdentity verifies a SignAlternateIdentity signature (Rust verify_alternate_identity).
 func (k *Key) VerifyAlternateIdentity(other *Key, signature []byte) error {
 	if other == nil {
 		return ErrNilOtherKey

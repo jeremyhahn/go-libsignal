@@ -1,25 +1,4 @@
-// Conformance test: Sealed Sender v2 multi-recipient wire parity vs Rust libsignal.
-//
-// The Rust emitter produced a complete sealed sender v2 multi-recipient sent
-// message for 3 recipients (Bob, Carol, Dave) and the corresponding per-
-// recipient received-format views.
-//
-// Assertion strategy: DIRECT BYTES-EQUAL on MessageForRecipient output.
-//   Parse the Rust-emitted sent_message with Go's ParseSealedSenderV2SentMessage,
-//   then call MessageForRecipient for Bob, Carol, and Dave. Assert that each
-//   Go-produced received-format view is byte-identical to the Rust-emitted
-//   {bob,carol,dave}_received_message.
-//
-// This is the strongest assertion available: it proves that Go's
-//   - v2 multi-recipient sent-message parser produces the correct offsets, and
-//   - MessageForRecipient extracts the correct per-recipient key material and
-//     shared bytes.
-//
-// The per-recipient USMC decryption is not exercised here because the recipient
-// private keys are not exposed in the fixture inputs; those are covered by the
-// package-level sealed_sender_v2 tests.
-//
-// Rust upstream: rust/protocol/src/sealed_sender.rs (libsignal v0.92.2)
+// Sealed Sender v2 multi-recipient parity: MessageForRecipient on the parsed Rust message must equal each Rust received-format view.
 
 package interop
 
@@ -132,8 +111,7 @@ func TestSealedSenderV2MultiWire(t *testing.T) {
 			for _, r := range recipients {
 				r := r
 				t.Run(r.name, func(t *testing.T) {
-					// DIRECT BYTES-EQUAL: MessageForRecipient must reproduce the
-					// Rust-emitted received-format view exactly.
+					// MessageForRecipient must equal the Rust received-format view.
 					got, err := parsed.MessageForRecipient(r.sid)
 					if err != nil {
 						t.Fatalf("MessageForRecipient(%s): %v", r.name, err)

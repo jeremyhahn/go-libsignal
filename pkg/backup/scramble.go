@@ -45,13 +45,7 @@ func (e *ScramblerError) Unwrap() error {
 	return e.Err
 }
 
-// Scrambler scrambles backup data for testing and anonymization purposes.
-// It replaces sensitive data (phone numbers, UUIDs, strings, byte slices)
-// with deterministic replacements that preserve structural properties.
-//
-// The Scrambler uses a seeded PRNG for deterministic output and maintains
-// maps of original-to-replacement values for consistent replacement across
-// the entire backup.
+// Scrambler deterministically replaces sensitive backup data, keeping structure and consistent replacements across the backup.
 type Scrambler struct {
 	seed      uint64
 	state     uint64
@@ -76,29 +70,7 @@ func NewScramblerWithSeed(seed uint64) *Scrambler {
 	}
 }
 
-// nextUint64 returns the next pseudorandom uint64 from the scrambler's PRNG.
-//
-// PRNG algorithm: XorShift-64 (Marsaglia 2003).  Three operations are applied
-// in sequence, matching the standard (13, 7, 17) parameter triple.
-//
-// PRNG DIVERGENCE NOTE (MEDIUM #5):
-// The Rust scrambler uses rand::rngs::StdRng::seed_from_u64(0), which in
-// rand 0.9 is ChaCha12 (128-bit state, 12 rounds).  The Go implementation
-// uses XorShift-64 (64-bit state, 3 xor-shifts).  The two algorithms produce
-// different output sequences.
-//
-// This divergence is intentional and safe because the scrambler is a
-// testing/anonymization tool — NOT a wire-format primitive.  Its output is
-// never transmitted on the wire, stored in interop fixtures, or compared
-// between implementations.  There is therefore no correctness requirement for
-// byte-identical PRNG output between Rust and Go.
-//
-// Aligning to ChaCha12 would require importing an external pure-Go ChaCha20
-// library or writing the block function from scratch purely to match an
-// internal test tool, which violates YAGNI.  If cross-language scramble
-// output parity ever becomes a requirement, this function should be replaced
-// with a ChaCha12 seeded via seed_from_u64 semantics (using 16 little-endian
-// bytes derived from the u64 seed with an empty 12-byte nonce).
+// nextUint64 returns the next XorShift-64 value; output differs from Rust's ChaCha12 scrambler, which is fine for a test tool.
 func (s *Scrambler) nextUint64() uint64 {
 	s.state ^= s.state << 13
 	s.state ^= s.state >> 7
@@ -126,13 +98,7 @@ func (s *Scrambler) ReplaceE164(e164 uint64) uint64 {
 	return replacement
 }
 
-// ReplaceServiceID consistently replaces a serialized ServiceId (or other
-// UUID) across a backup. Empty fields and nil UUIDs are left unchanged.
-//
-// If the input is 17 bytes (non-ACI ServiceId), the first byte (type prefix)
-// is preserved. If the input is 16 bytes, a random v4 UUID replaces it.
-// For other lengths, the replacement is truncated or padded to preserve the
-// original length, including any structural mistakes.
+// ReplaceServiceID consistently replaces a serialized ServiceId or UUID, keeping a 17-byte type prefix and the original length.
 func (s *Scrambler) ReplaceServiceID(field []byte) []byte {
 	if len(field) == 0 {
 		return field
@@ -232,10 +198,7 @@ func (s *Scrambler) RandomUUID() []byte {
 	return uuid
 }
 
-// ScrambleContentType scrambles a MIME content type by preserving the
-// major type and replacing the subtype with "unknown". For example,
-// "image/jpeg" becomes "image/unknown". If there is no "/" separator,
-// the entire string is replaced with "unknown".
+// ScrambleContentType keeps the MIME major type and replaces the subtype with "unknown".
 func ScrambleContentType(contentType string) string {
 	idx := strings.Index(contentType, "/")
 	if idx < 0 {
@@ -262,9 +225,7 @@ func ReplacementURL() string {
 	return replacementURL
 }
 
-// CryptoRandomUUID generates a cryptographically random v4 UUID using
-// crypto/rand. This is used when true randomness is required rather
-// than the deterministic PRNG of a Scrambler.
+// CryptoRandomUUID returns a random v4 UUID from crypto/rand.
 func CryptoRandomUUID() ([]byte, error) {
 	uuid := make([]byte, uuidLen)
 	if _, err := rand.Read(uuid); err != nil {

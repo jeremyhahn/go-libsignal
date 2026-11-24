@@ -38,12 +38,7 @@ func NewPreKeyFromStruct(structure *PreKeyStructure, serializer PreKeySerializer
 		serializer: serializer,
 	}
 
-	// Decode the 33-byte serialized EC public key ([0x05 || 32 key bytes]).
-	// Using ecc.DecodePoint rather than bytehelper.SliceToArray + NewDjbECPublicKey
-	// is required because SliceToArray truncates the 33-byte form to [32]byte,
-	// keeping the 0x05 type byte and discarding the last key byte, producing a
-	// corrupted public key.
-	// Mirrors the Rust approach of decoding from the stored bytes directly.
+	// Decode the 33-byte key [0x05 || 32 bytes] with ecc.DecodePoint; SliceToArray would truncate it.
 	publicKey, err := ecc.DecodePoint(structure.PublicKey, 0)
 	if err != nil {
 		return nil, err

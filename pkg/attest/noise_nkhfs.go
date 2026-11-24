@@ -3,28 +3,7 @@
 
 package attest
 
-// Package-level implementation of the Noise NKhfs handshake pattern.
-//
-// Noise_NKhfs_25519+Kyber1024_ChaChaPoly_SHA256 extends the standard NK
-// pattern with a KEM-based hybrid forward secrecy (HFS) step, as defined
-// in the Noise HFS extension specification.
-//
-// NK pre-message: <- s (responder's static key is known to initiator)
-//
-// Message pattern:
-//
-//	-> e, es, e1    (initiator sends ephemeral DH key + encrypted KEM encapsulation key)
-//	<- e, ee, ekem1 (responder sends ephemeral DH key + encrypted KEM ciphertext)
-//
-// Both sides mix the KEM shared secret into the handshake state alongside
-// the standard DH operations, providing forward secrecy even if discrete-log
-// is broken by a quantum adversary.
-//
-// Wire format (both messages are 1632 bytes):
-//
-//	e.pub(32) + EncryptAndHash(e1.pub or ekem1.ct)(1568+16) + EncryptAndHash(nil)(16) = 1632
-//
-// This matches Rust libsignal's NOISE_HANDSHAKE_OVERHEAD = 1632.
+// Noise_NKhfs_25519+Kyber1024_ChaChaPoly_SHA256: NK plus a KEM hybrid forward secrecy step; both messages are 1632 bytes, as Rust libsignal.
 
 import (
 	"crypto/mlkem"
@@ -119,9 +98,7 @@ type nkhfsSymmetricState struct {
 	n      uint64   // nonce counter for the handshake symmetric key
 }
 
-// initializeSymmetric initializes the symmetric state from the protocol name.
-// Per the Noise spec: if len(name) <= 32, h = name padded with zeros;
-// otherwise h = HASH(name). In our case the name is >32 bytes, so h = SHA256(name).
+// initializeSymmetric sets h = SHA256(name), since the protocol name exceeds 32 bytes.
 func newNKhfsSymmetricState() *nkhfsSymmetricState {
 	name := []byte(NoisePatternHFS)
 	h := sha256.Sum256(name)
@@ -173,9 +150,7 @@ func (ss *nkhfsSymmetricState) encryptAndHash(plaintext []byte) ([]byte, error) 
 	return ciphertext, nil
 }
 
-// decryptAndHash decrypts ciphertext (if key is set), mixes ciphertext into h,
-// and returns the plaintext. Per the Noise spec, the ciphertext is mixed into h
-// BEFORE decryption, using the pre-mix h value as AEAD additional data.
+// decryptAndHash decrypts with the pre-mix h as associated data, mixing the ciphertext into h first.
 func (ss *nkhfsSymmetricState) decryptAndHash(ciphertext []byte) ([]byte, error) {
 	if !ss.hasKey {
 		ss.mixHash(ciphertext)
@@ -230,8 +205,7 @@ func (ss *nkhfsSymmetricState) split() (*NKhfsCipherState, *NKhfsCipherState, []
 // key material, producing a 64-byte output (two 32-byte keys) per the Noise spec.
 // The caller is responsible for zeroizing the returned slice after use.
 func noiseHKDF2(ck, ikm []byte) ([]byte, error) {
-	// The Noise spec uses HKDF with 2 outputs, each of HASHLEN (32) bytes.
-	// HKDF(salt=ck, ikm=ikm, info="") -> 64 bytes split into two 32-byte keys.
+	// HKDF(salt=ck, ikm) yields two 32-byte keys.
 	r := hkdf.New(sha256.New, ikm, ck, nil)
 	out := make([]byte, 64)
 	if _, err := r.Read(out); err != nil {
@@ -310,14 +284,7 @@ func newNKhfsHandshakeState(remoteStaticPub []byte) (*nkhfsHandshakeState, error
 	}, nil
 }
 
-// writeMessage1 produces the initiator's first handshake message: -> e, es, e1.
-//
-// Wire format: e.public(32) || EncryptAndHash(e1.public)(1568+16) || EncryptAndHash(payload)(len+16)
-//
-//  1. Append e.public to message, MixHash(e.public)
-//  2. MixKey(DH(e, rs)) — sets hasKey=true; X25519 DH result is zeroized after use
-//  3. EncryptAndHash(e1.public) — KEM pub is AEAD-encrypted since hasKey=true; append to message
-//  4. EncryptAndHash(payload) — payload encrypted and appended
+// writeMessage1 writes the initiator's -> e, es, e1: e.public || EncryptAndHash(e1.public) || EncryptAndHash(payload).
 func (hs *nkhfsHandshakeState) writeMessage1(payload []byte) ([]byte, error) {
 	var msg []byte
 
@@ -354,22 +321,7 @@ func (hs *nkhfsHandshakeState) writeMessage1(payload []byte) ([]byte, error) {
 	return msg, nil
 }
 
-// readMessage2 processes the responder's second handshake message: <- e, ee, ekem1.
-//
-// Expected wire format:
-//
-//	e.public(32) || DecryptAndHash(ekem1.ciphertext)(1568+16) || DecryptAndHash(payload)(len+16)
-//
-// Token processing order per the Noise HFS extension spec:
-//
-//  1. Read e.public (32 bytes), MixHash(e.public)
-//  2. MixKey(DH(e_local, e_remote)) — hasKey=true; DH result zeroized after use
-//  3. DecryptAndHash(encKemCt)(1584 bytes) — recover 1568-byte KEM ct using key from step 2
-//  4. Decapsulate(kemCt) → kemSS; MixKey(kemSS) — KEM SS zeroized after use
-//  5. DecryptAndHash(remaining payload) — using key from step 4
-//  6. split() — derive transport CipherStates, destroy ephemeral private key
-//
-// Returns the decrypted payload and transport CipherStates.
+// readMessage2 reads the responder's <- e, ee, ekem1, decapsulates the KEM secret, and returns the payload and transport CipherStates.
 func (hs *nkhfsHandshakeState) readMessage2(msg []byte) ([]byte, *NKhfsCipherState, *NKhfsCipherState, []byte, error) {
 	const (
 		dhPubLen     = 32
@@ -402,9 +354,7 @@ func (hs *nkhfsHandshakeState) readMessage2(msg []byte) ([]byte, *NKhfsCipherSta
 		return nil, nil, nil, nil, newNoiseHandshakeError(err)
 	}
 
-	// Step 3: ekem1 — DecryptAndHash the encrypted KEM ciphertext (1584 bytes on wire).
-	// The responder encrypted the 1568-byte KEM ct using the key from ee (step 2).
-	// We must decrypt with that same key BEFORE mixing in the KEM shared secret.
+	// ekem1 is decrypted with the ee key before the KEM shared secret is mixed in.
 	encKemCt := msg[:encKemCtLen]
 	msg = msg[encKemCtLen:]
 	kemCt, err := hs.ss.decryptAndHash(encKemCt)

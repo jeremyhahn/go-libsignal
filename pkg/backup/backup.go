@@ -130,19 +130,13 @@ func (br *BackupReader) ReadAll() ([][]byte, error) {
 	}
 }
 
-// BackupInfoRaw contains the decoded fields of the first frame (BackupInfo
-// protobuf) of a backup stream.
-//
-// Rust libsignal ref: rust/message-backup/src/backup.rs BackupInfo / BackupMeta
+// BackupInfoRaw holds the decoded first frame of a backup stream (rust/message-backup/src/backup.rs BackupInfo).
 type BackupInfoRaw struct {
 	// Version is the backup format version (must be 1).
 	Version uint64
 	// BackupTimeMs is the backup creation timestamp in milliseconds since epoch.
 	BackupTimeMs uint64
-	// MediaRootBackupKey is the 32-byte media root backup key, held in guarded
-	// memory: it is long-lived key material that derives every media
-	// encryption key in the backup, so it is kept out of the Go heap for the
-	// same reasons as the session state in pkg/state/record.
+	// MediaRootBackupKey is the 32-byte media root key, kept in guarded memory.
 	MediaRootBackupKey *secret.Secret
 }
 
@@ -155,12 +149,7 @@ func (b *BackupInfoRaw) Destroy() {
 	b.MediaRootBackupKey.Destroy()
 }
 
-// ValidatedReadResult is the result of ValidatedReadAll.
-//
-// The result owns the guarded media root backup key reached through Info, so
-// callers must Destroy it once they are done — nothing reclaims guarded memory
-// on its own. Info is a pointer so that copying the result cannot produce two
-// apparent owners of the same locked buffer.
+// ValidatedReadResult is the result of ValidatedReadAll; it owns guarded key memory, so callers must Destroy it.
 type ValidatedReadResult struct {
 	// Info is the parsed first-frame BackupInfo.
 	Info *BackupInfoRaw
@@ -181,21 +170,7 @@ func (r *ValidatedReadResult) Destroy() {
 	r.Info.Destroy()
 }
 
-// ValidatedReadAll reads all frames, parses the first frame as BackupInfo,
-// parses each subsequent frame as a Frame protobuf, and enforces the Purpose.
-// It returns ErrInvalidBackupInfo if the first frame cannot be decoded or
-// fails basic validation, ErrInvalidFrame for subsequent frame parse errors,
-// and ErrPurposeMismatch if the BackupInfo version does not correspond to the
-// expected purpose constraints.
-//
-// Unknown field numbers in any frame are recorded in ValidatedReadResult.FoundUnknownFields
-// rather than causing an error, matching proto3 forward-compatibility rules.
-//
-// On success the caller owns the returned result, which carries the media root
-// backup key in guarded memory, and must call Destroy on it. A failed call
-// leaves nothing behind to release.
-//
-// Rust libsignal ref: rust/message-backup/src/backup.rs BackupReader::read_all
+// ValidatedReadAll parses and validates every frame against the Purpose, records unknown fields, and returns a result the caller must Destroy.
 func (br *BackupReader) ValidatedReadAll(purpose Purpose) (_ *ValidatedReadResult, err error) {
 	result := &ValidatedReadResult{}
 
@@ -271,20 +246,7 @@ func (br *BackupReader) ValidatedReadAll(purpose Purpose) (_ *ValidatedReadResul
 	return result, nil
 }
 
-// parseBackupInfo decodes the BackupInfo protobuf from raw bytes.
-// It returns the decoded fields, any unknown field numbers found, and any
-// parse error.
-//
-// BackupInfo wire format (rust/message-backup/src/proto/backup.proto):
-//
-//	message BackupInfo {
-//	  uint64 version = 1;           // varint
-//	  uint64 backupTimeMs = 2;      // varint
-//	  bytes mediaRootBackupKey = 3; // bytes (32 bytes)
-//	  string currentAppVersion = 4; // bytes
-//	  string firstAppVersion = 5;   // bytes
-//	  bytes debugInfo = 6;          // bytes
-//	}
+// parseBackupInfo decodes a BackupInfo protobuf (rust/message-backup/src/proto/backup.proto) and returns its unknown field numbers.
 func parseBackupInfo(b []byte) (_ *BackupInfoRaw, unknowns []FoundUnknownField, err error) {
 	info := &BackupInfoRaw{}
 	data := b
@@ -392,28 +354,7 @@ func parseBackupInfo(b []byte) (_ *BackupInfoRaw, unknowns []FoundUnknownField, 
 	return info, unknowns, nil
 }
 
-// parseFrame performs a minimal parse of a Frame protobuf to detect unknown
-// field numbers at the top level. It does not recursively validate sub-messages.
-//
-// Frame wire format (rust/message-backup/src/proto/backup.proto):
-//
-//	message Frame {
-//	  oneof item {
-//	    AccountData account = 1;
-//	    Recipient recipient = 2;
-//	    Chat chat = 3;
-//	    ChatItem chatItem = 4;
-//	    StickerPack stickerPack = 5;
-//	    AdHocCall adHocCall = 6;
-//	    NotificationProfile notificationProfile = 7;
-//	    ChatFolder chatFolder = 8;
-//	  }
-//	}
-//
-// frameKnownFieldNames maps Frame oneof field numbers (1-8) to their proto
-// names for use in *ErrUnexpectedWireType messages.
-//
-// Rust libsignal ref: rust/message-backup/src/proto/backup.proto Frame.item
+// parseFrame reports unknown top-level Frame fields without validating sub-messages; frameKnownFieldNames names fields 1-8.
 var frameKnownFieldNames = map[uint64]string{
 	1: "Frame.account",
 	2: "Frame.recipient",
@@ -546,19 +487,12 @@ func encodeVarintDelimited(data []byte) []byte {
 	return result
 }
 
-// PaddedLength rounds contentLength up to obscure the exact size of a backup.
-// This matches the Rust reference: log_base(content_length, 1.05).ceil() -> 1.05^exp -> floor.
-// Uses Go's IEEE 754 compliant math.Log and math.Pow, matching Rust's f64::log and f64::powf.
-//
-// Rust libsignal ref: rust/message-backup/src/lib.rs padded_length
+// PaddedLength rounds contentLength up to the next power of 1.05, as Rust message-backup padded_length.
 func PaddedLength(contentLength uint32) uint32 {
 	const base = 1.05
 	exp := math.Ceil(math.Log(float64(contentLength)) / math.Log(base))
 	v := math.Floor(math.Pow(base, exp))
-	// Clamp to [0, math.MaxUint32] before converting to uint32. Near 4 GiB the
-	// float64 result can exceed math.MaxUint32, and Go's float64→uint32 cast is
-	// implementation-defined in that range (Rust uses saturating_cast which
-	// returns u32::MAX). Explicit clamping matches Rust's saturating behavior.
+	// Clamp to MaxUint32 before the cast, matching Rust's saturating cast.
 	if v >= math.MaxUint32 {
 		return math.MaxUint32
 	}

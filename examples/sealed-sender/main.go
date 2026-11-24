@@ -1,15 +1,4 @@
-// Package main demonstrates a Sealed Sender V1 message from Alice to Bob.
-//
-// Flow:
-//  1. Generate a trust root key pair (simulates the Signal server root of trust).
-//  2. Generate a server certificate signed by the trust root.
-//  3. Generate identity keys for Alice (sender) and Bob (recipient).
-//  4. Alice establishes a session with Bob via X3DH (ProcessBundle).
-//  5. Create a SenderCertificate for Alice, signed by the server key.
-//  6. Alice encrypts using SealedSenderEncrypt — Bob's identity is hidden from the server.
-//  7. Bob decrypts using SealedSenderDecryptWithKyber and recovers the plaintext + sender UUID.
-//
-// Run: GOWORK=off go run ./examples/sealed-sender/
+// Package main sends a Sealed Sender V1 message from Alice to Bob; run with GOWORK=off go run ./examples/sealed-sender/.
 package main
 
 import (

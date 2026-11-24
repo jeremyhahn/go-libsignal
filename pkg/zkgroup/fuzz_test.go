@@ -8,12 +8,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/zkcredential"
 )
 
-// FuzzDeserializeReceiptCredentialPresentation verifies that
-// DeserializeReceiptCredentialPresentation never panics on arbitrary input.
-// Seeds are derived from the deterministic inputs used in existing round-trip tests.
-//
-// Hardening target: u64-LE poksho_proof length prefix in the ReceiptCredentialPresentation
-// wire format (rust/zkgroup/src/api/receipts/receipt_credential_presentation.rs).
+// FuzzDeserializeReceiptCredentialPresentation checks DeserializeReceiptCredentialPresentation never panics, including on the u64-LE proof length.
 func FuzzDeserializeReceiptCredentialPresentation(f *testing.F) {
 	// Seed: produce a valid presentation using the same randomness as the
 	// existing round-trip test.

@@ -1,23 +1,6 @@
 package zkcredential
 
-// Room-credential flow test.
-//
-// Ports the zkcredential_examples::room_credential example from the Rust
-// libsignal codebase (libsignal/rust/zkcredential/benches/ @ 98915c44).
-//
-// The scenario demonstrates:
-//   - A custom RoomId attribute implementing RevealedAttribute.
-//   - Blind issuance: the issuing server cannot see the room ID.
-//   - Presentation + verification: the verifying server checks the room ID.
-//
-// The flow matches the Rust pattern:
-//  1. Server generates a CredentialKeyPair from fixed randomness.
-//  2. Client generates a BlindingKeyPair from fixed randomness.
-//  3. Client blinds the RoomId into a BlindedPoint and sends it to the server.
-//  4. Server issues a BlindedIssuanceProof over the blinded room ID.
-//  5. Client verifies the proof and decrypts the credential.
-//  6. Client presents the credential, supplying the plaintext RoomId.
-//  7. Server verifies the presentation against the RoomId.
+// Room-credential flow, ported from Rust zkcredential's room_credential example: a RoomId attribute is blindly issued, presented and verified against the room ID.
 
 import (
 	"testing"
@@ -121,14 +104,7 @@ func TestRoomCredentialRoundTrip(t *testing.T) {
 	}
 }
 
-// TestRoomCredentialWrongRoomId verifies that the verifying server rejects a
-// credential presentation when it checks against a room ID that differs from
-// the one that was credentialed.
-//
-// Protocol invariant: the credential V contains y1 * roomID.AsPoint() (baked in
-// during blind issuance). The verifying server subtracts y1 * M_verifier from Z
-// when computing the proof check.  If M_verifier ≠ roomID the Z mismatch causes
-// the poksho proof to fail.
+// TestRoomCredentialWrongRoomId checks verification against a different room ID fails, since V binds y1 * roomID.
 func TestRoomCredentialWrongRoomId(t *testing.T) {
 	var serverRandomness [RandomnessLen]byte
 	for i := range serverRandomness {
@@ -188,8 +164,7 @@ func TestRoomCredentialWrongRoomId(t *testing.T) {
 		t.Fatalf("Verify (issuance) failed: %v", err)
 	}
 
-	// Present with the CORRECT room ID (presentation ignores the value; the
-	// verifier is the party that must supply the correct room ID to match V).
+	// Present with the right room ID; the verifier supplies the ID it checks.
 	presentBuilder := NewPresentationProofBuilder(label)
 	presentBuilder.AddRevealedAttribute(roomID)
 	presentProof, err := presentBuilder.Present(credKeyPair.PublicKey(), credential, presentRandomness)
@@ -197,8 +172,7 @@ func TestRoomCredentialWrongRoomId(t *testing.T) {
 		t.Fatalf("Present failed: %v", err)
 	}
 
-	// Verifier checks against the WRONG room ID — must fail, because the
-	// credential V is bound to roomID and wrongRoomID produces a different Z.
+	// Verifying against wrongRoomID must fail.
 	verifyPresent := NewPresentationProofVerifier(label)
 	verifyPresent.AddRevealedAttribute(wrongRoomID)
 	if err := verifyPresent.Verify(credKeyPair, presentProof); err == nil {

@@ -53,15 +53,7 @@ func chainKeyBaseMaterial(chainKey []byte, seed []byte) []byte {
 	return mac.Sum(nil)
 }
 
-// TestPQRHKDFVectors verifies that the HKDF-SHA256 derivation for MessageKeys
-// produces identical output with and without a PQR salt. These vectors are
-// cross-verified against the Rust libsignal reference implementation.
-//
-// Rust reference: libsignal/rust/protocol/src/ratchet/keys.rs
-//
-//	MessageKeys::derive_keys(input_key_material, optional_salt, counter)
-//	  => HKDF-SHA256(salt=optional_salt, ikm=input_key_material, info="WhisperMessageKeys", len=80)
-//	  => cipher_key = okm[0..32], mac_key = okm[32..64], iv = okm[64..80]
+// TestPQRHKDFVectors checks MessageKeys HKDF with and without a PQR salt against Rust keys.rs derive_keys (info WhisperMessageKeys, 80 bytes).
 func TestPQRHKDFVectors(t *testing.T) {
 	// Use the known chain key seed from the Rust unit test
 	// (test_chain_key_derivation in ratchet/keys.rs)
@@ -188,12 +180,7 @@ func TestPQRHKDFVectors(t *testing.T) {
 	}
 }
 
-// TestPQRChainKeyDerivation verifies the chain key ratchet and message key
-// seed derivation matches the Rust reference implementation. This is the
-// prerequisite computation before HKDF is applied.
-//
-// Rust reference: ChainKey::message_keys() returns HMAC-SHA256(chainKey, 0x01)
-// Rust reference: ChainKey::next_chain_key() returns HMAC-SHA256(chainKey, 0x02)
+// TestPQRChainKeyDerivation checks message key seed HMAC(chainKey, 0x01) and next chain key HMAC(chainKey, 0x02), as Rust.
 func TestPQRChainKeyDerivation(t *testing.T) {
 	// Known values from Rust test_chain_key_derivation
 	seed := mustDecodeHex(t, "8ab72d6f4cc5ac0d387eaf463378ddb28edd07385b1cb01250c715982e7ad48f")
@@ -249,15 +236,7 @@ func TestPQRChainKeyDerivation(t *testing.T) {
 	}
 }
 
-// TestPQRGoHKDFParameterOrder verifies that the Go kdf.DeriveSecrets function
-// maps parameters correctly to the Rust HKDF call. This is critical because
-// the Go function signature is (ikm, salt, info, len) while Rust's hkdf crate
-// constructor is Hkdf::new(salt, ikm).
-//
-// The correct mapping for PQR integration is:
-//
-//	Go:   kdf.DeriveSecrets(inputKeyMaterial=seed, salt=pqrKey, info="WhisperMessageKeys", outputLength=80)
-//	Rust: Hkdf::new(optional_salt=pqrKey, input_key_material=seed).expand("WhisperMessageKeys", 80)
+// TestPQRGoHKDFParameterOrder checks kdf.DeriveSecrets(ikm, salt, ...) maps to Rust Hkdf::new(salt, ikm).
 func TestPQRGoHKDFParameterOrder(t *testing.T) {
 	ikm := mustDecodeHex(t, "bf51e9d75e0e31031051f82a2491ffc084fa298b7793bd9db620056febf45217")
 	salt := mustDecodeHex(t, "4141414141414141414141414141414141414141414141414141414141414141")
@@ -306,15 +285,7 @@ func TestPQRGoHKDFParameterOrder(t *testing.T) {
 	t.Logf("HKDF with real salt:  %s", hex.EncodeToString(directResult[:32]))
 }
 
-// TestPQRMessageKeysIntegrationWithChainKey exercises the full chain:
-//
-//  1. Start with a known chain key
-//  2. Derive the message key seed via HMAC-SHA256(chainKey, 0x01)
-//  3. Derive MessageKeys via HKDF with optional PQR salt
-//  4. Advance the chain key via HMAC-SHA256(chainKey, 0x02)
-//  5. Repeat for multiple indices
-//
-// This mirrors what happens in session_cipher.rs during encrypt/decrypt.
+// TestPQRMessageKeysIntegrationWithChainKey derives message keys and advances the chain over several indices, as session_cipher.rs.
 func TestPQRMessageKeysIntegrationWithChainKey(t *testing.T) {
 	// Deterministic chain key
 	chainKey := mustDecodeHex(t, "8ab72d6f4cc5ac0d387eaf463378ddb28edd07385b1cb01250c715982e7ad48f")
@@ -406,8 +377,7 @@ func TestPQRNilVsNoneSemantics(t *testing.T) {
 		t.Fatalf("HKDF failed: %v", err)
 	}
 
-	// Per RFC 5869, nil/empty salt defaults to HashLen zeros (32 for SHA-256).
-	// So nil salt and 32-byte-zero salt should produce IDENTICAL output.
+	// A nil salt equals 32 zero bytes (RFC 5869).
 	if hex.EncodeToString(nilResult) != hex.EncodeToString(zeroResult) {
 		t.Errorf("nil salt and 32-zero-byte salt should be identical per RFC 5869\n  nil:  %s\n  zero: %s",
 			hex.EncodeToString(nilResult[:32]),

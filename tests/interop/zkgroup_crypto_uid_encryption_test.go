@@ -1,16 +1,4 @@
-// Interop test for zkgroup UidEncryptionDomain parity.
-//
-// Source: rust/zkgroup/src/crypto/uid_encryption.rs:112-181
-// at Rust libsignal commit 98915c442d.
-//
-// Rust's test_uid_encryption() derives a KeyPair from TEST_ARRAY_32 via
-// Sho(HMAC-SHA256, b"Test_Uid_Encryption"), encrypts an ACI built from
-// TEST_ARRAY_16, and pins the 64-byte ciphertext.
-//
-// test_pni_encryption() is property-based only (no pinned ciphertext).
-//
-// Go equivalent: zkcredential.DeriveKeyPair + kp.Encrypt(UIDStruct).
-// Byte-identity requires matching SHO ratcheting; divergence is logged only.
+// UID encryption against Rust test_uid_encryption: DeriveKeyPair + Encrypt(UIDStruct); a byte mismatch is logged.
 package interop
 
 import (

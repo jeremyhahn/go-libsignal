@@ -1,13 +1,4 @@
-// Package interop contains integration tests that verify the Go port of the
-// Signal Protocol zkgroup library accepts the exact byte sequences produced by
-// the Rust libsignal reference implementation.
-//
-// Hex vectors are harvested verbatim from:
-//
-//	/rust/zkgroup/tests/integration_tests.rs
-//
-// No Rust subprocess is required; all fixtures are static byte slices loaded
-// at package init from tests/interop/fixtures/zkgroup/presentations.go.
+// Package interop checks Go accepts zkgroup bytes from Rust integration_tests.rs, loaded from fixtures/zkgroup/presentations.go.
 package interop_test
 
 import (
@@ -19,13 +10,7 @@ import (
 	fixtures "github.com/jeremyhahn/go-libsignal/tests/interop/fixtures/zkgroup"
 )
 
-// TestInteropAuthCredentialPresentationV1Rejected verifies that Go's
-// DeserializeAnyAuthCredentialPresentation rejects the V1 auth credential
-// presentation bytes with a deserialization error, mirroring the Rust behavior
-// in test_auth_credential_presentation_v1_is_rejected (integration_tests.rs:60).
-//
-// The V1 bytes have a 0x00 version byte. Rust's AnyAuthCredentialPresentation::new
-// only accepts V4 (0x03); all other version bytes are rejected.
+// TestInteropAuthCredentialPresentationV1Rejected checks a V1 (0x00) auth presentation is rejected, as Rust.
 func TestInteropAuthCredentialPresentationV1Rejected(t *testing.T) {
 	_, err := zkgroup.DeserializeAnyAuthCredentialPresentation(fixtures.AuthCredentialPresentationV1Bytes)
 	if err == nil {
@@ -44,12 +29,7 @@ func TestInteropAuthCredentialPresentationV1Rejected(t *testing.T) {
 	}
 }
 
-// TestInteropAuthCredentialPresentationV4Deserializes verifies that the V4 auth
-// credential presentation bytes from the Rust integration test suite parse
-// cleanly and produce non-nil ACI and PNI ciphertexts with the correct 64-byte
-// encoded size, and a non-zero redemption time.
-//
-// Source vector: integration_tests.rs:38 (AUTH_CREDENTIAL_PRESENTATION_V4_RESULT).
+// TestInteropAuthCredentialPresentationV4Deserializes checks the Rust V4 auth presentation parses with 64-byte ciphertexts and a redemption time.
 func TestInteropAuthCredentialPresentationV4Deserializes(t *testing.T) {
 	pres, err := zkgroup.DeserializeAnyAuthCredentialPresentation(fixtures.AuthCredentialPresentationV4ResultBytes)
 	if err != nil {
@@ -89,12 +69,7 @@ func TestInteropAuthCredentialPresentationV4Deserializes(t *testing.T) {
 	}
 }
 
-// TestInteropProfileKeyCredentialPresentationV1 verifies that the Rust-produced
-// V1 profile key credential presentation bytes parse via
-// DeserializeAnyProfileKeyCredentialPresentation and return a V1-typed result
-// with accessible ciphertexts and no expiration time.
-//
-// Source vector: integration_tests.rs:42 (PROFILE_KEY_CREDENTIAL_PRESENTATION_V1).
+// TestInteropProfileKeyCredentialPresentationV1 checks the Rust V1 presentation parses as V1 with ciphertexts and no expiration.
 func TestInteropProfileKeyCredentialPresentationV1(t *testing.T) {
 	any, err := zkgroup.DeserializeAnyProfileKeyCredentialPresentation(fixtures.ProfileKeyCredentialPresentationV1Bytes)
 	if err != nil {
@@ -234,20 +209,7 @@ func TestInteropProfileKeyCredentialPresentationV4(t *testing.T) {
 	}
 }
 
-// TestInteropAdditionalKATsNotAvailable documents that the four supplemental
-// Rust test files (backup_auth_flow.rs, call_link_flow.rs,
-// group_send_endorsements.rs, receipt_flow.rs) do not contain static hex
-// presentation-byte constants that can be harvested for Go interop tests.
-//
-// All four files use dynamically-generated key material and verify round-trip
-// correctness in Rust without embedding expected byte sequences as compile-time
-// constants. As a result there are no presentation-byte KATs to mirror here.
-//
-// Gap: BackupAuthCredentialPresentation, CallLinkAuthCredentialPresentation,
-// GroupSendEndorsementPresentation, and ReceiptCredentialPresentation are
-// implemented in the Go port but have no Rust static hex vectors to verify
-// against. End-to-end functional testing of those types is covered by the
-// package-level tests in pkg/zkgroup/.
+// TestInteropAdditionalKATsNotAvailable records that the Rust flow tests have no static presentation vectors; pkg/zkgroup tests cover those types.
 func TestInteropAdditionalKATsNotAvailable(t *testing.T) {
 	t.Run("BackupAuthCredentialPresentation_NoStaticVector", func(t *testing.T) {
 		// backup_auth_flow.rs generates credential material dynamically; no hex! const.

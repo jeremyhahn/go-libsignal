@@ -1,15 +1,4 @@
-// Conformance test: incremental MAC equivalence with single-shot HMAC.
-//
-// Mirrors the property exercised by rust/protocol/src/incremental_mac.rs::test::
-// final_result_should_be_equal_to_non_incremental_hmac (proptest):
-//
-//   For any input length, the FINAL MAC produced by the incremental
-//   builder must equal a plain HMAC-SHA-256 over the same input.
-//
-// We pin the same TEST_HMAC_KEY hex literal Rust uses, and run the
-// equivalence assertion across a deterministic spread of input sizes
-// that span chunk-aligned, partial-tail, and zero-length cases — the
-// boundaries that have historically been the failure modes.
+// Conformance: the final incremental MAC equals single-shot HMAC-SHA-256 for any input length, with Rust's TEST_HMAC_KEY across empty, partial and chunk-aligned sizes.
 
 package interop
 
@@ -29,24 +18,14 @@ const incrementalMacTestKeyHex = "a83481457efecc69ad1342e21d9c0297f71debbf5c9304
 // constant if it ever changes.
 const incrementalMacChunkSize = 64 * 1024
 
-// TestIncrementalMAC_FinalEqualsPlainHMAC asserts byte-for-byte that
-// the FINAL MAC from Incremental.Finalize equals a plain HMAC-SHA-256
-// over the same bytes, across boundary sizes and longer inputs.
+// TestIncrementalMAC_FinalEqualsPlainHMAC checks the final MAC equals plain HMAC-SHA-256 across boundary and longer sizes.
 func TestIncrementalMAC_FinalEqualsPlainHMAC(t *testing.T) {
 	key, err := hex.DecodeString(incrementalMacTestKeyHex)
 	if err != nil {
 		t.Fatalf("decode key: %v", err)
 	}
 
-	// A spread of input sizes that exercises:
-	//   - empty input
-	//   - sub-chunk inputs
-	//   - exact-chunk inputs
-	//   - chunk-plus-one (partial trailing chunk)
-	//   - multi-chunk inputs
-	// Sizes spanning sub-chunk, exact-chunk, partial-trailing-chunk and
-	// multi-chunk territory. Each chunk is 64 KiB so the multipliers below
-	// are in 64 KiB units.
+	// Sizes in 64 KiB chunk units: empty, sub-chunk, exact, chunk plus one and multi-chunk.
 	sizes := []int{
 		0, 1, 7, 31, 32, 33, 1024, 4096,
 		incrementalMacChunkSize - 1,
@@ -84,7 +63,7 @@ func TestIncrementalMAC_FinalEqualsPlainHMAC(t *testing.T) {
 			t.Fatalf("Finalize produced no MACs for size=%d", n)
 		}
 
-		// The LAST MAC is the full-input MAC, which must equal plain HMAC.
+		// The last MAC covers the whole input and must equal plain HMAC.
 		got := macs[len(macs)-1]
 		if hex.EncodeToString(got) != hex.EncodeToString(want) {
 			t.Fatalf("incremental final MAC mismatch (size=%d):\n  got  %s\n  want %s",
@@ -93,12 +72,7 @@ func TestIncrementalMAC_FinalEqualsPlainHMAC(t *testing.T) {
 	}
 }
 
-// TestIncrementalMAC_ChunkBoundaryProducesIntermediateMAC asserts that
-// when the input is a positive multiple of the chunk size, an
-// intermediate MAC equal to plain-HMAC-of-that-prefix is produced at
-// each boundary, and the final MAC is also recorded. This mirrors
-// Rust's incremental_macs_are_valid proptest pattern but with
-// deterministic inputs.
+// TestIncrementalMAC_ChunkBoundaryProducesIntermediateMAC checks each chunk boundary yields the HMAC of its prefix, plus the final MAC.
 func TestIncrementalMAC_ChunkBoundaryProducesIntermediateMAC(t *testing.T) {
 	key, err := hex.DecodeString(incrementalMacTestKeyHex)
 	if err != nil {
@@ -124,13 +98,7 @@ func TestIncrementalMAC_ChunkBoundaryProducesIntermediateMAC(t *testing.T) {
 		t.Fatalf("Finalize: %v", err)
 	}
 
-	// Expect numChunks intermediate MACs (one per boundary) + 1 final
-	// MAC = numChunks+1 total. The final boundary intermediate MAC and
-	// the final MAC are separate values: the intermediate is the MAC of
-	// the prefix-up-to-boundary, the final is the MAC of the whole
-	// input (which here equals the last intermediate since input length
-	// is a multiple of chunk size, but they are still emitted as two
-	// distinct elements).
+	// Expect one MAC per boundary plus the final MAC, emitted separately even when equal.
 	if len(macs) < numChunks {
 		t.Fatalf("expected at least %d MACs, got %d", numChunks, len(macs))
 	}

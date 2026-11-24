@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 1 test in this file exercises X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH requires X25519, so the fips140only tag drops this file.
 
 package identity
 
@@ -17,15 +12,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 )
 
-// TestKeyPairSerializeRoundTrip verifies that Serialize → NewKeyPairFromBytes
-// produces a KeyPair with byte-identical public and private key material.
-//
-// We use ecc.GenerateKeyPair so that the private key is already Curve25519-clamped
-// (NewDjbECPrivateKey applies clamping at construction; raw unclamped bytes will
-// not round-trip unchanged).
-//
-// Rust reference: test_serialize_identity_key_pair in
-// rust/protocol/src/identity_key.rs
+// TestKeyPairSerializeRoundTrip checks Serialize and NewKeyPairFromBytes round-trip a clamped key pair.
 func TestKeyPairSerializeRoundTrip(t *testing.T) {
 	kp, err := ecc.GenerateKeyPair()
 	if err != nil {

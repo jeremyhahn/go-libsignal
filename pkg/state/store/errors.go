@@ -5,13 +5,7 @@ import (
 	"fmt"
 )
 
-// ErrStoreIO indicates a storage backend I/O failure when reading or writing
-// session, identity, or pre-key records. It wraps the underlying error so
-// callers can use errors.Is / errors.As for diagnosis.
-//
-// Mirrors the storage-layer error semantics from
-// rust/protocol/src/storage/traits.rs where every store method returns
-// Result<T, SignalProtocolError>.
+// ErrStoreIO wraps a storage backend failure reading or writing records.
 type ErrStoreIO struct {
 	Op  string
 	Err error
@@ -26,10 +20,7 @@ func (e *ErrStoreIO) Error() string {
 
 func (e *ErrStoreIO) Unwrap() error { return e.Err }
 
-// ErrStoreNotFound indicates that a record was not found in the store.
-// Callers that need to distinguish "not found" from "I/O failure" should
-// use errors.As to check for this type; a (nil, nil) return from Load
-// methods also signals not-found for backward-compatible callers.
+// ErrStoreNotFound indicates a missing record; Load may also return (nil, nil).
 type ErrStoreNotFound struct {
 	Op string
 	ID interface{}
@@ -39,14 +30,7 @@ func (e *ErrStoreNotFound) Error() string {
 	return fmt.Sprintf("store: %s: record not found: %v", e.Op, e.ID)
 }
 
-// ErrLastResortReplay is returned by KyberPreKey.MarkKyberPreKeyUsed when a
-// last-resort Kyber pre-key is presented with the same
-// (kyberPreKeyID, signedPreKeyID, baseKey) triple as a previous call,
-// indicating a replay attack.
-//
-// Implementations of KyberPreKeyStore.MarkKyberPreKeyUsed MUST return this
-// error (or a type that wraps it) when last-resort replay is detected.
-// Mirrors the intent of rust/protocol/src/storage/traits.rs:131-134.
+// ErrLastResortReplay is returned by MarkKyberPreKeyUsed when a last-resort pre-key triple is presented again; implementations must return it or wrap it.
 type ErrLastResortReplay struct {
 	KyberPreKeyID  uint32
 	SignedPreKeyID uint32

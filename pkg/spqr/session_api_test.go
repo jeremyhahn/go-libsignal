@@ -577,7 +577,7 @@ func TestSendRecvWithEpochAdvance(t *testing.T) {
 		}(), wireVersion)
 	}
 
-	// Parse the SCKA wire message and verify epoch offset (chain epoch 1 → SCKA epoch 2).
+	// Chain epoch 1 is SCKA epoch 2.
 	sckaMsg, _, sckaErr := mlkembraid.DeserializeSCKA(pqrMsg)
 	if sckaErr != nil {
 		t.Fatalf("DeserializeSCKA: %v", sckaErr)

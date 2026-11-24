@@ -1,13 +1,4 @@
-// Package zkgroup implements the Signal Private Group System's zero-knowledge
-// group credentials. It provides types and operations for anonymous credential
-// issuance, presentation, and verification using ristretto255 group operations.
-//
-// This is a port of the Rust libsignal zkgroup implementation. The low-level
-// credential operations are delegated to the zkcredential package; this package
-// provides the higher-level API types used by Signal clients and servers.
-//
-// Based on "The Signal Private Group System and Anonymous Credentials Supporting
-// Efficient Verifiable Encryption" by Chase, Perrin, and Zaverucha.
+// Package zkgroup implements Signal's zero-knowledge group credentials over Ristretto255, the client and server API above zkcredential.
 package zkgroup
 
 import (
@@ -182,10 +173,7 @@ func (s ServiceID) Bytes() [UUIDLen]byte {
 	return s.RawUUID
 }
 
-// ServiceIdBinary returns the standard variable-width binary representation
-// of this ServiceID, matching Rust's ServiceId::service_id_binary().
-// For ACI, this returns just the raw 16-byte UUID.
-// For PNI, this returns 17 bytes: [0x01 type prefix] + [16 UUID bytes].
+// ServiceIdBinary returns the 16-byte UUID for an ACI, or 0x01 and the UUID for a PNI.
 func (s ServiceID) ServiceIdBinary() []byte {
 	if s.Type == ServiceIDTypeACI {
 		return s.RawUUID[:]

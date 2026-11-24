@@ -31,20 +31,7 @@ func NewSenderKeyMessageFromBytes(serialized []byte,
 		return nil, err
 	}
 
-	// Retain the bytes over which the signature was computed so that Serialize()
-	// can return them directly, preventing byte-malleability attacks where
-	// re-encoding a message with non-minimal varints or unknown proto fields
-	// produces different bytes than what the sender signed.
-	//
-	// Format detection: the Protobuf wire format appends the 64-byte signature as
-	// a binary suffix (version_byte || proto_body || sig[64]), so the last
-	// SenderKeySignatureLength bytes of the received buffer equal structure.Signature.
-	// JSON embeds the signature as a field, not as a binary suffix.
-	//
-	// Binary (protobuf) format: retain serialized[:len-SenderKeySignatureLength].
-	// Non-binary (JSON): re-serialize without the signature field to reproduce
-	//   the canonical pre-signature bytes. This matches the original behavior and
-	//   carries no additional malleability risk for test-only formats.
+	// Keep the signed bytes so Serialize returns them unchanged: the protobuf suffix is stripped, JSON is re-serialized without the signature.
 	if len(serialized) > SenderKeySignatureLength &&
 		bytes.Equal(serialized[len(serialized)-SenderKeySignatureLength:], senderKeyMessageStructure.Signature) {
 		// Binary wire format: signature is a binary suffix.
@@ -117,15 +104,7 @@ func NewSenderKeyMessageWithVersion(version uint32, distributionID [16]byte, key
 		return nil, newIncompleteMessageError("SenderKeyMessage", "signature key is nil")
 	}
 
-	// Build our SenderKeyMessage. The struct's version field stores the
-	// supplied version parameter so the wire byte high nibble encodes it
-	// correctly: ((version & 0xF) << 4) | SenderKeyCurrentVersion.
-	// This matches the Rust reference SenderKeyMessage::new which encodes
-	// message_version in the high nibble of the wire byte while storing
-	// SENDERKEY_MESSAGE_CURRENT_VERSION in the struct's message_version field
-	// (rust/protocol/src/protocol.rs:551,558). Both are currently 3, making
-	// the distinction latent; storing the parameter keeps the API honest for
-	// future version bumps.
+	// The wire byte carries version in the high nibble and the current version in the low nibble (Rust protocol.rs:551,558).
 	senderKeyMessage := &SenderKeyMessage{
 		distributionID: distributionID,
 		keyID:          keyID,
@@ -169,13 +148,7 @@ type SenderKeyMessage struct {
 	ciphertext     []byte
 	signature      []byte
 	serializer     SenderKeyMessageSerializer
-	// serializedBytes holds the pre-signature wire bytes retained from the
-	// received message at deserialize time. When non-nil, Serialize() returns
-	// these bytes directly so that GroupCipher signature verification uses
-	// the original encoding rather than a re-serialized form. This prevents
-	// byte-malleability where non-minimal varints or unknown proto fields
-	// survive unmarshal but are dropped by re-encoding, causing signature
-	// verification to succeed on a byte-modified message.
+	// serializedBytes holds the received pre-signature bytes, so signatures are verified over the original encoding.
 	serializedBytes []byte
 }
 
@@ -204,18 +177,7 @@ func (p *SenderKeyMessage) Version() uint32 {
 	return p.version
 }
 
-// Serialize will use the given serializer to return the message as bytes
-// excluding the signature. This should be used for signing and verifying
-// message signatures.
-//
-// When the message was deserialized from wire bytes (NewSenderKeyMessageFromBytes),
-// Serialize returns the retained original pre-signature bytes directly.
-// This prevents byte-malleability in signature verification: if the received
-// encoding uses non-minimal varints or carries unknown proto fields, re-serializing
-// from the struct would produce different bytes than what was signed.
-//
-// On the construction path (NewSenderKeyMessageWithVersion), serializedBytes is
-// nil and this method re-serializes from the struct as before.
+// Serialize returns the bytes the signature covers: the received bytes when deserialized, else a fresh serialization.
 func (p *SenderKeyMessage) Serialize() ([]byte, error) {
 	if p.serializedBytes != nil {
 		out := make([]byte, len(p.serializedBytes))

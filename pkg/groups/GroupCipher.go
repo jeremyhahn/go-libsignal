@@ -12,12 +12,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 )
 
-// maxForwardJumps limits the forward jump in sender key iteration.
-// Unlike the 1:1 session cipher which pre-checks total skipped keys,
-// the group cipher iterates up to maxForwardJumps HMAC derivations per
-// message. This matches the Rust reference (group_cipher.rs) where
-// MAX_FORWARD_JUMPS is the only limit. The per-add eviction in
-// AddSenderMessageKey caps stored keys at maxMessageKeys=2000.
+// maxForwardJumps limits the sender key chain advance per message, as Rust group_cipher.rs MAX_FORWARD_JUMPS.
 const maxForwardJumps = 25000
 
 // NewGroupCipher will return a new group message cipher that can be used for
@@ -111,10 +106,7 @@ func (c *GroupCipher) Encrypt(distributionID [16]byte, plaintext []byte) (protoc
 	return senderKeyMessage, nil
 }
 
-// Decrypt decrypts the given message using an existing session that
-// is stored in the senderKey store. The distribution ID embedded in the
-// incoming SenderKeyMessage is used for the store lookup, matching the
-// Rust reference implementation (group_decrypt).
+// Decrypt decrypts a SenderKeyMessage, looking up the session by the message's distribution ID as Rust group_decrypt does.
 func (c *GroupCipher) Decrypt(senderKeyMessage *protocol.SenderKeyMessage) ([]byte, error) {
 	if c.senderKeyStore == nil {
 		return nil, ErrNilSenderKeyStore
@@ -209,10 +201,7 @@ func (c *GroupCipher) getSenderKey(senderKeyState *record.SenderKeyState, iterat
 		return nil, newOldCounterError(senderChainKey.Iteration(), iteration)
 	}
 
-	// Guard against uint32 underflow: if iteration < chainIteration the
-	// subtraction wraps, producing a very large value that exceeds the limit.
-	// The earlier branch (chainIteration > iteration) should catch this, but
-	// we defend against it explicitly for safety.
+	// Guard against uint32 underflow explicitly.
 	jump := iteration - senderChainKey.Iteration()
 	if jump > maxForwardJumps {
 		return nil, &Error{kind: errTooManyFutureMessages}
@@ -239,15 +228,7 @@ func (c *GroupCipher) getSenderKey(senderKeyState *record.SenderKeyState, iterat
 	return senderChainKey.SenderMessageKey()
 }
 
-// DistributionIDToGroupID formats a 16-byte distribution UUID as a standard
-// hyphenated UUID string (8-4-4-4-12 lowercase hex) for use as a
-// SenderKeyName group ID. The output is byte-identical to Rust's Uuid::Display
-// (std::fmt::Display for uuid::Uuid) applied to the same 16 bytes.
-//
-// Rust counterpart: uuid::Uuid formatted via Display in
-// rust/protocol/src/group_cipher.rs — the distribution_id field is a Uuid
-// and its string representation via {} in log statements and error types
-// uses this same hyphenated format.
+// DistributionIDToGroupID formats a 16-byte distribution UUID as a lowercase hyphenated string, identical to Rust's Uuid Display.
 func DistributionIDToGroupID(id [16]byte) string {
 	h := hex.EncodeToString(id[:])
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]

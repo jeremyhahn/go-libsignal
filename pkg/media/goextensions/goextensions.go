@@ -12,8 +12,7 @@ const (
 	// MediaTypeUnknown indicates an unrecognized media type.
 	MediaTypeUnknown MediaType = iota
 
-	// MediaTypeJPEG indicates a JPEG image.
-	// Rust source: not present in libsignal media crate; go-libsignal extension.
+	// MediaTypeJPEG indicates a JPEG image (a go-libsignal extension).
 	MediaTypeJPEG
 
 	// MediaTypePNG indicates a PNG image.
@@ -58,17 +57,13 @@ type SanitizeResult struct {
 	// MediaType is the detected type of the input media.
 	MediaType MediaType
 
-	// Sanitized contains the output media data. When MetadataStripped is true,
-	// metadata such as EXIF, ICC profiles, and comments has been removed. When
-	// MetadataStripped is false, the data has only been structurally validated
-	// and is returned as-is.
+	// Sanitized is the output: metadata removed when MetadataStripped, otherwise the validated input.
 	Sanitized []byte
 
 	// OriginalSize is the size of the original input data in bytes.
 	OriginalSize int64
 
-	// MetadataStripped indicates whether metadata was actually removed.
-	// True for JPEG and PNG. False for GIF (structural validation only).
+	// MetadataStripped is true for JPEG and PNG, false for GIF.
 	MetadataStripped bool
 }
 
@@ -147,14 +142,7 @@ var (
 // detection across all three extension types.
 const minDetectionSize = 8 // PNG signature length
 
-// DetectMediaType detects the media type from the first bytes of data.
-//
-// Detection is based on magic byte sequences:
-//   - JPEG: 0xFF 0xD8 0xFF at offset 0
-//   - PNG: 8-byte PNG signature at offset 0
-//   - GIF: "GIF87a" or "GIF89a" at offset 0
-//
-// Returns MediaTypeUnknown if the type cannot be determined.
+// DetectMediaType detects JPEG, PNG or GIF by magic bytes, else MediaTypeUnknown.
 func DetectMediaType(data []byte) MediaType {
 	if len(data) >= 3 && bytes.HasPrefix(data, jpegMagic) {
 		return MediaTypeJPEG
@@ -170,14 +158,7 @@ func DetectMediaType(data []byte) MediaType {
 	return MediaTypeUnknown
 }
 
-// Sanitize performs sanitization on JPEG, PNG, or GIF data.
-//
-// For JPEG and PNG, metadata (EXIF, ICC, comments, etc.) is stripped and
-// MetadataStripped is set to true. For GIF, only structural validation is
-// performed and the data is returned unmodified with MetadataStripped false.
-//
-// Returns ErrUnsupportedMediaType if the media type is not one of the three
-// extension types. For MP4 and WebP, use pkg/media instead.
+// Sanitize strips metadata from JPEG and PNG and validates GIF; other types return ErrUnsupportedMediaType (use pkg/media for MP4 and WebP).
 func Sanitize(data []byte) (*SanitizeResult, error) {
 	if len(data) < 3 {
 		return nil, ErrDataTooShort
@@ -219,9 +200,7 @@ func Sanitize(data []byte) (*SanitizeResult, error) {
 	return result, nil
 }
 
-// SanitizeJPEG strips EXIF and other metadata from JPEG data while preserving
-// the image data. It removes APP0 (JFIF), APP1 (EXIF/XMP), APP2 (ICC),
-// APP13 (IPTC/Photoshop), and COM (comment) markers.
+// SanitizeJPEG removes APP0, APP1, APP2, APP13 and COM markers, keeping the image data.
 func SanitizeJPEG(data []byte) ([]byte, error) {
 	if len(data) < 3 || !bytes.HasPrefix(data, jpegMagic) {
 		return nil, ErrInvalidJPEG
@@ -315,9 +294,7 @@ func SanitizeJPEG(data []byte) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// SanitizePNG strips metadata chunks from PNG data while preserving critical
-// chunks (IHDR, PLTE, IDAT, IEND) and safe ancillary chunks.
-// Removes tEXt, zTXt, iTXt, eXIf, iCCP, and tIME chunks.
+// SanitizePNG removes tEXt, zTXt, iTXt, eXIf, iCCP and tIME chunks, keeping critical and safe ancillary chunks.
 func SanitizePNG(data []byte) ([]byte, error) {
 	if len(data) < 8 || !bytes.HasPrefix(data, pngMagic) {
 		return nil, ErrInvalidPNG

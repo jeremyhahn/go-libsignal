@@ -1,24 +1,4 @@
-// Conformance test: zkgroup AuthCredentialWithPniZkc end-to-end byte-identical
-// to Rust.
-//
-// Mirrors rust/zkgroup/tests/integration_tests.rs::test_integration_auth_zkc:
-//
-//   1. server_secret = ServerSecretParams::generate(TEST_ARRAY_32).
-//   2. master_key    = GroupMasterKey::new(TEST_ARRAY_32_1).
-//   3. group         = GroupSecretParams::derive_from_master_key(master_key).
-//   4. aci           = Aci::from(TEST_ARRAY_16).
-//   5. pni           = Pni::from(TEST_ARRAY_16_1).
-//   6. redemption    = Timestamp::from_epoch_seconds(123456 * SECONDS_PER_DAY).
-//   7. response      = AuthCredentialWithPniZkcResponse::issue_credential(
-//                          aci, pni, redemption, &server_secret, TEST_ARRAY_32_2).
-//   8. credential    = response.receive(aci, pni, redemption, &server_public).
-//   9. presentation  = credential.present(&server_public, &group, TEST_ARRAY_32_5).
-//  10. bincode::serialize(&presentation) == AUTH_CREDENTIAL_PRESENTATION_V4_RESULT.
-//
-// This is the only KAT we have today that exercises the *full* auth zkc round
-// trip — IssuanceProof generation, Receive verification, PresentationProof
-// generation, attribute encryption, and the bincode wire format that goes
-// over the wire to the chat service.
+// Conformance: the full AuthCredentialWithPniZkc flow (issue, receive, present) with Rust test_integration_auth_zkc inputs serializes to AUTH_CREDENTIAL_PRESENTATION_V4_RESULT.
 
 package interop
 

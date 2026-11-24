@@ -1,13 +1,4 @@
-// Conformance test: distribution-ID to group-ID transform vs Rust libsignal-protocol.
-//
-// Mirrors rust/protocol/src/group_cipher.rs:16-73 where distribution_id is a
-// uuid::Uuid formatted via Uuid::Display (standard hyphenated UUID string).
-// The Go DistributionIDToGroupID function must produce byte-identical output.
-//
-// Rust reference: uuid crate Display impl produces "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-// (8-4-4-4-12 lowercase hex groups separated by hyphens), matching RFC 4122 §3.
-// Go's DistributionIDToGroupID uses hex.EncodeToString + string slicing to
-// produce the identical format from the same 16-byte input.
+// DistributionIDToGroupID must match Rust's hyphenated UUID formatting (group_cipher.rs:16-73, RFC 4122 §3).
 
 package interop
 

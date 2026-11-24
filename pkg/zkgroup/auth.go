@@ -6,16 +6,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/zkcredential"
 )
 
-// authCredentialWithPniZkcLen is the wire length of a serialized
-// AuthCredentialWithPniZkc in bincode format:
-// 1 (version) + 96 (Credential: t:32 ‖ U:32 ‖ V:32)
-// + 80 (UIDStruct ACI: bytes:16 ‖ M1:32 ‖ M2:32)
-// + 80 (UIDStruct PNI: bytes:16 ‖ M1:32 ‖ M2:32)
-// + 8 (redemption_time LE u64)
-// = 265 bytes.
-//
-// Matches Rust constant AUTH_CREDENTIAL_WITH_PNI_LEN = 265 in
-// zkgroup/src/common/constants.rs.
+// authCredentialWithPniZkcLen is the 265-byte bincode length of AuthCredentialWithPniZkc (Rust AUTH_CREDENTIAL_WITH_PNI_LEN).
 const authCredentialWithPniZkcLen = 265
 
 // authCredentialWithPniZkcLabel is the credential label for zkcredential-based
@@ -114,19 +105,7 @@ func (p *AnyAuthCredentialPresentation) GetRedemptionTime() Timestamp {
 	return p.Presentation.RedemptionTimeSecs
 }
 
-// Serialize encodes the AuthCredentialWithPniZkc to its 265-byte bincode wire
-// format, which clients store locally.
-//
-// Wire layout (matches Rust bincode derive on AuthCredentialWithPniZkc):
-//
-//	[0]          version byte (AuthCredentialWithPniVersionZkc == 0x03)
-//	[1..97]      Credential: t:32 ‖ U:32 ‖ V:32
-//	[97..177]    UIDStruct ACI: raw_uuid_bytes:16 ‖ M1:32 ‖ M2:32
-//	[177..257]   UIDStruct PNI: raw_uuid_bytes:16 ‖ M1:32 ‖ M2:32
-//	[257..265]   redemption_time (8-byte LE u64, seconds since epoch)
-//
-// Matches Rust AUTH_CREDENTIAL_WITH_PNI_LEN = 265 from
-// zkgroup/src/common/constants.rs.
+// Serialize encodes the credential as 265 bytes: version 0x03, credential, ACI and PNI UIDStructs, u64 LE redemption time.
 func (c *AuthCredentialWithPniZkc) Serialize() ([]byte, error) {
 	credBytes := zkcredential.EncodeCredential(c.Credential)
 	aciBytes := c.ACI.Serialize()
@@ -145,22 +124,7 @@ func (c *AuthCredentialWithPniZkc) Serialize() ([]byte, error) {
 	return out, nil
 }
 
-// DeserializeAuthCredentialWithPniZkc decodes an AuthCredentialWithPniZkc from
-// exactly 265 bytes of bincode wire-format data.
-//
-// Returns ErrInvalidCredentialLength if the input is not exactly 265 bytes.
-// Returns ZkGroupDeserializationFailure for malformed point or scalar encodings.
-//
-// Wire layout:
-//
-//	[0]          version byte (must be AuthCredentialWithPniVersionZkc == 0x03)
-//	[1..97]      Credential: t:32 ‖ U:32 ‖ V:32
-//	[97..177]    UIDStruct ACI: raw_uuid_bytes:16 ‖ M1:32 ‖ M2:32
-//	[177..257]   UIDStruct PNI: raw_uuid_bytes:16 ‖ M1:32 ‖ M2:32
-//	[257..265]   redemption_time (8-byte LE u64, seconds since epoch)
-//
-// Mirrors Rust bincode::deserialize::<AuthCredentialWithPniZkc> from
-// zkgroup/src/api/auth/auth_credential_with_pni/zkc.rs.
+// DeserializeAuthCredentialWithPniZkc decodes exactly 265 bytes, returning ErrInvalidCredentialLength or ZkGroupDeserializationFailure.
 func DeserializeAuthCredentialWithPniZkc(b []byte) (*AuthCredentialWithPniZkc, error) {
 	if len(b) != authCredentialWithPniZkcLen {
 		return nil, &ErrInvalidCredentialLength{Got: len(b), Want: authCredentialWithPniZkcLen}
@@ -198,10 +162,7 @@ func DeserializeAuthCredentialWithPniZkc(b []byte) (*AuthCredentialWithPniZkc, e
 	}, nil
 }
 
-// IssueAuthCredentialWithPniZkc issues an auth credential with PNI using the
-// zkcredential system. This is a server-side operation.
-//
-// Matches Rust AuthCredentialWithPniZkcResponse::issue_credential.
+// IssueAuthCredentialWithPniZkc issues a server-side auth credential with PNI (Rust issue_credential).
 func (s *ServerSecretParams) IssueAuthCredentialWithPniZkc(
 	aci ServiceID,
 	pni ServiceID,
@@ -231,10 +192,7 @@ func (s *ServerSecretParams) IssueAuthCredentialWithPniZkc(
 	}, nil
 }
 
-// ReceiveAuthCredentialWithPniZkc verifies and receives an auth credential
-// with PNI. This is a client-side operation.
-//
-// Matches Rust AuthCredentialWithPniZkcResponse::receive.
+// ReceiveAuthCredentialWithPniZkc verifies and receives an auth credential with PNI on the client (Rust receive).
 func (pub *ServerPublicParams) ReceiveAuthCredentialWithPniZkc(
 	aci ServiceID,
 	pni ServiceID,
@@ -270,10 +228,7 @@ func (pub *ServerPublicParams) ReceiveAuthCredentialWithPniZkc(
 	}, nil
 }
 
-// CreateAuthCredentialWithPniZkcPresentation creates a zero-knowledge
-// presentation of an auth credential with PNI. This is a client-side operation.
-//
-// Matches Rust AuthCredentialWithPniZkc::present.
+// CreateAuthCredentialWithPniZkcPresentation creates a client-side presentation of the credential (Rust present).
 func (pub *ServerPublicParams) CreateAuthCredentialWithPniZkcPresentation(
 	credential *AuthCredentialWithPniZkc,
 	groupSecretParams *GroupSecretParams,
@@ -305,10 +260,7 @@ func (pub *ServerPublicParams) CreateAuthCredentialWithPniZkcPresentation(
 	}, nil
 }
 
-// VerifyAuthCredentialWithPniZkcPresentation verifies an auth credential
-// with PNI presentation. This is a server-side operation.
-//
-// Matches Rust AuthCredentialWithPniZkcPresentation::verify.
+// VerifyAuthCredentialWithPniZkcPresentation verifies a presentation on the server (Rust verify).
 func (s *ServerSecretParams) VerifyAuthCredentialWithPniZkcPresentation(
 	groupPublicParams *GroupPublicParams,
 	presentation *AuthCredentialWithPniZkcPresentation,
@@ -332,26 +284,7 @@ func (s *ServerSecretParams) VerifyAuthCredentialWithPniZkcPresentation(
 	return nil
 }
 
-// DeserializeAnyAuthCredentialPresentation parses a serialized
-// AnyAuthCredentialPresentation from wire-format bytes, mirroring the behavior
-// of Rust's AnyAuthCredentialPresentation::new.
-//
-// Only V4 presentations (first byte == PresentationVersion4 == 0x03) are
-// accepted. V1–V3 and any unrecognized version byte return
-// ErrDeserializationFailure, matching the Rust implementation which removed
-// support for V1–V3 auth credential presentations.
-//
-// Wire layout (Rust bincode, AuthCredentialWithPniZkcPresentation):
-//
-//	[0]         version byte (must be 0x03)
-//	[1..]       PresentationProof in Rust bincode format
-//	[proof+0..proof+64]   aci_ciphertext (EA1 ∥ EA2, each 32 bytes)
-//	[proof+64..proof+128] pni_ciphertext (EA1 ∥ EA2, each 32 bytes)
-//	[proof+128..proof+136] redemption_time (8-byte LE u64, seconds since epoch)
-//
-// Returns ErrUnknownPresentationVersion for any version byte other than 0x03,
-// ErrDataTooShort for empty or truncated input, and ZkGroupDeserializationFailure
-// for malformed point encodings.
+// DeserializeAnyAuthCredentialPresentation parses a V4 (0x03) presentation, as Rust AnyAuthCredentialPresentation::new; other versions return ErrUnknownPresentationVersion.
 func DeserializeAnyAuthCredentialPresentation(data []byte) (*AnyAuthCredentialPresentation, error) {
 	if len(data) == 0 {
 		return nil, &ErrDataTooShort{}
@@ -403,22 +336,7 @@ func DeserializeAnyAuthCredentialPresentation(data []byte) (*AnyAuthCredentialPr
 	}, nil
 }
 
-// SerializeAuthCredentialWithPniZkcPresentation encodes an
-// AuthCredentialWithPniZkcPresentation to its Rust bincode wire-format bytes.
-//
-// This is the inverse of DeserializeAnyAuthCredentialPresentation and produces
-// byte-identical output to bincode::serialize on the corresponding Rust
-// AuthCredentialWithPniZkcPresentation struct.
-//
-// Wire layout:
-//
-//	[0]                  version byte (PresentationVersion4 == 0x03)
-//	[1..]                PresentationProof in Rust bincode format
-//	[proof+0..proof+64]  aci_ciphertext (EA1 ∥ EA2)
-//	[proof+64..proof+128] pni_ciphertext (EA1 ∥ EA2)
-//	[proof+128..proof+136] redemption_time (8-byte LE u64, seconds since epoch)
-//
-// Matches Rust bincode::serialize(&AuthCredentialWithPniZkcPresentation).
+// SerializeAuthCredentialWithPniZkcPresentation encodes p as Rust bincode: version 0x03, proof, ACI and PNI ciphertexts, u64 LE redemption time.
 func SerializeAuthCredentialWithPniZkcPresentation(
 	p *AuthCredentialWithPniZkcPresentation,
 ) []byte {

@@ -1,24 +1,6 @@
-// Package tripleratchet implements the Triple Ratchet: a hybrid EC + PQ
-// encrypt/decrypt interface combining the Double Ratchet (via ECCipher) and
-// the ML-KEM Braid SCKA (via mlkembraid) with SPQR chain key derivation.
+// Package tripleratchet implements a Triple Ratchet: each message key combines the EC Double Ratchet and the SPQR chain, whose epoch advances on each ML-KEM Braid output key.
 //
-// Each message is encrypted using keys derived from both the EC ratchet and
-// the PQ ratchet via KDFHybrid. The PQ chain epoch advances when the ML-KEM
-// Braid SCKA produces an output key.
-//
-// Public API:
-//
-//	tr, err := tripleratchet.NewAlice(ecCipher, sharedSecret, kemImpl, chunkSize)
-//	tr, err := tripleratchet.NewBob(ecCipher, sharedSecret, kemImpl, chunkSize)
-//	msg, err := tr.Encrypt(plaintext)
-//	plaintext, err := tr.Decrypt(compositeMessage)
-//
-// Rust source: rust/protocol/src/triple_ratchet.rs
-// Note: This Go package is a higher-level standalone hybrid that wraps the
-// Braid SCKA + SPQR + EC ratchet, while the Rust TripleRatchet is an internal
-// (pub(crate)) session-management helper. The public Go API (NewAlice/NewBob)
-// is a Go-specific design matching the initialization semantics documented in
-// the Signal protocol specification.
+// NewAlice and NewBob create the two ends; Encrypt and Decrypt exchange composite messages. Unlike the internal Rust TripleRatchet (rust/protocol/src/triple_ratchet.rs), this is a standalone API.
 package tripleratchet
 
 import (
@@ -43,29 +25,13 @@ const (
 	epochsToKeepPriorToSendEpoch = 1
 )
 
-// pqSkippedKeyID identifies a skipped PQ key by epoch and counter.
-//
-// NOTE: The epoch field is populated with tr.pqEpoch at derivation time.
-// CompositeHeader carries no PQ epoch field, so cross-epoch out-of-order
-// decryption via skipped keys cannot work: a message from epoch N cannot be
-// decrypted after the ratchet has advanced past N's retention window because
-// (a) there is no epoch in the wire header to look up the correct skipped key,
-// and (b) purgeOldSkippedKeys removes keys from expired epochs. The epoch
-// field is retained as future-proofing: if a later protocol version adds a PQ
-// epoch to CompositeHeader, no structural change to pqSkippedKeyID is needed.
+// pqSkippedKeyID identifies a skipped PQ key by epoch and counter; the header carries no epoch, so skipped keys work only within the current epoch.
 type pqSkippedKeyID struct {
 	epoch   uint64
 	counter uint32
 }
 
-// ECCipher abstracts the EC Double Ratchet operations needed by the Triple Ratchet.
-//
-// Implementations should return the EC message key and a serialized EC header
-// on send, and derive the EC message key from the header on receive.
-//
-// Rust source: the EC ratchet path in rust/protocol/src/triple_ratchet.rs,
-// where the DR sender chain key and receiver chain are managed by the session
-// state. This interface provides a Go-idiomatic abstraction for the same role.
+// ECCipher is the EC Double Ratchet used by the Triple Ratchet: SendKey returns a message key and serialized header, and receiving derives the key from a header.
 type ECCipher interface {
 	// SendKey returns the EC message key and serialized EC header for the next
 	// outgoing message without performing the actual encryption.
@@ -76,10 +42,7 @@ type ECCipher interface {
 	ReceiveKey(ecHeader []byte) (messageKey []byte, err error)
 }
 
-// ECCipherSnapshotable is an optional interface for atomic rollback of EC
-// ratchet state. When the ECCipher also implements ECCipherSnapshotable, the
-// Triple Ratchet snapshots EC state before ReceiveKey and restores it if MAC
-// verification or any subsequent step fails.
+// ECCipherSnapshotable lets the Triple Ratchet snapshot EC state before ReceiveKey and restore it on failure.
 type ECCipherSnapshotable interface {
 	// TakeECSnapshot serializes the current EC state for atomic rollback.
 	TakeECSnapshot() ([]byte, error)
@@ -107,10 +70,7 @@ type decryptSnapshot struct {
 	ecSnapshot []byte
 }
 
-// TripleRatchet is a hybrid EC + PQ encrypt/decrypt session.
-//
-// TripleRatchet is NOT safe for concurrent use by multiple goroutines.
-// Session-level serialization (load → mutate → store) provides synchronization.
+// TripleRatchet is a hybrid EC and PQ session; it is not safe for concurrent use.
 type TripleRatchet struct {
 	ecCipher  ECCipher
 	braid     *mlkembraid.Braid
@@ -133,32 +93,17 @@ type TripleRatchet struct {
 	// skippedPQKeys holds out-of-order PQ message keys keyed by (epoch, counter).
 	skippedPQKeys map[pqSkippedKeyID]*secret.Secret
 
-	// skippedPQKeysFIFO records pqSkippedKeyIDs in insertion order, enabling
-	// O(1)-amortised eviction of the oldest key when the map is at capacity.
-	// Entries may be stale (already removed from skippedPQKeys by consume or
-	// purge); stale entries are skipped during eviction.
-	// skippedPQKeysFIFOHead is the index of the first candidate live entry.
+	// skippedPQKeysFIFO lists skipped key IDs in insertion order for amortized O(1) eviction; stale entries are skipped, and skippedPQKeysFIFOHead marks the first candidate.
 	skippedPQKeysFIFO     []pqSkippedKeyID
 	skippedPQKeysFIFOHead int
 }
 
-// NewAlice initializes a Triple Ratchet for the initiator (Alice).
-// Derives initial SPQR chain keys from sharedSecret using spqr.KdfSckaInit and
-// initializes the Braid via mlkembraid.InitAlice.
-//
-// Rust source: session initialization path in rust/protocol/src/triple_ratchet.rs.
-// Alice is the session initiator whose Braid starts in KeysUnsampled state.
+// NewAlice creates the initiator: SPQR chain keys from spqr.KdfSckaInit and a braid from mlkembraid.InitAlice.
 func NewAlice(ecCipher ECCipher, sharedSecret []byte, kemImpl mlkembraid.IncrementalKEM, chunkSize int) (*TripleRatchet, error) {
 	return newTripleRatchet(ecCipher, sharedSecret, kemImpl, chunkSize, false)
 }
 
-// NewBob initializes a Triple Ratchet for the responder (Bob).
-// Derives initial SPQR chain keys from sharedSecret using spqr.KdfSckaInit and
-// initializes the Braid via mlkembraid.InitBob. Bob's send and receive chain
-// keys are swapped relative to Alice's.
-//
-// Rust source: session initialization path in rust/protocol/src/triple_ratchet.rs.
-// Bob is the session responder whose Braid starts in NoHeaderReceived state.
+// NewBob creates the responder with mlkembraid.InitBob and Alice's send and receive chain keys swapped.
 func NewBob(ecCipher ECCipher, sharedSecret []byte, kemImpl mlkembraid.IncrementalKEM, chunkSize int) (*TripleRatchet, error) {
 	return newTripleRatchet(ecCipher, sharedSecret, kemImpl, chunkSize, true)
 }
@@ -223,17 +168,7 @@ func newTripleRatchet(ecCipher ECCipher, sharedSecret []byte, kemImpl mlkembraid
 	}, nil
 }
 
-// Encrypt encrypts plaintext and returns the composite wire message.
-//
-// Steps:
-//  1. Calls ecCipher.SendKey() to get an EC message key and serialized EC header.
-//  2. Calls braid.Send() to advance the Braid SCKA and get an outbound SCKA message.
-//  3. If the Braid produces an OutputKey, advances the PQ epoch via advancePQEpoch.
-//  4. Increments sendCounter and derives a PQ message key via spqr.KdfSckaCK.
-//  5. Combines EC and PQ keys via KDFHybrid (or KDFHybridECOnly if PQ key is nil).
-//  6. Encrypts plaintext with AES-256-CBC.
-//  7. Computes HMAC-SHA256 over the encrypted payload.
-//  8. Builds and returns the composite message.
+// Encrypt combines the EC message key with the next SPQR key through KDFHybrid, encrypts with AES-256-CBC and HMAC-SHA256, and returns the composite message with the braid's SCKA message.
 func (tr *TripleRatchet) Encrypt(plaintext []byte) ([]byte, error) {
 	// Step 1: EC ratchet send key.
 	ecHeader, ecMKBytes, err := tr.ecCipher.SendKey()
@@ -252,16 +187,7 @@ func (tr *TripleRatchet) Encrypt(plaintext []byte) ([]byte, error) {
 		return nil, &ErrBraidFailed{Op: "Send", Cause: braidErr}
 	}
 
-	// Step 3: advance PQ epoch if the Braid produced an OutputKey.
-	// NOTE: In the current ML-KEM Braid SCKA implementation, all sendXxx state
-	// handlers return nil OutputKey. OutputKeys are only produced by receiveXxx
-	// handlers (braid.Receive in Decrypt). This block is a defensive forward-
-	// compatibility guard in case the braid protocol is extended with Send-side
-	// OutputKey emission.
-	// Copy the key bytes out of the locked-memory-protected region before calling
-	// advancePQEpoch, because secret.New inside that function calls
-	// the locked-memory constructor, which destructively zeroes the source slice.
-	// Zeroing a locked-memory-protected page via a raw pointer causes a segfault.
+	// Braid send handlers return no OutputKey today; handle one anyway, copying it out of locked memory since secret.New zeroes its input.
 	if outputKey != nil { // coverage-exempt: braid.Send never produces OutputKey in current protocol
 		epochSecretBytes := []byte{}
 		_ = outputKey.Key.WithBytes(func(b []byte) error {
@@ -274,10 +200,7 @@ func (tr *TripleRatchet) Encrypt(plaintext []byte) ([]byte, error) {
 		}
 	}
 
-	// Step 4: derive PQ message key from send chain.
-	// Check BEFORE incrementing to avoid mutating state on the error path.
-	// Matches SPQR.Encrypt's pre-increment guard. When sendCounter == MaxUint32
-	// an increment would wrap to 0, producing an invalid counter.
+	// Reject MaxUint32 before incrementing so the counter never wraps.
 	if tr.sendCounter == math.MaxUint32 {
 		return nil, &ErrInvalidInput{Field: "sendCounter", Reason: "counter overflow"}
 	}
@@ -339,11 +262,7 @@ func (tr *TripleRatchet) Encrypt(plaintext []byte) ([]byte, error) {
 	return marshalCompositeMessage(headerBytes, authenticated), nil
 }
 
-// Decrypt decrypts a composite wire message produced by Encrypt and returns
-// the plaintext.
-//
-// On MAC failure or decryption failure, all state mutations are rolled back
-// via snapshot/restore so the TripleRatchet remains usable.
+// Decrypt returns the plaintext of an Encrypt message, restoring the snapshot on any failure.
 func (tr *TripleRatchet) Decrypt(compositeMessage []byte) ([]byte, error) {
 	// Parse outer framing.
 	headerBytes, authenticatedCiphertext, parseErr := unmarshalCompositeMessage(compositeMessage)
@@ -418,11 +337,7 @@ func (tr *TripleRatchet) decryptWithSnapshot(
 		}
 	}
 
-	// Step 3: advance PQ epoch if the Braid produced an OutputKey.
-	// Copy the key bytes out of the locked-memory-protected region before calling
-	// advancePQEpoch, because secret.New inside that function calls
-	// the locked-memory constructor, which destructively zeroes the source slice.
-	// Zeroing a locked-memory-protected page via a raw pointer causes a segfault.
+	// Copy the output key out of locked memory, since secret.New zeroes its input.
 	if outputKey != nil { // coverage-exempt: reachable only in a synchronized bidirectional TripleRatchet session after the full ML-KEM Braid SCKA handshake completes; requires both parties to exchange braid messages in both directions, which is not achievable in unit tests using a simple symmetric EC cipher without a full session-layer implementation
 		epochSecretBytes := []byte{}
 		_ = outputKey.Key.WithBytes(func(b []byte) error {
@@ -444,10 +359,7 @@ func (tr *TripleRatchet) decryptWithSnapshot(
 		defer pqMK.Destroy()
 	}
 
-	// Step 5: derive hybrid keys.
-	// pqMK is nil only when pqEpoch==0 && PQCounter==0 (pre-negotiation).
-	// In practice sendCounter is incremented before any message is sent, so
-	// PQCounter is always ≥ 1. The EC-only branch is a defensive fallback.
+	// pqMK is nil only at epoch 0, counter 0; counters start at 1, so the EC-only branch is defensive.
 	var hkeys *HybridKeys
 	if pqMK != nil {
 		hkeys, err = KDFHybrid(ecMK, pqMK)
@@ -492,10 +404,7 @@ func (tr *TripleRatchet) decryptWithSnapshot(
 	return plaintext, nil
 }
 
-// advancePQEpoch advances the PQ ratchet epoch using the given epoch secret.
-// Derives new root key, send chain key, and receive chain key via spqr.KdfSckaRK.
-// For the responder (Bob), send and receive chain keys are swapped.
-// Resets counters, marks handshake complete, and purges old skipped keys.
+// advancePQEpoch derives new root and chain keys with spqr.KdfSckaRK (swapped for Bob), resets counters, completes the handshake and purges old skipped keys.
 func (tr *TripleRatchet) advancePQEpoch(epochSecret []byte) error {
 	epochSec, err := secret.New(epochSecret)
 	if err != nil { // coverage-exempt: only reachable on locked-memory allocation failure
@@ -538,22 +447,7 @@ func (tr *TripleRatchet) advancePQEpoch(epochSecret []byte) error {
 	return nil
 }
 
-// receivePQKey returns the PQ message key for the given counter, handling
-// out-of-order delivery:
-//
-//   - Epoch 0, counter 0: returns nil (pre-negotiation state, EC-only).
-//   - Previously skipped key: removes from skippedPQKeys and returns.
-//   - Counter behind current position: returns error (counter already consumed).
-//   - Counter ahead: enforces maxPQJump, stores intermediate skipped keys, returns the target key.
-//
-// The recvCounter tracks the highest counter whose key has been derived from the
-// chain. Keys are derived by calling KdfSckaCK once per step from the current
-// chain key position.
-//
-// NOTE: Skipped-key lookup always uses tr.pqEpoch (the current epoch). Because
-// CompositeHeader carries no PQ epoch field, cross-epoch out-of-order messages
-// cannot be decrypted from the skipped-key cache after a ratchet epoch advance.
-// This is a known limitation of the current wire format. See pqSkippedKeyID.
+// receivePQKey returns the PQ key for counter: nil at epoch 0 counter 0, a stored skipped key, an error for a consumed counter, or the key ahead within maxPQJump, storing those skipped. Skipped keys are looked up in the current epoch only.
 func (tr *TripleRatchet) receivePQKey(counter uint32) (*secret.Secret, error) {
 	// Pre-negotiation: no PQ key yet.
 	if tr.pqEpoch == 0 && counter == 0 {
@@ -564,10 +458,7 @@ func (tr *TripleRatchet) receivePQKey(counter uint32) (*secret.Secret, error) {
 	skippedID := pqSkippedKeyID{epoch: tr.pqEpoch, counter: counter}
 	if mk, ok := tr.skippedPQKeys[skippedID]; ok {
 		delete(tr.skippedPQKeys, skippedID)
-		// The FIFO entry for this key is now stale. Trim to prevent
-		// unbounded growth when the map is repeatedly filled and consumed
-		// below capacity (so eviction never triggers compaction), including
-		// stale entries buried behind a still-live head.
+		// Trim the FIFO now this entry is stale.
 		tr.trimPQFIFOIfNeeded()
 		return mk, nil
 	}
@@ -598,10 +489,7 @@ func (tr *TripleRatchet) receivePQKey(counter uint32) (*secret.Secret, error) {
 		tr.recvChain.Destroy()
 		tr.recvChain = nextCK
 
-		// Buffer the skipped key with FIFO eviction when at capacity.
-		// Evict the oldest entry first so that newer (more likely to arrive
-		// out-of-order) keys are retained rather than dropped. This matches
-		// standard Signal/libsignal FIFO behaviour and the sibling spqr package.
+		// At capacity evict the oldest skipped key, as spqr does.
 		if len(tr.skippedPQKeys) >= maxSkippedPQKeys {
 			tr.evictOldestSkippedPQKey()
 		}
@@ -622,9 +510,7 @@ func (tr *TripleRatchet) receivePQKey(counter uint32) (*secret.Secret, error) {
 	return mk, nil
 }
 
-// purgeOldSkippedKeys removes skipped keys from epochs before the retention window.
-// After bulk deletion, the FIFO is compacted so stale entries do not accumulate
-// without bound when purges occur without subsequent eviction triggers.
+// purgeOldSkippedKeys drops skipped keys from epochs before the retention window and compacts the FIFO.
 func (tr *TripleRatchet) purgeOldSkippedKeys() {
 	if tr.pqEpoch <= epochsToKeepPriorToSendEpoch {
 		return
@@ -639,12 +525,7 @@ func (tr *TripleRatchet) purgeOldSkippedKeys() {
 	tr.trimPQFIFOIfNeeded()
 }
 
-// evictOldestSkippedPQKey removes the oldest live skipped PQ message key using
-// the FIFO order recorded in skippedPQKeysFIFO. Stale FIFO entries (already
-// removed by consume or purge) are skipped in O(1) amortised time. When the
-// FIFO is exhausted, it is rebuilt from the map via rebuildSkippedPQKeysFIFO
-// so that eviction always succeeds even after a snapshot restore (where the
-// FIFO is reset to nil).
+// evictOldestSkippedPQKey evicts the oldest live skipped key in FIFO order, rebuilding the FIFO when it is exhausted, as after a restore.
 func (tr *TripleRatchet) evictOldestSkippedPQKey() {
 	for tr.skippedPQKeysFIFOHead < len(tr.skippedPQKeysFIFO) {
 		id := tr.skippedPQKeysFIFO[tr.skippedPQKeysFIFOHead]
@@ -657,9 +538,7 @@ func (tr *TripleRatchet) evictOldestSkippedPQKey() {
 		}
 		// Entry already removed — advance past it without evicting.
 	}
-	// FIFO exhausted without finding a live entry. Rebuild from the map
-	// (covers the snapshot-restore path where FIFO was reset to nil) and
-	// retry once.
+	// No live entry: rebuild from the map, as after a restore, and retry once.
 	tr.rebuildSkippedPQKeysFIFO()
 	if tr.skippedPQKeysFIFOHead < len(tr.skippedPQKeysFIFO) {
 		id := tr.skippedPQKeysFIFO[tr.skippedPQKeysFIFOHead]
@@ -672,13 +551,7 @@ func (tr *TripleRatchet) evictOldestSkippedPQKey() {
 	}
 }
 
-// compactPQFIFOIfNeeded advances the FIFO head past any stale entries (keys
-// already removed from skippedPQKeys by consume, purge, or eviction) and then
-// compacts the underlying slice when more than half the capacity has been
-// consumed. Calling this on the consume and purge paths — not only on eviction
-// — prevents the FIFO from growing unbounded when the map stays below capacity
-// and eviction is never triggered. Each FIFO entry is visited at most once,
-// giving O(1) amortised cost per insert/consume cycle.
+// compactPQFIFOIfNeeded advances the head past stale entries and compacts the slice once over half is consumed.
 func (tr *TripleRatchet) compactPQFIFOIfNeeded() {
 	// Advance head past any stale entries at the front of the FIFO.
 	for tr.skippedPQKeysFIFOHead < len(tr.skippedPQKeysFIFO) {
@@ -697,14 +570,7 @@ func (tr *TripleRatchet) compactPQFIFOIfNeeded() {
 	}
 }
 
-// trimPQFIFOIfNeeded compacts the FIFO head and, when stale entries buried in
-// the tail significantly outnumber live entries, rebuilds the FIFO from the
-// live map. Head compaction alone cannot reclaim stale entries that sit behind
-// a still-live head entry: if an old skipped key remains live while many newer
-// keys are consumed, head never advances and the slice grows without bound.
-// The rebuild guard (mirroring SPQR.trimFIFOIfNeeded) closes that gap. The
-// factor of 2 keeps the rebuild cost amortised — each entry triggers at most
-// one rebuild per doubling of the live map size.
+// trimPQFIFOIfNeeded compacts the head and rebuilds the FIFO when stale entries exceed twice the live ones, as SPQR.trimFIFOIfNeeded does.
 func (tr *TripleRatchet) trimPQFIFOIfNeeded() {
 	tr.compactPQFIFOIfNeeded()
 	live := len(tr.skippedPQKeysFIFO) - tr.skippedPQKeysFIFOHead
@@ -713,10 +579,7 @@ func (tr *TripleRatchet) trimPQFIFOIfNeeded() {
 	}
 }
 
-// rebuildSkippedPQKeysFIFO rebuilds the insertion-order FIFO from the current
-// skippedPQKeys map. Called when the FIFO is empty (e.g., after a snapshot
-// restore). Keys are sorted by (epoch, counter) to provide a deterministic
-// eviction order that approximates the historical insertion order.
+// rebuildSkippedPQKeysFIFO rebuilds the FIFO from skippedPQKeys sorted by (epoch, counter).
 func (tr *TripleRatchet) rebuildSkippedPQKeysFIFO() {
 	tr.skippedPQKeysFIFO = make([]pqSkippedKeyID, 0, len(tr.skippedPQKeys))
 	for id := range tr.skippedPQKeys {
@@ -802,10 +665,7 @@ func (tr *TripleRatchet) takeSnapshot() (*decryptSnapshot, error) {
 	return snap, nil
 }
 
-// restoreSnapshot replaces all mutable TripleRatchet state from a snapshot.
-// Returns a non-nil error only when braid deserialization or EC-cipher restore
-// fails. Key material is always restored even on partial failure so that the
-// caller can determine the extent of the damage.
+// restoreSnapshot restores all mutable state from snap, returning an error only when the braid or EC restore fails; key material is always restored.
 func (tr *TripleRatchet) restoreSnapshot(snap *decryptSnapshot) error {
 	// Attempt braid restore. On failure, continue restoring key material so
 	// the session is in the most consistent state possible; report the error
@@ -842,8 +702,7 @@ func (tr *TripleRatchet) restoreSnapshot(snap *decryptSnapshot) error {
 	}
 	tr.skippedPQKeys = snap.skippedPQKeys
 	snap.skippedPQKeys = nil
-	// Reset the FIFO: the restored map may have a different set of entries.
-	// rebuildSkippedPQKeysFIFO will reconstruct it lazily on the next eviction.
+	// Reset the FIFO; the next eviction rebuilds it.
 	tr.skippedPQKeysFIFO = nil
 	tr.skippedPQKeysFIFOHead = 0
 
@@ -859,12 +718,7 @@ func (tr *TripleRatchet) restoreSnapshot(snap *decryptSnapshot) error {
 	return restoreErr
 }
 
-// destroySnapshot zeroizes all secrets in a snapshot on the success path.
-// Every byte slice is overwritten with zeros before the reference is cleared so
-// that sensitive key material does not persist in heap memory after decryption.
-//
-// Rust equivalent: zeroize::Zeroize derive on session-state types in
-// rust/protocol/src/triple_ratchet.rs and rust/protocol/src/ratchet/keys.rs.
+// destroySnapshot zeroizes every secret in a snapshot after a successful decrypt.
 func (tr *TripleRatchet) destroySnapshot(snap *decryptSnapshot) {
 	if snap.rootKey != nil {
 		snap.rootKey.Destroy()

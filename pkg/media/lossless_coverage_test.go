@@ -1,25 +1,12 @@
 package media
 
-// lossless_coverage_test.go — VP8L bitstream validator coverage tests.
-//
-// Oracle: webpsan/src/parse/lossless.rs + bitstream.rs (webpsan 0.5.3).
-//
-// Each test exercises a specific branch or error path left uncovered by the
-// existing conformance suite. Tests are grouped by the function they target.
-// All bitstreams are hand-crafted using leBitWriter, which emits bits LSB-first
-// within each byte — matching bitstream_io LE semantics used by the Rust oracle.
+// VP8L validator branch coverage tests against webpsan 0.5.3, with LSB-first hand-built bitstreams.
 
 import (
 	"testing"
 )
 
-// ---------------------------------------------------------------------------
-// leBitWriter — LSB-first bit stream builder (test helper only).
-//
-// Mirrors the inverse of leBitReader: bits are packed LSB-first within each
-// byte, and bytes accumulate in order. finalize() returns the complete byte
-// slice padded to a whole byte with trailing zero bits.
-// ---------------------------------------------------------------------------
+// leBitWriter packs bits LSB-first, the inverse of leBitReader; finalize pads to a whole byte.
 
 type leBitWriter struct {
 	buf    []byte
@@ -166,13 +153,7 @@ func TestLZ77DistToPixelDist_NegativeClamp(t *testing.T) {
 	}
 }
 
-// TestLZ77DistToPixelDist_ResultZeroClamp verifies the result==0 guard on the
-// >120 branch (line 879-881). distCode=120 is in-map; distCode=120+120=240
-// gives result=120 (fine). distCode=120 falls into the map branch.
-// The only way result==0 in the >120 branch would be distCode==120 (edge),
-// but that's handled by the map. For distCode=121: result=1 (already tested).
-// Test distCode=0 which skips the map (0 < 1) and goes to else: result=0-120
-// which underflows as uint32. The guard clamps it to 1.
+// TestLZ77DistToPixelDist_ResultZeroClamp checks a zero or underflowing result is clamped to 1.
 func TestLZ77DistToPixelDist_CodeZero(t *testing.T) {
 	// distCode=0: skips the map condition (0 < 1 is false, 0 > 120 is false).
 	// Falls to else: result = 0 - 120 = underflow as uint32 (very large number).
@@ -228,12 +209,7 @@ func TestBuildHuffmanTree_MaxLenTooLarge(t *testing.T) {
 // Example: two symbols both assigned length 2 with only one valid code each,
 // leaving half the table unfilled.
 func TestBuildHuffmanTree_IncompleteTable(t *testing.T) {
-	// Assign length=2 to sym 0 only, length=2 to sym 1 only.
-	// A valid 2-bit tree needs exactly 4 table entries covered.
-	// With two symbols at length 2 we only cover 2 entries → incomplete.
-	// Actually with exactly 2 symbols at length 2, the canonical code assigns
-	// codes 00 and 01, leaving 10 and 11 unfilled → incomplete.
-	// This triggers the "table not complete" check.
+	// Two symbols at length 2 fill only codes 00 and 01, so the table is incomplete.
 	pairs := []symLen{
 		{sym: 0, length: 2},
 		{sym: 1, length: 2},
@@ -277,12 +253,7 @@ func TestBuildHuffmanTree_MultiSymbolExtension(t *testing.T) {
 		t.Errorf("expected sym=0, got %d", sym)
 	}
 
-	// Decode sym2 (code=110, length=3): LSB-first key=0b011=3... let me compute.
-	// Canonical LSB-first: sym0→code 0 (1bit), sym1→code 10 (2bit), sym2→code 110 (3bit).
-	// In leBitWriter: code bits are code[0]=MSB side. Let me verify by round-trip:
-	// The key in the lookup table for sym2 is computed from the code vector.
-	// code vector for sym2 (after canonical assignment): [1,1,0] (code[0]=1,code[1]=1,code[2]=0).
-	// key = code[0]*2^0 + code[1]*2^1 + code[2]*2^2 = 1+2+0 = 3.
+	// sym2 has code vector [1,1,0], so its LSB-first lookup key is 3.
 	r2 := newLeBitReader([]byte{0x03, 0x00})
 	sym2, err := tree.decode(r2)
 	if err != nil {
@@ -297,14 +268,7 @@ func TestBuildHuffmanTree_MultiSymbolExtension(t *testing.T) {
 // decode — uncovered branch: entry.codeLen == 255 (line 378-380)
 // ---------------------------------------------------------------------------
 
-// TestDecode_InvalidEntry verifies that decoding from a partially-invalid table
-// returns ErrLosslessInvalidPrefixCode.
-// This is unreachable in practice via buildHuffmanTree (which validates
-// completeness), but the guard in decode provides defense-in-depth.
-// We test it indirectly: a two-symbol tree with sym0=code"0" and sym1=code"1"
-// is valid; any other tree shape that passes through the check will use valid entries.
-// Instead, test that a truncated read (empty reader) from a multi-symbol tree
-// returns an error (truncation, not invalid-entry, but exercises the decode path).
+// TestDecode_InvalidEntry exercises decode's error path through a truncated read, since buildHuffmanTree rejects invalid tables.
 func TestDecode_TruncatedMultiSymbol(t *testing.T) {
 	pairs := []symLen{{sym: 0, length: 1}, {sym: 1, length: 1}}
 	tree, err := buildHuffmanTree(pairs)
@@ -439,13 +403,7 @@ func TestReadPrefixCode_SimpleSingleSym_1bit_sym1(t *testing.T) {
 // when the 8-bit symbol field overruns the stream.
 // lossless.rs:538-552.
 func TestReadPrefixCode_Simple_Truncated(t *testing.T) {
-	// simple=1, has_second=0, is_8bit=1, then only 4 of the required 8 bits for firstSym.
-	// finalize() pads with zeros so we need exactly enough bits for is_8bit but not firstSym.
-	// 1 (simple) + 1 (has_second) + 1 (is_8bit) = 3 bits written; finalize gives 1 byte (8 bits).
-	// Then readBits(8) for firstSym needs bits 3..10 → byte 0 bits 3..7 (5 bits) + byte 1 bits 0..2 (3 bits).
-	// If we only provide 1 byte, bits 8..10 are missing → truncated.
-	// Write exactly 3 bits: the finalized byte has 5 zero bits for partial firstSym,
-	// but readBits(8) needs another byte. Since finalize only emits 1 byte, it truncates.
+	// simple=1, has_second=0, is_8bit=1 is 3 bits; the 8-bit firstSym runs past the single byte.
 	w := &leBitWriter{}
 	w.writeBit(1) // simple=1
 	w.writeBit(0) // has_second=0
@@ -474,22 +432,7 @@ func TestReadPrefixCode_Simple_Truncated(t *testing.T) {
 // We build a stream that decodes a complete, valid Huffman table via the
 // normal (non-simple) path with explicit max_symbol_reads.
 func TestReadPrefixCode_NormalExplicitLen(t *testing.T) {
-	// Build a normal prefix code for a 2-symbol alphabet.
-	// Layout (all LSB-first):
-	//   simple=0
-	//   codeLengthPrefixCode: rawCount(4 bits)=0 → 4 code-length codes read
-	//     Each code-length code is 3 bits. We read codeOrder[0..3] = {17,18,0,1}.
-	//     We need a valid meta-tree for reading code lengths.
-	//     Simplest: set all 4 meta-lengths to 0 → all-zero meta-tree.
-	//     But an all-zero meta-tree with zero active symbols needs special handling.
-	//     Actually if all meta-lengths are 0, buildHuffmanTree returns a single-symbol
-	//     tree (default sym=0), so codeLenTree.decode always returns 0 (code length 0).
-	//   has_explicit_len=1
-	//   lenBits3(3 bits)=0 → lengthBitLen=2+0=2
-	//   extra(2 bits)=0 → maxSymbolReads = 2+0 = 2
-	//   Then maxSymbolReads=2 iterations of decoding code lengths.
-	//   Since codeLenTree always decodes 0 (length 0), all symbols get length=0.
-	//   Result: buildHuffmanTree with all-zero lengths → single-symbol default tree.
+	// Normal prefix code with an all-zero meta-tree and explicit length 2: every symbol gets length 0, giving the single-symbol default tree.
 
 	w := &leBitWriter{}
 	w.writeBit(0) // simple=0 (normal)
@@ -526,12 +469,7 @@ func TestReadPrefixCode_NormalExplicitLen(t *testing.T) {
 // maxSymbolCount is rejected with ErrLosslessInvalidSymbolCount.
 // lossless.rs:567-571.
 func TestReadPrefixCode_InvalidSymbolCount(t *testing.T) {
-	// Build stream: simple=0, meta-tree with all zeros (always decodes sym=0),
-	// has_explicit_len=1, lenBits3=7 → lengthBitLen=16,
-	// extra=65533 (0xFFFF-2+1 so that 2+65533=65535 which > alphabet=280).
-	// Actually: maxSymbolReads = 2 + extra. We need > 280.
-	// With lenBits3=7: lengthBitLen = 2+14=16. Read 16 bits = extra.
-	// extra=279 → maxSymbolReads=281 > 280.
+	// lenBits3=7 gives a 16-bit extra; extra=279 makes maxSymbolReads 281, above the 280-symbol alphabet.
 
 	w := &leBitWriter{}
 	w.writeBit(0) // simple=0
@@ -570,16 +508,7 @@ func TestReadPrefixCode_CodeLen16_RepeatLast(t *testing.T) {
 	// We need this not to overflow: alphabetSize must be >= 3.
 	w := &leBitWriter{}
 	w.writeBit(0) // simple=0
-	// meta-tree: rawCount=0, 4 code-length codes.
-	// We want meta-tree to emit code=16 (positions codeOrder[8]=16).
-	// codeOrder = [17,18,0,1,2,3,4,5,16,...]. Position 8 = 16.
-	// So rawCount=4 → positions 0..3 = {17,18,0,1}. We can't reach position 8 with rawCount=4.
-	// Use rawCount=5 → positions 0..4 = {17,18,0,1,2}. Still can't reach 16.
-	// We need to use rawCount such that codeOrder[i]=16 is included.
-	// codeOrder[8]=16, so we need codeLengthCount >= 9 → rawCount >= 5.
-	// rawCount field is 4 bits → codeLengthCount = 4+rawCount.
-	// For codeOrder[8] to be read: codeLengthCount >= 9 → rawCount >= 5.
-	// Set rawCount=5 → codeLengthCount=9, reads positions codeOrder[0..8]={17,18,0,1,2,3,4,5,16}.
+	// codeOrder[8] is 16, so rawCount=5 (9 code-length codes) reaches it.
 	w.writeBits(5, 4) // rawCount=5 → codeLengthCount=9
 	w.writeBits(0, 3) // lengths[17]=0
 	w.writeBits(0, 3) // lengths[18]=0
@@ -592,17 +521,7 @@ func TestReadPrefixCode_CodeLen16_RepeatLast(t *testing.T) {
 	w.writeBits(1, 3) // lengths[16]=1 → only non-zero → single-sym meta-tree → always returns 16
 	// has_explicit_len=0 → maxSymbolReads=alphabetSize
 	w.writeBit(0)
-	// First iteration: clCode=16 → codeLength=lastNonZero=8, read 2 extra bits.
-	// extra=0 → repeatTimes=3. 3 symbols at length=8. newLen=3 <= alphabetSize.
-	// After that: lastNonZero=8. Second iteration: clCode=16 → repeat again.
-	// With alphabetSize=280 (green channel), many iterations. After 280/3 ≈ 93 iters
-	// we'd hit 279 symbols, then one more repeat of 3 → overflow check.
-	// To keep it simple and exercise code=16 path without overflow, use alphabetSize=3:
-	// 3 symbols assigned length=8. But only 1 non-zero code (length 8 appears ≤3 times).
-	// Actually a Huffman tree of 3 symbols all at length 8 is invalid (not a complete code).
-	// So keep alphabetSize=3 and expect an error from buildHuffmanTree at the end.
-	// The goal is to exercise the code=16 branch, not necessarily produce a valid tree.
-	// extra bits for repeat: 0,0 (2 bits → extra=0 → repeat 3 times)
+	// Code 16 repeats length 8 three times; with alphabetSize 3 the tree is incomplete, and the error is expected.
 	w.writeBits(0, 2) // extra bits for code-16 first iteration
 
 	data := w.finalize()
@@ -689,54 +608,9 @@ func TestReadPrefixCode_InvalidCodeLengthRepetition(t *testing.T) {
 	}
 }
 
-// TestReadPrefixCode_NormalTruncated_HasExplicitLen verifies truncation when
-// reading has_explicit_len bit. (line 543-545)
-// The meta-tree (all-zero lengths) decodes as a single-symbol tree consuming 0 bits.
-// After reading the meta-tree header (1+4+4*3=17 bits = 3 bytes rounded up),
-// the has_explicit_len bit must come from the next bit position.
-// We place exactly 17 bits then fill the rest of the last byte with zeros;
-// readBit for has_explicit_len reads from the padded zeros successfully.
-// To force truncation we need exactly 2 bytes (16 bits) which is less than 17.
-// Instead we verify: after a valid normal stream up through maxSymbolReads,
-// a truncation in the code-length decode loop propagates. The exact truncation
-// in has_explicit_len requires leaving that bit byte-aligned with no byte to read.
-// We achieve this by writing 17 bits (fills 3 bytes needing 1 more) then reading.
-// Actually 17 bits: byte0=8, byte1=8, bit17 is in byte2 at position 0.
-// finalize() adds byte2 (with the 1 bit). readBit for has_explicit_len reads that bit = 0.
-// For TRUE truncation: write ONLY 16 bits (exactly 2 bytes), so bit 16 (has_explicit_len) is missing.
+// TestReadPrefixCode_NormalTruncated_HasExplicitLen ends the stream before has_explicit_len, passing raw bytes because finalize always pads.
 func TestReadPrefixCode_NormalTruncated_HasExplicitLen(t *testing.T) {
-	// simple=0 (1 bit) + rawCount (4 bits) + 4×3-bit meta-lengths = 1+4+12 = 17 bits.
-	// We write only 16 bits (2 bytes) → has_explicit_len truncated.
-	// 16 bits = simple(1) + rawCount(4) + 4 meta-lengths but only 11 of the 12 meta-length bits.
-	// Actually let's just set rawCount=0 and write 3 of the 4 meta-lengths to get 1+4+9=14 bits.
-	// Then stop. 14 bits → 2 bytes. The 4th meta-length (3 bits) starts in byte1 bit 6..7 and byte2 bit 0.
-	// That forces truncation when reading the 4th meta-length (still inside readCodeLengthPrefixCode).
-	// The correct approach: write exactly 17 bits (including all meta bits), finalize gives 3 bytes.
-	// has_explicit_len is read from bit 17 → byte 2 bit 1. Since finalize always pads the last byte,
-	// bit 17 = 0 (padded) → has_explicit_len=0 → no explicit len path → maxSymbolReads = alphabetSize.
-	// The loop then decodes maxSymbolReads code-lengths. With single-sym meta tree (sym=0, 0 bits),
-	// every decode call returns 0 without consuming bits. After maxSymbolReads iterations we have
-	// maxSymbolReads symbols. If maxSymbolReads > alphabetSize that's caught. Otherwise buildHuffmanTree.
-	// This path is already tested elsewhere. For has_explicit_len truncation:
-	// We need to consume exactly 17 bits and then have no more bits.
-	// Write 17 bits using rawCount=0 (4 bits) + 4 meta-lengths (12 bits) + simple=0 (1 bit) = 17.
-	// finalize() gives ceil(17/8)=3 bytes, so bits 17..23 exist as zero padding.
-	// readBit at position 17 → 0. Not truncated. This cannot be truncated via byte rounding.
-	//
-	// ALTERNATIVE: Use rawCount=15 (codeLengthCount=19) to read 19×3=57 meta-length bits.
-	// Total meta-header: 1+4+57=62 bits = 7 bytes + 6 bits → finalize gives 8 bytes.
-	// has_explicit_len is at bit 62 → byte 7 bit 6 = 0 (padded). Still not truncated.
-	//
-	// TRUE truncation: provide 0 bytes total after the meta bits, by using rawCount=15
-	// but only writing 61 of 62 required bits → finalize gives 8 bytes with bit 61 = 0.
-	// The 62nd bit (readBit position 61) exists as 0 in byte 7. Again not truncated.
-	//
-	// Conclusion: has_explicit_len truncation requires the stream to end exactly at the
-	// meta-header boundary with no padding byte containing the has_explicit_len bit.
-	// This is impossible with leBitWriter since finalize() always pads.
-	// The truncation at has_explicit_len is covered by providing a stream that is
-	// artificially short (no bytes at all for the bit reader after meta-header):
-	// We pass the raw bytes directly to newLeBitReader.
+	// finalize pads the last byte, so pass a 2-byte slice that ends before the has_explicit_len bit.
 
 	// Build: 17 bits of meta-header → 3 bytes after finalize. Then pass only 2 bytes.
 	w := &leBitWriter{}
@@ -761,34 +635,7 @@ func TestReadPrefixCode_NormalTruncated_HasExplicitLen(t *testing.T) {
 // lenBits3 after has_explicit_len=1. (lines 549-551)
 // Similar to above: we need to end the stream exactly after has_explicit_len=1.
 func TestReadPrefixCode_NormalTruncated_LenBits(t *testing.T) {
-	// 17 bits of meta + has_explicit_len=1 = 18 bits → 3 bytes (with 6 padding zeros).
-	// lenBits3 is read from bit 18 → byte 2 bit 2. Since finalize pads the byte, bit 18=0.
-	// So: write exactly 18 bits, finalize gives 3 bytes with bits 18..23 = 0.
-	// lenBits3 reads bits 18,19,20 = 0,0,0 → lenBits3=0. Not truncated.
-	// TRUE truncation: pass only the 2-byte prefix (without byte 2).
-	// Bit 17 (has_explicit_len) is in byte 2 bit 1 → not present in 2-byte slice.
-	// Wait: 17 bits → bytes 0 and 1 are full (16 bits), bit 17 is in byte 2 bit 1.
-	// If we pass only bytes 0..1 (2 bytes), bit 17 is missing → has_explicit_len truncated (above).
-	// For lenBits3 truncation: has_explicit_len must succeed (=1) but lenBits3 fails.
-	// has_explicit_len=1 is at bit 17 → must be in a byte we provide.
-	// Write 18 bits (meta 17 + explicit=1). finalize gives 3 bytes.
-	// lenBits3 needs bits 18,19,20. Those are in byte 2 (bits 2,3,4).
-	// Pass only 3 bytes → bits 18..23 all exist as zeros. Not truncated.
-	// Pass only first 18 bits worth (ceil(18/8)=3 bytes but cut to 2+partial).
-	// We need the reader to have < 3 bytes for lenBits3 to truncate.
-	// Pass bytes 0..1 only (16 bits). Bit 17 = missing → still hits has_explicit_len truncation.
-	//
-	// The fundamental issue: both bits 17 and 18-20 live in byte 2.
-	// We need byte 2 to contain has_explicit_len=1 at bit 1, but NOT contain bits 2-4.
-	// This is impossible with byte-granular slicing.
-	//
-	// SOLUTION: Use rawCount=15 to push the meta-header to 62 bits (8 bytes).
-	// Then has_explicit_len is at bit 62 → byte 7 bit 6.
-	// lenBits3 is at bits 63,64,65 → crosses byte 7 bit 7 and byte 8 bits 0,1.
-	// Pass 8 bytes: bit 62 = 0 (padded from finalize). Need explicit=1 at bit 62.
-	// Set bit 62 by writing 1 for has_explicit_len. Finalize with 63 bits = 8 bytes.
-	// Then pass only 8 bytes → lenBits3 bits 63,64,65: bit 63 is in byte 7 bit 7,
-	// bits 64,65 are in byte 8 bits 0,1 → byte 8 doesn't exist → TRUNCATED. ✓
+	// rawCount=15 puts has_explicit_len at bit 62 and lenBits3 across bytes 7 and 8; passing 8 bytes truncates lenBits3.
 
 	w := &leBitWriter{}
 	w.writeBit(0)      // simple=0
@@ -1009,13 +856,7 @@ func TestReadEntropyCodedImageFull_LiteralWithCallback(t *testing.T) {
 	}
 }
 
-// TestReadEntropyCodedImageFull_GreenDecodeFail verifies truncation when decoding
-// the green channel in the pixel loop (line 791-793).
-// Oracle: lossless.rs readEntropyCodedImageFull pixel loop first case.
-// Setup: noCache(1)+green-2sym(12)+red-single(4)+blue-single(4)+alpha-single(4)+dist-single(4)=29bits.
-// With 4-byte stream (32 bits): 3 spare bits after prefix. 2-sym green uses 1 bit/pixel.
-// After 3 pixel-green decodes (bits 29,30,31), pixel4 green needs bit 32 → TRUNCATED.
-// We use a 4-pixel image (1 row × 4 cols) to reach pixel3 green.
+// TestReadEntropyCodedImageFull_GreenDecodeFail truncates the fourth pixel's green decode in a 4-byte stream.
 func TestReadEntropyCodedImageFull_GreenDecodeFail(t *testing.T) {
 	w := &leBitWriter{}
 	writeNoCache(w)
@@ -1038,13 +879,7 @@ func TestReadEntropyCodedImageFull_GreenDecodeFail(t *testing.T) {
 	}
 }
 
-// TestReadEntropyCodedImageFull_LiteralRedTruncated verifies truncation when
-// decoding red channel in the pixel loop (line 799-801).
-// Oracle: lossless.rs readEntropyCodedImageFull, literal case.
-// Setup: noCache(1)+green-single(4)+red-2sym(12)+blue-single(4)+alpha-single(4)+dist-single(4)=29bits.
-// 4-byte stream: 3 spare bits at positions 29,30,31. green=single(0 bits/pixel).
-// red=2-sym (1 bit/pixel). 4-pixel image: pixels0-2 decode red(bits29,30,31=0→sym0).
-// Pixel3: green=0bits ok, red needs bit32 → beyond 4 bytes → TRUNCATED. ✓
+// TestReadEntropyCodedImageFull_LiteralRedTruncated truncates the fourth pixel's red decode in a 4-byte stream.
 func TestReadEntropyCodedImageFull_LiteralRedTruncated(t *testing.T) {
 	w := &leBitWriter{}
 	writeNoCache(w)
@@ -1132,12 +967,7 @@ func TestReadEntropyCodedImageFull_CallbackError(t *testing.T) {
 	}
 }
 
-// writeGreenTreeWith256 writes a normal-path green tree (alphabetSize=280) that
-// produces a 2-active-symbol Huffman tree: sym0 (literal) and sym256 (LZ77 len=0).
-// The meta-tree uses 2 symbols: meta-sym=0 (→code-length=0) and meta-sym=1 (→code-length=1).
-// codeOrder[2]=0, codeOrder[3]=1: rawCount=0 reads positions {17,18,0,1}.
-// Set lengths[0]=1, lengths[1]=1 → meta-tree: sym0→bit0, sym1→bit1.
-// Oracle: lossless.rs read_prefix_code normal path.
+// writeGreenTreeWith256 writes a 280-symbol green tree with two active symbols: 0 (literal) and 256 (LZ77 length).
 func writeGreenTreeWith256(w *leBitWriter) {
 	w.writeBit(0)     // simple=0 (normal)
 	w.writeBits(0, 4) // rawCount=0 → codeLengthCount=4
@@ -1162,14 +992,7 @@ func writeGreenTreeWith256(w *leBitWriter) {
 	// Result: Huffman tree with 2 active symbols: sym0→bit0, sym256→bit1.
 }
 
-// TestReadEntropyCodedImageFull_LZ77ValidBackRef verifies the LZ77 back-reference
-// pixel path (lines 817-843 in lossless.go). Oracle: lossless.rs:317-338.
-//
-// Stream: 2-pixel image (1×2). Pixel0 literal (green=0). Pixel1 LZ77 (green=256).
-// Green tree: sym0→bit0 (literal), sym256→bit1 (LZ77 len=0).
-// LZ77: lenSym=0 → expandLZ77(0)=1 (length=1). distSym from distance single-sym=0.
-// expandLZ77(0)=1 → distCode=1. lz77DistToPixelDist(1, width=1): DISTANCE_MAP[0]={0,1}.
-// v = 1*1+0 = 1. dist=1. pixelIdx=1. 1>=1 ✓. length=1. remaining=2-1=1. 1<=1 ✓. Valid!
+// TestReadEntropyCodedImageFull_LZ77ValidBackRef decodes a literal then a length-1, distance-1 back-reference (lossless.rs:317-338).
 func TestReadEntropyCodedImageFull_LZ77ValidBackRef(t *testing.T) {
 	w := &leBitWriter{}
 	writeNoCache(w)
@@ -1341,25 +1164,7 @@ func TestReadEntropyCodedImageFull_LZ77DistanceTruncated(t *testing.T) {
 	// We need to cut the stream. Use direct slice trimming.
 	full := w.finalize()
 
-	// The green tree uses (1+4+12+1+280)=298 bits + 4 default trees × 4bits + distance-2sym(12bits)
-	// = 298 + 16 + 12 = 326 bits = ceil(326/8) = 41 bytes (with 2 spare bits).
-	// Pixel: green (1 bit) = bit 326. After that: distance (1 bit) at bit 327.
-	// With 41 bytes (328 bits): bits 326 and 327 both exist (as padding zeros).
-	// green=0→sym0 (literal not LZ77). We need green=1 → bit 326 = 0 in padding. ✗.
-	// Since finalize pads with zeros, writing bit=1 at the end gets included in a
-	// new byte. Let's verify: w.writeBit(1) is written AFTER all prefix codes,
-	// so it IS part of the stream. bit at position 326 = 1 (we wrote it). ✓.
-	// distance bit at position 327 = 0 (padded). This is valid for 2-sym tree (bit=0→sym0).
-	// So distance decode succeeds. Not truncated.
-	// For true truncation: pass only 41 bytes (without the last byte containing distance bit).
-	// bit 326 (green) is in byte 40 bit 6. bit 327 (distance) is in byte 40 bit 7.
-	// Both in byte 40. Can't separate. Need distance in byte 41 which doesn't exist.
-	// Write 2 pixel bits: green(bit326=1), then distance is in byte 40 bit 7.
-	// Pass only 41 bytes (bytes 0..40), bit 327 = byte40 bit7 is available.
-	// For distance to truncate: distance must be in byte 41. That requires green bit at byte 40 bit7.
-	// That means 327 green bits of prefix code... not practical.
-	// Skip this specific sub-branch (LZ77 distance truncation) — covered by the general
-	// truncation tests above.
+	// LZ77 distance truncation is not reachable here with byte-granular streams; the general truncation tests cover it.
 	_ = full
 	t.Log("LZ77 distance truncation is covered indirectly by general truncation tests")
 }
@@ -1442,9 +1247,7 @@ func TestReadEntropyCodedImageFull_ColorCacheValidHit(t *testing.T) {
 	data := w.finalize()
 
 	r := newLeBitReader(data)
-	// readEntropyCodedImageFull(r, 1, 1, 0, fn):
-	// colorCacheLen is read INSIDE readEntropyCodedImageFull from the stream!
-	// So we pass colorCacheLen=0 as the ignored parameter, and it reads color cache from stream.
+	// readEntropyCodedImageFull reads the color cache from the stream; the colorCacheLen argument is ignored.
 	err := readEntropyCodedImageFull(r, 1, 1, 0, nil)
 	if err != nil {
 		t.Errorf("valid color-cache hit (index=0) must be accepted: %v", err)
@@ -1474,12 +1277,7 @@ func TestReadTransform_TruncatedTypeRead(t *testing.T) {
 // TestReadTransform_ColorTransform verifies the color transform path.
 // lossless.rs:222-232: reads block_order (3 bits) + entropy-coded sub-image.
 func TestReadTransform_ColorTransform(t *testing.T) {
-	// Build: hasTransform=1, type=0b01 (color transform).
-	// blockOrder3=0 → blockOrder=2, blockSize=4.
-	// For a 4×4 image: wInBlocks=1, hInBlocks=1 → 1×1 sub-image.
-	// Sub-image: no-cache + 5 simple-default prefix codes + 1 pixel.
-	// Then hasTransform=0.
-	// Then readSpatiallyCodedImage for 4×4: no-cache, no-meta, 5 simple prefix codes.
+	// Color transform with block size 4 over a 4x4 image: a 1x1 sub-image, then the spatially coded image.
 	w := &leBitWriter{}
 	w.writeBit(1)     // hasTransform=1
 	w.writeBits(1, 2) // type=0b01 (color transform)
@@ -1932,12 +1730,7 @@ func TestReadPrefixCode_SimplePath_Table(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			// is_8bit occupies 1 bit (bit 2 of byte 0). After finalize(), the byte
-			// has all 8 bits, so is_8bit reads 0 (not truncated). Then is_8bit=0
-			// reads 1 bit for sym (bit 3 of byte 0 = 0) → sym=0. No truncation.
-			// A true is_8bit truncation requires is_8bit=1 then firstSym truncated;
-			// that case is already covered by simple_trunc_at_8bit_sym.
-			// This slot tests the no-second, 1-bit sym path which always succeeds.
+			// The padded byte makes is_8bit read 0, so this slot covers the always-successful 1-bit symbol path.
 			name: "simple_no_second_1bit_sym0_succeeds",
 			bits: func(w *leBitWriter) {
 				w.writeBit(1) // simple=1

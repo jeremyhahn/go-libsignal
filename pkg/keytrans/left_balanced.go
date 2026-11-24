@@ -1,11 +1,7 @@
 // Copyright 2024 Signal Messenger, LLC.
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package keytrans implements key transparency verification for the Signal protocol.
-//
-// It provides VRF (Verifiable Random Function) verification, Merkle tree proof
-// evaluation, monitoring protocol support, and search/lookup operations for
-// detecting misbehavior in key transparency logs.
+// Package keytrans verifies Signal key transparency: VRF proofs, Merkle proofs, monitoring and search.
 package keytrans
 
 import (

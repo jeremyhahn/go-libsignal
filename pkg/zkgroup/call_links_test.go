@@ -523,12 +523,7 @@ func TestCreateCallLinkCredentialPresentation_Verify_Overflow(t *testing.T) {
 	}
 }
 
-// TestEncodeCreateCallLinkCredentialResponse_LeadingReservedByte verifies that
-// the fixed bug is present: the encoded response must start with 0x00 (the
-// Rust bincode ReservedByte) followed by 8 LE timestamp bytes.
-//
-// Mirrors Rust CreateCallLinkCredentialResponse at
-// rust/zkgroup/src/api/call_links/create_credential.rs:115-121.
+// TestEncodeCreateCallLinkCredentialResponse_LeadingReservedByte checks the response starts with 0x00 and an 8-byte LE timestamp.
 func TestEncodeCreateCallLinkCredentialResponse_LeadingReservedByte(t *testing.T) {
 	roomID := []byte("test-room")
 	var r0 RandomnessBytes

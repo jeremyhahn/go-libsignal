@@ -1,14 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// CalculateSharedSecret is the X3DH/Double Ratchet DH function: X25519 over
-// Curve25519, mandated by the X3DH specification section 2.1. Extract's RFC
-// 5869 Test Case 1 vector fixes a 13-byte salt, which HKDF uses as the HMAC
-// key. crypto/ecdh rejects X25519 and crypto/hmac rejects keys shorter than
-// 112 bits under GODEBUG=fips140=only, so these tests are excluded from the
-// FIPS gate by the fips140only build tag. Everything else in this package
-// stays gated.
+// FIPS 140-3 exemption (docs/FIPS.md): X25519 (X3DH §2.1) and the 13-byte RFC 5869 salt are rejected under fips140=only.
 
 package kdf
 

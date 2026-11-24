@@ -1,16 +1,4 @@
-// SGX X.509 extension DER fixture test.
-//
-// Loads the binary fixture tests/interop/fixtures/attest/sgx_x509_extension.der
-// (verbatim copy of rust/attest/tests/data/sgx_x509_extension.der) and parses
-// it via parseSGXExtensionASN1. Asserts that the structural fields match the
-// values asserted by Rust's test_deserialization:
-//
-//	ext.pceid      == [0x00, 0x00]   (rust: ext.pceid)
-//	ext.pcesvn     == 11             (rust: ext.tcb.pcesvn)
-//	ext.compsvn[0] == 4              (rust: ext.tcb.compsvn[0])
-//
-// Rust source: rust/attest/src/dcap/sgx_x509.rs:392 (test_deserialization)
-// Upstream commit: 98915c44
+// SGX X.509 extension fixture test, mirroring rust/attest/src/dcap/sgx_x509.rs test_deserialization.
 package attest
 
 import (
@@ -38,15 +26,7 @@ func readSGXFixture(t *testing.T) []byte {
 	return data
 }
 
-// TestParseSGXExtensionASN1_UpstreamDERFixture parses the upstream
-// sgx_x509_extension.der and asserts the structural fields that Rust's
-// test_deserialization verifies (rust/attest/src/dcap/sgx_x509.rs:392).
-//
-// Assertions:
-//
-//	pceid   == [0x00, 0x00]  (rust: ext.pceid == [0u8, 0u8])
-//	pcesvn  == 11             (rust: ext.tcb.pcesvn == 11)
-//	compsvn[0] == 4          (rust: ext.tcb.compsvn[0] == 4)
+// TestParseSGXExtensionASN1_UpstreamDERFixture checks pceid, pcesvn and compsvn[0] against the Rust reference.
 func TestParseSGXExtensionASN1_UpstreamDERFixture(t *testing.T) {
 	derBytes := readSGXFixture(t)
 	if len(derBytes) == 0 {
@@ -77,9 +57,7 @@ func TestParseSGXExtensionASN1_UpstreamDERFixture(t *testing.T) {
 	}
 }
 
-// TestParseSGXExtensionASN1_UpstreamDERFixture_FMSPCSanity asserts structural
-// sanity beyond the three Rust-reference fields: FMSPC must be present and
-// exactly 6 bytes per the Intel SGX PCK certificate extension specification.
+// TestParseSGXExtensionASN1_UpstreamDERFixture_FMSPCSanity checks FMSPC is present and 6 bytes.
 func TestParseSGXExtensionASN1_UpstreamDERFixture_FMSPCSanity(t *testing.T) {
 	derBytes := readSGXFixture(t)
 

@@ -47,8 +47,7 @@ const (
 	// ErrorKindStoreCloneFailed indicates a store operation failed because
 	// cloning a record was not possible.
 	ErrorKindStoreCloneFailed
-	// ErrorKindSendExpired indicates the active session has exceeded MAXSEND
-	// and can no longer be used for encryption.
+	// ErrorKindSendExpired indicates the active session exceeded MAXSEND.
 	ErrorKindSendExpired
 	// ErrorKindRestoreFailed indicates that a rollback of the user record
 	// failed after an operation error. The Cause holds the original error
@@ -226,8 +225,7 @@ func NewMaxUsersExceededError(max int) *SesameError {
 	}
 }
 
-// NewSendExpiredError creates an error indicating the active session has
-// exceeded MAXSEND and can no longer be used for encryption per spec section 4.2.
+// NewSendExpiredError reports that the active session exceeded MAXSEND (spec §4.2).
 func NewSendExpiredError(userID string, deviceID uint32) *SesameError {
 	return &SesameError{
 		Kind:    ErrorKindSendExpired,

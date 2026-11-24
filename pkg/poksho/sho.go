@@ -1,13 +1,4 @@
-// Package poksho implements a Proof of Knowledge library using SHA-256 and
-// HMAC-SHA-256. It provides the Stateful Hash Object (SHO) abstraction and
-// Schnorr-style zero-knowledge proofs over Ed25519.
-//
-// The SHO is a sponge-like construction built on SHA-256 or HMAC-SHA-256 that
-// can absorb data and squeeze out deterministic output. It forms the foundation
-// for the zero-knowledge proof system used by Signal's zkcredential, zkgroup,
-// and username modules.
-//
-// This implementation matches the Rust reference in libsignal/rust/poksho/src/.
+// Package poksho implements the Stateful Hash Object (SHA-256 or HMAC-SHA-256) and Schnorr-style proofs used by zkgroup, zkcredential and usernames, matching Rust poksho.
 package poksho
 
 import (
@@ -38,10 +29,7 @@ type shoVariant interface {
 	// current chaining value. Called at the start of absorbing.
 	initHasher(cv [hashLen]byte) hash.Hash
 
-	// ratchetFinalize completes the ratchet phase on the given hasher,
-	// returning the new chaining value.
-	// HMAC: appends 0x00, then cv = HMAC.finalize()
-	// SHA256: cv = SHA256(SHA256(accumulated_data))
+	// ratchetFinalize returns the new chaining value: HMAC appends 0x00 and finalizes; SHA256 double-hashes.
 	ratchetFinalize(h hash.Hash) [hashLen]byte
 
 	// squeezeBlock produces one output block for the given counter.
@@ -58,15 +46,7 @@ type shoVariant interface {
 	clone() shoVariant
 }
 
-// SHO is a Stateful Hash Object used as the basis for zero-knowledge proofs.
-// It provides a sponge-like construction over SHA-256 or HMAC-SHA-256,
-// matching the Rust ShoApi trait from libsignal.
-//
-// The absorbed field records all data written to the hasher during the current
-// absorb phase. This enables Clone() to perform a true deep copy by replaying
-// the absorbed data into a fresh hasher, matching Rust's #[derive(Clone)]
-// semantics without requiring hash.Hash to implement encoding.BinaryMarshaler
-// (which crypto/hmac does not).
+// SHO is a Stateful Hash Object (Rust ShoApi); absorbed records the current phase's input so Clone can replay it.
 type SHO struct {
 	cv       [hashLen]byte
 	hasher   hash.Hash
@@ -194,10 +174,7 @@ func NewShoSha256(label string) *SHO {
 	return s
 }
 
-// Absorb feeds data into the SHO state. If the SHO is in RATCHETED mode,
-// a new streaming hasher is initialized from the current chaining value.
-// Multiple Absorb calls accumulate data into the same hasher until Ratchet
-// is called.
+// Absorb feeds data into the SHO, starting a new hasher from the chaining value after a ratchet.
 func (s *SHO) Absorb(data []byte) {
 	if s.mode == modeRatcheted {
 		s.hasher = s.variant.initHasher(s.cv)
@@ -213,11 +190,7 @@ func (s *SHO) Absorb(data []byte) {
 	s.absorbed = append(s.absorbed, data...)
 }
 
-// Ratchet finalizes the current absorb phase and updates the chaining value.
-// If already in RATCHETED mode, this is a no-op (matching Rust behavior).
-//
-// For the HMAC variant: appends 0x00, then cv = HMAC.finalize()
-// For the SHA256 variant: cv = SHA256(SHA256(accumulated_data))
+// Ratchet ends the absorb phase and updates the chaining value; a no-op when already ratcheted.
 func (s *SHO) Ratchet() {
 	if s.mode == modeRatcheted {
 		return
@@ -250,14 +223,7 @@ func (s *SHO) AbsorbAndRatchet(data []byte) {
 	s.Ratchet()
 }
 
-// SqueezeAndRatchet produces output bytes from the SHO state and updates
-// the chaining value. If the SHO is still in ABSORBING mode it is ratcheted
-// first, mirroring the Rust assert!(self.mode == ShoMode::Ratcheted) guard
-// that the Rust implementation enforces at this entry point.
-//
-// This matches the Rust squeeze_and_ratchet() method exactly:
-//   - For each 32-byte block i: output_i = hash(cv, i_as_be64 || 0x01)
-//   - New cv = hash(cv, outlen_as_be64 || 0x02)
+// SqueezeAndRatchet ratchets if needed, outputs hash(cv, i_be64 || 0x01) per 32-byte block and sets cv = hash(cv, outlen_be64 || 0x02).
 func (s *SHO) SqueezeAndRatchet(length int) []byte {
 	if s.mode == modeAbsorbing {
 		s.Ratchet()
@@ -286,13 +252,7 @@ func (s *SHO) SqueezeAndRatchet(length int) []byte {
 	return result
 }
 
-// Squeeze produces output bytes and ratchets the state. This is an alias for
-// SqueezeAndRatchet for backward compatibility with callers that previously
-// used Squeeze followed by Ratchet.
-//
-// If the SHO is in ABSORBING mode, it will be ratcheted first before squeezing.
-// This provides backward compatibility for callers that absorb then squeeze
-// without an explicit ratchet step.
+// Squeeze is an alias for SqueezeAndRatchet.
 func (s *SHO) Squeeze(length int) []byte {
 	if s.mode == modeAbsorbing {
 		s.Ratchet()
@@ -300,17 +260,7 @@ func (s *SHO) Squeeze(length int) []byte {
 	return s.SqueezeAndRatchet(length)
 }
 
-// Clone returns a deep copy of the SHO state. The clone is in exactly the same
-// state as the original, including mid-absorb hasher state. This matches the
-// Rust #[derive(Clone)] behavior where Clone produces a true field-by-field
-// deep copy without any side effects on the original.
-//
-// When the SHO is in ABSORBING mode, Clone recreates the hasher from the
-// chaining value and replays the absorbed data. This is necessary because Go's
-// hash.Hash interface (and crypto/hmac in particular) does not provide a
-// general-purpose clone method. The replay produces an identical hasher state
-// because hash functions are deterministic: initHasher(cv) + Write(absorbed)
-// always yields the same internal state.
+// Clone returns a deep copy, replaying the absorbed data into a fresh hasher when mid-absorb.
 func (s *SHO) Clone() *SHO {
 	clone := &SHO{
 		cv:      s.cv,

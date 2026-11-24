@@ -235,12 +235,7 @@ func parseReportBody(data []byte) (*sgxReportBody, error) {
 // parseQuoteSupport parses the ECDSA signature data structure (A4.4).
 // Returns the support structure and the number of bytes consumed.
 func parseQuoteSupport(data []byte) (*sgxQuoteSupport, int, error) {
-	// SgxEcdsaSignatureHeader is:
-	//   signature: [64]byte
-	//   attest_pub_key: [64]byte
-	//   qe_report_body: [384]byte (SgxReportBody)
-	//   qe_report_signature: [64]byte
-	//   auth_data_size: uint16
+	// SgxEcdsaSignatureHeader: signature[64], attest_pub_key[64], qe_report_body[384], qe_report_signature[64], auth_data_size uint16.
 	headerSize := 64 + 64 + sgxReportBodySize + 64 + 2
 	if len(data) < headerSize {
 		return nil, 0, &EvidenceParseError{Detail: "quote support too short"}

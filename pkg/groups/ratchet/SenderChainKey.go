@@ -35,8 +35,7 @@ func NewSenderChainKey(iteration uint32, chainKey []byte) *SenderChainKey {
 	copy(cp, chainKey)
 	s, err := secret.New(cp)
 	if err != nil {
-		// coverage-exempt: defensive OOM guard for the locked-memory allocation;
-		// cannot be unit-tested without modifying the host (see CLAUDE.md).
+		// coverage-exempt: defensive OOM guard for the locked-memory allocation.
 		panic("ratchet: failed to allocate guarded memory for chain key: " + err.Error())
 	}
 	return &SenderChainKey{
@@ -45,15 +44,7 @@ func NewSenderChainKey(iteration uint32, chainKey []byte) *SenderChainKey {
 	}
 }
 
-// NewSenderChainKeyFromStruct will return a new chain key object from the
-// given serializeable structure. The key is cloned from the structure's
-// guarded memory straight into the returned key's own, so the material never
-// lands on the Go heap and the source structure is left intact for its owner
-// to Zeroize.
-//
-// Returns *MissingKeyError if the structure carries no chain key: a sender
-// chain key is mandatory, and decoding one that is absent or already destroyed
-// must fail rather than yield a key nothing can ratchet.
+// NewSenderChainKeyFromStruct clones the chain key guarded-to-guarded; a missing key returns *MissingKeyError.
 func NewSenderChainKeyFromStruct(structure *SenderChainKeyStructure) (*SenderChainKey, error) {
 	if structure == nil || structure.ChainKey.IsZero() {
 		return nil, &MissingKeyError{Field: "sender chain key"}
@@ -68,11 +59,7 @@ func NewSenderChainKeyFromStruct(structure *SenderChainKeyStructure) (*SenderCha
 	}, nil
 }
 
-// NewStructFromSenderChainKey returns a serializable structure of a SenderChainKey,
-// suitable for persistence and transmission. Mirrors NewSenderChainKeyFromStruct:
-// the key is cloned guarded-to-guarded, so serialization no longer stages it on
-// the heap. Callers must Zeroize the returned structure once the serializer has
-// consumed it.
+// NewStructFromSenderChainKey returns a serializable copy of the key in guarded memory; the caller Zeroizes it.
 func NewStructFromSenderChainKey(key *SenderChainKey) (*SenderChainKeyStructure, error) {
 	cloned, err := key.chainKey.Clone()
 	if err != nil {
@@ -84,10 +71,7 @@ func NewStructFromSenderChainKey(key *SenderChainKey) (*SenderChainKeyStructure,
 	}, nil
 }
 
-// SenderChainKeyStructure is a serializeable structure of SenderChainKeys. The
-// chain key is held in guarded memory: it crosses the storage boundary, and a
-// chain key on the plain heap can be swapped out or captured in a core dump,
-// which zeroizing it afterwards does not undo.
+// SenderChainKeyStructure is the serializable form of a SenderChainKey, its key held in guarded memory.
 type SenderChainKeyStructure struct {
 	Iteration uint32
 	ChainKey  secret.Secret
@@ -134,8 +118,7 @@ func (k *SenderChainKey) Next() (*SenderChainKey, error) {
 	// which will zeroize it (that's fine, it's a throwaway buffer).
 	s, err := secret.New(derived)
 	if err != nil {
-		// coverage-exempt: defensive OOM guard for the locked-memory allocation;
-		// cannot be unit-tested without modifying the host (see CLAUDE.md).
+		// coverage-exempt: defensive OOM guard for the locked-memory allocation.
 		panic("ratchet: failed to allocate guarded memory for next chain key: " + err.Error())
 	}
 	return &SenderChainKey{

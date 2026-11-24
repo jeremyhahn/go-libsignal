@@ -5,10 +5,7 @@ import (
 	"sync"
 )
 
-// MemoryStore is an in-memory implementation of the Store interface,
-// suitable for testing. It clones records on load and store to prevent
-// external mutation from corrupting stored state, preserving rollback
-// semantics on decryption failure.
+// MemoryStore is an in-memory Store for tests that clones records on load and store.
 type MemoryStore struct {
 	mu      sync.RWMutex
 	records map[string]*UserRecord
@@ -21,11 +18,7 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
-// LoadUserRecord returns a deep clone of the UserRecord for the given user ID,
-// or nil if no record exists. The clone prevents mutations from affecting
-// stored state, which is essential for rollback semantics on decryption failure.
-// Returns an error if the record exists but cloning fails, rather than falling
-// back to the raw pointer which would break rollback guarantees.
+// LoadUserRecord returns a clone of the user's record, nil if none, or an error if cloning fails.
 func (s *MemoryStore) LoadUserRecord(userID string) (*UserRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -44,10 +37,7 @@ func (s *MemoryStore) LoadUserRecord(userID string) (*UserRecord, error) {
 	return cloned, nil
 }
 
-// StoreUserRecord persists a deep clone of the UserRecord for the given user ID.
-// The clone prevents external mutation from corrupting stored state.
-// Returns an error if cloning fails, rather than storing the raw pointer
-// which would break isolation guarantees.
+// StoreUserRecord stores a clone of record, or returns an error if cloning fails.
 func (s *MemoryStore) StoreUserRecord(userID string, record *UserRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

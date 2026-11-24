@@ -29,33 +29,17 @@ type SkippedKeyID struct {
 	Counter uint32
 }
 
-// negotiationState tracks the version negotiation state of the SPQR ratchet.
-// When a session is first created, version negotiation is pending until the
-// first message is received, which resolves the negotiation to either V0
-// (PQR disabled) or V1 (PQR enabled).
+// negotiationState tracks version negotiation, pending until the first received message resolves it to V0 or V1.
 type negotiationState uint8
 
 const (
-	// negotiationPending indicates version negotiation has not yet completed.
-	// The SPQR will send empty PQR messages and wait for the first received
-	// message to determine the version.
+	// negotiationPending sends empty PQR messages until the first received message sets the version.
 	negotiationPending negotiationState = iota
-	// negotiationResolved indicates version negotiation is complete and the
-	// resolved version is stored in the SPQR's version field.
+	// negotiationResolved means the version field holds the negotiated version.
 	negotiationResolved
 )
 
-// SPQR is the Sparse Post-Quantum Ratchet state machine. It manages epoch-based
-// chain keys derived from SCKA outputs, providing forward secrecy and
-// post-compromise security through periodic post-quantum key agreement.
-//
-// When a Braid (ML-KEM SCKA) is attached, SPQR piggybacks braid chunks on
-// each message and advances the chain epoch when the braid completes a key
-// agreement round.
-//
-// SPQR is NOT safe for concurrent use by multiple goroutines.
-// The session-level serialization (load -> mutate -> store) provides
-// implicit synchronization when used through the session cipher.
+// SPQR is the Sparse Post-Quantum Ratchet: epoch chain keys from SCKA outputs, advanced by an attached Braid; it is not safe for concurrent use.
 type SPQR struct {
 	rootKey     *secret.Secret
 	epoch       uint64
@@ -74,36 +58,15 @@ type SPQR struct {
 	// for V1, or discarded for V0).
 	authKey []byte
 
-	// braid is the ML-KEM Braid SCKA state machine. When non-nil, the
-	// package-level Send() and Recv() functions transparently piggyback braid
-	// chunks on each message and advance the epoch when the braid produces
-	// an output key.
-	//
-	// In V4 serialization format, braid state is persisted alongside the
-	// chain state. When deserialized from V1/V2/V3 formats, braid starts as
-	// nil and chain-only mode is used.
+	// braid, when set, piggybacks chunks on Send and Recv and advances the epoch on each output key; only the V4 format persists it.
 	braid *mlkembraid.Braid
 
-	// skippedKeysFIFO holds SkippedKeyIDs in insertion order, enabling
-	// O(1)-amortized eviction without scanning the entire skippedKeys map.
-	// Entries may be stale (already removed from skippedKeys by GC, epoch
-	// pruning, or consumption); stale entries are skipped during eviction.
-	// skippedKeysFIFOHead is the index of the first candidate live entry.
+	// skippedKeysFIFO lists skipped key IDs in insertion order for amortized O(1) eviction; stale entries are skipped, and skippedKeysFIFOHead marks the first candidate.
 	skippedKeysFIFO     []SkippedKeyID
 	skippedKeysFIFOHead int
 }
 
-// Init creates a new SPQR instance from a shared secret, direction, and max
-// forward jump limit. The shared secret is used to derive the initial root key
-// and chain keys for epoch 0. Direction determines the assignment of
-// send/receive chains. The maxJumpLimit controls the maximum forward jump
-// allowed in the receive counter; use the package-level maxJump constant
-// (25000) for normal sessions and math.MaxUint32 for self-sessions.
-//
-// MinVersion is set to VersionV1, matching the Rust libsignal policy of
-// "Require that all clients speak SPQR" (ratchet.rs:88, 152). V0 (opt-in
-// downgrade) requires explicit use of InitialStateWithParams and warrants an
-// audit note before deployment.
+// Init creates an SPQR from sharedSecret, direction and maxJumpLimit (maxJump normally, MaxUint32 for self-sessions); MinVersion is V1, and V0 needs InitialStateWithParams.
 func Init(sharedSecret []byte, direction Direction, maxJumpLimit uint32) (*SPQR, error) {
 	rk, cks, ckr, err := KdfSckaInit(sharedSecret)
 	if err != nil {
@@ -132,15 +95,7 @@ func Init(sharedSecret []byte, direction Direction, maxJumpLimit uint32) (*SPQR,
 	}, nil
 }
 
-// InitWithBraid creates a new SPQR instance with an attached ML-KEM Braid for
-// SCKA-integrated epoch advancement. The braid is used by SendBraid/RecvBraid
-// to piggyback key agreement chunks on each message.
-//
-// Parameters:
-//   - sharedSecret: initial shared secret for chain key derivation
-//   - direction: A2B or B2A, determines send/recv key assignment
-//   - maxJumpLimit: max forward jump for the receive counter
-//   - braid: initialized ML-KEM Braid instance (Alice or Bob)
+// InitWithBraid creates an SPQR like Init with braid attached for SendBraid and RecvBraid.
 func InitWithBraid(sharedSecret []byte, direction Direction, maxJumpLimit uint32, braid *mlkembraid.Braid) (*SPQR, error) {
 	s, err := Init(sharedSecret, direction, maxJumpLimit)
 	if err != nil {
@@ -150,9 +105,7 @@ func InitWithBraid(sharedSecret []byte, direction Direction, maxJumpLimit uint32
 	return s, nil
 }
 
-// ReceiveKey processes an SCKA output for a new epoch, deriving fresh chain
-// keys and updating the root key. The new epoch must be strictly greater
-// than the current epoch.
+// ReceiveKey derives new chain keys and root key from an SCKA output for an epoch above the current one.
 func (s *SPQR) ReceiveKey(sckaOutput []byte, newEpoch uint64) error {
 	if newEpoch <= s.epoch {
 		return &ErrOldEpoch{Current: s.epoch, Received: newEpoch}
@@ -181,10 +134,7 @@ func (s *SPQR) ReceiveKey(sckaOutput []byte, newEpoch uint64) error {
 	return nil
 }
 
-// Encrypt derives the next message key from the send chain of the given epoch,
-// returning the message key and the counter for this message.
-// The counter is incremented before use, so the first message key is at index 1,
-// matching the Rust reference implementation.
+// Encrypt returns the next message key and counter from epoch's send chain; counters start at 1.
 func (s *SPQR) Encrypt(epoch uint64) (messageKey *secret.Secret, counter uint32, err error) {
 	if epoch < s.sendEpoch {
 		return nil, 0, &ErrSendEpochDecreased{Current: s.sendEpoch, Requested: epoch}
@@ -224,24 +174,14 @@ func (s *SPQR) Encrypt(epoch uint64) (messageKey *secret.Secret, counter uint32,
 	return mk, counter, nil
 }
 
-// Decrypt derives the message key for the given epoch and counter. If the
-// message arrived out of order, intermediate keys are stored as skipped keys.
-// Previously skipped keys are returned directly.
-// Counters are 1-based (first message key is at index 1), matching the Rust
-// reference implementation where the counter is incremented before use.
-//
-// Note: The maxSkippedKeys limit is enforced globally across all epochs,
-// matching Rust's per-epoch KeyHistory::gc behavior. Skipped keys from
-// older epochs are only garbage-collected when the total count exceeds
-// trimSize, which means keys from multiple epochs may coexist in the map.
+// Decrypt returns the message key for epoch and counter, storing skipped keys for out-of-order messages; counters start at 1, and maxSkippedKeys applies across all epochs.
 func (s *SPQR) Decrypt(epoch uint64, counter uint32) (messageKey *secret.Secret, err error) {
 	// Check skipped keys first (out-of-order message retrieval).
 	skID := SkippedKeyID{Epoch: epoch, Counter: counter}
 	if mk, ok := s.skippedKeys[skID]; ok {
 		// Transfer ownership of the secret out of the map.
 		delete(s.skippedKeys, skID)
-		// Compact the FIFO so the stale entry for this key does not accumulate
-		// indefinitely in sessions that consume skipped keys below eviction capacity.
+		// Compact the FIFO so consumed keys do not accumulate.
 		s.trimFIFOIfNeeded()
 		return mk, nil
 	}
@@ -272,13 +212,7 @@ func (s *SPQR) Decrypt(epoch uint64, counter uint32) (messageKey *secret.Secret,
 		return nil, &ErrMaxJump{From: chain.recvCounter, To: counter}
 	}
 
-	// Skip forward to the requested counter, storing intermediate keys.
-	// recvCounter tracks the last counter we derived; increment before use.
-	//
-	// Skipped keys are recorded in both skippedKeys (for O(1) lookup) and
-	// skippedKeysFIFO (for O(1)-amortized FIFO eviction). When the map is at
-	// capacity, evict the oldest entry before inserting, matching Rust's FIFO
-	// trim policy in KeyHistory::gc (chain.rs).
+	// Walk forward to counter, recording skipped keys in the map and the FIFO and evicting the oldest at capacity, as Rust KeyHistory::gc does.
 	for chain.recvCounter+1 < counter {
 		if chain.recvCounter == math.MaxUint32 {
 			return nil, &ErrCounterExhausted{Epoch: epoch}
@@ -352,7 +286,7 @@ func (s *SPQR) Zeroize() {
 		s.braid.Zeroize()
 		s.braid = nil
 	}
-	// Clear the FIFO — no secret material, just IDs, but nil it for GC.
+	// The FIFO holds only IDs; nil it.
 	s.skippedKeysFIFO = nil
 	s.skippedKeysFIFOHead = 0
 }
@@ -378,15 +312,12 @@ func (s *SPQR) Braid() *mlkembraid.Braid {
 	return s.braid
 }
 
-// SetBraid attaches an ML-KEM Braid SCKA instance to the SPQR state.
-// This enables braid-integrated Send/Recv with epoch advancement.
+// SetBraid attaches an ML-KEM Braid for braid-integrated Send and Recv.
 func (s *SPQR) SetBraid(braid *mlkembraid.Braid) {
 	s.braid = braid
 }
 
-// advanceEpoch advances the chain to a new epoch using the given output key
-// from the braid SCKA. It derives new root, send, and receive chain keys
-// via KdfSckaRK and installs them as a new epoch chain.
+// advanceEpoch installs a new epoch chain from KdfSckaRK over the braid output key.
 func (s *SPQR) advanceEpoch(outputKey *secret.Secret) error {
 	if outputKey == nil || outputKey.IsDestroyed() {
 		return &ErrInvalidInput{
@@ -395,8 +326,7 @@ func (s *SPQR) advanceEpoch(outputKey *secret.Secret) error {
 		}
 	}
 
-	// Check epoch overflow BEFORE any KDF or state mutation. This prevents
-	// leaking freshly derived chain keys when the epoch counter is exhausted.
+	// Check for epoch overflow before deriving or changing anything.
 	if s.epoch == math.MaxUint64 {
 		return &ErrEpochOverflow{}
 	}
@@ -430,17 +360,7 @@ func (s *SPQR) advanceEpoch(outputKey *secret.Secret) error {
 	return nil
 }
 
-// clearOldEpochs removes epoch chains and skipped message keys that fall
-// outside the retention window. This is more aggressive than the Rust
-// reference which retains chains in the deque and only clears send keys:
-// Go removes entire chains below keepFrom, while Rust keeps them but nils
-// their send direction. This is safe because skipped message keys are
-// stored separately in the skippedKeys map, not in the chains.
-//
-// The retention window keeps epochs from min(sendEpoch, epoch) - 1 through
-// the current epoch, matching Rust's EPOCHS_TO_KEEP_PRIOR_TO_SEND_EPOCH (1)
-// behavior. This prevents premature removal of epochs the sender still
-// references when recv advances ahead.
+// clearOldEpochs drops chains and skipped keys before min(sendEpoch, epoch) - 1; unlike Rust it removes whole chains, which is safe because skipped keys live in skippedKeys.
 func (s *SPQR) clearOldEpochs() {
 	keepFrom := s.sendEpoch
 	if s.epoch < keepFrom {
@@ -489,12 +409,7 @@ func (s *SPQR) gcSkippedKeys(epoch uint64, currentCounter uint32) {
 	s.trimFIFOIfNeeded()
 }
 
-// evictOldestSkippedKey removes the oldest live skipped message key using the
-// FIFO order recorded in skippedKeysFIFO. This gives O(1)-amortized eviction:
-// stale entries (already removed by gcSkippedKeys, clearOldEpochs, or normal
-// consumption) are skipped in O(1) per entry, and each entry is visited at most
-// once. When the FIFO is exhausted (e.g., right after deserialization), it is
-// rebuilt from the map and the oldest key by (Epoch, Counter) is evicted.
+// evictOldestSkippedKey evicts the oldest live skipped key in FIFO order, rebuilding the FIFO from the map when it is exhausted.
 func (s *SPQR) evictOldestSkippedKey() {
 	for s.skippedKeysFIFOHead < len(s.skippedKeysFIFO) {
 		id := s.skippedKeysFIFO[s.skippedKeysFIFOHead]
@@ -508,9 +423,7 @@ func (s *SPQR) evictOldestSkippedKey() {
 		// Entry was already removed (by gcSkippedKeys, clearOldEpochs, or
 		// consumption). Advance past it without evicting — still O(1) amortized.
 	}
-	// FIFO exhausted without finding a live entry. Rebuild from the map
-	// (covers the deserialization path where the FIFO was never populated)
-	// and retry once.
+	// No live entry: rebuild from the map, as after deserialization, and retry once.
 	s.rebuildSkippedKeysFIFO()
 	if s.skippedKeysFIFOHead < len(s.skippedKeysFIFO) {
 		id := s.skippedKeysFIFO[s.skippedKeysFIFOHead]
@@ -535,12 +448,7 @@ func (s *SPQR) compactFIFOIfNeeded() {
 	}
 }
 
-// trimFIFOIfNeeded compacts the FIFO after a key is consumed or a batch of
-// keys is deleted (by gcSkippedKeys or clearOldEpochs). It first trims the
-// consumed head, then rebuilds the entire slice from the live map when the
-// number of stale FIFO entries has grown significantly larger than the live
-// map. This prevents unbounded slice growth in long-lived sessions that
-// insert and consume skipped keys without ever hitting eviction capacity.
+// trimFIFOIfNeeded trims the consumed head and rebuilds the FIFO when stale entries far outnumber live keys.
 func (s *SPQR) trimFIFOIfNeeded() {
 	s.compactFIFOIfNeeded()
 	// Rebuild when stale entries in the tail significantly outnumber live
@@ -552,10 +460,7 @@ func (s *SPQR) trimFIFOIfNeeded() {
 	}
 }
 
-// rebuildSkippedKeysFIFO rebuilds the insertion-order FIFO from the current
-// skippedKeys map. Called when the FIFO is empty (e.g., after deserialization).
-// Keys are sorted by (Epoch, Counter) to provide a deterministic eviction order
-// that approximates the historical insertion order.
+// rebuildSkippedKeysFIFO rebuilds the FIFO from skippedKeys sorted by (Epoch, Counter).
 func (s *SPQR) rebuildSkippedKeysFIFO() {
 	s.skippedKeysFIFO = make([]SkippedKeyID, 0, len(s.skippedKeys))
 	for id := range s.skippedKeys {

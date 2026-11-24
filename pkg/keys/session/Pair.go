@@ -38,10 +38,7 @@ func NewKeyPair(rootKey RootKeyable, chainKey ChainKeyable) *KeyPair {
 	return &keyPair
 }
 
-// NewKeyPairWithPQR returns a new session key pair that holds a root key, chain key,
-// and an initial PQR (post-quantum ratchet) key for SPQR initialization.
-// The pqrKey bytes are moved into locked memory; the source slice is
-// zeroized by secret.New. Pass nil to indicate no PQR key (legacy v3 sessions).
+// NewKeyPairWithPQR returns a session key pair with an initial PQR key in locked memory; nil means a v3 session.
 func NewKeyPairWithPQR(rootKey RootKeyable, chainKey ChainKeyable, pqrKey []byte) (*KeyPair, error) {
 	if pqrKey == nil {
 		return &KeyPair{
@@ -61,20 +58,14 @@ func NewKeyPairWithPQR(rootKey RootKeyable, chainKey ChainKeyable, pqrKey []byte
 	}, nil
 }
 
-// KeyPair is a session key pair that holds a single root and chain key pair. These
-// keys are ratcheted after every message sent and every message round trip.
-// InitialPQRKey holds the third derived key for SPQR initialization in
-// locked memory. It is nil for legacy v3 sessions.
-// Callers must invoke Zeroize() after consuming the PQR key.
+// KeyPair holds a session's root and chain keys and, except for v3 sessions, the initial PQR key; call Zeroize after use.
 type KeyPair struct {
 	RootKey       RootKeyable
 	ChainKey      ChainKeyable
 	InitialPQRKey *secret.Secret
 }
 
-// Zeroize destroys the guarded PQR key material. This is idempotent and
-// safe to call when InitialPQRKey is nil. Call this after the PQR key has
-// been consumed by SPQR initialization.
+// Zeroize destroys the PQR key; it is idempotent.
 func (kp *KeyPair) Zeroize() {
 	if kp.InitialPQRKey != nil {
 		kp.InitialPQRKey.Destroy()

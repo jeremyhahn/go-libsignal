@@ -147,10 +147,7 @@ func (p *ExpiringProfileKeyCredentialPresentation) GetExpirationTime() Timestamp
 	return p.CredentialExpirationTime
 }
 
-// CreateProfileKeyCredentialRequestContext creates a profile key credential
-// request context. This is a client-side operation.
-//
-// Matches Rust ServerPublicParams::create_profile_key_credential_request_context.
+// CreateProfileKeyCredentialRequestContext creates a client-side profile key credential request context.
 func (pub *ServerPublicParams) CreateProfileKeyCredentialRequestContext(
 	randomness RandomnessBytes,
 	aci ServiceID,
@@ -211,10 +208,7 @@ func (pub *ServerPublicParams) CreateProfileKeyCredentialRequestContext(
 	}, nil
 }
 
-// IssueExpiringProfileKeyCredential creates a blinded expiring profile key
-// credential response. This is a server-side operation.
-//
-// Matches Rust ServerSecretParams::issue_expiring_profile_key_credential.
+// IssueExpiringProfileKeyCredential creates the server's blinded expiring profile key credential response.
 func (s *ServerSecretParams) IssueExpiringProfileKeyCredential(
 	randomness RandomnessBytes,
 	request *ProfileKeyCredentialRequest,
@@ -316,10 +310,7 @@ func (s *ServerSecretParams) IssueExpiringProfileKeyCredential(
 	}, nil
 }
 
-// ReceiveExpiringProfileKeyCredential verifies the server's response and
-// unblinds the credential. This is a client-side operation.
-//
-// Matches Rust ServerPublicParams::receive_expiring_profile_key_credential.
+// ReceiveExpiringProfileKeyCredential verifies the server's response and unblinds the credential.
 func (pub *ServerPublicParams) ReceiveExpiringProfileKeyCredential(
 	ctx *ProfileKeyCredentialRequestContext,
 	response *ExpiringProfileKeyCredentialResponse,
@@ -371,17 +362,7 @@ func (pub *ServerPublicParams) ReceiveExpiringProfileKeyCredential(
 	}, nil
 }
 
-// CreateExpiringProfileKeyCredentialPresentation creates a zero-knowledge
-// presentation of an expiring profile key credential. This is a client-side
-// operation.
-//
-// presentationVersion selects between PresentationVersion3 (the historical
-// proof) and PresentationVersion4 (adds a C_y5 = z * G_y5 clause that proves
-// the empty C_y5 commitment was formed with the same z, mirroring Rust's
-// const-generic `V >= PRESENTATION_VERSION_4` switch). Any other value
-// returns ErrUnknownPresentationVersion.
-//
-// Matches Rust ServerPublicParams::create_expiring_profile_key_credential_presentation.
+// CreateExpiringProfileKeyCredentialPresentation creates a presentation; PresentationVersion4 adds the C_y5 = z * G_y5 clause, and other versions return ErrUnknownPresentationVersion.
 func (pub *ServerPublicParams) CreateExpiringProfileKeyCredentialPresentation(
 	randomness RandomnessBytes,
 	groupSecretParams *GroupSecretParams,
@@ -534,10 +515,7 @@ func (pub *ServerPublicParams) CreateExpiringProfileKeyCredentialPresentation(
 	}, nil
 }
 
-// VerifyExpiringProfileKeyCredentialPresentation verifies an expiring profile
-// key credential presentation. This is a server-side operation.
-//
-// Matches Rust ServerSecretParams::verify_expiring_profile_key_credential_presentation.
+// VerifyExpiringProfileKeyCredentialPresentation verifies a presentation on the server.
 func (s *ServerSecretParams) VerifyExpiringProfileKeyCredentialPresentation(
 	groupPublicParams *GroupPublicParams,
 	presentation *ExpiringProfileKeyCredentialPresentation,
@@ -647,14 +625,7 @@ func (s *ServerSecretParams) VerifyExpiringProfileKeyCredentialPresentation(
 	return nil
 }
 
-// expiringProfileKeyCredentialPresentationStatement returns the poksho statement
-// for expiring profile key credential presentations. Matches Rust
-// ExpiringProfileKeyCredentialPresentationProof::get_poksho_statement.
-//
-// fullChecking selects between the V3 (false) and V4 (true) statement. V4 adds
-// a `C_y5 = z * G_y5` clause that proves the empty C_y5 commitment was actually
-// formed with the same z used elsewhere. Rust ties this to the const generic
-// `V >= PRESENTATION_VERSION_4`.
+// expiringProfileKeyCredentialPresentationStatement returns the V3 statement, or with fullChecking the V4 statement that adds C_y5 = z * G_y5.
 func expiringProfileKeyCredentialPresentationStatement(fullChecking bool) *poksho.Statement {
 	st := poksho.NewStatement()
 	st.Add("Z", [][2]string{{"z", "I"}})

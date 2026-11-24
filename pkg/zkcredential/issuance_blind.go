@@ -56,7 +56,6 @@ type BlindingPrivateKey struct {
 }
 
 // Zeroize overwrites the private scalar with zero.
-// This should be called when the key is no longer needed.
 func (bpk *BlindingPrivateKey) Zeroize() {
 	zeroScalar(bpk.Y)
 	bpk.Y = nil
@@ -73,8 +72,7 @@ type BlindingKeyPair struct {
 	PubKey  *BlindingPublicKey
 }
 
-// Zeroize overwrites the private key material and nils all references.
-// This should be called when the key pair is no longer needed.
+// Zeroize overwrites the private key and clears all references.
 func (bkp *BlindingKeyPair) Zeroize() {
 	if bkp.PrivKey != nil {
 		bkp.PrivKey.Zeroize()
@@ -490,17 +488,7 @@ func EncodeBlindingPublicKey(pk *BlindingPublicKey) []byte {
 	return pk.Ypoint.Bytes()
 }
 
-// EncodeBlindedIssuanceProofBincode serializes a [BlindedIssuanceProof] to
-// the Rust bincode wire format. Differs from [EncodeBlindedIssuanceProof]
-// by including the 8-byte LE u64 length prefix on the poksho_proof Vec<u8>,
-// which is required when the proof is embedded inside a larger struct
-// (otherwise the decoder can't tell where the proof ends).
-//
-// Layout:
-//
-//	[128]       BlindedCredential (T + U + S1 + S2, 32 bytes each)
-//	[8 LE u64]  poksho_proof vec length
-//	[len]       poksho_proof bytes
+// EncodeBlindedIssuanceProofBincode encodes a [BlindedIssuanceProof] as Rust bincode: 128-byte credential, u64 LE proof length, proof.
 func EncodeBlindedIssuanceProofBincode(p *BlindedIssuanceProof) []byte {
 	cred := EncodeBlindedCredential(p.Credential)
 	proofLen := len(p.PokshoProof)
@@ -513,10 +501,7 @@ func EncodeBlindedIssuanceProofBincode(p *BlindedIssuanceProof) []byte {
 	return out
 }
 
-// DecodeBlindedIssuanceProofBincode deserializes a [BlindedIssuanceProof]
-// from the Rust bincode wire format produced by
-// [EncodeBlindedIssuanceProofBincode]. Returns the decoded proof and the
-// number of bytes consumed from data.
+// DecodeBlindedIssuanceProofBincode decodes a [BlindedIssuanceProof] from Rust bincode and returns the bytes consumed.
 func DecodeBlindedIssuanceProofBincode(data []byte) (*BlindedIssuanceProof, int, error) {
 	const credLen = 128
 	if len(data) < credLen+8 {

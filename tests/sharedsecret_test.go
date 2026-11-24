@@ -1,12 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 1 test in this file exercises X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) and the Double Ratchet
-// specification (section 5.2) require it, so the fips140only build tag drops
-// this file from the FIPS gate. `make test` and `make coverage` still run
-// it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) and the Double Ratchet (section 5.2) require X25519.
 
 package tests
 

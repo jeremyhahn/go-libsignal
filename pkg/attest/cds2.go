@@ -9,12 +9,7 @@ import (
 	"time"
 )
 
-// CDS2NewHandshake creates a new handshake for Contact Discovery Service v2.
-//
-// Parameters:
-//   - mrenclave: expected MRENCLAVE value (32 bytes)
-//   - attestationMsg: protobuf-encoded ClientHandshakeStart message
-//   - currentTime: current system time for validity checks
+// CDS2NewHandshake starts a CDS v2 handshake from the expected 32-byte MRENCLAVE, a ClientHandshakeStart message and the current time.
 func CDS2NewHandshake(
 	mrenclave []byte,
 	attestationMsg []byte,
@@ -53,16 +48,7 @@ func CDS2ExtractMetrics(attestationMsg []byte) (map[string]int64, error) {
 	return AttestationMetrics(evidence, endorsement)
 }
 
-// decodeCDS2ClientHandshakeStart decodes a protobuf-encoded CDS2 ClientHandshakeStart message.
-// Returns (evidence, endorsement, error).
-//
-// The protobuf message has the following fields:
-//
-//	message ClientHandshakeStart {
-//	  bytes pubkey = 1;
-//	  bytes evidence = 2;
-//	  bytes endorsement = 3;
-//	}
+// decodeCDS2ClientHandshakeStart returns the evidence (field 2) and endorsement (field 3) of a ClientHandshakeStart message.
 func decodeCDS2ClientHandshakeStart(data []byte) ([]byte, []byte, error) {
 	var evidence, endorsement []byte
 	offset := 0

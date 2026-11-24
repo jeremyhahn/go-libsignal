@@ -5,44 +5,9 @@ import (
 	"math"
 )
 
-// ReadBincodeU64Len reads a u64-LE length prefix from data[off:off+8] and
-// returns it as a safe int, enforcing two invariants that match Rust's bincode
-// behavior (with_fixint_encoding + with_little_endian + reject_trailing_bytes):
-//
-//  1. The raw u64 must be <= math.MaxInt so the int cast never goes negative
-//     on any supported platform.
-//  2. The raw u64 multiplied by elemSize must not exceed the remaining bytes
-//     in data after the length field, preventing any allocation from exceeding
-//     the actual available input.
-//
-// Together these prevent integer-overflow / unbounded-alloc attacks where an
-// attacker supplies a wire u64 >= 2^63 that wraps to negative when cast to int,
-// defeating subsequent bounds checks and causing make/copy to panic.
-//
-// Matches: rust/zkgroup/src/common/serialization.rs zkgroup_bincode_options()
-// which uses:
-//
-//	bincode::DefaultOptions::new()
-//	    .with_fixint_encoding()
-//	    .with_little_endian()
-//	    .reject_trailing_bytes()
-//
-// Parameters:
-//
-//	data      — the full byte slice being decoded
-//	off       — byte offset of the 8-byte LE u64 length field
-//	            (caller must ensure len(data) >= off+8 before calling)
-//	elemSize  — size in bytes of each element counted by this length prefix
-//	            (use 1 for raw byte slices, 32 for compressed Ristretto255 points)
-//	fieldName — human-readable field name used in error messages
-//
-// Returns (length int, err) where length is safe to use directly with
-// make, copy, and slice-index arithmetic.
+// ReadBincodeU64Len reads the u64-LE length prefix at data[off:off+8] and returns it as an int, rejecting values above math.MaxInt or whose length*elemSize exceeds the remaining input, as zkgroup's bincode options (fixint, little-endian, reject trailing bytes) require. fieldName names the field in errors; the result is safe for make, copy and slicing.
 func ReadBincodeU64Len(data []byte, off int, elemSize int, fieldName string) (int, error) {
-	// Precondition guard: panic-free even when called from external code.
-	// off < 0 or off+8 > len(data) would index out of bounds; return a typed
-	// error rather than panicking, matching the security-library invariant that
-	// exported functions must never panic on invalid caller input.
+	// An out-of-range off is an error, not a panic.
 	if off < 0 || off > len(data)-8 {
 		return 0, &ErrInvalidEncoding{
 			Field: fieldName,

@@ -23,15 +23,7 @@ const MREnclaveSize = 32
 // MREnclave is a 32-byte MRENCLAVE value that identifies an enclave binary.
 type MREnclave [MREnclaveSize]byte
 
-// ForSGX creates a new handshake for an SGX enclave using DCAP attestation.
-//
-// Parameters:
-//   - mrenclave: expected MRENCLAVE value (32 bytes)
-//   - evidence: DCAP evidence bytes
-//   - endorsements: DCAP endorsement bytes
-//   - acceptableSWAdvisories: list of Intel SW advisory IDs known to be mitigated
-//   - currentTime: current system time for validity checks
-//   - handshakeType: PreQuantum or PostQuantum
+// ForSGX creates a PreQuantum or PostQuantum handshake for an SGX enclave after verifying its DCAP evidence and endorsements.
 func ForSGX(
 	mrenclave []byte,
 	evidence []byte,

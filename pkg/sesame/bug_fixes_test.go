@@ -255,7 +255,7 @@ func TestPrepForEncrypting_IdentityKeyMismatch_ReplacesEntireRecord(t *testing.T
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Device 2 should no longer exist (record was replaced).
+	// Device 2 must be gone because the record was replaced.
 	userRecord := mustLoadUserRecord(t, mgr.Store(), "alice")
 	if userRecord.GetDevice(2) != nil {
 		t.Error("expected device 2 to be gone after identity key mismatch replacement")

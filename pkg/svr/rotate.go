@@ -1,15 +1,6 @@
 package svr
 
-// Package svr implements Secure Value Recovery (SVR) for the Signal protocol.
-//
-// This file provides constructors for SVR4 rotation request messages and
-// response decoders for the rotation arms of the Request4/Response4 protocol.
-//
-// Rotation requests use a hand-rolled protobuf wire encoder (encodeRotateStart,
-// encodeRotateCommit, encodeRotateRollback) that is byte-for-bit identical to
-// the generated proto.Marshal path; see TestRotateStartWireByteEquality.
-//
-// Rust libsignal ref: rust/svrb/src/proto/svrb.proto Request4/Response4
+// Package svr implements Signal Secure Value Recovery; rotation requests use a hand-written encoder identical to proto.Marshal (Rust svrb.proto Request4/Response4).
 
 import (
 	"encoding/binary"
@@ -48,11 +39,7 @@ func protoFieldMessage(fieldNum uint32, msg []byte) []byte {
 	return protoFieldBytes(fieldNum, msg)
 }
 
-// encodeRotateStart encodes a Request4 with a RotateStart inner message.
-// Wire encoding: oneof field 6, submessage with fixed32 version=1,
-// bytes oprf_secretshare_delta=2, bytes encryption_secretshare_delta=3.
-//
-// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateStart
+// encodeRotateStart encodes Request4.RotateStart (oneof 6: version, oprf and encryption share deltas).
 func encodeRotateStart(version uint32, oprfDelta, encDelta []byte) []byte {
 	// Encode the RotateStart submessage.
 	var sub []byte
@@ -63,39 +50,25 @@ func encodeRotateStart(version uint32, oprfDelta, encDelta []byte) []byte {
 	return protoFieldMessage(6, sub)
 }
 
-// encodeRotateCommit encodes a Request4 with a RotateCommit inner message.
-// Wire encoding: oneof field 7, submessage with fixed32 version=1.
-//
-// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateCommit
+// encodeRotateCommit encodes Request4.RotateCommit (oneof 7: version).
 func encodeRotateCommit(version uint32) []byte {
 	sub := protoFieldFixed32(1, version)
 	return protoFieldMessage(7, sub)
 }
 
-// encodeRotateRollback encodes a Request4 with a RotateRollback inner message.
-// Wire encoding: oneof field 8, submessage with fixed32 version=1.
-//
-// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateRollback
+// encodeRotateRollback encodes Request4.RotateRollback (oneof 8: version).
 func encodeRotateRollback(version uint32) []byte {
 	sub := protoFieldFixed32(1, version)
 	return protoFieldMessage(8, sub)
 }
 
-// RotateStart4 represents a v4 SVR rotation-start request set. It sends a
-// delta to each server to begin rotating the OPRF key and encryption shares.
-//
-// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateStart
+// RotateStart4 is an SVR4 rotation-start request set carrying deltas to each server.
 type RotateStart4 struct {
 	// Requests contains one serialized Request4 per server.
 	Requests [][]byte
 }
 
-// NewRotateStart4 creates rotation-start requests for n servers. Each request
-// carries the same version, oprfDelta, and encDelta values. In a real
-// protocol flow the deltas would be computed per-server; this constructor
-// accepts pre-computed values for symmetry with NewOPRFBackup4.
-//
-// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateStart
+// NewRotateStart4 returns n rotation-start requests with the given version and precomputed deltas.
 func NewRotateStart4(n int, version uint32, oprfDelta, encDelta []byte) (*RotateStart4, error) {
 	if n <= 0 {
 		return nil, ErrBadData
@@ -107,18 +80,12 @@ func NewRotateStart4(n int, version uint32, oprfDelta, encDelta []byte) (*Rotate
 	return &RotateStart4{Requests: requests}, nil
 }
 
-// FinalizeRotateStart4 processes server responses to RotateStart requests.
-// It verifies that all servers returned OK status.
-//
-// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.RotateStart
+// FinalizeRotateStart4 checks every RotateStart response is OK.
 func FinalizeRotateStart4(responses [][]byte) error {
 	return finalizeRotation(responses, decodeRotateStartStatus)
 }
 
-// RotateCommit4 represents a v4 SVR rotation-commit request set. Sending it
-// makes the new OPRF key permanent on all servers.
-//
-// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateCommit
+// RotateCommit4 is an SVR4 request set that makes the new OPRF key permanent.
 type RotateCommit4 struct {
 	// Requests contains one serialized Request4 per server.
 	Requests [][]byte
@@ -138,18 +105,12 @@ func NewRotateCommit4(n int, version uint32) (*RotateCommit4, error) {
 	return &RotateCommit4{Requests: requests}, nil
 }
 
-// FinalizeRotateCommit4 processes server responses to RotateCommit requests.
-// It verifies that all servers returned OK status.
-//
-// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.RotateCommit
+// FinalizeRotateCommit4 checks every RotateCommit response is OK.
 func FinalizeRotateCommit4(responses [][]byte) error {
 	return finalizeRotation(responses, decodeRotateCommitStatus)
 }
 
-// RotateRollback4 represents a v4 SVR rotation-rollback request set. Sending
-// it aborts a previously started rotation and reverts to the prior OPRF key.
-//
-// Rust libsignal ref: rust/svrb/src/svrb.proto Request4.RotateRollback
+// RotateRollback4 is an SVR4 request set that aborts a rotation.
 type RotateRollback4 struct {
 	// Requests contains one serialized Request4 per server.
 	Requests [][]byte
@@ -169,10 +130,7 @@ func NewRotateRollback4(n int, version uint32) (*RotateRollback4, error) {
 	return &RotateRollback4{Requests: requests}, nil
 }
 
-// FinalizeRotateRollback4 processes server responses to RotateRollback
-// requests. It verifies that all servers returned OK status.
-//
-// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.RotateRollback
+// FinalizeRotateRollback4 checks every RotateRollback response is OK.
 func FinalizeRotateRollback4(responses [][]byte) error {
 	return finalizeRotation(responses, decodeRotateRollbackStatus)
 }
@@ -195,13 +153,7 @@ func finalizeRotation(responses [][]byte, statusOf func([]byte) (svrpb.Response4
 	return nil
 }
 
-// decodeRotateStartStatus parses a Response4 and extracts the RotateStart
-// status field. It uses the generated proto decoder for the Response4 outer
-// message; because the generated types do not include the rotation oneof
-// wrappers, the oneof inner bytes are read from the unknown fields and decoded
-// manually.
-//
-// Rust libsignal ref: rust/svrb/src/svrb.proto Response4.RotateStart
+// decodeRotateStartStatus returns the RotateStart status from a Response4, read from unknown fields.
 func decodeRotateStartStatus(b []byte) (svrpb.Response4_Status, error) {
 	return decodeRotationResponseStatus(b, 6)
 }
@@ -220,14 +172,7 @@ func decodeRotateRollbackStatus(b []byte) (svrpb.Response4_Status, error) {
 	return decodeRotationResponseStatus(b, 8)
 }
 
-// decodeRotationResponseStatus decodes a Response4 protobuf and extracts the
-// status field from the rotation submessage at the given oneof field number
-// (6=RotateStart, 7=RotateCommit, 8=RotateRollback). Each rotation response
-// submessage has a single status field at field number 1.
-//
-// proto.Unmarshal validates the outer message structure; the raw submessage
-// bytes are then located directly via extractProtoLenField to read the status
-// varint without allocating additional generated types.
+// decodeRotationResponseStatus returns field 1 of the rotation submessage at oneof field (6, 7 or 8) of a Response4.
 func decodeRotationResponseStatus(b []byte, oneofFieldNum int) (svrpb.Response4_Status, error) {
 	// First pass: use proto.Unmarshal to validate the outer message structure.
 	resp := &svrpb.Response4{}

@@ -1,9 +1,4 @@
-// Interop tests for message-backup frames with invalid/malformed structure.
-//
-// Source: synthetic cases exercising pkg/backup.FrameDecryptor error paths
-// at Rust libsignal commit 98915c442d. Rust BackupReader::new_encrypted_compressed
-// rejects these before the HMAC phase; Go FrameDecryptor rejects at the
-// ErrDataTooShort check.
+// Malformed message-backup frames: Rust rejects them before the HMAC check, Go FrameDecryptor with ErrDataTooShort.
 package interop
 
 import (
@@ -17,13 +12,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/tests/interop/loader"
 )
 
-// TestMessageBackup_InvalidFrameTooShort verifies that input shorter than
-// the minimum (IV + HMAC = 48 bytes) is rejected with ErrDataTooShort.
-//
-// Rust BackupReader::new_encrypted_compressed returns an error when the
-// backing stream is shorter than the required header/MAC sizes
-// (test_cases.rs context: any encrypted input must carry at least the IV and
-// HMAC before any frame data).
+// TestMessageBackup_InvalidFrameTooShort checks input under 48 bytes (IV + HMAC) returns ErrDataTooShort, as Rust rejects it.
 func TestMessageBackup_InvalidFrameTooShort(t *testing.T) {
 	assertFrameRejected(t, "messagebackup/cases/invalid_frame/too_short.json")
 }

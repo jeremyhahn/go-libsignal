@@ -1,11 +1,4 @@
-// Package session provides the methods necessary to build Signal Protocol
-// sessions and encrypt/decrypt messages. Callers should use the
-// ...WithLocalAddress constructor variants (NewCipherWithLocalAddress,
-// NewCipherFromSessionWithLocalAddress, NewCipherWithIdentityAndLocalAddress)
-// to enable address binding (SignalMessage field 6), which Rust libsignal
-// always populates and which prevents address-substitution downgrade attacks.
-// The legacy constructors without a local-address parameter leave field 6
-// unpopulated and are deprecated.
+// Package session builds Signal sessions and encrypts and decrypts messages; use the WithLocalAddress constructors for address binding, as the others are deprecated.
 package session
 
 import (
@@ -81,19 +74,7 @@ func NewBuilderFromSignal(signalStore store.SignalProtocol,
 	return &builder
 }
 
-// Builder is responsible for setting up encrypted sessions.
-// Once a session has been established, SessionCipher can be
-// used to encrypt/decrypt messages in that session.
-//
-// Sessions are built from one of three different vectors:
-//   - PreKeyBundle retrieved from a server.
-//   - PreKeySignalMessage received from a client.
-//   - KeyExchangeMessage sent to or received from a client.
-//
-// Sessions are constructed per recipientId + deviceId tuple.
-// Remote logical users are identified by their recipientId,
-// and each logical recipientId can have multiple physical
-// devices.
+// Builder sets up sessions per recipient and device from a PreKeyBundle, a PreKeySignalMessage or a KeyExchangeMessage.
 type Builder struct {
 	sessionStore      store.Session
 	preKeyStore       store.PreKey
@@ -104,11 +85,7 @@ type Builder struct {
 	serializer        *serialize.Serializer
 }
 
-// DeferredActions holds session state changes that must only be committed
-// after the inner SignalMessage is successfully decrypted. This matches
-// the Rust reference (session_cipher.rs:207-260 message_decrypt_prekey)
-// which defers save_identity, mark_kyber_pre_key_used, remove_pre_key,
-// and store_session until after decrypt succeeds.
+// DeferredActions holds store changes committed only after the inner SignalMessage decrypts, as Rust message_decrypt_prekey defers them.
 type DeferredActions struct {
 	// SessionRecord is the newly established session record.
 	SessionRecord *record.Session
@@ -130,10 +107,7 @@ type DeferredActions struct {
 	builder *Builder
 }
 
-// Complete commits the deferred side effects after successful decryption.
-// This stores the session, saves the identity key, marks the Kyber pre-key
-// as used, and removes the one-time pre-key. The caller must invoke this
-// only after the inner SignalMessage decryption succeeds.
+// Complete stores the session and identity, marks the Kyber pre-key used and removes the one-time pre-key; call it only after decryption succeeds.
 func (d *DeferredActions) Complete() error {
 	// Store the updated session record.
 	if err := d.builder.sessionStore.StoreSession(d.builder.remoteAddress, d.SessionRecord); err != nil {
@@ -165,11 +139,7 @@ func (d *DeferredActions) Complete() error {
 	return nil
 }
 
-// Process builds a new session from a session record and pre key signal
-// message. It returns a DeferredActions struct whose Complete() method
-// must be called after the inner SignalMessage is successfully decrypted.
-// If decryption fails, the caller discards the DeferredActions, preserving
-// pre-keys from being burned.
+// Process builds a session from a PreKeySignalMessage and returns DeferredActions; call Complete after decryption, or discard it to keep the pre-keys.
 func (b *Builder) Process(message *protocol.PreKeySignalMessage) (*DeferredActions, error) {
 
 	// Load or create session record for this session.
@@ -178,14 +148,7 @@ func (b *Builder) Process(message *protocol.PreKeySignalMessage) (*DeferredActio
 		return nil, err
 	}
 
-	// Operate on a deep copy. Session stores return their record by reference,
-	// so processV3 (which adds the new session state) and the subsequent
-	// DecryptWithRecordPreKey (which advances the ratchet) would otherwise
-	// mutate the persisted session in place — corrupting it even when the inner
-	// SignalMessage fails to decrypt and Complete() is never called. By cloning
-	// here, a failed decryption leaves the stored session untouched and the
-	// one-time pre-key unburned; Complete() persists this copy only on success.
-	// Mirrors Rust's atomic process_prekey_signal_message (session.rs).
+	// Work on a copy so a failed decryption leaves the stored session and pre-key untouched; Complete persists it.
 	sessionRecord, err := loadedRecord.Copy()
 	if err != nil {
 		return nil, err
@@ -218,10 +181,7 @@ func (b *Builder) Process(message *protocol.PreKeySignalMessage) (*DeferredActio
 	}, nil
 }
 
-// processV3 builds a new session from a session record and pre key
-// signal message. It returns the unsigned pre-key ID and Kyber pre-key
-// ID without performing any store mutations. The caller is responsible
-// for deferring those operations until after successful decryption.
+// processV3 adds the new session state and returns the pre-key and Kyber pre-key IDs without touching the stores.
 func (b *Builder) processV3(sessionRecord *record.Session,
 	message *protocol.PreKeySignalMessage) (unsignedPreKeyID *optional.Uint32, kyberPreKeyID *optional.Uint32, err error) {
 
@@ -237,9 +197,7 @@ func (b *Builder) processV3(sessionRecord *record.Session,
 		return nil, nil, nil
 	}
 
-	// H4: Enforce PQXDH requirement. X3DH (PreKyberVersion) is no longer
-	// supported, matching Rust process_prekey_impl which rejects v3 messages
-	// with "X3DH no longer supported".
+	// PQXDH is required; X3DH is no longer supported, as in Rust.
 	if message.MessageVersion() == protocol.PreKyberVersion {
 		return nil, nil, &Error{kind: errX3DHNoLongerSupported}
 	}
@@ -331,10 +289,7 @@ func (b *Builder) processV3(sessionRecord *record.Session,
 	sessionState.SetVersion(message.MessageVersion())
 	sessionState.SetRemoteIdentityKey(parameters.TheirIdentityKey())
 	sessionState.SetLocalIdentityKey(parameters.OurIdentityKeyPair().PublicKey())
-	// The state takes ownership of the chain it is given, and destroys the chain
-	// it supersedes. Our ratchet key here is the signed pre-key, which belongs
-	// to the pre-key store and outlives this session, so hand the state its own
-	// copy rather than the store's.
+	// The state destroys chains it supersedes, so give it a copy of the store-owned signed pre-key.
 	ourRatchetKey, ratchetErr := cloneKeyPairForState(parameters.OurRatchetKey())
 	if ratchetErr != nil {
 		return nil, nil, ratchetErr
@@ -344,10 +299,7 @@ func (b *Builder) processV3(sessionRecord *record.Session,
 		return nil, nil, err
 	}
 
-	// SPQR: Initialize post-quantum ratchet state from the InitialPQRKey
-	// derived during PQXDH. Bob is DirectionB2A (receiver side).
-	// Self-sessions (where local and remote identity keys match) use
-	// math.MaxUint32 as the max forward jump to match Rust's u32::MAX.
+	// Bob's SPQR state (DirectionB2A) starts from InitialPQRKey; self-sessions allow a MaxUint32 forward jump, as Rust does.
 	if derivedKeys.InitialPQRKey != nil && !derivedKeys.InitialPQRKey.IsDestroyed() {
 		// spqr keeps no reference to the key; it is copied out of the
 		// read-only view and the copy is wiped once the state is built.
@@ -384,10 +336,7 @@ func (b *Builder) processV3(sessionRecord *record.Session,
 		retKyberPreKeyID = optional.NewOptionalUint32(message.KyberPreKeyID().Value)
 	}
 
-	// Collect the unsigned pre-key ID for deferred removal after successful
-	// decryption. The actual RemovePreKey call is deferred to
-	// DeferredActions.Complete() to prevent burning keys on decrypt failure.
-	// A nil PreKeyID or an empty optional indicates no one-time pre-key was used.
+	// Record the one-time pre-key ID for removal in Complete; nil or empty means none was used.
 	var retUnsignedPreKeyID *optional.Uint32
 	if message.PreKeyID() != nil && !message.PreKeyID().IsEmpty {
 		retUnsignedPreKeyID = message.PreKeyID()
@@ -512,10 +461,7 @@ func (b *Builder) ProcessBundle(preKey *prekey.Bundle) error {
 		return err
 	}
 
-	// SPQR: Initialize post-quantum ratchet state from the InitialPQRKey
-	// derived during PQXDH. Alice is DirectionA2B (sender initiated session).
-	// Self-sessions (where local and remote identity keys match) use
-	// math.MaxUint32 as the max forward jump to match Rust's u32::MAX.
+	// Alice's SPQR state (DirectionA2B) starts from InitialPQRKey; self-sessions allow a MaxUint32 forward jump, as Rust does.
 	if derivedKeys.InitialPQRKey != nil && !derivedKeys.InitialPQRKey.IsDestroyed() {
 		// spqr keeps no reference to the key; it is copied out of the
 		// read-only view and the copy is wiped once the state is built.
@@ -575,16 +521,7 @@ func (b *Builder) ProcessBundle(preKey *prekey.Bundle) error {
 	return nil
 }
 
-// cloneKeyPairForState returns a key pair whose private half is an independent
-// guarded copy, for handing a borrowed key to a session state, which takes
-// ownership of what it is given and destroys it when the chain is superseded.
-//
-// A heap-backed private key is copied too, not passed through: the state's
-// destruction path zeroizes a *ecc.DjbECPrivateKey in place, so sharing one
-// would wipe the caller's key — a signed pre-key still held by the pre-key
-// store, say — as a side effect of the session ratcheting forward. The copy is
-// guarded regardless of the representation it came from, which is also what the
-// protected-memory rule asks of live session state.
+// cloneKeyPairForState returns the key pair with an independent guarded copy of the private key, since the state destroys what it is given and the original may belong to the pre-key store.
 func cloneKeyPairForState(keyPair *ecc.ECKeyPair) (*ecc.ECKeyPair, error) {
 	privateKey := keyPair.PrivateKey()
 	if guarded, ok := privateKey.(*ecc.GuardedECPrivateKey); ok {

@@ -26,14 +26,10 @@ const ChainDerivedSecretsSize = 64
 // KdfInfo is used as the info for message keys to derive secrets using a Key Derivation Function
 const KdfInfo string = "WhisperRatchet"
 
-// KdfInfoPQXDH is used as the HKDF info label when PQXDH (post-quantum extended Diffie-Hellman)
-// key agreement is used, incorporating CRYSTALS-KYBER-1024 alongside X25519.
+// KdfInfoPQXDH is the HKDF info label for PQXDH key agreement.
 const KdfInfoPQXDH string = "WhisperText_X25519_SHA-256_CRYSTALS-KYBER-1024"
 
-// NewKey returns a new RootKey given the key derivation function and bytes.
-// The key material is moved into locked memory and the source
-// slice is zeroized by go-enclave. Panics if the locked-memory allocation fails
-// (fatal condition).
+// NewKey returns a RootKey with its material moved into locked memory; it panics if allocation fails.
 func NewKey(kdf kdf.HKDF, key []byte) *Key {
 	guardedKey, err := secret.New(key)
 	if err != nil {

@@ -1,11 +1,6 @@
 package media
 
-// webp_structural_test.go — conformance tests for Finding #6 (WebP structural
-// validation) and Finding #7 (odd-chunk padding and trailing-byte rejection).
-//
-// WebP spec: https://developers.google.com/speed/webp/docs/riff_container
-// Rust oracle: libsignal webpsan crate (behavioral reference)
-// Java oracle: WebpSanitizerTest.java (ported tests)
+// WebP structural, odd-chunk padding and trailing-byte tests against the RIFF container spec, webpsan and WebpSanitizerTest.java.
 
 import (
 	"bytes"
@@ -13,15 +8,9 @@ import (
 	"testing"
 )
 
-// ---------------------------------------------------------------------------
-// Helper: build a RIFF/WebP file with arbitrary chunk list.
-// ---------------------------------------------------------------------------
+// Helpers to build RIFF/WebP files.
 
-// buildWebPWithChunks constructs a RIFF/WEBP file containing the given raw
-// chunk data.  riffPayload = "WEBP" + chunks (already serialized).
-// The RIFF size field is computed to match the payload length exactly, so that
-// no trailing-byte rejection occurs (unless the caller deliberately adds extra
-// bytes).
+// buildWebPWithChunks builds a RIFF/WEBP file whose size field matches the given chunks exactly.
 func buildWebPWithChunks(chunks []byte) []byte {
 	riffPayload := make([]byte, 0, 4+len(chunks))
 	riffPayload = append(riffPayload, []byte("WEBP")...)
@@ -37,8 +26,7 @@ func buildWebPWithChunks(chunks []byte) []byte {
 	return buf.Bytes()
 }
 
-// buildWebPChunk serializes a single RIFF chunk: 4-byte type + 4-byte LE size +
-// data + optional 0x00 pad byte (if data length is odd).
+// buildWebPChunk serializes type, LE size, data and a 0x00 pad byte for odd lengths.
 func buildWebPChunk(fourcc string, data []byte) []byte {
 	size := uint32(len(data))
 	chunk := make([]byte, 0, 8+len(data)+1)
@@ -53,13 +41,7 @@ func buildWebPChunk(fourcc string, data []byte) []byte {
 	return chunk
 }
 
-// buildVP8XPayload builds a valid 10-byte VP8X chunk payload.
-//
-// flags byte:
-//
-//	bit 1 = ICC, bit 2 = alpha, bit 3 = EXIF, bit 4 = XMP, bit 5 = anim
-//
-// canvas width/height are 24-bit LE (value = actual - 1).
+// buildVP8XPayload builds a 10-byte VP8X payload: flags (ICC 1, alpha 2, EXIF 3, XMP 4, anim 5) and 24-bit LE dimensions minus one.
 func buildVP8XPayload(flags byte, width, height uint32) []byte {
 	p := make([]byte, 10)
 	p[0] = flags
@@ -183,12 +165,7 @@ func TestFinding6_VP8X_CanvasDimensionTooLarge(t *testing.T) {
 	}
 }
 
-// TestFinding6_VP8X_MaxValidDimensions verifies that VP8X with canvas
-// dimensions exactly at the maximum (16383 stored = 16384 actual) is accepted
-// when followed by a VP8 bitstream chunk (required by webpsan for still images).
-//
-// webpsan/src/parse/vp8x.rs: stored canvas dim = actual-1; max stored = 16383.
-// webpsan/src/lib.rs:207-246 (sanitize_still requires VP8/VP8L).
+// TestFinding6_VP8X_MaxValidDimensions checks the maximum stored canvas dimension 16383 is accepted with a VP8 chunk.
 func TestFinding6_VP8X_MaxValidDimensions(t *testing.T) {
 	p := buildVP8XPayload(0x00, 16383, 16383)
 	// VP8 lossy body (4 bytes) required by sanitize_still.
@@ -252,8 +229,7 @@ func TestFinding6_ChunkOrder_VP8FollowedByVP8X(t *testing.T) {
 	}
 }
 
-// TestFinding6_ChunkOrder_EmptyFile verifies that a WEBP file with no chunks
-// is rejected.
+// TestFinding6_ChunkOrder_EmptyFile checks a WEBP file with no chunks is rejected.
 func TestFinding6_ChunkOrder_EmptyFile(t *testing.T) {
 	data := buildWebPWithChunks(nil)
 	if err := SanitizeWebP(data); err == nil {
@@ -276,15 +252,7 @@ func TestFinding6_ChunkOrder_NonBitstreamFirst(t *testing.T) {
 // Finding #7: odd-chunk padding and trailing-byte tests
 // ---------------------------------------------------------------------------
 
-// TestFinding7_OddChunkPadByte_Valid verifies that an odd-size chunk followed
-// by the mandatory 0x00 pad byte is accepted.
-//
-// WebP spec §RIFF file format: "If the chunk size is odd, a single padding byte
-// — which MUST be 0 — is added."
-// webpsan/src/reader.rs:232 — ensure_matches_attach!(pad, 0, ParseError::InvalidInput, ...)
-//
-// Uses a VP8 (lossy) chunk with 3 bytes (odd) to exercise the pad-byte path.
-// VP8 chunks have no minimum payload size requirement in webpsan (only VP8L does).
+// TestFinding7_OddChunkPadByte_Valid checks an odd 3-byte VP8 chunk with its 0x00 pad byte is accepted.
 func TestFinding7_OddChunkPadByte_Valid(t *testing.T) {
 	// 3-byte VP8 data (odd) + explicit 0x00 pad.
 	vp8Data := []byte{0x9D, 0x01, 0x2A} // 3 bytes (odd)
@@ -302,11 +270,7 @@ func TestFinding7_OddChunkPadByte_Valid(t *testing.T) {
 	}
 }
 
-// TestFinding7_OddChunkPadByte_NonZero verifies that a non-zero pad byte is
-// rejected.
-//
-// WebP spec §RIFF file format: the pad byte "MUST be 0".
-// webpsan/src/reader.rs:232 — ensure_matches_attach!(pad, 0, ParseError::InvalidInput, ...)
+// TestFinding7_OddChunkPadByte_NonZero checks a non-zero pad byte is rejected.
 func TestFinding7_OddChunkPadByte_NonZero(t *testing.T) {
 	vp8Data := []byte{0x9D, 0x01, 0x2A} // 3 bytes (odd)
 	size := uint32(len(vp8Data))
@@ -322,12 +286,9 @@ func TestFinding7_OddChunkPadByte_NonZero(t *testing.T) {
 	}
 }
 
-// TestFinding7_OddChunkPadByte_Missing verifies that an odd-size chunk without
-// a pad byte is rejected (the padded extent would exceed the RIFF payload).
-// webpsan/src/reader.rs:232 — pad byte validation occurs in read_padding.
+// TestFinding7_OddChunkPadByte_Missing checks an odd chunk without room for its pad byte is rejected.
 func TestFinding7_OddChunkPadByte_Missing(t *testing.T) {
-	// Build the file such that the RIFF payload ends exactly at the chunk data
-	// with no room for the mandatory pad byte.
+	// The RIFF payload ends at the chunk data, leaving no room for the pad byte.
 	vp8Data := []byte{0x9D, 0x01, 0x2A} // 3 bytes (odd)
 	size := uint32(len(vp8Data))
 	sizeBytes := make([]byte, 4)
@@ -350,11 +311,7 @@ func TestFinding7_OddChunkPadByte_Missing(t *testing.T) {
 	}
 }
 
-// TestFinding7_TrailingBytesRejected verifies that bytes appearing after the
-// declared RIFF payload are rejected (fail-closed against concatenated files).
-//
-// Java oracle: WebpSanitizerTest.java — the java sanitizer is fail-closed;
-// this test mirrors that posture.  Finding #7.
+// TestFinding7_TrailingBytesRejected checks bytes after the declared RIFF payload are rejected.
 func TestFinding7_TrailingBytesRejected(t *testing.T) {
 	data := javaWebp() // valid minimal VP8L WebP
 	// Append extra bytes beyond the declared RIFF boundary.
@@ -364,14 +321,9 @@ func TestFinding7_TrailingBytesRejected(t *testing.T) {
 	}
 }
 
-// TestFinding7_OddChunkPadByte_PaddedExtentBeyondPayload verifies that an odd-
-// size chunk whose padded extent (dataEnd+1) would exceed the RIFF payload is
-// rejected even when the pad byte exists in the buffer but outside the payload.
-// webpsan/src/lib.rs:170–174 — trailing-bytes check rejects this case.
+// TestFinding7_OddChunkPadByte_PaddedExtentBeyondPayload checks a pad byte outside the declared payload is rejected.
 func TestFinding7_OddChunkPadByte_PaddedExtentBeyondPayload(t *testing.T) {
-	// Build a VP8 chunk of 3 bytes (odd). Declare a RIFF payload size that ends
-	// exactly at the chunk data end (no room for the pad byte within payload), but
-	// provide extra bytes in the actual buffer so the validator can read them.
+	// A 3-byte VP8 chunk whose declared payload ends before its pad byte, with extra bytes in the buffer.
 	vp8Data := []byte{0x9D, 0x01, 0x2A} // 3 bytes
 	size := uint32(3)
 	sizeBytes := make([]byte, 4)
@@ -381,9 +333,7 @@ func TestFinding7_OddChunkPadByte_PaddedExtentBeyondPayload(t *testing.T) {
 	// Pad byte is in the buffer but beyond the declared RIFF payload.
 	chunk = append(chunk, 0x00)
 
-	// Declare the RIFF payload as ending before the pad byte.
-	// riffPayload = "WEBP" (4) + chunk header (8) + 3 bytes data = 15 bytes.
-	// (The pad byte 0x00 is NOT included in the declared payload.)
+	// Declared payload: WEBP(4) + chunk header(8) + 3 data bytes = 15, excluding the pad byte.
 	riffPayloadDeclared := 4 + 8 + 3 // = 15
 	riffPayloadFull := append([]byte("WEBP"), chunk...)
 
@@ -395,8 +345,7 @@ func TestFinding7_OddChunkPadByte_PaddedExtentBeyondPayload(t *testing.T) {
 	buf.Write(riffPayloadFull)
 	data := buf.Bytes()
 
-	// The actual file has more bytes than the declared RIFF size+8, so it should
-	// be rejected by the trailing-bytes check before even getting to the pad validation.
+	// The trailing-bytes check rejects this before pad validation.
 	if err := SanitizeWebP(data); err == nil {
 		t.Error("expected error for padded extent beyond declared RIFF payload, got nil")
 	}
@@ -428,12 +377,7 @@ func TestJavaConformance_WebP_Minimal(t *testing.T) {
 	}
 }
 
-// TestFinding6_VP8X_WithMetadataChunks verifies that an extended VP8X file
-// with a VP8 bitstream, EXIF, and XMP chunks is accepted (valid extended layout).
-//
-// Flags: HAS_EXIF(0x08)|HAS_XMP(0x04) = 0x0C.
-// webpsan requires: VP8X → image data (VP8/VP8L) → EXIF → XMP.
-// webpsan/src/lib.rs:179–204 (sanitize_extended ordering)
+// TestFinding6_VP8X_WithMetadataChunks checks VP8X, VP8, EXIF, XMP in that order is accepted.
 func TestFinding6_VP8X_WithMetadataChunks(t *testing.T) {
 	vp8xPayload := buildVP8XPayload(0x0C, 0, 0) // HAS_EXIF(0x08)|HAS_XMP(0x04)
 	vp8Data := []byte{0x9D, 0x01, 0x2A, 0x01}   // VP8 lossy (4 bytes)

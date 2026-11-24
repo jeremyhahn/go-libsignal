@@ -1,9 +1,4 @@
-// Package backup implements reading, writing, and validating Signal message
-// backup files. It provides key derivation from account entropy pools,
-// frame-level encryption and decryption using AES-256-CBC with HMAC-SHA256,
-// and varint-delimited protobuf frame parsing.
-//
-// This is a port of the Rust libsignal message-backup module.
+// Package backup reads, writes and validates Signal message backups, a port of Rust libsignal message-backup.
 package backup
 
 import "fmt"

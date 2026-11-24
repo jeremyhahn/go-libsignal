@@ -47,17 +47,7 @@ func makeIdentityKeyPair(t *testing.T, privateHex string) *identity.KeyPair {
 	return identity.NewKeyPair(identity.NewKey(kp.PublicKey()), kp.PrivateKey())
 }
 
-// Test vectors from signalapp/libsignal-protocol-java RatchetingSessionTest.java.
-// These are the well-known reference key materials used for cross-implementation
-// verification of the X3DH key agreement and initial ratchet session derivation.
-//
-// The test verifies that when Alice (sender) and Bob (receiver) perform X3DH
-// using the same key material, they derive identical root and chain keys,
-// matching the expected sender chain key from the Java reference.
-//
-// Key material layout (all Curve25519):
-//   Bob: identity key pair, signed pre-key pair, ephemeral key pair (ratchet)
-//   Alice: identity key pair, base key pair (ephemeral)
+// Key material from libsignal-protocol-java RatchetingSessionTest: Bob identity, signed prekey and ratchet keys; Alice identity and base keys.
 
 // bobIdentityPrivate is Bob's identity private key (already clamped for Curve25519).
 const bobIdentityPrivate = "4875cc69ddf8ea0719ec947d61e4a0d7d0cba3581fa40455b5e397be45302eda"
@@ -81,15 +71,7 @@ const aliceBaseKeyPrivate = "3158d30a73b41b0350bdd30683e8c4df2dd86953793ea40c6a8
 // HKDF derivation that alters this output indicates a protocol-breaking change.
 const expectedSenderChainKey = "6d4ab8eaa5b9045c0fb0916619bbfd3d22b85557ced68135fe6b58f5ea87a752"
 
-// TestRatchetingSession_JavaVector verifies that the X3DH + ratchet session
-// initialization produces the same sender chain key as the Signal Java reference
-// implementation (signalapp/libsignal-protocol-java RatchetingSessionTest).
-//
-// This test constructs key pairs from known hex values, runs session initialization
-// as both Alice (sender) and Bob (receiver), and verifies that:
-//  1. Both sides derive identical root keys.
-//  2. Both sides derive identical chain keys.
-//  3. The derived chain key matches the expected value from the Java test vector.
+// TestRatchetingSession_JavaVector checks Alice and Bob derive the same root and chain keys, matching the Java reference chain key.
 func TestRatchetingSession_JavaVector(t *testing.T) {
 	// Construct Bob's key pairs from test vector private keys.
 	bobIdentity := makeIdentityKeyPair(t, bobIdentityPrivate)

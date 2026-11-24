@@ -1,9 +1,4 @@
-// Package secrettest lets tests assert on the material a locked secret holds
-// from inside its WithBytes borrow: equal to an expected value, equal to or
-// different from another secret, or zeroed. Borrow failures fail the test.
-//
-// No helper returns the material: tests may not copy secrets out of protected
-// storage into plain memory to assert on them.
+// Package secrettest asserts on a secret's material inside WithBytes without copying it out.
 package secrettest
 
 import (

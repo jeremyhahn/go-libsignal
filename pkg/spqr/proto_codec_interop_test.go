@@ -16,18 +16,7 @@ import (
 // byte-parity tests. Build it with `make interop-live-build`.
 const rustInteropBinary = "../../tests/interop/rust/target/release/libsignal-interop"
 
-// TestProtoCodec_RustParity runs byte-parity tests against a live Rust interop
-// binary. It verifies that Go's UnmarshalStateProto + MarshalStateProto round-trip
-// produces byte-identical output to the Rust prost serializer for each
-// (seed, direction) combination.
-//
-// This test is compiled only under the interop_live build tag. If the binary is
-// absent, the test fails hard (t.Fatalf) rather than skipping, because the tag
-// signals the environment is expected to have the binary present.
-//
-// Build the binary first:
-//
-//	make interop-live-build
+// TestProtoCodec_RustParity checks round-trips are byte-identical to the Rust interop binary (interop_live tag; build with make interop-live-build).
 func TestProtoCodec_RustParity(t *testing.T) {
 	if _, err := os.Stat(rustInteropBinary); err != nil {
 		t.Fatalf("Rust interop binary not found at %s — build with `make interop-live-build`", rustInteropBinary)

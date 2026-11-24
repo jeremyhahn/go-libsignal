@@ -1,13 +1,7 @@
 // Copyright 2025 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package polynomial implements Lagrange interpolation over GF(2^16) for
-// Reed-Solomon-like chunk redundancy in the Signal SPQR (Sparse Post-Quantum
-// Ratchet) protocol. It is a direct port of the Rust sparsepostquantumratchet
-// crate at commit f2589fef, providing byte-level parity with the reference.
-//
-// This package is an internal implementation detail of pkg/mlkembraid and must
-// not be imported outside that module.
+// Package polynomial implements GF(2^16) Lagrange interpolation for SPQR chunk redundancy, byte-identical to Rust sparsepostquantumratchet; internal to pkg/mlkembraid.
 package polynomial
 
 import (
@@ -121,8 +115,7 @@ func lagrangeInterpolate(pts []pt) Poly {
 	return out
 }
 
-// lagrangeInterpolatePrepare computes PRODUCT(x - pts[i].x) as part of
-// Lagrange interpolation. Mirrors Rust's Poly::lagrange_interpolate_prepare.
+// lagrangeInterpolatePrepare computes PRODUCT(x - pts[i].x) (Rust Poly::lagrange_interpolate_prepare).
 func lagrangeInterpolatePrepare(pts []pt) Poly {
 	p := polyZero(len(pts) + 1)
 	p.Coefficients = p.Coefficients[:len(pts)+1] // resize to len+1
@@ -135,10 +128,7 @@ func lagrangeInterpolatePrepare(pts []pt) Poly {
 	return p
 }
 
-// multXdiffAssignTrailing computes self[start..] *= (x - difference).
-// Interprets the trailing coefficients as a sub-polynomial and multiplies it
-// by (x - difference), with carry into self[start-1].
-// Mirrors Rust's Poly::mult_xdiff_assign_trailing.
+// multXdiffAssignTrailing multiplies self[start:] by (x - difference), carrying into self[start-1] (Rust mult_xdiff_assign_trailing).
 func multXdiffAssignTrailing(p *Poly, start int, difference gf.GF16) {
 	l := len(p.Coefficients)
 	for i := start; i < l; i++ {
@@ -147,10 +137,7 @@ func multXdiffAssignTrailing(p *Poly, start int, difference gf.GF16) {
 	}
 }
 
-// lagrangeInterpolateComplete modifies working in place so that it represents
-// the Lagrange basis polynomial for pts[i], scaled by x.
-// After this call, working[0] should be zero (clean division).
-// Mirrors Rust's Poly::lagrange_interpolate_complete.
+// lagrangeInterpolateComplete turns working into pts[i]'s basis polynomial scaled by x (Rust lagrange_interpolate_complete).
 func lagrangeInterpolateComplete(working *Poly, pts []pt, i int) {
 	pi := pts[i]
 
@@ -174,10 +161,7 @@ func lagrangeInterpolateComplete(working *Poly, pts []pt, i int) {
 	}
 }
 
-// lagrangeInterpolatePt returns the Lagrange basis polynomial for pts[i]:
-// it evaluates to pts[i].y at pts[i].x and to 0 at all other pts[j].x.
-// This is the fallback used when no precomputed table is available.
-// Mirrors Rust's Poly::lagrange_interpolate_pt.
+// lagrangeInterpolatePt returns the basis polynomial that is pts[i].y at pts[i].x and 0 at the others (Rust lagrange_interpolate_pt).
 func lagrangeInterpolatePt(pts []pt, i int) Poly {
 	result := lagrangeInterpolatePrepare(pts)
 	lagrangeInterpolateComplete(&result, pts, i)
@@ -244,12 +228,7 @@ func lagrangeSum(pts []pt, polys []Poly) Poly {
 	return out
 }
 
-// fromCompletePoints constructs a polynomial passing through all pts, where
-// pts[i].x == i for i in 0..len(pts) (a "complete" point set). It uses
-// precomputed Lagrange basis polynomials from the init-time tables for the
-// allowed sizes (0, 1, 3, 5, 30, 34, 36). Other sizes fall back to the
-// generic lagrangeInterpolatePt path.
-// Mirrors Rust's Poly::from_complete_points.
+// fromCompletePoints interpolates a complete point set from the precomputed tables, else the generic path (Rust Poly::from_complete_points).
 func fromCompletePoints(pts []pt) (Poly, error) {
 	for i, p := range pts {
 		if p.x.Value != uint16(i) {
@@ -346,11 +325,7 @@ const (
 	EncoderStatePolys
 )
 
-// PolyEncoder encodes a message into an infinite stream of 32-byte chunks
-// using Lagrange interpolation over GF(2^16). The first N chunks reproduce
-// the original data; subsequent chunks are interpolated redundancy.
-//
-// PolyEncoder mirrors Rust's PolyEncoder { idx: u32, s: EncoderState }.
+// PolyEncoder emits 32-byte chunks by GF(2^16) interpolation: the first N reproduce the data, later ones are redundancy (Rust PolyEncoder).
 type PolyEncoder struct {
 	idx    uint32
 	points [NumPolys]Point
@@ -358,10 +333,7 @@ type PolyEncoder struct {
 	state  EncoderStateKind
 }
 
-// NewPolyEncoder creates a PolyEncoder for the given message.
-// The message length must be a non-zero even number not exceeding
-// (1<<16)*NumPolys bytes.
-// Mirrors Rust's Encoder::encode_bytes.
+// NewPolyEncoder returns an encoder for a non-empty, even-length message of at most (1<<16)*NumPolys bytes (Rust Encoder::encode_bytes).
 func NewPolyEncoder(msg []byte) (*PolyEncoder, error) {
 	if len(msg)%2 != 0 {
 		return nil, ErrMessageLengthEven{}
@@ -400,10 +372,7 @@ func byteChunks2(b []byte) [][2]byte {
 	return out
 }
 
-// pointAt returns the y-value of the poly-th polynomial channel at poly_idx.
-// If poly_idx is beyond the stored points, it triggers a transition from
-// Points state to Polys state and then evaluates the interpolated polynomial.
-// Mirrors Rust's PolyEncoder::point_at.
+// pointAt returns channel poly's value at polyIdx, interpolating past the stored points (Rust PolyEncoder::point_at).
 func (e *PolyEncoder) pointAt(poly, polyIdx int) gf.GF16 {
 	if e.state == EncoderStatePoints {
 		if polyIdx < len(e.points[poly].Value) {
@@ -466,10 +435,7 @@ func (e *PolyEncoder) Polys() *[NumPolys]Poly {
 	return &e.polys
 }
 
-// PolyDecoder collects chunks and reconstructs the original message once
-// enough points have been gathered per polynomial channel.
-//
-// PolyDecoder mirrors Rust's PolyDecoder { pts_needed, pts: [SortedSet<Pt>; 16], is_complete }.
+// PolyDecoder reconstructs the message once each channel has enough points (Rust PolyDecoder).
 type PolyDecoder struct {
 	// PtsNeeded is the total number of GF(2^16) elements in the message
 	// (= len_bytes / 2). Exported for proto marshaling.
@@ -554,10 +520,7 @@ func (d *PolyDecoder) necessaryPoints(poly int) int {
 	return pointsPerPoly
 }
 
-// AddChunk incorporates the data from c into the decoder.
-// Points are only accepted if they are needed (either within the polynomial
-// degree range or when we haven't reached the necessary count yet).
-// Mirrors Rust's Decoder::add_chunk.
+// AddChunk adds the chunk's points that are still needed (Rust Decoder::add_chunk).
 func (d *PolyDecoder) AddChunk(c Chunk) {
 	for i := 0; i < NumPolys; i++ {
 		totalIdx := int(c.Index)*NumPolys + i
@@ -576,11 +539,7 @@ func (d *PolyDecoder) AddChunk(c Chunk) {
 	}
 }
 
-// DecodedMessage attempts to reconstruct and return the original message.
-// Returns (msg, true) when sufficient points have been collected, or
-// (nil, false) otherwise. Once the decoder returns a message, subsequent
-// calls always return (nil, false) (is_complete semantics from Rust).
-// Mirrors Rust's Decoder::decoded_message.
+// DecodedMessage returns the message once enough points are collected, else (nil, false) (Rust Decoder::decoded_message).
 func (d *PolyDecoder) DecodedMessage() ([]byte, bool) {
 	if d.IsComplete {
 		return nil, false
@@ -670,10 +629,7 @@ func SerializePt(p Pt) [4]byte {
 	}
 }
 
-// NewPolyEncoderFromPolys creates a PolyEncoder in Polys state with the given
-// interpolated polynomials and chunk index counter. Used by the proto codec
-// (Phase D) to reconstruct an encoder that has already transitioned past the
-// first-pass boundary.
+// NewPolyEncoderFromPolys returns an encoder in Polys state for the proto codec.
 func NewPolyEncoderFromPolys(polys []Poly, idx uint32) (*PolyEncoder, error) {
 	if len(polys) != NumPolys {
 		return nil, ErrSerializationInvalid{}

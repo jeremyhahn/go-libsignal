@@ -1,32 +1,8 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 1 test in this file exercises X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) requires X25519.
 
-// Conformance test: Sealed Sender v2 received-format wire parity vs Rust libsignal.
-//
-// The Rust emitter produced a sealed sender v2 single-recipient received-format
-// message (version byte 0x22) for Bob. When the fixture includes bob_identity_private,
-// Go decrypts the Rust-emitted ciphertext end-to-end and asserts sender identity.
-//
-// Assertion strategy: DECRYPT-AND-MATCH when bob_identity_private is present.
-//   Load the Rust-emitted received message bytes, decrypt with
-//   SealedSenderDecryptToUSMC using Bob's identity key pair (via the received-
-//   format path SealedSenderV2DecryptReceivedToUSMC), and assert:
-//     1. The sender UUID, E164, device ID match Alice's values.
-//     2. The sender certificate bytes are byte-identical to the fixture's
-//        sender_cert_serialized.
-//     3. The USMC contents (plaintext) match the fixture's expected plaintext.
-//
-// If bob_identity_private is absent from the fixture (old fixture format), the
-// test fails with a clear message directing the developer to regenerate via
-// `make interop-wire-emit`.
-//
-// Rust upstream: rust/protocol/src/sealed_sender.rs (libsignal v0.92.2)
+// Conformance: Go decrypts the Rust-emitted v2 received message (0x22) for Bob and matches the sender, certificate bytes and plaintext; a fixture without bob_identity_private fails with a make interop-wire-emit instruction.
 
 package interop
 
@@ -105,12 +81,7 @@ func buildWireV2IdentityStore(t *testing.T, privHex, pubHex string) *wireV2Ident
 	return &wireV2IdentityStore{keyPair: idKeyPair}
 }
 
-// TestSealedSenderV2ReceivedWire decrypts the Rust-emitted v2 received-format
-// message with Go's SealedSenderDecryptToUSMC (dispatched to the received path)
-// and asserts that the sender identity and plaintext match the fixture values.
-//
-// When bob_identity_private is absent from the fixture, the test fails with a
-// clear regen instruction.
+// TestSealedSenderV2ReceivedWire decrypts the Rust v2 received message and checks sender and plaintext.
 func TestSealedSenderV2ReceivedWire(t *testing.T) {
 	raw := loader.MustRead("wire/sealed_sender_v2_received.json")
 
@@ -179,9 +150,7 @@ func TestSealedSenderV2ReceivedWire(t *testing.T) {
 					senderCert.Serialize(), wantCert)
 			}
 
-			// Assert the decrypted USMC contents match the fixture plaintext.
-			// The wire emitter uses CiphertextMessageType::Plaintext, so the
-			// USMC Contents() field holds the raw plaintext bytes.
+			// The emitter uses Plaintext content, so Contents holds the raw plaintext.
 			gotContent := usmc.Contents()
 			wantContent := mustHex(t, v.Inputs.Plaintext)
 			if !bytes.Equal(gotContent, wantContent) {

@@ -2,21 +2,7 @@ package zkcredential
 
 import "encoding/binary"
 
-// SerializeEndorsementResponse encodes an [EndorsementResponse] to the Rust
-// bincode wire format, producing byte-for-byte identical output to
-// zkgroup::serialize on the same value.
-//
-// Wire layout (matches Rust zkcredential::endorsements::EndorsementResponse at
-// rust/zkcredential/src/endorsements.rs, serialized by bincode with
-// with_fixint_encoding + with_little_endian + reject_trailing_bytes):
-//
-//	[8 LE u64]   len(R)               — number of compressed ristretto255 points
-//	[32*len(R)]  R bytes              — each compressed point is 32 bytes
-//	[8 LE u64]   len(proof)           — proof byte count
-//	[len(proof)] proof bytes
-//
-// There is no reserved/version byte; that is added by the outer
-// GroupSendEndorsementsResponse wrapper.
+// SerializeEndorsementResponse encodes an [EndorsementResponse] as Rust bincode: u64 LE point count, 32-byte points, u64 LE proof length, proof.
 func SerializeEndorsementResponse(r *EndorsementResponse) []byte {
 	nR := len(r.R)
 	nProof := len(r.Proof)
@@ -39,12 +25,7 @@ func SerializeEndorsementResponse(r *EndorsementResponse) []byte {
 	return out
 }
 
-// DeserializeEndorsementResponse decodes an [EndorsementResponse] from the
-// Rust bincode wire format produced by [SerializeEndorsementResponse].
-//
-// Returns [ErrEndorsementResponseTruncated] if the data is too short,
-// [ErrEndorsementResponsePointLength] if a point has an unexpected length,
-// or [ErrEndorsementResponseTrailingBytes] if there are leftover bytes.
+// DeserializeEndorsementResponse decodes an [EndorsementResponse] from Rust bincode, rejecting truncated data, bad point lengths and trailing bytes.
 func DeserializeEndorsementResponse(data []byte) (*EndorsementResponse, error) {
 	n, rest, err := ReadEndorsementResponse(data)
 	if err != nil {
@@ -56,12 +37,7 @@ func DeserializeEndorsementResponse(data []byte) (*EndorsementResponse, error) {
 	return n, nil
 }
 
-// ReadEndorsementResponse reads an EndorsementResponse from the beginning of
-// data and returns the parsed value plus any unconsumed tail bytes.
-//
-// This is the low-level parser used by [DeserializeEndorsementResponse] and
-// by callers (such as zkgroup) that embed EndorsementResponse in a larger
-// bincode struct and need to continue parsing after the response bytes.
+// ReadEndorsementResponse parses an EndorsementResponse from the start of data and returns the remaining bytes.
 func ReadEndorsementResponse(data []byte) (*EndorsementResponse, []byte, error) {
 	off := 0
 
@@ -69,11 +45,7 @@ func ReadEndorsementResponse(data []byte) (*EndorsementResponse, []byte, error) 
 	if len(data) < off+8 {
 		return nil, nil, &ErrEndorsementResponseTruncated{Need: off + 8, Got: len(data)}
 	}
-	// ReadBincodeU64Len guards against u64 >= 2^63 (negative after int cast)
-	// and against claims that exceed remaining data, matching Rust's
-	// reject_trailing_bytes behavior (rust/zkgroup/src/common/serialization.rs).
-	// This eliminates the narrowing-cast overflow in the diagnostic Need value
-	// that existed when the rejected attacker u64 was cast directly to int.
+	// ReadBincodeU64Len rejects lengths of 2^63 or more and lengths beyond the data.
 	nR, err := ReadBincodeU64Len(data, off, 32, "R")
 	if err != nil {
 		return nil, nil, &ErrEndorsementResponseTruncated{Need: off + 8, Got: len(data)}

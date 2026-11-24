@@ -1,16 +1,4 @@
-// Conformance test: Fingerprint generation vs Rust libsignal-protocol.
-//
-// Mirrors rust/protocol/src/fingerprint.rs::test::{
-//   fingerprint_test_v1,
-//   fingerprint_test_v2,
-//   fingerprint_encodings,
-// }.
-//
-// Validates that Go's NumericFingerprintGenerator.CreateFor with the
-// canonical Alice/Bob inputs produces:
-//   1. The exact 60-digit displayable string (Rust: DISPLAYABLE_FINGERPRINT_V1).
-//   2. The exact v1 scannable protobuf encoding for both Alice and Bob.
-//   3. The exact v2 scannable protobuf encoding for both Alice and Bob.
+// Conformance: NumericFingerprintGenerator.CreateFor against the Rust fingerprint tests: the 60-digit display string and the v1 and v2 scannable encodings.
 
 package interop
 

@@ -1,20 +1,5 @@
 #!/usr/bin/env bash
-# check_fixtures.sh — verify every fixture under tests/interop/fixtures/
-# matches its sha256 in MANIFEST.toml AND matches the verbatim bytes of the
-# upstream Rust libsignal file at the commit recorded in /RUST_REV.
-#
-# Exit codes:
-#   0  every fixture matches the manifest AND (if upstream tree is present)
-#      matches the upstream bytes verbatim
-#   1  a manifest hash check failed (drift between fixture bytes and manifest)
-#   2  a fixture is missing from disk
-#   3  upstream-bytes check failed (drift between fixture and upstream tree;
-#      run when LIBSIGNAL_UPSTREAM is set, otherwise skipped)
-#
-# Usage:
-#   tests/interop/scripts/check_fixtures.sh                 # manifest only
-#   LIBSIGNAL_UPSTREAM=/path/to/libsignal \
-#       tests/interop/scripts/check_fixtures.sh             # full check
+# check_fixtures.sh checks fixtures against MANIFEST.toml, and against LIBSIGNAL_UPSTREAM at /RUST_REV if set; exit 1 hash, 2 missing, 3 upstream drift.
 
 set -euo pipefail
 
@@ -143,11 +128,7 @@ while IFS=$'\x1f' read -r rel_path upstream sha_expected size_expected kind need
                 fi
                 ;;
             synthetic|emitted|computed)
-                # No upstream-tree byte-for-byte comparison possible for these
-                # fixture kinds: synthetic = hand-authored, emitted = generated
-                # by tests/interop/rust/src/bin/wire_emitter.rs, computed =
-                # derived from a deterministic transform of upstream sources.
-                # MANIFEST sha256 + size are still validated above.
+                # Synthetic, emitted and computed fixtures have no upstream file; the manifest check above still applies.
                 ;;
             *)
                 echo "MANIFEST ERROR ${rel_path}: unknown upstream_kind=${kind}" >&2

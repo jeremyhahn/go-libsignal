@@ -11,16 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// ServerCertificate represents a server's signing certificate.
-// It contains the server's public key and a signature produced
-// by the trust root private key.
-//
-// Mirrors the Rust libsignal type ServerCertificate at
-// rust/protocol/src/sealed_sender.rs. Wire format (protobuf-encoded
-// outer envelope with inner Certificate plus XEdDSA signature) is
-// byte-identical with the Rust reference; do not introduce JSON or
-// other ad-hoc encodings — server-side certificate signing in
-// go-signal must construct this type and serialize via Serialize().
+// ServerCertificate is a server key signed by the trust root, byte-identical to Rust sealed_sender.rs; build it with NewServerCertificate.
 type ServerCertificate struct {
 	serialized  []byte
 	keyID       uint32
@@ -29,12 +20,7 @@ type ServerCertificate struct {
 	signature   []byte // Ed25519 signature by trust root
 }
 
-// NewServerCertificate creates a new ServerCertificate, signing the inner
-// certificate with the provided trust root private key.
-//
-// This is the canonical, Rust-byte-compatible constructor; go-signal must
-// call this rather than reimplementing certificate signing with raw
-// ed25519 or HMAC.
+// NewServerCertificate signs the inner certificate with the trust root private key.
 func NewServerCertificate(keyID uint32, key ecc.ECPublicKeyable, trustRoot ecc.ECPrivateKeyable) (*ServerCertificate, error) {
 	// Build the inner Certificate protobuf.
 	innerCert := &sealedpb.ServerCertificate_Certificate{
@@ -109,10 +95,7 @@ func DeserializeServerCertificate(data []byte) (*ServerCertificate, error) {
 	}, nil
 }
 
-// revokedServerCertificateKeyIDs contains server certificate key IDs that have
-// been revoked and must be rejected during validation. Per the Rust reference,
-// 0xDEADC357 is a test ID used to verify revocation logic. If a production
-// certificate is ever revoked, its key ID should be added here.
+// revokedServerCertificateKeyIDs lists rejected server certificate key IDs; 0xDEADC357 is the Rust test ID.
 var revokedServerCertificateKeyIDs = []uint32{0xDEADC357}
 
 // Validate checks that the server certificate is not revoked and that its
@@ -128,10 +111,7 @@ func (sc *ServerCertificate) Validate(trustRoot ecc.ECPublicKeyable) (bool, erro
 		}
 	}
 
-	// Rust's verify_signature converts the slice to a [u8; 64] via try_into()
-	// and returns false (not an error) on a length mismatch. Match that:
-	// a wrong-length signature is treated as a failed verification, not a
-	// structural error.
+	// A wrong-length signature fails verification rather than erroring, as Rust verify_signature.
 	if len(sc.signature) != 64 {
 		return false, nil
 	}
@@ -155,20 +135,12 @@ func (sc *ServerCertificate) Serialize() []byte {
 	return sc.serialized
 }
 
-// Certificate returns the raw inner Certificate protobuf bytes (the
-// blob that was signed by the trust root).
-//
-// Mirrors Rust libsignal's ServerCertificate::certificate at
-// rust/protocol/src/sealed_sender.rs.
+// Certificate returns the inner Certificate bytes signed by the trust root (Rust ServerCertificate::certificate).
 func (sc *ServerCertificate) Certificate() []byte {
 	return sc.certificate
 }
 
-// Signature returns the raw Ed25519 signature bytes produced by the
-// trust root over the inner Certificate blob.
-//
-// Mirrors Rust libsignal's ServerCertificate::signature at
-// rust/protocol/src/sealed_sender.rs.
+// Signature returns the trust root's signature over the inner Certificate (Rust ServerCertificate::signature).
 func (sc *ServerCertificate) Signature() []byte {
 	return sc.signature
 }
@@ -181,16 +153,7 @@ type senderCertificateSigner struct {
 	refID    uint32             // used when embedded is nil (reference by ID)
 }
 
-// SenderCertificate represents a sender's certificate, signed by a
-// server certificate's key. It contains the sender's identity key,
-// UUID, optional phone number, device ID, and expiration.
-//
-// Mirrors the Rust libsignal type SenderCertificate at
-// rust/protocol/src/sealed_sender.rs. Wire format is byte-identical with
-// the Rust reference. go-signal's CertificatesManager must build sender
-// certificates via NewSenderCertificate and emit Serialize() bytes; raw
-// ed25519/HMAC signing of ad-hoc JSON payloads is forbidden because it
-// produces a non-Signal-compatible byte format.
+// SenderCertificate is a sender's identity, UUID, optional number, device and expiry signed by a server certificate, byte-identical to Rust; build it with NewSenderCertificate.
 type SenderCertificate struct {
 	serialized   []byte
 	signer       senderCertificateSigner
@@ -203,15 +166,7 @@ type SenderCertificate struct {
 	signature    []byte // signature by server cert's key
 }
 
-// NewSenderCertificate creates a new SenderCertificate, signing the inner
-// certificate with the provided server signing key.
-//
-// This is the canonical, Rust-byte-compatible constructor; go-signal must
-// call this rather than reimplementing certificate signing with raw
-// ed25519 or HMAC. The signerKey is the *server* certificate's signing
-// private key (not the trust root); the resulting SenderCertificate
-// chains up to the ServerCertificate that holds the corresponding
-// public key.
+// NewSenderCertificate signs the inner certificate with the server certificate's private key.
 func NewSenderCertificate(
 	senderUUID string,
 	senderE164 *string,
@@ -328,10 +283,7 @@ func DeserializeSenderCertificate(data []byte) (*SenderCertificate, error) {
 		senderE164 = &e164
 	}
 
-	// Resolve the sender UUID from the oneof field.
-	// Use a type switch on the oneof interface rather than comparing the string
-	// value to "": GetUuidString() returns "" both when the UuidString variant
-	// is unset AND when it is explicitly set to "", making == "" ambiguous.
+	// Use a type switch on the oneof: GetUuidString returns "" both when unset and when set to "".
 	var senderUUID string
 	switch uuidOneof := innerCert.GetSenderUuid().(type) {
 	case *sealedpb.SenderCertificate_Certificate_UuidString:
@@ -369,34 +321,12 @@ func DeserializeSenderCertificate(data []byte) (*SenderCertificate, error) {
 	}, nil
 }
 
-// Validate checks:
-//  1. The server certificate validates against the trust root.
-//  2. The sender certificate signature is valid (signed by the server cert's key).
-//  3. The certificate has not expired relative to validationTime.
-//
-// Validate is a thin wrapper around ValidateWithTrustRoots with a single root.
+// Validate checks the chain to trustRoot and expiry at validationTime; see ValidateWithTrustRoots.
 func (sc *SenderCertificate) Validate(trustRoot ecc.ECPublicKeyable, validationTime uint64) (bool, error) {
 	return sc.ValidateWithTrustRoots([]ecc.ECPublicKeyable{trustRoot}, validationTime)
 }
 
-// ValidateWithTrustRoots validates the sender certificate against a slice of
-// trust roots. It returns true when any root in roots produces a valid chain.
-//
-// Mirrors Rust libsignal's SenderCertificate::validate_with_trust_roots at
-// rust/protocol/src/sealed_sender.rs. The Rust implementation uses a
-// constant-time fold over all roots (libsignal_core::ct_equal / subtle::Choice)
-// so that timing does not reveal which root matched. This implementation
-// accumulates success with subtle.ConstantTimeSelect to preserve that invariant:
-// every root is always verified regardless of prior results, and the final
-// boolean is assembled with constant-time integer operations even when the
-// server-cert signature length check returns early — that check is structural,
-// not secret-dependent.
-//
-// Validation steps:
-//  1. Per-root: server certificate signature verified against each trust root
-//     (constant-time accumulation; all roots always evaluated).
-//  2. Sender certificate signature verified against the server cert's key.
-//  3. Expiration check against validationTime.
+// ValidateWithTrustRoots checks the server certificate against every root in constant time, then the sender signature and expiry (Rust validate_with_trust_roots).
 func (sc *SenderCertificate) ValidateWithTrustRoots(roots []ecc.ECPublicKeyable, validationTime uint64) (bool, error) {
 	if len(roots) == 0 {
 		return false, nil
@@ -485,28 +415,17 @@ func (sc *SenderCertificate) Serialize() []byte {
 	return sc.serialized
 }
 
-// Certificate returns the raw inner Certificate protobuf bytes (the
-// blob that was signed by the server certificate's key).
-//
-// Mirrors Rust libsignal's SenderCertificate::certificate at
-// rust/protocol/src/sealed_sender.rs.
+// Certificate returns the inner Certificate bytes signed by the server key (Rust SenderCertificate::certificate).
 func (sc *SenderCertificate) Certificate() []byte {
 	return sc.certificate
 }
 
-// Signature returns the raw signature bytes produced by the server
-// certificate's key over the inner Certificate blob.
-//
-// Mirrors Rust libsignal's SenderCertificate::signature at
-// rust/protocol/src/sealed_sender.rs.
+// Signature returns the server key's signature over the inner Certificate (Rust SenderCertificate::signature).
 func (sc *SenderCertificate) Signature() []byte {
 	return sc.signature
 }
 
-// Signer resolves and returns the server certificate that signed this sender
-// certificate. For embedded signers, this returns the certificate directly.
-// For referenced signers, this performs a lookup in the known server
-// certificates table and returns an error if the ID is not recognized.
+// Signer returns the signing server certificate, embedded or looked up by ID, or an error for an unknown ID.
 func (sc *SenderCertificate) Signer() (*ServerCertificate, error) {
 	if sc.signer.embedded != nil {
 		return sc.signer.embedded, nil

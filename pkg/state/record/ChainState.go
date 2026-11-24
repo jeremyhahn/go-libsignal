@@ -33,13 +33,7 @@ func NewChain(senderRatchetKeyPair *ecc.ECKeyPair, chainKey *chain.Key,
 	}
 }
 
-// NewChainFromStructure will return a new Chain with the given
-// chain structure.
-//
-// The ratchet private key, the chain key and every message key are moved into
-// guarded memory as they are decoded. If the chain cannot be completed, all of
-// them are released before returning, so a failed call leaves no locked memory
-// behind.
+// NewChainFromStructure returns a Chain whose private keys are in guarded memory; on failure it releases them.
 func NewChainFromStructure(structure *ChainStructure) (*Chain, error) {
 	if structure == nil {
 		return nil, nil
@@ -137,12 +131,7 @@ func (c *Chain) ChainKey() *chain.Key {
 	return c.chainKey
 }
 
-// SetChainKey will set the chain state's chain key. The key being replaced is
-// destroyed rather than abandoned: callers ratchet forward from a copy —
-// State.SenderChainKey and State.ReceiverChainKey both hand out copies — so
-// the chain's own key is the last reference, and go-enclave reclaims nothing on
-// its own. Without this, every message sent or accepted would cost the process
-// a locked page it never gets back.
+// SetChainKey sets the chain key and destroys the old one, the last reference to that locked memory.
 func (c *Chain) SetChainKey(key *chain.Key) {
 	if c.chainKey != nil && c.chainKey != key {
 		c.chainKey.Zeroize()
@@ -177,10 +166,7 @@ func (c *Chain) PopFirstMessageKeys() *message.Keys {
 	return removed
 }
 
-// structure returns a serializeable structure of the chain state.
-// The caller owns the returned structure and must Zeroize it once the
-// serializer is done with it; on failure everything built so far is released
-// before returning.
+// structure returns a serializable chain state the caller must Zeroize; on failure it releases what it built.
 func (c *Chain) structure() (_ *ChainStructure, err error) {
 	structure := &ChainStructure{
 		SenderRatchetKeyPublic: c.senderRatchetKeyPair.PublicKey().Serialize(),

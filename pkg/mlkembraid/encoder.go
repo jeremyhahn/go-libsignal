@@ -13,18 +13,7 @@ const ChunkDataSize = polynomial.ChunkSize
 // MaxChunkIndex is the maximum chunk index supported (u16 range).
 const MaxChunkIndex = 65535
 
-// Encoder encodes a message into an infinite stream of 32-byte polynomial chunks
-// using Lagrange interpolation over GF(2^16). Each chunk on the wire is formatted as:
-//
-//	[varint(index)] [data(32 bytes)]
-//
-// This matches the Rust SPQR reference implementation's wire format:
-//
-//	encode_chunk: encode_varint(c.index as u64) ++ c.data[..]
-//
-// The first N chunks reproduce the original data; subsequent chunks are
-// interpolated redundancy. Chunks beyond the first pass continue wrapping
-// via NextChunk for retransmission redundancy.
+// Encoder emits [varint(index)][32 bytes] chunks by Lagrange interpolation over GF(2^16), as Rust SPQR; chunks after the first N are redundancy.
 type Encoder struct {
 	inner *polynomial.PolyEncoder
 
@@ -36,17 +25,7 @@ type Encoder struct {
 	sent int
 }
 
-// NewEncoder creates an Encoder for the given data.
-//
-// The chunkSize parameter is accepted for API compatibility but has no effect;
-// the Rust SPQR wire format mandates a fixed 32-byte payload per chunk. Passing
-// a value other than 32 (or DefaultChunkSize) is not an error — it is silently
-// treated as 32.
-//
-// The data slice must not be empty and must have an even byte length (required
-// by the GF(2^16) polynomial encoding). If the data length is odd, one byte of
-// zero padding is appended internally so the caller's original data is always
-// reconstructed faithfully.
+// NewEncoder returns an Encoder for non-empty data, padding odd lengths by one byte; chunkSize is ignored, as the wire format fixes 32 bytes.
 func NewEncoder(data []byte, _ int) (*Encoder, error) {
 	if len(data) == 0 {
 		return nil, &ErrInvalidInput{Field: "data", Reason: "must not be empty"}
@@ -80,13 +59,7 @@ func NewEncoder(data []byte, _ int) (*Encoder, error) {
 	}, nil
 }
 
-// NextChunk returns the next chunk in Rust-compatible wire format:
-//
-//	[varint(index)] [data(32 bytes)]
-//
-// After the first pass (all total chunks sent), NextChunk wraps around for
-// retransmission redundancy. The polynomial encoding guarantees that any
-// ceil(len(data)/32) distinct chunks suffice for reconstruction.
+// NextChunk returns the next [varint(index)][32 bytes] chunk, continuing with redundancy after the first pass.
 func (e *Encoder) NextChunk() []byte {
 	pc := e.inner.NextChunk()
 
@@ -114,37 +87,20 @@ func (e *Encoder) TotalChunks() int {
 
 // Reset resets the encoder to the beginning of the first pass.
 func (e *Encoder) Reset() {
-	// The polynomial encoder's idx is a monotonically-increasing counter;
-	// re-create the encoder from the same message to reset to chunk 0.
-	// We reconstruct from the points that are already stored in the inner encoder.
-	// Since PolyEncoder.ChunkAt(idx) is pure, we can just reset the idx counter.
-	// The polynomial package exposes Idx() but not a setter — reconstruct by
-	// resetting sent and letting the inner encoder continue from its current idx.
-	// For a true reset we need to recreate the inner encoder. Capture the message
-	// from the existing points array.
+	// Recreate the inner encoder from its stored message to reset to chunk 0.
 	msg := encoderMessage(e.inner)
 	inner, err := polynomial.NewPolyEncoder(msg)
 	if err != nil {
-		// coverage-exempt: defensive invariant panic; message was validated at
-		// construction time so NewPolyEncoder cannot fail here. Cannot be unit-tested
-		// without corrupting internal state (see CLAUDE.md).
+		// coverage-exempt: the message was validated at construction, so this invariant panic is unreachable.
 		panic("mlkembraid: encoder Reset: unexpected polynomial error: " + err.Error())
 	}
 	e.inner = inner
 	e.sent = 0
 }
 
-// encoderMessage reconstructs the original message bytes from the inner
-// PolyEncoder's stored points (only valid before the first transition to Polys
-// state, which is the common case for Reset). In Polys state we evaluate at
-// x=0..N to recover the original points.
+// encoderMessage recovers the original message bytes from the inner encoder.
 func encoderMessage(e *polynomial.PolyEncoder) []byte {
-	// Walk chunk indices 0..(total-1) and pull raw point values.
-	// Each chunk at index i covers NumPolys=16 GF(2^16) elements.
-	// We reconstruct the message by calling ChunkAt on a clone of the encoder.
-	// Since ChunkAt is non-destructive (it only reads/lazily interpolates),
-	// the simplest approach is to use the existing inner encoder's ChunkAt
-	// to read the first-pass chunk data and concatenate their payloads.
+	// Concatenate the first-pass chunk payloads; ChunkAt does not change the encoder.
 
 	// Determine total chunks from the stored points length.
 	pts := e.Points()
@@ -176,11 +132,7 @@ func encoderMessage(e *polynomial.PolyEncoder) []byte {
 	return out
 }
 
-// NewEncoderFromInner creates an Encoder wrapping an already-constructed
-// PolyEncoder. The idx parameter is the current chunk counter (matching
-// PolyEncoder.Idx()), and msgLen is the original (un-padded) message length in
-// bytes. This is used exclusively by the proto codec (Phase D) to reconstruct
-// an Encoder from a deserialized protobuf.
+// NewEncoderFromInner wraps a PolyEncoder at chunk counter idx for the proto codec; msgLen is the unpadded message length.
 func NewEncoderFromInner(inner *polynomial.PolyEncoder, idx int, msgLen int) (*Encoder, error) {
 	if inner == nil {
 		return nil, &ErrInvalidInput{Field: "inner", Reason: "must not be nil"}
@@ -196,9 +148,7 @@ func NewEncoderFromInner(inner *polynomial.PolyEncoder, idx int, msgLen int) (*E
 	}, nil
 }
 
-// InnerEncoder returns the underlying polynomial encoder. It is used by the
-// proto marshaling layer (Phase D). Callers outside the SPQR state serializer
-// should not call this directly.
+// InnerEncoder returns the polynomial encoder for the proto codec only.
 func (e *Encoder) InnerEncoder() *polynomial.PolyEncoder {
 	return e.inner
 }

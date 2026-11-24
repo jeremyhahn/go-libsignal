@@ -1,16 +1,6 @@
 //go:build legacy_x3dh
 
-// Package ratchet provides the methods necessary to establish a new double
-// ratchet session. This file contains legacy X3DH session derivation functions
-// that are NOT part of the default build. They are gated behind the
-// legacy_x3dh build tag because:
-//
-//  1. The Rust libsignal reference no longer exposes X3DH (v3) paths in its
-//     public API; only PQXDH (v4+) sessions are supported.
-//  2. These functions are retained solely for symmetric (KeyExchange) session
-//     backward compatibility and Java cross-implementation test vectors.
-//
-// Build with -tags=legacy_x3dh to include these functions.
+// Legacy X3DH session derivation, built only with -tags=legacy_x3dh for symmetric sessions and Java test vectors.
 package ratchet
 
 import (
@@ -24,15 +14,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto"
 )
 
-// CalculateSymmetricSession calculates the key agreement between two users. This
-// works by both clients exchanging KeyExchange messages to first establish a session.
-// This is useful for establishing a session if both users are online.
-//
-// Note: Symmetric sessions use the legacy X3DH path (v3) with the "WhisperRatchet"
-// KDF label. This path does not exist in the Rust reference and does not require Kyber.
-// It is retained for backward compatibility with existing KeyExchange-based sessions.
-//
-// Requires build tag: legacy_x3dh
+// CalculateSymmetricSession derives a session from exchanged KeyExchange messages over the legacy X3DH v3 path; requires legacy_x3dh.
 func CalculateSymmetricSession(parameters *SymmetricParameters) (*session.KeyPair, error) {
 	// Compare the base public keys so we can deterministically know whether we should
 	// be setting up a sender or receiver session. If our key converted to an integer is
@@ -109,12 +91,7 @@ func calculateLegacyDH(parameters *SenderParameters) ([]byte, error) {
 	return masterSecret, nil
 }
 
-// CalculateLegacySenderSession performs the legacy X3DH sender-side session
-// derivation using the "WhisperRatchet" KDF label without Kyber. This is used
-// for symmetric sessions and for verifying cross-implementation X3DH test vectors.
-// New sessions MUST use CalculateSenderSession which enforces PQXDH.
-//
-// Requires build tag: legacy_x3dh
+// CalculateLegacySenderSession derives a legacy X3DH sender session without Kyber; new sessions use CalculateSenderSession. Requires legacy_x3dh.
 func CalculateLegacySenderSession(parameters *SenderParameters) (*session.KeyPair, error) {
 	masterSecret, err := calculateLegacyDH(parameters)
 	if err != nil {
@@ -139,12 +116,7 @@ func CalculateLegacySenderSession(parameters *SenderParameters) (*session.KeyPai
 	return session.NewKeyPair(rootKey, chainKey), nil
 }
 
-// CalculateLegacyReceiverSession performs the legacy X3DH receiver-side session
-// derivation using the "WhisperRatchet" KDF label without Kyber. This is used
-// for symmetric sessions and for verifying cross-implementation X3DH test vectors.
-// New sessions MUST use CalculateReceiverSession which enforces PQXDH.
-//
-// Requires build tag: legacy_x3dh
+// CalculateLegacyReceiverSession derives a legacy X3DH receiver session without Kyber; new sessions use CalculateReceiverSession. Requires legacy_x3dh.
 func CalculateLegacyReceiverSession(parameters *ReceiverParameters) (*session.KeyPair, error) {
 	var secret [32]byte
 	var publicKey [32]byte

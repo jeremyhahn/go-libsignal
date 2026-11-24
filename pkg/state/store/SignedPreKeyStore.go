@@ -4,14 +4,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
 )
 
-// SignedPreKey store is an interface that describes how to persistently
-// store signed PreKeys.
-//
-// Every method returns an error so that storage backend failures propagate to
-// callers. A nil record with a nil error from Load methods means "not found".
-//
-// Mirrors the Rust libsignal trait SignedPreKeyStore at
-// rust/protocol/src/storage/traits.rs.
+// SignedPreKey persists signed pre-keys; a nil record with a nil error means not found.
 type SignedPreKey interface {
 	// LoadSignedPreKey loads a local SignedPreKeyRecord, returning (nil, nil) if not found.
 	LoadSignedPreKey(signedPreKeyID uint32) (*record.SignedPreKey, error)

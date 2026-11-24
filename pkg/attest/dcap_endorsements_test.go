@@ -558,15 +558,7 @@ func buildEndorsementsData(t *testing.T, versionFieldBytes []byte) []byte {
 	key, cert := generateTestCertAndKey(t)
 	pemCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
 
-	// Generate valid empty CRLs signed by the test cert.
-	//
-	// The endorsements buffer stores each CRL as a NUL-terminated field, and
-	// parseEndorsements strips that terminator with stripTrailingNull before
-	// parsing. The terminator therefore has to be here: without it, a DER CRL
-	// whose final byte is 0x00 -- roughly 1 in 256, since the last byte is the
-	// tail of a randomised ECDSA signature -- loses a real byte to the strip
-	// and fails to parse. That made these tests flaky at about 1 in 500,
-	// independent of FIPS mode.
+	// Empty CRLs signed by the test cert, NUL-terminated as parseEndorsements expects.
 	crlPCK := append(generateTestCRL(t, cert, key), 0x00)
 	crlProcCA := append(generateTestCRL(t, cert, key), 0x00)
 

@@ -1,15 +1,4 @@
-// AES-256-GCM-SIV conformance test using the RFC 8452 reference vectors.
-//
-// AES-GCM-SIV is the AEAD used by zkgroup's GroupSecretParams.EncryptBlob.
-// A Rust↔Go byte-format divergence on group blob encryption was surfaced
-// in the previous turn (see tests/interop/zkgroup_blob_encryption_test.go);
-// this RFC 8452 KAT isolates whether the bug lives in the AES-GCM-SIV
-// primitive itself or in higher-level zkgroup blob_key derivation /
-// output framing.
-//
-// Vectors are reproduced verbatim from RFC 8452 §C.2 (AES-256 cases). They
-// are NOT tracked by the fixture manifest because the IETF RFC is the
-// source of truth.
+// AES-256-GCM-SIV conformance with the RFC 8452 §C.2 vectors, separating the primitive from zkgroup blob framing.
 
 package interop
 

@@ -1,11 +1,4 @@
-// SHA-256 conformance test using the NIST FIPS 180-4 published vectors
-// and the canonical NIST SHA test suite single-/long-input cases.
-//
-// SHA-256 underlies HMAC-SHA-256 (validated separately against RFC 4231),
-// HKDF-SHA-256 (RFC 5869), poksho's SHO_HMAC_SHA256 / SHO_SHA256
-// transcripts, and every fingerprint / proof-construction operation in
-// pkg/zkgroup. Validating SHA-256 itself against NIST anchors guarantees
-// the foundation those higher-level primitives stand on.
+// SHA-256 conformance with the NIST FIPS 180-4 vectors.
 
 package interop
 

@@ -9,10 +9,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
 )
 
-// SessionWrapper wraps an underlying Signal Protocol session record with
-// timestamps for session lifecycle tracking per the Sesame specification.
-// The lastSend and lastReceive fields use atomic.Value for lock-free
-// concurrent access from multiple goroutines.
+// SessionWrapper adds Sesame lifecycle timestamps, read and written atomically, to a session record.
 type SessionWrapper struct {
 	session     *record.Session
 	identityKey *identity.Key
@@ -89,16 +86,12 @@ func (sw *SessionWrapper) RecordReceive(now time.Time) {
 	sw.lastReceive.Store(now)
 }
 
-// IsSendExpired returns true if MAXSEND time has elapsed since the session
-// was created. Per Sesame spec section 4.2, "At time MAXSEND" the session
-// expires (inclusive). Expiration is based on the creation timestamp.
+// IsSendExpired reports whether MAXSEND has passed since creation, inclusive (Sesame §4.2).
 func (sw *SessionWrapper) IsSendExpired(config *Config, now time.Time) bool {
 	return now.Sub(sw.createdAt) >= config.MaxSend
 }
 
-// IsRecvExpired returns true if MAXRECV time has elapsed since the session
-// was created. Per Sesame spec section 4.2, "At time MAXRECV" the session
-// expires (inclusive). Expiration is based on the creation timestamp.
+// IsRecvExpired reports whether MAXRECV has passed since creation, inclusive (Sesame §4.2).
 func (sw *SessionWrapper) IsRecvExpired(config *Config, now time.Time) bool {
 	return now.Sub(sw.createdAt) >= config.MaxRecv
 }

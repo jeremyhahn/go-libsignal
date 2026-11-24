@@ -20,23 +20,12 @@ var (
 	_ keyops.PrivateKey   = (*GuardedECPrivateKey)(nil)
 )
 
-// GuardedECPrivateKey stores an EC private key in locked memory.
-// It implements ECPrivateKeyable for backward compatibility, and also
-// implements keyops.Signer, keyops.VRFSigner, and keyops.KeyAgreement
-// for forward-looking key operations that avoid exposing raw key material.
+// GuardedECPrivateKey stores an EC private key in locked memory and implements ECPrivateKeyable and the keyops interfaces.
 type GuardedECPrivateKey struct {
 	key *secret.Secret32
 }
 
-// NewGuardedECPrivateKey creates a GuardedECPrivateKey from a 32-byte array
-// after applying Curve25519 clamping.  Rust PrivateKey::From<[u8;32]> and
-// PrivateKey::deserialize both call scalar::clamp_integer before storing the
-// key; this constructor matches that behaviour so that round-trip serialization
-// produces byte-for-byte identical output to the Rust reference.
-//
-// Rust source: rust/core/src/curve/curve25519.rs:170-175; rust/core/src/curve.rs:246-247.
-//
-// The source array is zeroized after the data is moved into guarded memory.
+// NewGuardedECPrivateKey clamps the 32-byte key as Rust does, moves it into guarded memory and zeroizes the source.
 func NewGuardedECPrivateKey(data [32]byte) (k *GuardedECPrivateKey, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -59,19 +48,9 @@ func NewGuardedECPrivateKeyFromSecret(s *secret.Secret32) *GuardedECPrivateKey {
 	return &GuardedECPrivateKey{key: s}
 }
 
-// Serialize returns a copy of the 32-byte private key material.
-// Callers should prefer using Sign or Agreement operations instead
-// of extracting raw key bytes.
-//
-// Implements ECPrivateKeyable.
+// Serialize returns a copy of the 32-byte private key; prefer Sign or Agreement.
 func (g *GuardedECPrivateKey) Serialize() [32]byte {
-	// The array is the value that leaves the borrow: it is copied inside it,
-	// and the caller zeroizes it after use.
-	//
-	// A destroyed (or missing) key is rejected: Serialize has no error
-	// return, and handing back zeros would let a caller sign or agree with
-	// an all-zero scalar. The generic consumers in this package check
-	// IsDestroyed first and return ErrGuardedKeyDestroyed instead.
+	// The caller zeroizes the copy; a destroyed key is rejected rather than returned as zeros.
 	var out [32]byte
 	if err := g.key.WithBytes(func(b []byte) error {
 		if len(b) != len(out) {
@@ -123,10 +102,7 @@ func (g *GuardedECPrivateKey) IsDestroyed() bool {
 	return g == nil || g.key == nil || g.key.IsDestroyed()
 }
 
-// Sign performs XEdDSA signing over the message using the guarded private key.
-// The rand parameter provides 64 bytes of randomness needed for XEdDSA.
-//
-// Implements keyops.Signer.
+// Sign returns an XEdDSA signature using 64 bytes of randomness from rand.
 func (g *GuardedECPrivateKey) Sign(rand io.Reader, message []byte) ([64]byte, error) {
 	if g.IsDestroyed() {
 		return [64]byte{}, ErrGuardedKeyDestroyed
@@ -152,10 +128,7 @@ func (g *GuardedECPrivateKey) Sign(rand io.Reader, message []byte) ([64]byte, er
 	return *signature, nil
 }
 
-// VRFSign produces a VXEdDSA signature and VRF output for the given message.
-// The rand parameter provides 64 bytes of randomness for the signature.
-//
-// Implements keyops.VRFSigner.
+// VRFSign returns a VXEdDSA signature and VRF output using 64 bytes of randomness from rand.
 func (g *GuardedECPrivateKey) VRFSign(rand io.Reader, message []byte) ([]byte, []byte, error) {
 	if g.IsDestroyed() {
 		return nil, nil, ErrGuardedKeyDestroyed
@@ -183,10 +156,7 @@ func (g *GuardedECPrivateKey) VRFSign(rand io.Reader, message []byte) ([]byte, [
 	return sig[:], vrf, nil
 }
 
-// Agreement performs X25519 Diffie-Hellman key agreement with the peer's
-// public key. Returns the 32-byte shared secret in a guarded Secret32.
-//
-// Implements keyops.KeyAgreement.
+// Agreement returns the X25519 shared secret with peer in a guarded Secret32.
 func (g *GuardedECPrivateKey) Agreement(peerPublic [32]byte) (ss *secret.Secret32, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -228,10 +198,7 @@ func (g *GuardedECPrivateKey) Agreement(peerPublic [32]byte) (ss *secret.Secret3
 	return shared, nil
 }
 
-// PublicKey derives and returns the corresponding Curve25519 public key
-// (32 bytes) from the guarded private key.
-//
-// Implements keyops.Signer and keyops.KeyAgreement.
+// PublicKey returns the 32-byte Curve25519 public key of the guarded private key.
 func (g *GuardedECPrivateKey) PublicKey() [32]byte {
 	if g.IsDestroyed() {
 		return [32]byte{}

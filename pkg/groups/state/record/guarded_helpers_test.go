@@ -23,21 +23,9 @@ func mustGuard(t *testing.T, data []byte) secret.Secret {
 	return guarded
 }
 
-// TestNewSenderKeyStateFromStructureReleasesOnFailure covers destroySenderKeyState,
-// the cleanup that runs when a state cannot be fully decoded. go-enclave sets no
-// finalizer, so a state abandoned mid-construction would keep its buffers
-// mlock'd for the life of the process.
-//
-// The failure is induced at the last decode step — the sender chain key — so
-// the message keys ahead of it have already been guarded and are what the
-// cleanup has to release.
+// TestNewSenderKeyStateFromStructureReleasesOnFailure checks destroySenderKeyState releases the message keys when the chain key fails to decode.
 func TestNewSenderKeyStateFromStructureReleasesOnFailure(t *testing.T) {
-	// Fixed key bytes rather than ecc.GenerateKeyPair. This test is about the
-	// cleanup path, not key agreement, and GenerateKeyPair performs an X25519
-	// scalar multiplication that GODEBUG=fips140=only refuses -- generating here
-	// would drop the test out of the FIPS gate for no coverage gained. The
-	// decode path exercised below (DecodePoint, NewGuardedECPrivateKey) parses
-	// and clamps without any curve operation, so it is approved-mode clean.
+	// Fixed key bytes, so the test runs in the FIPS gate.
 	signingKeyPublic := append([]byte{ecc.DjbType}, bytes.Repeat([]byte{0x42}, 32)...)
 
 	structure := &SenderKeyStateStructure{

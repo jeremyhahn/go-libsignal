@@ -427,7 +427,7 @@ func TestNewBackupAuthCredentialRequestContext_EndToEnd(t *testing.T) {
 	serverParams := GenerateGenericServerSecretParams(r1)
 	req := ctx.GetRequest()
 
-	// 2023-04-13 00:00:00 UTC — matches DAY_ALIGNED_TIMESTAMP in Rust test.
+	// 2023-04-13 00:00:00 UTC, Rust DAY_ALIGNED_TIMESTAMP.
 	redemptionTime := NewTimestamp(1681344000)
 	resp, err := req.Issue(redemptionTime, BackupLevelFree, BackupCredentialTypeMessages, serverParams, r2)
 	if err != nil {

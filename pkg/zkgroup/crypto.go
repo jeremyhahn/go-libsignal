@@ -21,19 +21,13 @@ func zeroScalar(s *ristretto255.Scalar) {
 	}
 }
 
-// LegacyCredentialConfig defines the storage length and attribute count for
-// a legacy zkgroup credential type. StorageLen controls how many y-scalars
-// are drawn from the SHO during key generation; NumAttrs controls how many
-// Gy points are used in the public key I computation.
+// LegacyCredentialConfig sets how many y-scalars a legacy credential draws (StorageLen) and how many Gy points its I uses (NumAttrs).
 type LegacyCredentialConfig struct {
 	StorageLen int
 	NumAttrs   int
 }
 
-// Legacy credential types with their storage and attribute counts.
-// These match the Rust zkgroup::crypto::credentials module where each
-// credential type draws a specific number of y-scalars from the SHO
-// and uses a specific number of Gy points.
+// Legacy credential configurations, as in Rust zkgroup::crypto::credentials.
 var (
 	LegacyAuthCredentialConfig               = LegacyCredentialConfig{StorageLen: 4, NumAttrs: 3}
 	LegacyProfileKeyCredentialConfig         = LegacyCredentialConfig{StorageLen: 4, NumAttrs: 4}
@@ -62,8 +56,7 @@ func GenerateSignatureKeyPair(sho *zkcredential.ShoExt) (*SignatureKeyPair, erro
 	}, nil
 }
 
-// Zeroize overwrites the signing key scalar with zero and nils all references.
-// This should be called when the key pair is no longer needed.
+// Zeroize overwrites the signing scalar and drops all references.
 func (kp *SignatureKeyPair) Zeroize() {
 	zeroScalar(kp.SigningKey)
 	kp.SigningKey = nil
@@ -75,13 +68,7 @@ func (kp *SignatureKeyPair) GetPublicKey() *SignaturePublicKey {
 	return &SignaturePublicKey{PublicKey: kp.PublicKey}
 }
 
-// Sign produces a Schnorr-style signature over message using the
-// supplied 32-byte synthetic randomness. The output is binding to both
-// message and the keypair's public key.
-//
-// Mirrors Rust libsignal's zkgroup::SignatureKeyPair::sign at
-// rust/zkgroup/src/crypto/signature.rs. Output bytes are byte-identical
-// for the same inputs.
+// Sign returns a Schnorr-style signature over message bound to the public key, byte-identical to Rust SignatureKeyPair::sign.
 func (kp *SignatureKeyPair) Sign(message, randomness []byte) ([]byte, error) {
 	return poksho.Sign(kp.SigningKey, kp.PublicKey, message, randomness)
 }
@@ -91,11 +78,7 @@ type SignaturePublicKey struct {
 	PublicKey *ristretto255.Element
 }
 
-// Verify checks a Schnorr-style signature produced by SignatureKeyPair.Sign.
-// Returns nil on success, a typed proof error otherwise.
-//
-// Mirrors Rust libsignal's zkgroup::PublicKey::verify_signature at
-// rust/zkgroup/src/crypto/signature.rs.
+// Verify checks a SignatureKeyPair.Sign signature, returning a typed proof error on mismatch.
 func (pk *SignaturePublicKey) Verify(message, signature []byte) error {
 	return poksho.Verify(signature, pk.PublicKey, message)
 }
@@ -202,12 +185,7 @@ type ProfileKeyEncryptionPublicKey = zkcredential.PublicKey
 // ProfileKeyEncryptionCiphertext is an encrypted profile key.
 type ProfileKeyEncryptionCiphertext = zkcredential.Ciphertext
 
-// UIDStruct represents a user identifier as ristretto255 points for
-// attribute-based credential operations.
-//
-// Mirrors Rust's UidStruct in zkgroup/src/crypto/uid_struct.rs. The
-// raw_uuid_bytes field is serialized as the first 16 bytes of the 80-byte
-// bincode wire format: bytes:16 ‖ M1:32 ‖ M2:32.
+// UIDStruct is a user identifier as Ristretto255 points; its 80-byte bincode form is bytes(16) || M1(32) || M2(32).
 type UIDStruct struct {
 	// RawUUIDBytes holds the raw 16-byte UUID from the ServiceID.
 	// This field is serialized first in the bincode wire format, matching
@@ -217,15 +195,7 @@ type UIDStruct struct {
 	M2           *ristretto255.Element
 }
 
-// NewUIDStructFromServiceID creates a UIDStruct from a ServiceID.
-//
-// M1 is derived via SHO using the service ID's binary representation
-// (16 bytes for ACI, 17 bytes for PNI) with label "Signal_ZKGroup_20200424_UID_CalcM1".
-//
-// M2 is derived via Lizard encoding of the raw UUID bytes, which provides
-// a reversible mapping from 16-byte data to a Ristretto255 point.
-//
-// Mirrors Rust's UidStruct::from_service_id in zkgroup/src/crypto/uid_struct.rs.
+// NewUIDStructFromServiceID derives M1 by SHO ("Signal_ZKGroup_20200424_UID_CalcM1") over the service ID binary and M2 by Lizard-encoding the UUID.
 func NewUIDStructFromServiceID(sid ServiceID) *UIDStruct {
 	// ZK-C1: Use correct SHO label matching Rust uid_struct.rs:46
 	sho := zkcredential.NewShoHmacSha256Ext("Signal_ZKGroup_20200424_UID_CalcM1")
@@ -245,11 +215,7 @@ func NewUIDStructFromServiceID(sid ServiceID) *UIDStruct {
 // 16 (raw UUID bytes) + 32 (M1) + 32 (M2).
 const UIDStructLen = 80
 
-// Serialize encodes the UIDStruct into 80 bytes:
-// bytes:16 ‖ M1:32 ‖ M2:32.
-//
-// This matches the Rust bincode wire format for UidStruct with
-// serde field order: raw_uuid_bytes, M1, M2.
+// Serialize encodes the UIDStruct as bytes(16) || M1(32) || M2(32).
 func (u *UIDStruct) Serialize() []byte {
 	out := make([]byte, 0, UIDStructLen)
 	out = append(out, u.RawUUIDBytes[:]...)
@@ -282,16 +248,7 @@ func DeserializeUIDStruct(data []byte) (*UIDStruct, error) {
 	}, nil
 }
 
-// LizardEncode maps 16 bytes of data to a Ristretto255 point using the Lizard
-// encoding method. This is a reversible mapping: the original bytes can be
-// recovered from the point via LizardDecode.
-//
-// The algorithm:
-//  1. Hash the 16-byte data with SHA-256 to get 32 bytes
-//  2. Overlay the original data at bytes[8..24]
-//  3. Clear the low bit of byte[0] (ensure positive field element)
-//  4. Clear the top 2 bits of byte[31] (reduce to valid range)
-//  5. Map the resulting field element to a Ristretto point via single Elligator
+// LizardEncode maps 16 bytes reversibly to a Ristretto255 point: SHA-256 the data, overlay it at bytes 8..24, clear bit 0 of byte 0 and the top two bits of byte 31, then apply single Elligator.
 func LizardEncode(data [16]byte) *ristretto255.Element {
 	// Hash data with SHA-256
 	hash := sha256.Sum256(data[:])
@@ -307,10 +264,7 @@ func LizardEncode(data [16]byte) *ristretto255.Element {
 	feBytes[0] &= 254 // clear low bit (make positive since Elligator on r and -r is the same)
 	feBytes[31] &= 63 // clear top 2 bits
 
-	// Map to Ristretto point using single Elligator.
-	// SetUniformBytes(a || b) computes MAP(a) + MAP(b).
-	// MAP(zeros) = identity in the Ristretto group, so
-	// SetUniformBytes(feBytes || zeros) = MAP(feBytes) + identity = MAP(feBytes).
+	// MAP(zeros) is the identity, so SetUniformBytes(fe || zeros) is MAP(fe).
 	var uniform [64]byte
 	copy(uniform[:32], feBytes[:])
 	// Second 32 bytes remain zero.
@@ -322,14 +276,7 @@ func LizardEncode(data [16]byte) *ristretto255.Element {
 	return e
 }
 
-// LizardDecode recovers the original 16 bytes from a Lizard-encoded
-// ristretto255 point by inverting the Elligator map and checking which
-// candidate field element matches the Lizard encoding structure.
-//
-// Returns the decoded 16 bytes and true on success, or a zero array and
-// false if the point was not created via LizardEncode.
-//
-// This matches Rust curve25519-dalek-signal's lizard_decode method.
+// LizardDecode recovers the 16 bytes from a LizardEncode point, returning false for any other point.
 func LizardDecode(point *ristretto255.Element) ([16]byte, bool) {
 	encoded := point.Bytes()
 	mask, candidates, ok := elligator.ElligatorRistrettoFlavorInverse(encoded)
@@ -368,14 +315,7 @@ func LizardDecode(point *ristretto255.Element) ([16]byte, bool) {
 	return [16]byte{}, false
 }
 
-// Decode253Bits recovers up to 8 candidate 32-byte field elements from a
-// ristretto255 point by inverting the Elligator map.
-//
-// Returns a bitmask indicating which candidates are valid, and the candidates
-// themselves. This is used for profile key decryption where the 32-byte
-// profile key was encoded via single Elligator with bit clearing.
-//
-// This matches Rust curve25519-dalek-signal's decode_253_bits method.
+// Decode253Bits inverts Elligator to up to 8 candidate field elements and a validity mask, for profile key decryption.
 func Decode253Bits(point *ristretto255.Element) (mask uint8, candidates [8][32]byte, ok bool) {
 	encoded := point.Bytes()
 	return elligator.ElligatorRistrettoFlavorInverse(encoded)
@@ -393,12 +333,7 @@ type ProfileKeyStruct struct {
 	M4       *ristretto255.Element
 }
 
-// NewProfileKeyStruct creates a ProfileKeyStruct from raw profile key bytes and
-// a user ID. This matches Rust's ProfileKeyStruct::new which uses:
-//   - M3: SHO with label "Signal_ZKGroup_20200424_ProfileKeyAndUid_ProfileKey_CalcM3",
-//     absorbs profileKeyBytes||uidBytes, then single-Elligator map (32-byte squeeze).
-//   - M4: profile key bytes with bits cleared ([0]&=254, [31]&=63), then single-Elligator
-//     map directly (no SHO involvement).
+// NewProfileKeyStruct derives M3 by SHO over profileKeyBytes || uidBytes and M4 from the bit-cleared profile key, each by single Elligator.
 func NewProfileKeyStruct(profileKeyBytes ProfileKeyBytes, uidBytes UIDBytes) *ProfileKeyStruct {
 	// M3: seed with correct label, absorb combined data, single-Elligator map.
 	m3 := calcProfileKeyM3(profileKeyBytes, uidBytes)
@@ -567,10 +502,7 @@ func (r *ReceiptStruct) CalcM1() *ristretto255.Scalar {
 	return CalcReceiptM1(r.ReceiptExpirationTime, r.ReceiptLevel)
 }
 
-// CalcReceiptM1 computes the M1 scalar from a receipt expiration time and level.
-// The derivation concatenates the big-endian bytes of the timestamp (8 bytes)
-// and receipt level (8 bytes), then uses SHO with label
-// "Signal_ZKGroup_20210919_Receipt_CalcM1".
+// CalcReceiptM1 derives M1 by SHO ("Signal_ZKGroup_20210919_Receipt_CalcM1") over the big-endian expiration time and level.
 func CalcReceiptM1(expirationTime Timestamp, level ReceiptLevel) *ristretto255.Scalar {
 	var combined [16]byte
 	expBytes := expirationTime.ToBeBytes()

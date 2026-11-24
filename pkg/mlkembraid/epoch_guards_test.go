@@ -1,14 +1,6 @@
 package mlkembraid
 
-// Tests for F3 and F4 epoch-guard fixes.
-//
-// F3: receiveCt2Sampled Transition 13 must trigger on ANY message type with
-// epoch == state.epoch+1, not only MessageTypeHdr.
-// Rust ref: src/v1/chunked/states.rs Ct2Sampled arm, Ordering::Greater branch.
-//
-// F4: All states except Ct2Sampled must reject msg.epoch > state.epoch with
-// ErrEpochOutOfRange. The previous code allowed epoch+1 for every state.
-// Rust ref: every non-Ct2Sampled arm uses Ordering::Greater => Err(EpochOutOfRange).
+// Epoch guards: Ct2Sampled advances on any message at epoch+1; every other state rejects a later epoch with ErrEpochOutOfRange (Rust v1/chunked/states.rs).
 
 import (
 	"encoding/binary"

@@ -59,11 +59,7 @@ func VXEdDSAVerify(key ECPublicKeyable, message, signature []byte) (bool, []byte
 // DjbType is the Diffie-Hellman curve type (curve25519) created by D. J. Bernstein.
 const DjbType = 0x05
 
-// DecodePoint decodes a type-prefixed public key from bytes starting at offset.
-// It validates only the type byte (0x05 = DjbType / Curve25519) and key length;
-// full curve-point validation is deferred to first cryptographic use (key
-// agreement, signature verify, etc.), matching Rust's behavior in curve.rs:84-105.
-// Currently only DJB (Curve25519) keys are supported.
+// DecodePoint decodes a type-prefixed Curve25519 public key at offset, checking only the type byte and length, as Rust curve.rs does.
 func DecodePoint(bytes []byte, offset int) (ECPublicKeyable, error) {
 	if offset < 0 || offset >= len(bytes) {
 		return nil, ErrInputTooShort
@@ -119,13 +115,7 @@ func GenerateKeyPair() (*ECKeyPair, error) {
 	return keypair, nil
 }
 
-// KeyPairFromBytes constructs an ECKeyPair from raw 33-byte public key bytes
-// (1 type byte + 32 key bytes) and a 32-byte private key.  The private key is
-// clamped before storage, matching Rust KeyPair::from_public_and_private
-// (rust/core/src/curve.rs:350-360) and PrivateKey::deserialize clamping
-// (rust/core/src/curve/curve25519.rs:172).
-//
-// Rust source: rust/core/src/curve.rs:350-360.
+// KeyPairFromBytes builds an ECKeyPair from a 33-byte public key and a 32-byte private key, clamping the private key as Rust does.
 func KeyPairFromBytes(pubBytes []byte, privBytes [32]byte) (*ECKeyPair, error) {
 	pub, err := DecodePoint(pubBytes, 0)
 	if err != nil {

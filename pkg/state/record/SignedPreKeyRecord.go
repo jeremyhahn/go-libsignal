@@ -29,10 +29,7 @@ func NewSignedPreKeyFromBytes(serialized []byte, serializer SignedPreKeySerializ
 	return NewSignedPreKeyFromStruct(signedPreKeyStructure, serializer)
 }
 
-// NewSignedPreKeyFromStruct returns a SignedPreKey record using the given
-// serializable structure. The record copies the private key into its own
-// guarded memory; the caller keeps ownership of the structure and should
-// Zeroize it when done.
+// NewSignedPreKeyFromStruct returns a SignedPreKey with a guarded copy of the private key; the caller keeps and zeroizes structure.
 func NewSignedPreKeyFromStruct(structure *SignedPreKeyStructure,
 	serializer SignedPreKeySerializer) (*SignedPreKey, error) {
 
@@ -44,13 +41,7 @@ func NewSignedPreKeyFromStruct(structure *SignedPreKeyStructure,
 		signature:  bytehelper.SliceToArray64(structure.Signature),
 	}
 
-	// Decode the 33-byte serialized EC public key ([0x05 || 32 key bytes]).
-	// Using ecc.DecodePoint rather than bytehelper.SliceToArray + NewDjbECPublicKey
-	// is required because SliceToArray truncates the 33-byte form to [32]byte,
-	// keeping the 0x05 type byte and discarding the last key byte, producing a
-	// corrupted public key. A corrupted SPK public key causes signature
-	// verification of the SPK to fail with valid signatures.
-	// Mirrors the Rust approach of decoding from the stored bytes directly.
+	// Decode the 33-byte key [0x05 || 32 bytes] with ecc.DecodePoint; SliceToArray would corrupt it and break signature checks.
 	publicKey, err := ecc.DecodePoint(structure.PublicKey, 0)
 	if err != nil {
 		return nil, err
@@ -79,10 +70,7 @@ func NewSignedPreKey(id uint32, timestamp int64, keyPair *ecc.ECKeyPair,
 	}
 }
 
-// SignedPreKeyStructure is a flat structure of a signed pre key, used
-// for serialization and deserialization. The private key is held in guarded
-// memory for the crossing of the storage boundary; see
-// PendingKeyExchangeStructure for the rationale.
+// SignedPreKeyStructure is the serializable form of a signed pre-key, with the private key in guarded memory.
 type SignedPreKeyStructure struct {
 	ID         uint32
 	PublicKey  []byte
@@ -97,10 +85,7 @@ func (s *SignedPreKeyStructure) Zeroize() {
 	s.PrivateKey.Destroy()
 }
 
-// SignedPreKey record is a structure for storing a signed
-// pre key in a SignedPreKey store. The private key lives only in the guarded
-// memory of the record's key pair; the serializable structure is built on
-// demand.
+// SignedPreKey is a stored signed pre-key; its private key lives only in guarded memory.
 type SignedPreKey struct {
 	id         uint32
 	timestamp  int64

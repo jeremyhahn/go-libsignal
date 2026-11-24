@@ -1,14 +1,4 @@
-// Conformance test: SignalMessage wire-format parity vs Rust libsignal.
-//
-// Rust source: rust/protocol/src/protocol.rs:79 SignalMessage::new (libsignal v0.92.2)
-//
-// Loads the Rust-emitted wire/signal_message.json fixture and verifies:
-//  1. NewSignalMessageFromBytes parses the serialized bytes without error.
-//  2. Counter and previous_counter match the fixture inputs.
-//  3. SenderRatchetKey serializes back to the fixture's sender_ratchet_public.
-//  4. Body() returns the fixture's ciphertext bytes.
-//  5. VerifyMac succeeds using the fixture's mac_key, sender, and receiver identity keys.
-//  6. Re-serializing the parsed message produces the original bytes byte-for-byte.
+// SignalMessage wire parity with the Rust fixture (protocol.rs:79): counters, ratchet key, body, MAC and byte round-trip.
 
 package interop
 

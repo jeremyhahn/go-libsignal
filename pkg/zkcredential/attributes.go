@@ -95,14 +95,7 @@ func DeriveDefaultGeneratorPoints(domainID string) [2]*ristretto255.Element {
 	return [2]*ristretto255.Element{ga1, ga2}
 }
 
-// KeyPair is a key used to encrypt attributes.
-//
-// The private key is a pair of scalars a1 and a2. Attributes are encrypted as:
-//
-//	E_A1 = a1 * M1
-//	E_A2 = a2 * E_A1 + M2
-//
-// Defined in Chase-Perrin-Zaverucha section 4.1.
+// KeyPair encrypts attributes with scalars a1, a2: E_A1 = a1*M1, E_A2 = a2*E_A1 + M2 (Chase-Perrin-Zaverucha §4.1).
 type KeyPair struct {
 	A1        *ristretto255.Scalar
 	A2        *ristretto255.Scalar
@@ -180,11 +173,7 @@ func keyPairFromScalars(a1, a2 *ristretto255.Scalar, domain Domain) *KeyPair {
 	}
 }
 
-// InverseKeyPair creates a KeyPair that is the inverse of other.
-// That is, encrypting with the inverse and then with the original yields
-// the original attribute.
-//
-// The domain of the result must differ from the domain of other.
+// InverseKeyPair returns the inverse of other, in a different domain.
 func InverseKeyPair(other *KeyPair, newDomain Domain) (*KeyPair, error) {
 	if other.domain != nil && newDomain.ID() == other.domain.ID() {
 		return nil, &ErrMissingInverseDomain{}
@@ -217,10 +206,7 @@ func (kp *KeyPair) EncryptArbitrary(attr Attribute) *Ciphertext {
 	}
 }
 
-// DecryptToSecondPoint recovers M2 from a ciphertext: M2 = E_A2 - a2 * E_A1.
-//
-// Returns an error if E_A1 is the generator point, which would imply
-// that a1 is not actually encrypting anything.
+// DecryptToSecondPoint returns M2 = E_A2 - a2*E_A1, or an error if E_A1 is the generator.
 func (kp *KeyPair) DecryptToSecondPoint(ct *Ciphertext) (*ristretto255.Element, error) {
 	gen := ristretto255.NewGeneratorElement()
 	if ct.EA1.Equal(gen) == 1 {

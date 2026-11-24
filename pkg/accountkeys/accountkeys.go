@@ -152,8 +152,7 @@ func (p AccountEntropyPool) Validate() error {
 	return nil
 }
 
-// DeriveSVRKey derives a 32-byte SVR key from the entropy pool using HKDF-SHA256.
-// The returned Secret must be destroyed by the caller when no longer needed.
+// DeriveSVRKey derives a 32-byte SVR key from the entropy pool with HKDF-SHA256; the caller destroys the Secret.
 func (p AccountEntropyPool) DeriveSVRKey() (*secret.Secret, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
@@ -169,8 +168,7 @@ func (p AccountEntropyPool) DeriveSVRKey() (*secret.Secret, error) {
 	return s, nil
 }
 
-// DeriveBackupKey derives a 32-byte backup key from the entropy pool using HKDF-SHA256.
-// The returned Secret must be destroyed by the caller when no longer needed.
+// DeriveBackupKey derives a 32-byte backup key from the entropy pool with HKDF-SHA256; the caller destroys the Secret.
 func (p AccountEntropyPool) DeriveBackupKey() (*secret.Secret, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
@@ -186,10 +184,7 @@ func (p AccountEntropyPool) DeriveBackupKey() (*secret.Secret, error) {
 	return s, nil
 }
 
-// PinHash holds the derived keys from a PIN hash operation.
-// The 64-byte Argon2id output is split: first 32 bytes are the encryption key,
-// last 32 bytes are the access key, matching the Rust libsignal implementation.
-// Call Zeroize when the PinHash is no longer needed.
+// PinHash holds the encryption key (first 32 bytes) and access key (last 32) of the Argon2id output; call Zeroize when done.
 type PinHash struct {
 	EncryptionKey *secret.Secret // For local encryption (bytes 0-31 of Argon2id output).
 	AccessKey     *secret.Secret // For SVR authentication (bytes 32-63 of Argon2id output).
@@ -265,8 +260,7 @@ func HashPin(pin string, salt []byte) (*PinHash, error) {
 	}, nil
 }
 
-// VerifyPin checks if a PIN matches a previously derived access key by hashing
-// the PIN with the same salt and performing a constant-time comparison.
+// VerifyPin hashes the PIN with the same salt and compares it to the access key in constant time.
 func VerifyPin(pin string, salt []byte, expectedAccessKey []byte) (bool, error) {
 	h, err := HashPin(pin, salt)
 	if err != nil {
@@ -276,11 +270,7 @@ func VerifyPin(pin string, salt []byte, expectedAccessKey []byte) (bool, error) 
 	return h.AccessKey.EqualTo(expectedAccessKey), nil
 }
 
-// LocalPinHash creates a PHC-string encoded Argon2i hash of the PIN for local
-// screen lock verification. Uses a random 16-byte salt and Argon2i with
-// memory=512KiB, time=64, parallelism=1, output=32 bytes.
-// Returns a PHC-string like "$argon2i$v=19$m=512,t=64,p=1$<salt>$<hash>".
-// This matches the Rust libsignal local_pin_hash implementation.
+// LocalPinHash returns a PHC-encoded Argon2i hash (m=512KiB, t=64, p=1, 16-byte random salt) for local screen lock, as Rust local_pin_hash.
 func LocalPinHash(pin string) (string, error) {
 	normalized := normalizePin(pin)
 	if len(normalized) == 0 {
@@ -413,14 +403,7 @@ func parsePHCString(phc string) (salt, hash []byte, err error) {
 	return salt, hash, nil
 }
 
-// isAllDigits reports whether s is non-empty and every rune satisfies
-// unicode.IsDigit. Used by normalizePin to decide whether to apply digit
-// transliteration: the Rust reference only transliterates when the WHOLE
-// trimmed string consists of digits (step 2 of the normalization algorithm).
-//
-// Rust reference: rust/account-keys/src/hash.rs doc comment, step 2:
-// "If the whole string consists of digits, then non-arabic digits must be
-// replaced with their arabic 0-9 equivalents."
+// isAllDigits reports whether s is non-empty and all digits; only then is the PIN transliterated (rust/account-keys/src/hash.rs step 2).
 func isAllDigits(s string) bool {
 	if s == "" {
 		return false
@@ -433,17 +416,7 @@ func isAllDigits(s string) bool {
 	return true
 }
 
-// normalizePin normalizes a PIN string following the Rust reference implementation:
-//  1. Trim leading and trailing whitespace.
-//  2. If and only if the whole trimmed string consists of digits (every rune
-//     satisfies unicode.IsDigit), transliterate non-ASCII decimal digits to
-//     their ASCII equivalents (e.g., Arabic-Indic '١' → '1').
-//  3. Apply Unicode NFKD normalization.
-//
-// Gating transliteration on all-digits (step 2) matches the Rust reference at
-// rust/account-keys/src/hash.rs. The previous implementation transliterated
-// unconditionally, producing divergent SVR/backup keys for mixed PINs such as
-// "abc١def" (incorrectly became "abc1def" instead of staying "abc١def").
+// normalizePin trims, transliterates digits only when the whole PIN is digits, then applies NFKD (rust/account-keys/src/hash.rs).
 func normalizePin(pin string) string {
 	trimmed := strings.TrimSpace(pin)
 	s := trimmed
@@ -453,10 +426,7 @@ func normalizePin(pin string) string {
 	return norm.NFKD.String(s)
 }
 
-// transliterateDigits converts non-ASCII Unicode decimal digits to their ASCII
-// equivalents. For any digit rune where unicode.IsDigit returns true but the
-// rune is outside ASCII 0-9, it finds the zero digit of that Unicode block
-// (decimal digit blocks are contiguous runs of 10) and maps it to '0' + offset.
+// transliterateDigits maps non-ASCII Unicode decimal digits to ASCII 0-9 by offset from their block's zero.
 func transliterateDigits(s string) string {
 	var result []rune
 	for _, r := range s {

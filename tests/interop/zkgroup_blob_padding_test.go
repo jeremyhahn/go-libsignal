@@ -1,12 +1,4 @@
-// Conformance test: zkgroup EncryptBlobWithPadding byte-identical to Rust.
-//
-// Mirrors rust/zkgroup/src/api/groups/group_params.rs::test_encrypt_with_padding:
-//   - GroupSecretParams::generate with all-zero randomness (32 bytes).
-//   - EncryptBlobWithPadding using all-zero randomness, plaintext "secret
-//     team", padding_len = 0 then 8.
-//   - Assert ciphertext byte-matches the Rust expected hex for both cases.
-//   - Round-trip via DecryptBlobWithPadding and confirm the original
-//     plaintext is recovered (padding_len bytes stripped).
+// Conformance: EncryptBlobWithPadding with zero randomness, "secret team" and padding 0 and 8 matches Rust test_encrypt_with_padding and round-trips.
 
 package interop
 

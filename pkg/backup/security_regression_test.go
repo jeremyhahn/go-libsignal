@@ -1,7 +1,6 @@
 package backup
 
-// Security regression tests for CONFIRMED review findings.
-// Each test is named after the finding it covers.
+// Security regression tests, one per confirmed review finding.
 
 import (
 	"bytes"
@@ -18,13 +17,7 @@ import (
 // Finding 1: VerifyHMAC unbounded read (OOM DoS)
 // ---------------------------------------------------------------------------
 
-// TestVerifyHMAC_BoundedRead_Contract documents the production-scale behaviour:
-// VerifyHMAC uses io.LimitReader(r, maxBackupSize+1) before io.ReadAll so
-// attacker-controlled streams never cause unbounded allocation. The unit-level
-// proof is in TestVerifyHMAC_BoundedRead_SmallScale which exercises the
-// identical code path via verifyHMACWithLimit at a feasible scale (256 bytes).
-// A full 100 GiB integration test is not run here because io.ReadAll must
-// materialise all read bytes in memory.
+// TestVerifyHMAC_BoundedRead_Contract: VerifyHMAC reads through io.LimitReader(maxBackupSize+1); the small-scale test proves the path.
 func TestVerifyHMAC_BoundedRead_Contract(t *testing.T) {
 	// Verify that the production helper builds and runs without error for a
 	// valid small backup, confirming the LimitReader plumbing is in place.
@@ -229,8 +222,7 @@ func TestEncryptFrames_OutputIsBucketed(t *testing.T) {
 	}
 }
 
-// TestEncryptFramesModern_OutputIsBucketed verifies the same for the modern
-// (SBACKUP\x01) path.
+// TestEncryptFramesModern_OutputIsBucketed checks the same for the SBACKUP\x01 path.
 func TestEncryptFramesModern_OutputIsBucketed(t *testing.T) {
 	key := testKey()
 	defer key.Zeroize()
@@ -380,7 +372,7 @@ func TestDecryptPayload_BudgetExceeded_SmallScale(t *testing.T) {
 // than the old 10 MiB cap is accepted. Before the fix, frames > 10 MiB returned
 // FrameTooLargeError. Now the cap is u32::MAX and the stream bound is relied upon.
 func TestVarintDelimitedReader_FrameLargerThan10MiB(t *testing.T) {
-	// 11 MiB frame — previously rejected, now accepted.
+	// An 11 MiB frame is accepted.
 	const frameSize = 11 * 1024 * 1024
 	payload := bytes.Repeat([]byte{0xAB}, frameSize)
 

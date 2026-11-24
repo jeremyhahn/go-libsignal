@@ -28,14 +28,7 @@ const (
 
 var backupCredentialLabel = []byte("20231003_Signal_BackupAuthCredential")
 
-// parseBackupLevel validates a u64 wire value as a BackupLevel enum variant.
-// Mirrors Rust's TryFrom<u64> for BackupLevel at
-// rust/zkgroup/src/api/backups/auth_credential.rs:68-78:
-//   - value must fit in a u8 (>255 rejected), then
-//   - the u8 must equal a valid variant (200=Free, 201=Paid).
-//
-// Previously Go silently truncated the u64 to a byte with no range or enum
-// check; this validator matches the Rust rejection semantics exactly.
+// parseBackupLevel accepts a u64 that fits a u8 and is a BackupLevel (200 Free, 201 Paid), as Rust TryFrom<u64> does.
 func parseBackupLevel(v uint64) (BackupLevel, error) {
 	if v > 255 {
 		return 0, &ZkGroupDeserializationFailure{TypeName: "BackupLevel"}
@@ -48,11 +41,7 @@ func parseBackupLevel(v uint64) (BackupLevel, error) {
 	return 0, &ZkGroupDeserializationFailure{TypeName: "BackupLevel"}
 }
 
-// parseBackupCredentialType validates a u64 wire value as a BackupCredentialType variant.
-// Mirrors Rust's TryFrom<u64> for BackupCredentialType at
-// rust/zkgroup/src/api/backups/auth_credential.rs:98-108:
-//   - value must fit in a u8, then
-//   - the u8 must equal a valid variant (1=Messages, 2=Media).
+// parseBackupCredentialType accepts a u64 that fits a u8 and is a BackupCredentialType (1 Messages, 2 Media).
 func parseBackupCredentialType(v uint64) (BackupCredentialType, error) {
 	if v > 255 {
 		return 0, &ZkGroupDeserializationFailure{TypeName: "BackupCredentialType"}
@@ -93,13 +82,7 @@ type BackupAuthCredentialRequestContext struct {
 	KeyPair          *zkcredential.BlindingKeyPair
 }
 
-// NewBackupAuthCredentialRequestContext derives a BackupAuthCredentialRequestContext
-// deterministically from (backupKey, aci) using the canonical SHO label
-// "20231003_Signal_BackupAuthCredentialRequest". The ACI must have kind ACI
-// (not PNI); Rust enforces this structurally via the type system.
-//
-// Mirrors Rust BackupAuthCredentialRequestContext::new at
-// rust/zkgroup/src/api/backups/auth_credential.rs:118.
+// NewBackupAuthCredentialRequestContext derives a request context from backupKey and an ACI (not a PNI) with SHO label "20231003_Signal_BackupAuthCredentialRequest".
 func NewBackupAuthCredentialRequestContext(backupKey [32]byte, aci ServiceID) (*BackupAuthCredentialRequestContext, error) {
 	if aci.Type != ServiceIDTypeACI {
 		return nil, &ErrInvalidServiceIDKind{Got: aci.Type}

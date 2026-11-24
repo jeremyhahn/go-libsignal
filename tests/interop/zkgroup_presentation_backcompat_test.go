@@ -1,19 +1,4 @@
-// Conformance tests: profile key credential presentation backward-compatibility.
-//
-// Mirrors two Rust integration tests in rust/zkgroup/tests/integration_tests.rs:
-//
-//   test_profile_key_credential_presentation_expiring_as_v1 (line 403):
-//     Verifies that a V3 ExpiringProfileKeyCredentialPresentation can be
-//     structurally re-encoded as a V1 presentation, and the UUID and profile
-//     key ciphertexts are preserved.
-//
-//   test_profile_key_credential_presentation_v2_as_v1 (implicit):
-//     Same structural check for V2.
-//
-// The key semantic: AnyProfileKeyCredentialPresentation::to_structurally_valid_v1_presentation_bytes
-// stamps a 0x00 version byte and 8 Ristretto basepoint proof-point placeholders,
-// writes a 320-byte zero proof, then copies the ciphertexts verbatim. The result
-// parses as a valid V1 structural frame, with matching ciphertexts.
+// V2 and V3 presentations re-encoded as V1 frames keep their ciphertexts (Rust integration_tests.rs:403).
 
 package interop
 
@@ -24,12 +9,7 @@ import (
 	fixtures "github.com/jeremyhahn/go-libsignal/tests/interop/fixtures/zkgroup"
 )
 
-// TestInteropProfileKeyCredentialPresentationV1BackCompat verifies that a V3
-// ExpiringProfileKeyCredentialPresentation can be structurally re-encoded as a
-// V1 presentation with ciphertexts preserved.
-//
-// Rust reference: test_profile_key_credential_presentation_expiring_as_v1
-// (rust/zkgroup/tests/integration_tests.rs:403)
+// TestInteropProfileKeyCredentialPresentationV1BackCompat checks a V3 presentation re-encoded as V1 keeps its ciphertexts.
 func TestInteropProfileKeyCredentialPresentationV1BackCompat(t *testing.T) {
 	// Parse V3 bytes from the Rust-emitted fixture.
 	v3Any, err := zkgroup.DeserializeAnyProfileKeyCredentialPresentation(

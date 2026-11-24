@@ -60,13 +60,7 @@ func DefaultExpiration(currentTime Timestamp) Timestamp {
 	return NewTimestamp(expiration)
 }
 
-// sortPoints computes a deterministic sort order for ristretto255 points.
-// Each point is doubled and compressed to a canonical 32-byte encoding, and
-// the resulting sort keys are compared lexicographically. Returns the
-// permutation (sorted index -> original index) and the reordered points.
-//
-// This matches Rust GroupSendEndorsementsResponse::sort_points which uses
-// double_and_compress_batch for deterministic ordering.
+// sortPoints orders points by their doubled compressed encoding and returns the permutation and sorted points (Rust sort_points).
 func sortPoints(points []*ristretto255.Element) (perm []int, sorted []*ristretto255.Element) {
 	type indexedKey struct {
 		index int
@@ -146,10 +140,7 @@ type ReceivedEndorsement struct {
 	Decompressed *GroupSendEndorsement
 }
 
-// ReceiveWithCiphertexts validates and returns the endorsements issued by the
-// server. Points are sorted in the same deterministic order used during
-// issuance, and results are un-permuted back to the original order of
-// memberCiphertexts.
+// ReceiveWithCiphertexts validates the endorsements and returns them in memberCiphertexts order.
 func (r *GroupSendEndorsementsResponse) ReceiveWithCiphertexts(
 	memberCiphertexts []*UUIDCiphertext,
 	now Timestamp,
@@ -189,14 +180,7 @@ func (r *GroupSendEndorsementsResponse) ReceiveWithCiphertexts(
 	return collectPermutation(sortedResult, perm), nil
 }
 
-// ReceiveWithServiceIDs validates and returns the endorsements issued by the
-// server. Unlike ReceiveWithCiphertexts, this method takes ServiceIDs directly
-// and computes the first ciphertext point (a1 * M1) internally.
-//
-// Points are sorted in the same deterministic order used during issuance, and
-// results are un-permuted back to the original order of serviceIDs.
-//
-// This matches Rust GroupSendEndorsementsResponse::receive_with_service_ids.
+// ReceiveWithServiceIDs validates the endorsements for serviceIDs and returns them in that order (Rust receive_with_service_ids).
 func (r *GroupSendEndorsementsResponse) ReceiveWithServiceIDs(
 	serviceIDs []ServiceID,
 	now Timestamp,

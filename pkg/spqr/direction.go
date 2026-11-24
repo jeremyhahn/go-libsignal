@@ -25,8 +25,7 @@ func (d Direction) String() string {
 	}
 }
 
-// Version represents the SPQR protocol version for version negotiation.
-// During session setup, the parties negotiate whether PQR is enabled.
+// Version is the SPQR protocol version negotiated at session setup.
 type Version uint8
 
 const (
@@ -48,8 +47,7 @@ func (v Version) String() string {
 	}
 }
 
-// CurrentVersion describes the version-negotiation state of a serialized SPQR
-// state, matching Rust's spqr::CurrentVersion enum (lib.rs:87-93).
+// CurrentVersion is the negotiation state of a serialized SPQR state (Rust spqr::CurrentVersion).
 type CurrentVersion struct {
 	// Complete is true when negotiation has finished.
 	// When false, Version and MinVersion describe the pending negotiation.
@@ -61,11 +59,7 @@ type CurrentVersion struct {
 	MinVersion Version
 }
 
-// CurrentVersionOf returns the version-negotiation state of a serialized SPQR
-// state without fully deserializing it. Matches Rust's pub fn current_version
-// (lib.rs:247-260).
-//
-// An empty state (Rust's empty_state()) returns NegotiationComplete(V0).
+// CurrentVersionOf returns the negotiation state of serialized SPQR state without full deserialization; an empty state is NegotiationComplete(V0).
 func CurrentVersionOf(serializedState []byte) (CurrentVersion, error) {
 	s, err := Deserialize(serializedState)
 	if err != nil {
@@ -86,8 +80,7 @@ func CurrentVersionOf(serializedState []byte) (CurrentVersion, error) {
 	}, nil
 }
 
-// Params holds the parameters for creating an initial SPQR state with
-// version negotiation support.
+// Params holds the parameters for an initial SPQR state with version negotiation.
 type Params struct {
 	// AuthKey is the 32-byte initial PQR key from X3DH key agreement.
 	AuthKey []byte

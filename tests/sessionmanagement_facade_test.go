@@ -1,12 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 1 test in this file exercises X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) and the Double Ratchet
-// specification (section 5.2) require it, so the fips140only build tag drops
-// this file from the FIPS gate. `make test` and `make coverage` still run
-// it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH and the Double Ratchet require X25519, so the fips140only tag drops this file.
 
 package tests
 
@@ -18,22 +12,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/sessionmanagement"
 )
 
-// TestSessionManagement_FacadeBundleRoundTrip exercises the high-level
-// pkg/sessionmanagement facade end-to-end:
-//
-//  1. Alice processes Bob's pre-key bundle (existing builder API; the
-//     facade does not yet wrap ProcessBundle, mirroring Rust's split
-//     between session::process_prekey_bundle and session_management::*).
-//  2. Alice calls MessageEncrypt to produce a PreKeySignalMessage.
-//  3. Bob calls MessageDecrypt; the facade routes to MessageDecryptPreKey,
-//     which establishes the session and decrypts the inner message.
-//  4. Bob calls MessageEncrypt; produces a plain SignalMessage.
-//  5. Alice calls MessageDecrypt; routes to MessageDecryptSignal, which
-//     decrypts using the now-acknowledged session.
-//
-// Mirrors the round-trip behaviour of Rust's session_management tests
-// (rust/protocol/src/session_management.rs and tests/session.rs) but
-// against the Go facade.
+// TestSessionManagement_FacadeBundleRoundTrip runs prekey and signal messages both ways through the pkg/sessionmanagement facade, as Rust session_management.
 func TestSessionManagement_FacadeBundleRoundTrip(t *testing.T) {
 	serializer := newSerializer()
 

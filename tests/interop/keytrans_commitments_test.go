@@ -1,19 +1,4 @@
-// Keytrans commitment conformance test.
-//
-// Drives pkg/keytrans.Commit against the four test vectors extracted from
-// rust/keytrans/src/commitments.rs::test::test_commit.
-//
-// The commitment scheme is HMAC-SHA256 with a fixed 16-byte key baked into
-// the implementation. The HMAC input is:
-//
-//	nonce (16 bytes) || BE-uint16(len(search_key)) || search_key
-//	|| BE-uint32(len(data)) || data
-//
-// All four upstream vectors use a zero nonce. Go's Commit must reproduce the
-// expected 32-byte output byte-for-byte.
-//
-// Rust source: rust/keytrans/src/commitments.rs:37-51
-// Upstream commit: 98915c442d
+// Keytrans commitment conformance: Commit reproduces the four Rust test_commit vectors, HMAC-SHA256 over nonce(16) || BE16 len || search_key || BE32 len || data.
 package interop
 
 import (

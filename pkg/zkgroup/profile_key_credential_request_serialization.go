@@ -6,31 +6,10 @@ import (
 	"github.com/gtank/ristretto255"
 )
 
-// profileKeyCredentialRequestFixedSize is the fixed-length prefix of a
-// serialized ProfileKeyCredentialRequest: a reserved byte followed by five
-// 32-byte ristretto points (the blinding public key Y and the ciphertext
-// elements D1, D2, E1, E2). The poksho proof bytes follow and are
-// variable-length.
+// profileKeyCredentialRequestFixedSize is a reserved byte plus five 32-byte points, before the variable proof.
 const profileKeyCredentialRequestFixedSize = 1 + 5*32 // 161
 
-// SerializeProfileKeyCredentialRequest serializes a ProfileKeyCredentialRequest
-// to the Rust bincode wire format, producing byte-for-byte identical output to
-// Rust's bincode::serialize on the same struct.
-//
-// Wire layout (matches Rust ProfileKeyCredentialRequest at
-// rust/zkgroup/src/api/profiles/profile_key_credential_request.rs):
-//
-//	[0x00]      reserved byte (ReservedByte)
-//	[32]        public_key  (PublicKey: blinding key Y)
-//	[32]        ciphertext.D1
-//	[32]        ciphertext.D2
-//	[32]        ciphertext.E1
-//	[32]        ciphertext.E2
-//	[variable]  proof (ProfileKeyCredentialRequestProof poksho bytes)
-//
-// The ristretto point encoding (Element.Bytes) and the proof bytes are the
-// same Rust-compatible encodings used by the request-proof generation and the
-// presentation serializer, so the result matches the client-produced bytes.
+// SerializeProfileKeyCredentialRequest encodes r as Rust bincode: reserved byte, public key, D1, D2, E1, E2, proof.
 func SerializeProfileKeyCredentialRequest(r *ProfileKeyCredentialRequest) []byte {
 	out := make([]byte, 0, profileKeyCredentialRequestFixedSize+len(r.Proof))
 	out = append(out, 0x00) // reserved
@@ -43,13 +22,7 @@ func SerializeProfileKeyCredentialRequest(r *ProfileKeyCredentialRequest) []byte
 	return out
 }
 
-// DeserializeProfileKeyCredentialRequest decodes a ProfileKeyCredentialRequest
-// from the Rust bincode wire format produced by the client's
-// CreateProfileKeyCredentialRequestContext().GetRequest(). The trailing bytes
-// after the five fixed points are the poksho proof, which is preserved opaque
-// and validated by the server during IssueExpiringProfileKeyCredential — so a
-// malformed request fails closed at proof verification rather than yielding a
-// bad credential.
+// DeserializeProfileKeyCredentialRequest decodes a client request; the proof stays opaque and is verified at issuance.
 func DeserializeProfileKeyCredentialRequest(data []byte) (*ProfileKeyCredentialRequest, error) {
 	if len(data) < profileKeyCredentialRequestFixedSize {
 		return nil, &ZkGroupDeserializationFailure{TypeName: "ProfileKeyCredentialRequest"}
@@ -155,27 +128,10 @@ func DeserializeProfileKeyCommitment(data []byte) (*ProfileKeyCommitment, error)
 	}, nil
 }
 
-// expiringProfileKeyCredentialResponseFixedSize is the fixed-length prefix of a
-// serialized ExpiringProfileKeyCredentialResponse: a reserved byte, the
-// 128-byte blinded credential (t, U, S1, S2), and an 8-byte expiration. The
-// poksho issuance proof follows and is variable-length.
+// expiringProfileKeyCredentialResponseFixedSize is a reserved byte, the 128-byte credential and an 8-byte expiration, before the proof.
 const expiringProfileKeyCredentialResponseFixedSize = 1 + 4*32 + 8 // 137
 
-// SerializeExpiringProfileKeyCredentialResponse serializes the server's
-// credential issuance response to the Rust bincode wire format the client
-// expects in ReceiveExpiringProfileKeyCredential.
-//
-// Wire layout (matches Rust ExpiringProfileKeyCredentialResponse at
-// rust/zkgroup/src/api/profiles/expiring_profile_key_credential_response.rs:13-18
-// and crypto/credentials.rs BlindedExpiringProfileKeyCredential):
-//
-//	[0x00]      reserved byte
-//	[32]        blinded_credential.t  (Scalar)
-//	[32]        blinded_credential.U  (RistrettoPoint)
-//	[32]        blinded_credential.S1 (RistrettoPoint)
-//	[32]        blinded_credential.S2 (RistrettoPoint)
-//	[8 LE u64]  credential_expiration_time (Timestamp)
-//	[variable]  proof (ExpiringProfileKeyCredentialIssuanceProof poksho bytes)
+// SerializeExpiringProfileKeyCredentialResponse encodes r as Rust bincode: reserved byte, t, U, S1, S2, u64 LE expiration, proof.
 func SerializeExpiringProfileKeyCredentialResponse(r *ExpiringProfileKeyCredentialResponse) []byte {
 	out := make([]byte, 0, expiringProfileKeyCredentialResponseFixedSize+len(r.Proof))
 	out = append(out, 0x00) // reserved

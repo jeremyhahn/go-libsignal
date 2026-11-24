@@ -10,52 +10,19 @@ import (
 	"golang.org/x/crypto/curve25519"
 )
 
-// NewNKhfsInitiator constructs a client-side NKhfs handshake against
-// the supplied server static X25519 public key. Returns an
-// UnvalidatedHandshake that exposes the first message via
-// InitialRequest() and completes via Complete(message2).
-//
-// Unlike SVR2NewHandshake (which validates SGX attestation evidence
-// before producing a Handshake), NewNKhfsInitiator is the unattested
-// entry point: callers have already validated the server's public key
-// out-of-band (software-attestation deployments, TPM-quote
-// deployments, or fully-end-to-end tests). It complements the
-// server-side NKhfsResponder.
+// NewNKhfsInitiator starts an unattested client NKhfs handshake against a server static X25519 key validated out of band.
 func NewNKhfsInitiator(serverStaticPub []byte) (*UnvalidatedHandshake, error) {
 	claims := &Claims{PublicKey: serverStaticPub, Custom: make(map[string][]byte)}
 	return newNKhfsHandshakeWithClaims(claims)
 }
 
-// NKhfsResponder implements the server side of the Noise NKhfs
-// (NK + Hash-Forward-Secrecy via ML-KEM-1024) handshake. The
-// initiator-side counterpart is NKhfsHandshake; together they form a
-// complete two-message handshake matching Signal's SVR/CDSI/SGX enclave
-// transport.
-//
-// The server (responder) is the long-lived service. Its static X25519
-// key pair is generated once at startup and surfaced in attestation
-// claims so clients can mix the static key into their handshake hash.
-// Each inbound client opens a fresh NKhfsResponder, calls
-// ProcessMessage1 with the inbound message-1 bytes, and receives the
-// outbound message-2 bytes plus the two transport cipher states.
-//
-// The two cipher states returned by ProcessMessage1 are FROM THE
-// SERVER'S PERSPECTIVE:
-//
-//   - sendCipher: the server encrypts outbound frames with this.
-//   - recvCipher: the server decrypts inbound frames with this.
-//
-// After ProcessMessage1 succeeds, the NKhfsResponder is single-use;
-// callers should discard it (other than the cipher states it returned).
+// NKhfsResponder is the single-use server side of the Noise NKhfs (NK with ML-KEM-1024) handshake; its cipher states are from the server's view.
 type NKhfsResponder struct {
 	staticPriv []byte
 	staticPub  []byte
 }
 
-// NewNKhfsResponder constructs a responder. staticPriv must be a 32-byte
-// X25519 private scalar; staticPub must be the corresponding 32-byte
-// X25519 public key. Callers typically generate this key pair once and
-// expose staticPub through attestation evidence.
+// NewNKhfsResponder constructs a responder from a 32-byte X25519 static private key and its public key.
 func NewNKhfsResponder(staticPriv, staticPub []byte) (*NKhfsResponder, error) {
 	if len(staticPriv) != 32 {
 		return nil, newAttestationDataError("NKhfsResponder: static private key must be 32 bytes")
@@ -69,20 +36,7 @@ func NewNKhfsResponder(staticPriv, staticPub []byte) (*NKhfsResponder, error) {
 	}, nil
 }
 
-// ProcessMessage1 consumes the initiator's first handshake message
-// (-> e, es, e1) and produces the responder's reply (<- e, ee, ekem1).
-//
-// Wire format consumed:
-//
-//	e.pub(32) + EncryptedKemPub(1568+16) + EncryptedPayload(plen+16)
-//
-// Wire format produced:
-//
-//	e.pub(32) + EncryptedKemCt(1568+16) + EncryptedPayload(16)
-//
-// Returns (msg2, sendCipher, recvCipher, handshakeHash, error). The
-// handshake hash uniquely identifies the session and can be used as
-// channel-binding material in higher-level protocols.
+// ProcessMessage1 consumes message 1 (e, es, e1) and returns message 2 (e, ee, ekem1), the send and receive ciphers and the handshake hash.
 func (r *NKhfsResponder) ProcessMessage1(msg1 []byte) ([]byte, *NKhfsCipherState, *NKhfsCipherState, []byte, error) {
 	const (
 		dhPubLen     = 32
@@ -160,8 +114,7 @@ func (r *NKhfsResponder) ProcessMessage1(msg1 []byte) ([]byte, *NKhfsCipherState
 	}
 	kemSS, kemCt := kemEK.Encapsulate()
 
-	// Per HFS spec: EncryptAndHash(kemCt) FIRST (with key from ee), then
-	// MixKey(kemSS). Initiator does the inverse.
+	// HFS order: EncryptAndHash(kemCt) with the ee key, then MixKey(kemSS).
 	encryptedKemCt, err := ss.encryptAndHash(kemCt)
 	if err != nil {
 		return nil, nil, nil, nil, err

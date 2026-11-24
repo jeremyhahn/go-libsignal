@@ -1,13 +1,6 @@
 package zkgroup
 
-// Wire-format lengths for zkgroup credential types. Every constant here has a
-// corresponding Rust pub const in rust/zkgroup/src/common/constants.rs at
-// commit 98915c44. Names are converted from SCREAMING_SNAKE_CASE to
-// PascalCase per Go style.
-//
-// Only constants that affect the external wire format or are needed by
-// external consumers are exported. Internal calculation constants remain
-// package-private.
+// Wire-format lengths matching rust/zkgroup/src/common/constants.rs, in PascalCase.
 const (
 	// AuthCredentialLen is the byte length of a serialized AuthCredential.
 	// Rust: AUTH_CREDENTIAL_LEN = 181

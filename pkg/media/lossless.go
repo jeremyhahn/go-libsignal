@@ -1,27 +1,8 @@
 package media
 
-// lossless.go — Pure-Go VP8L/ALPH lossless bitstream validator.
-//
-// This is an exact port of the webpsan 0.5.3 lossless decoder/validator:
-//
-//	webpsan/src/parse/bitstream.rs  — LSB-first BitReader, CanonicalHuffmanTree, buf_read_lz77
-//	webpsan/src/parse/lossless.rs   — LosslessImage::read (transforms, prefix codes, pixel loop)
-//	webpsan/src/parse/vp8l.rs       — Vp8lChunk header parsing + sanitize_image_data
-//	webpsan/src/parse/alph.rs       — AlphChunk::sanitize_image_data (COMPRESS_LOSSLESS path)
-//
-// The Go implementation reproduces every accept/reject decision from the Rust
-// oracle including: duplicate-transform rejection, color-cache bounds, LZ77
-// back-reference distance/length checks, code-length repetition bounds, invalid
-// predictor, invalid symbol count, and truncated-stream errors.
-//
-// Bit-reader fidelity: bitstream_io LE reads bits LSB-first within each byte,
-// exactly like the VP8L specification. Each byte is consumed from bit 0 (LSB)
-// to bit 7 (MSB), and consecutive bits span bytes in little-endian order.
-// lossless.rs uses BitBufReader<R, LE>; this file's leBitReader matches that.
+// Pure-Go VP8L/ALPH lossless validator ported from webpsan 0.5.3, reproducing every accept and reject decision; bits are read LSB-first.
 
-// ---------------------------------------------------------------------------
-// Typed errors (project convention: NEVER fmt.Errorf inline)
-// ---------------------------------------------------------------------------
+// Typed errors.
 
 // ErrLosslessTruncated indicates the VP8L bitstream ended before the image was complete.
 // Matches: webpsan/src/parse/bitstream.rs map_eof → ParseError::TruncatedChunk.
@@ -121,15 +102,7 @@ type ErrLosslessLZ77PrefixCode struct{ Code uint16 }
 
 func (e *ErrLosslessLZ77PrefixCode) Error() string { return "VP8L: invalid LZ77 prefix code" }
 
-// ---------------------------------------------------------------------------
-// LSB-first / LE bit reader
-//
-// Matches bitstream_io LE semantics used by BitBufReader<R, LE>:
-//   - Bits are consumed LSB-first within each byte.
-//   - Multi-bit reads accumulate bits from consecutive bytes in LE order.
-//
-// bitstream.rs: buf_read<T: Numeric>(bits) delegates to BitReader<Cursor<...>, LE>
-// ---------------------------------------------------------------------------
+// LSB-first bit reader matching bitstream_io LE.
 
 // leBitReader reads bits from a byte slice in LSB-first order.
 // It pre-buffers the entire VP8L image-stream into memory (webpsan does the
@@ -176,20 +149,11 @@ func (r *leBitReader) readBits8(n uint32) (uint8, error) {
 	return uint8(v), err
 }
 
-// ---------------------------------------------------------------------------
-// LZ77 prefix code expansion
-//
-// Matches bitstream.rs:90-99 — buf_read_lz77.
-// LZ77_MAX_SYMBOL = 39 (bitstream.rs:34).
-// Returns a NonZeroU32 equivalent (value >= 1).
-// ---------------------------------------------------------------------------
+// LZ77 prefix code expansion (bitstream.rs buf_read_lz77); LZ77_MAX_SYMBOL is 39 and values are >= 1.
 
 const lz77MaxSymbol = 39
 
-// expandLZ77 converts an LZ77 prefix code to the actual length/distance value.
-// prefix_code 0 → value 1, prefix_code 1 → value 2, prefix_code 2 → value 3,
-// prefix_code 3 → value 4; higher codes add extra bits.
-// bitstream.rs:90-99.
+// expandLZ77 maps prefix codes 0-3 to 1-4; higher codes add extra bits (bitstream.rs:90-99).
 func expandLZ77(r *leBitReader, prefixCode uint16) (uint32, error) {
 	switch {
 	case prefixCode <= 3:
@@ -209,22 +173,7 @@ func expandLZ77(r *leBitReader, prefixCode uint16) (uint32, error) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Canonical Huffman tree (LE / LSB-first decoding)
-//
-// Matches bitstream.rs:132-190 — CanonicalHuffmanTree::new / symbols().
-//
-// The canonical code assignment algorithm (bitstream.rs:160-190):
-//  1. Sort symbols by (code_length, symbol) — ascending.
-//  2. Skip symbols with code_length == 0.
-//  3. Special case: exactly one non-zero symbol → code = [] (0 bits).
-//  4. Assign codes incrementally: start with a vector of <first_code_length>
-//     zero bits, then for each subsequent symbol, increment the code like a
-//     binary counter and extend to the new code length.
-//
-// Decoding is done with a lookup table indexed by the next `maxCodeLen` bits
-// (LSB-first). Each entry stores the symbol value and the actual code length.
-// ---------------------------------------------------------------------------
+// Canonical Huffman tree (bitstream.rs CanonicalHuffmanTree), decoded through a table indexed by the next maxCodeLen bits.
 
 // huffSymbol holds a decoded symbol and the bit length of its code.
 type huffSymbol struct {
@@ -242,11 +191,7 @@ type huffmanTree struct {
 	singleSymbolVal uint16
 }
 
-// buildHuffmanTree constructs a canonical Huffman tree from (symbol, codeLen) pairs.
-// symbols is a slice of (symbol_value, code_length) pairs with code_length >= 0.
-// Zero-length codes indicate absent symbols.
-//
-// bitstream.rs:132-190: CanonicalHuffmanTree::new → symbols() → from_symbols().
+// buildHuffmanTree builds a canonical tree from (symbol, codeLen) pairs; length 0 means absent.
 func buildHuffmanTree(codeLengths []symLen) (*huffmanTree, error) {
 	// Sort by (code_length, symbol) ascending — bitstream.rs:164.
 	sortSymLens(codeLengths)
@@ -259,11 +204,7 @@ func buildHuffmanTree(codeLengths []symLen) (*huffmanTree, error) {
 	active := codeLengths[firstNonZero:]
 
 	if len(active) == 0 {
-		// All symbols have code_length == 0.
-		// This matches CanonicalHuffmanTree::symbols() returning [] (bitstream.rs:188),
-		// which then becomes a single-entry tree via Default impl (bitstream.rs:193-196).
-		// However, this only occurs for channels that are unused; the validator
-		// still needs to decode them. We use the first (or only) symbol if present.
+		// No non-zero lengths: a single-entry tree, as Rust's Default impl gives; use the first symbol if present.
 		if len(codeLengths) == 1 {
 			return &huffmanTree{
 				singleSymbol:    true,
@@ -275,10 +216,7 @@ func buildHuffmanTree(codeLengths []symLen) (*huffmanTree, error) {
 		return &huffmanTree{singleSymbol: true, singleSymbolVal: 0}, nil
 	}
 
-	// Special case: exactly one non-zero symbol → 0-bit code (bitstream.rs:168).
-	// bitstream.rs:167: (&[(first_symbol, 1)], _) — note: the Rust pattern matches
-	// code_length==1 specifically; but the Go equivalent is any single non-zero symbol
-	// since the symbols() function returns vec![(first_symbol, vec![])] for this case.
+	// Exactly one non-zero symbol gets a 0-bit code (bitstream.rs:168).
 	if len(active) == 1 {
 		return &huffmanTree{
 			singleSymbol:    true,
@@ -325,16 +263,7 @@ func buildHuffmanTree(codeLengths []symLen) (*huffmanTree, error) {
 			}
 		}
 
-		// Build the integer code value from the code bits (LSB-first).
-		// The code bits are in canonical order where code[0] is the MSB of the
-		// codeword as a bitstream — but since the bit reader reads LSB-first,
-		// we need to reverse the bit order for the lookup table.
-		//
-		// In bitstream_io LE, the first bit read is the LSB of the first byte.
-		// The canonical code bits (code[0]..code[len-1]) correspond to bits
-		// read in order. So the lookup table key is:
-		//   key = code[0]*2^0 + code[1]*2^1 + ... + code[len-1]*2^(len-1)
-		// which is the code vector interpreted as a little-endian bit pattern.
+		// The lookup key is the code bits read as a little-endian bit pattern.
 		codeVal := uint16(0)
 		for bit, v := range code {
 			if v != 0 {
@@ -363,14 +292,7 @@ func buildHuffmanTree(codeLengths []symLen) (*huffmanTree, error) {
 	}, nil
 }
 
-// decode reads the next Huffman symbol from the bit reader.
-//
-// When fewer than maxCodeLen bits remain in the stream, we read only the
-// remaining bits and zero-extend to maxCodeLen for the table lookup.  This
-// correctly decodes valid short codes that end exactly at the chunk boundary
-// without triggering a spurious ErrLosslessTruncated.  If the matched code's
-// actual length exceeds the number of bits available, the stream is genuinely
-// truncated and we return ErrLosslessTruncated.
+// decode reads the next symbol, zero-extending a short tail; ErrLosslessTruncated only if the matched code is longer than the bits left.
 func (h *huffmanTree) decode(r *leBitReader) (uint16, error) {
 	if h.singleSymbol {
 		return h.singleSymbolVal, nil
@@ -457,12 +379,7 @@ func sortSymLens(s []symLen) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Color-length prefix code (meta-tree for reading symbol code lengths)
-//
-// lossless.rs:627-644 — CodeLengthPrefixCode::read.
-// The 19-element code order is fixed by the VP8L spec.
-// ---------------------------------------------------------------------------
+// Code-length prefix code (lossless.rs CodeLengthPrefixCode::read); the 19-element order is fixed by the VP8L spec.
 
 // codeOrder is the permutation used to read code-length code lengths.
 // lossless.rs:628: CODE_ORDER = [17, 18, 0, 1, 2, 3, 4, 5, 16, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
@@ -497,11 +414,7 @@ func readCodeLengthPrefixCode(r *leBitReader) (*huffmanTree, error) {
 	return buildHuffmanTree(pairs)
 }
 
-// ---------------------------------------------------------------------------
-// Prefix code group (5 trees: green+length, red, blue, alpha, distance)
-//
-// lossless.rs:518-620 — PrefixCodeGroup::read, read_prefix_code.
-// ---------------------------------------------------------------------------
+// Prefix code group of five trees (lossless.rs PrefixCodeGroup::read).
 
 // prefixCodeGroup holds the 5 Huffman trees for an entropy-coded image block.
 type prefixCodeGroup struct {
@@ -723,11 +636,7 @@ func readPrefixCodeGroup(r *leBitReader, colorCacheLen uint16) (*prefixCodeGroup
 	}, nil
 }
 
-// ---------------------------------------------------------------------------
-// ColorCache
-//
-// lossless.rs:459-480 — ColorCache::read, ColorCache::len.
-// ---------------------------------------------------------------------------
+// ColorCache (lossless.rs:459-480).
 
 // readColorCache reads the color cache flag and optional order (1..11).
 // Returns the cache length (2^order) or 0 if no color cache.
@@ -755,11 +664,7 @@ func readColorCache(r *leBitReader) (uint16, error) {
 	return 1 << order, nil
 }
 
-// ---------------------------------------------------------------------------
-// MetaPrefixCodes
-//
-// lossless.rs:486-512 — MetaPrefixCodes::read, max_code_group.
-// ---------------------------------------------------------------------------
+// MetaPrefixCodes (lossless.rs:486-512).
 
 // readMetaPrefixCodes reads the meta-prefix-code block and returns the maximum
 // code group index.
@@ -799,22 +704,13 @@ func readMetaPrefixCodes(r *leBitReader, width, height uint32) (uint16, error) {
 	return maxCodeGroup, nil
 }
 
-// ---------------------------------------------------------------------------
-// EntropyCodedImage
-//
-// lossless.rs:294-358 — EntropyCodedImage::read.
-// ---------------------------------------------------------------------------
+// EntropyCodedImage (lossless.rs:294-358).
 
 // colorCallback is called for each decoded literal pixel (green, red values).
 // Used for predictor validation and meta-huffman group tracking.
 type colorCallback func(green, red uint8) error
 
-// readEntropyCodedImageFull reads an entropy-coded image of width×height pixels.
-// It reads the color cache header from the stream, then the prefix code group
-// and the full pixel loop.
-// fn is called for each literal pixel with (green, red) values; nil = no callback.
-//
-// lossless.rs:294-358 — EntropyCodedImage::read.
+// readEntropyCodedImageFull reads the color cache, prefix codes and pixels of a width x height image, calling fn per literal pixel.
 func readEntropyCodedImageFull(
 	r *leBitReader,
 	width, height uint32,
@@ -904,11 +800,7 @@ func readEntropyCodedImageFull(
 	return nil
 }
 
-// lz77DistToPixelDist converts an LZ77 distance code to a pixel distance.
-// Matches lossless.rs:406-426 — BackReference::buf_read.
-//
-// The distanceMap is the fixed 120-entry table from the VP8L spec.
-// Values > 120 map directly: pixel_dist = dist_code - 120.
+// lz77DistToPixelDist maps a distance code through the 120-entry VP8L table; larger codes subtract 120.
 func lz77DistToPixelDist(distCode, width uint32) uint32 {
 	const distanceMapLen = 120
 
@@ -954,11 +846,7 @@ var distanceMap = [120][2]int8{
 	{8, 7},
 }
 
-// ---------------------------------------------------------------------------
-// SpatiallyCodedImage
-//
-// lossless.rs:365-376 — SpatiallyCodedImage::read.
-// ---------------------------------------------------------------------------
+// SpatiallyCodedImage (lossless.rs:365-376).
 
 // readSpatiallyCodedImage reads the main image body with meta-huffman support.
 // lossless.rs:365-376.
@@ -983,11 +871,7 @@ func readSpatiallyCodedImage(r *leBitReader, width, height uint32) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// Transform reading
-//
-// lossless.rs:199-288 — Transform::read, TransformType::read.
-// ---------------------------------------------------------------------------
+// Transform reading (lossless.rs:199-288).
 
 // transform type constants — lossless.rs:43-49.
 const (
@@ -998,11 +882,7 @@ const (
 	transformCount         = 4
 )
 
-// readTransform reads one transform block and returns the transform type.
-// It also applies any width adjustment (for ColorIndexing).
-// Returns (transformType, newWidth, error).
-//
-// lossless.rs:200-244.
+// readTransform reads one transform and returns its type and the adjusted width (lossless.rs:200-244).
 func readTransform(r *leBitReader, width, height uint32) (uint8, uint32, error) {
 	ttype, err := r.readBits8(2)
 	if err != nil {
@@ -1089,21 +969,9 @@ func colorIndexingTransformedWidth(width, paletteLen uint32) uint32 {
 	return divCeil(width, pixelsPerSuperPixel)
 }
 
-// ---------------------------------------------------------------------------
-// LosslessImage::read — top-level entry point
-//
-// lossless.rs:166-193.
-// ---------------------------------------------------------------------------
+// LosslessImage::read entry point (lossless.rs:166-193).
 
-// readLosslessImage validates a VP8L lossless image bitstream.
-// width and height are the image dimensions (must be >= 1).
-//
-// This matches LosslessImage::read exactly:
-//  1. Read transform bits; for each transform present, validate and track.
-//  2. Reject duplicate transforms.
-//  3. Read the SpatiallyCodedImage with the (possibly adjusted) width.
-//
-// lossless.rs:166-193.
+// readLosslessImage validates a VP8L bitstream: transforms without duplicates, then the spatially coded image.
 func readLosslessImage(r *leBitReader, width, height uint32) error {
 	transformedWidth := width
 	var seenTransforms [transformCount]bool
@@ -1135,44 +1003,20 @@ func readLosslessImage(r *leBitReader, width, height uint32) error {
 	return readSpatiallyCodedImage(r, transformedWidth, height)
 }
 
-// ---------------------------------------------------------------------------
-// Public API: sanitize VP8L and ALPH image streams
-// ---------------------------------------------------------------------------
+// Sanitize VP8L and ALPH image streams.
 
-// sanitizeVP8LImageData validates the image-stream portion of a VP8L chunk.
-// payload is the raw VP8L chunk data (starting with the 0x2F signature byte).
-// width and height must be >= 1 (extracted from the 5-byte VP8L header).
-//
-// Matches vp8l.rs:52-56 — Vp8lChunk::sanitize_image_data.
-// The image-stream begins after the 5-byte header (byte offset 5).
+// sanitizeVP8LImageData validates the image stream after the 5-byte VP8L header (vp8l.rs sanitize_image_data).
 func sanitizeVP8LImageData(payload []byte, width, height uint32) error {
 	if len(payload) < 5 {
 		return &ErrLosslessTruncated{}
 	}
-	// Skip the 5-byte VP8L header; the lossless image stream starts at byte 5.
-	// vp8l.rs:53: BitBufReader::with_capacity(input, 4096) — input already seeked
-	// past the header by the caller (ParseChunk::parse consumed 5 bytes then
-	// sanitize_image_data receives the rest).
-	//
-	// However, examining vp8l.rs more carefully: sanitize_image_data receives
-	// the entire remaining input (after the chunk header bytes were consumed
-	// by parse()), not the VP8L header. The VP8L header bytes (5 bytes) were
-	// consumed by ParseChunk::parse via the BitReader. The sanitize_image_data
-	// input starts after those 5 bytes.
-	//
-	// In our Go implementation, payload is the full VP8L chunk data. The first
-	// 5 bytes are the VP8L header. The image stream starts at byte 5.
+	// The lossless image stream starts after the 5-byte VP8L header.
 	imageStream := payload[5:]
 	r := newLeBitReader(imageStream)
 	return readLosslessImage(r, width, height)
 }
 
-// sanitizeALPHImageData validates the image-stream portion of an ALPH chunk
-// when COMPRESS_LOSSLESS is set. The alpha plane stream starts immediately
-// at the beginning of alphaStream (no VP8L 0x2F header).
-//
-// Matches alph.rs:39-47 — AlphChunk::sanitize_image_data.
-// Note: ALPH uses width/height from VP8X; the lossless stream has no 0x2F header.
+// sanitizeALPHImageData validates a COMPRESS_LOSSLESS alpha stream, which has no 0x2F header (alph.rs sanitize_image_data).
 func sanitizeALPHImageData(alphaStream []byte, width, height uint32) error {
 	r := newLeBitReader(alphaStream)
 	return readLosslessImage(r, width, height)

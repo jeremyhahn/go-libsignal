@@ -8,10 +8,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/protocol"
 )
 
-// serializedRecipientViewVersion is the version byte at the head of a
-// SerializedRecipientView. Mirrors Java's
-// SealedSenderMultiRecipientMessage.SERIALIZED_RECIPIENT_VIEW_VERSION (0x01)
-// so values produced here can be consumed by Java callers and vice-versa.
+// serializedRecipientViewVersion (0x01) heads a SerializedRecipientView, as in Java.
 const serializedRecipientViewVersion byte = 0x01
 
 // serializedRecipientViewSize is the fixed size in bytes of a
@@ -29,15 +26,7 @@ var ErrRecipientNotInMessage = errors.New("sealed: recipient not in message")
 // original wire-format bytes (i.e. not via ParseSealedSenderV2SentMessage).
 var ErrMessageNotParsedFromBytes = errors.New("sealed: message has no full-buffer reference; parse via ParseSealedSenderV2SentMessage")
 
-// ParseSealedSenderV2SentMessage parses a Sealed Sender v2 multi-recipient
-// SentMessage from its complete wire format (including the leading version
-// byte). The returned struct retains the input buffer so server-side
-// multi-recipient delivery can extract per-recipient views via
-// SerializedRecipientView, RangeForRecipient, and OffsetOfSharedBytes.
-//
-// This is the entry point for server-side MRM handling. Clients that only
-// need to parse a body for testing should use the unexported v2ParseMessage
-// directly.
+// ParseSealedSenderV2SentMessage parses a full v2 sent message, keeping the buffer for SerializedRecipientView, RangeForRecipient and OffsetOfSharedBytes.
 func ParseSealedSenderV2SentMessage(data []byte) (*SealedSenderV2SentMessage, error) {
 	if len(data) == 0 {
 		return nil, &V2ParseError{Detail: "message was empty"}
@@ -66,10 +55,7 @@ func ParseSealedSenderV2SentMessage(data []byte) (*SealedSenderV2SentMessage, er
 	return parsed, nil
 }
 
-// Version returns the wire-format version byte of the parsed message
-// (SealedSenderV2VersionUUID = 0x22 or SealedSenderV2VersionServiceId = 0x23).
-// Returns zero if the message was not constructed via
-// ParseSealedSenderV2SentMessage.
+// Version returns the wire version (0x22 or 0x23), or zero if not parsed from bytes.
 func (m *SealedSenderV2SentMessage) Version() byte {
 	return m.version
 }
@@ -81,13 +67,7 @@ func (m *SealedSenderV2SentMessage) FullMessage() []byte {
 	return m.fullMessage
 }
 
-// OffsetOfSharedBytes returns the byte offset within FullMessage where the
-// shared region (32-byte ephemeral public key followed by the encrypted
-// payload) begins. The shared region runs from this offset to the end of the
-// full message.
-//
-// Returns ErrMessageNotParsedFromBytes if the message was not constructed via
-// ParseSealedSenderV2SentMessage.
+// OffsetOfSharedBytes returns the offset of the shared ephemeral key and payload, or ErrMessageNotParsedFromBytes.
 func (m *SealedSenderV2SentMessage) OffsetOfSharedBytes() (int, error) {
 	if m.fullMessage == nil {
 		return 0, ErrMessageNotParsedFromBytes
@@ -95,13 +75,7 @@ func (m *SealedSenderV2SentMessage) OffsetOfSharedBytes() (int, error) {
 	return m.sharedBytesOffset, nil
 }
 
-// RangeForRecipient returns the byte range [start, end) within FullMessage
-// where the given recipient's encrypted-M (C_i) ‖ auth-tag (AT_i) region
-// lies. For excluded recipients (no devices) the range is (0, 0).
-//
-// Returns ErrRecipientNotInMessage if serviceID is not among the message's
-// recipients, or ErrMessageNotParsedFromBytes if the message was not
-// constructed via ParseSealedSenderV2SentMessage.
+// RangeForRecipient returns the [start, end) range of the recipient's C_i || AT_i, (0, 0) if excluded; errors are ErrRecipientNotInMessage and ErrMessageNotParsedFromBytes.
 func (m *SealedSenderV2SentMessage) RangeForRecipient(serviceID protocol.ServiceId) (start, end int, err error) {
 	if m.fullMessage == nil {
 		return 0, 0, ErrMessageNotParsedFromBytes
@@ -116,26 +90,7 @@ func (m *SealedSenderV2SentMessage) RangeForRecipient(serviceID protocol.Service
 	return recip.KeyMaterialOffset, recip.KeyMaterialOffset + recip.KeyMaterialLength, nil
 }
 
-// MessageForRecipient returns a fresh byte slice forming a complete
-// SealedSender v2 ReceivedMessage for the given recipient, suitable for
-// delivery as the recipient's ciphertext. The result is a concatenation of:
-//
-//   - one version byte (always SealedSenderV2VersionUUID, mirroring the
-//     Rust reference, since the ReceivedMessage format hasn't changed since
-//     that version)
-//   - the recipient's key material (C_i ‖ AT_i)
-//   - the shared bytes (e_pub ‖ encrypted payload)
-//
-// Returns ErrRecipientNotInMessage if serviceID is not among the message's
-// recipients, or ErrMessageNotParsedFromBytes if the message was not
-// constructed via ParseSealedSenderV2SentMessage.
-//
-// For excluded recipients (no devices) this still returns a result, but the
-// payload will not decrypt because there is no key material for that
-// recipient.
-//
-// Mirrors Java's SealedSenderMultiRecipientMessage.messageForRecipient
-// (instance method).
+// MessageForRecipient returns the recipient's received message: version 0x22, C_i || AT_i, then the shared bytes (Java messageForRecipient); errors as RangeForRecipient.
 func (m *SealedSenderV2SentMessage) MessageForRecipient(serviceID protocol.ServiceId) ([]byte, error) {
 	if m.fullMessage == nil {
 		return nil, ErrMessageNotParsedFromBytes
@@ -159,25 +114,7 @@ func (m *SealedSenderV2SentMessage) MessageForRecipient(serviceID protocol.Servi
 	return out, nil
 }
 
-// SerializedRecipientView returns a 13-byte view header that, paired with the
-// full multi-recipient ciphertext, encodes everything needed to reconstruct
-// the recipient's ReceivedMessage via MessageForRecipient(fullData, view).
-//
-// Wire format (big-endian, byte-equivalent with Java
-// SealedSenderMultiRecipientMessage.serializedRecipientView):
-//
-//	[1] version byte (currently 0x01)
-//	[4] offsetOfSharedData (uint32 BE)
-//	[4] offsetOfRecipientKeyMaterial (uint32 BE)
-//	[4] lengthOfRecipientKeyMaterial (uint32 BE)
-//
-// This compact view is what server-side multi-recipient delivery (MRM)
-// stores per recipient in the message cache, so a single shared payload
-// holds the heavy-weight ciphertext and per-recipient state stays small.
-//
-// Returns ErrRecipientNotInMessage if serviceID is not among the message's
-// recipients, or ErrMessageNotParsedFromBytes if the message was not
-// constructed via ParseSealedSenderV2SentMessage.
+// SerializedRecipientView returns the 13-byte view: version, shared-data offset, key-material offset and length (uint32 BE each), as in Java; errors as RangeForRecipient.
 func (m *SealedSenderV2SentMessage) SerializedRecipientView(serviceID protocol.ServiceId) ([]byte, error) {
 	if m.fullMessage == nil {
 		return nil, ErrMessageNotParsedFromBytes
@@ -200,20 +137,7 @@ func (m *SealedSenderV2SentMessage) SerializedRecipientView(serviceID protocol.S
 // offsets outside the supplied data buffer).
 var ErrInvalidRecipientView = errors.New("sealed: invalid serialized recipient view")
 
-// MessageForRecipient (the package-level helper) reconstructs a recipient's
-// SealedSender v2 ReceivedMessage from the full multi-recipient ciphertext
-// (`fullMessageData`) and a previously-produced view header
-// (`serializedRecipientView` from the instance method of the same name).
-//
-// The result is the same byte sequence as
-// `(*SealedSenderV2SentMessage).MessageForRecipient(serviceID)` would
-// produce — see that method for the layout. Use this static form when you
-// only have the full ciphertext and a stored view header, e.g. on the
-// delivery path of a server-side MRM cache.
-//
-// Returns ErrInvalidRecipientView for malformed view bytes.
-//
-// Mirrors Java's static SealedSenderMultiRecipientMessage.messageForRecipient(byte[],byte[]).
+// MessageForRecipient rebuilds a recipient's received message from the full message and a stored view; returns ErrInvalidRecipientView for a bad view.
 func MessageForRecipient(fullMessageData, serializedRecipientView []byte) ([]byte, error) {
 	if len(serializedRecipientView) != serializedRecipientViewSize {
 		return nil, &RecipientViewError{Detail: fmt.Sprintf(

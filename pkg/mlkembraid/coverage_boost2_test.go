@@ -7,7 +7,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
-// ================== Error types not previously covered ==================
+// Error types.
 
 // TestErrChunkCountErrorMessage verifies ErrChunkCount.Error() returns a non-empty message.
 func TestErrChunkCountErrorMessage(t *testing.T) {

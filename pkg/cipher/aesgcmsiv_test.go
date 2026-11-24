@@ -499,13 +499,7 @@ func BenchmarkAESGCMSIVDecrypt(b *testing.B) {
 	}
 }
 
-// TestAESGCMSIVEncrypt_PlaintextTooLong verifies that AESGCMSIVEncrypt returns
-// ErrAESGCMSIVPlaintextTooLong when the plaintext length equals or exceeds the
-// RFC 8452 §6 maximum of (1<<36) - 32 bytes. We cannot allocate a real oversized
-// buffer, so we verify the error type and message are correct by constructing a
-// slice header that matches the too-long length.
-//
-// Finding #11 fix: the limit was previously 1<<36 (off by 32); it is now (1<<36)-32.
+// TestAESGCMSIVEncrypt_PlaintextTooLong checks the RFC 8452 limit of (1<<36)-32 bytes.
 func TestAESGCMSIVEncrypt_PlaintextTooLong(t *testing.T) {
 	key := make([]byte, aesGCMSIVKeySize)
 	nonce := make([]byte, aesGCMSIVNonceSize)
@@ -521,22 +515,11 @@ func TestAESGCMSIVEncrypt_PlaintextTooLong(t *testing.T) {
 		t.Fatal("ErrAESGCMSIVPlaintextTooLong must have a non-empty error message")
 	}
 
-	// Verify that a plaintext of exactly maxPlaintextLen is rejected.
-	// We construct an oversized slice via make, but limit the actual data
-	// size to something we can allocate: we test the boundary at the Go level
-	// by directly inspecting the constant rather than allocating 68 GB.
-	// The code path is: int64(len(plaintext)) >= aesGCMSIVMaxPlaintextLen.
-	// We test this with a realistic oversized value using a helper.
+	// Test the boundary through the constant rather than allocating 68 GB.
 	testPlaintextTooLong(t, key, nonce)
 }
 
-// testPlaintextTooLong exercises the plaintext-length guard by wrapping
-// aesGCMSIVEncryptInternal (which has no length check) and verifying that
-// AESGCMSIVEncrypt (which does) rejects inputs at the boundary.
-//
-// We cannot allocate 68 GB in a test. Instead, we confirm the guard runs for
-// inputs that are syntactically at the limit by checking that the enforced
-// maximum matches the RFC value and that the error type is returned correctly.
+// testPlaintextTooLong checks the enforced maximum matches RFC 8452 and the error type is returned.
 func testPlaintextTooLong(t *testing.T, key, nonce []byte) {
 	t.Helper()
 	// Verify the constant matches RFC 8452 §6.

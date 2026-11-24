@@ -1,30 +1,10 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 1 test in this file exercises HMAC-SHA256 under a four-byte key. FIPS
-// 140-3 does not approve that, but the key is INITIAL_SEED_KEY = [1, 2, 3,
-// 4], the constant rust/protocol/src/sender_keys.rs fixes for the test this
-// one ports, so the fips140only build tag drops this file from the FIPS
-// gate. `make test` and `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): the ported Rust test uses HMAC-SHA256 under the 4-byte INITIAL_SEED_KEY.
 
 package record
 
-// sender_key_state_machine_test.go — ports the remaining Rust sender-key state
-// machine tests from rust/protocol/src/sender_keys.rs:461-629 that are not
-// already covered by coverage_boost_test.go.
-//
-// Ported Rust tests (by Rust source line):
-//   add_single_state             sender_keys.rs:461   → TestRust_AddSingleState
-//   add_second_state             sender_keys.rs:476   → TestRust_AddSecondState
-//   iteration                    sender_keys.rs:605   → TestRust_SenderChainKeyIteration
-//   when_sender_chain_key_…      sender_keys.rs:629   → TestRust_SenderChainKeyIterationOverflow
-//
-// The following Rust tests are already ported in coverage_boost_test.go:
-//   when_exceed_maximum_states_then_oldest_is_ejected (495) → TestAddSenderKeyState_ExceedsMaxOldestEjected
-//   when_second_state_with_same_pk_and_chain_id_…_keeps_first_data (537) → TestAddSenderKeyState_ReinsertExisting
-//   when_second_state_with_different_pk_but_same_chain_id_…_replaced (553) → TestAddSenderKeyState_DifferentSigningKey
-//   when_second_state_with_same_pk_and_chain_id_…_becomes_most_recent (570) → TestAddSenderKeyState_ReinsertBecomesMostRecent
+// Ports of the Rust sender-key state machine tests (sender_keys.rs:461-629) not covered by coverage_boost_test.go.
 
 import (
 	"bytes"
@@ -129,17 +109,7 @@ func TestRust_AddSecondState(t *testing.T) {
 	assertChainKey(t, rec, chainID2, ck2)
 }
 
-// TestRust_SenderChainKeyIteration ports the iteration test
-// (sender_keys.rs:605-627).
-//
-// Each call to Next() must produce a strictly increasing iteration counter and
-// a seed that has not been seen before (no duplicates over 10 steps).
-// The iteration counter starts at INITIAL_ITERATION (0) and increments by 1.
-//
-// Rust source constants:
-//
-//	INITIAL_ITERATION: u32 = 0
-//	INITIAL_SEED_KEY:  [u8; 4] = [1, 2, 3, 4]
+// TestRust_SenderChainKeyIteration checks Next yields increasing iterations from 0 and unique seeds (sender_keys.rs:605).
 func TestRust_SenderChainKeyIteration(t *testing.T) {
 	const initialIteration = uint32(0)
 	initialSeedKey := []byte{1, 2, 3, 4}
@@ -167,15 +137,7 @@ func TestRust_SenderChainKeyIteration(t *testing.T) {
 	}
 }
 
-// TestRust_SenderChainKeyIterationOverflow ports when_sender_chain_key_iteration_overflows
-// (sender_keys.rs:629-637).
-//
-// Next() at u32::MAX must return an error matching InvalidState (Go: ErrChainTooLong).
-//
-// Rust source:
-//
-//	SenderChainKey::new(u32::MAX, INITIAL_SEED_KEY.to_vec())
-//	assert_matches!(sender_chain_key.next(), Err(SignalProtocolError::InvalidState { .. }))
+// TestRust_SenderChainKeyIterationOverflow checks Next at u32::MAX returns ErrChainTooLong (sender_keys.rs:629).
 func TestRust_SenderChainKeyIterationOverflow(t *testing.T) {
 	initialSeedKey := []byte{1, 2, 3, 4}
 

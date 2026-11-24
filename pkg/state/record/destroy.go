@@ -4,28 +4,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/ecc"
 )
 
-// Guarded key material is not reclaimed by the garbage collector: go-enclave
-// registers no finalizer, so a buffer must be explicitly destroyed or it stays
-// mlock'd for
-// the life of the process. A deserialization constructor that fails part-way
-// through has therefore stranded every guarded allocation it already made, and
-// a peer able to feed the store malformed persisted records can repeat that
-// path until the process exhausts its RLIMIT_MEMLOCK allowance.
-//
-// The helpers below release those allocations. They may only be applied to an
-// object the caller owns outright, and there are exactly two such objects: one
-// a constructor built and is about to abandon, which no caller has ever seen,
-// and a clone that will not be committed, which Clone built out of its own
-// guarded buffers (see State.DiscardClone). That restriction is what makes them
-// safe. Ordinary live objects are shared by design — State.CopyFrom moves the
-// clone's chains, root key and PQ ratchet state into the state committed into,
-// so the two then own the same guarded objects — and destroying a reachable
-// object would be a use-after-free. Giving the record layer a general
-// destruction model means settling that ownership question first; nothing here
-// depends on it.
-//
-// Every helper is nil-safe and idempotent, so a partially populated object is
-// as safe to pass as a complete one.
+// Guarded memory is never reclaimed by the GC, so a constructor that fails part-way must release what it allocated. These nil-safe, idempotent helpers apply only to objects the caller owns outright: an abandoned constructor result or an uncommitted clone.
 
 // destroyState releases the guarded material held by a session state.
 func destroyState(state *State) {

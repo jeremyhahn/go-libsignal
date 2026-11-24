@@ -252,12 +252,7 @@ func TestDecryptKeyTrimmed(t *testing.T) {
 	}
 	// recvCounter is now 13; skippedKeys still contains counter=1.
 
-	// To trigger ErrKeyTrimmed for counter=1, we need:
-	//   counter + maxSkippedKeys < chain.recvCounter
-	//   1 + 2000 < chain.recvCounter → chain.recvCounter >= 2002
-	//
-	// Use white-box access to directly set the chain state and clear the
-	// skipped key entry for counter 1 so it is not found in skippedKeys.
+	// ErrKeyTrimmed for counter 1 needs recvCounter >= 2002; set the chain directly and drop the skipped key.
 	chain := bob.chains[0]
 
 	// Remove any stored skipped key for counter=1.

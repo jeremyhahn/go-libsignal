@@ -7,20 +7,7 @@ import (
 	"crypto/subtle"
 )
 
-// Decrypt decrypts AES-256-CBC ciphertext using the given iv and key, removing
-// PKCS7 padding. The key must be exactly 32 bytes (AES-256). The ciphertext is
-// not mutated.
-//
-// This function is used by the Signal session and group ciphers. The argument
-// order (iv, key) differs from AESCBCDecrypt (key, iv); both delegate to the
-// same underlying implementation.
-//
-// IMPORTANT: Callers MUST collapse all decrypt errors into a single opaque
-// "decryption failed" result before returning to network peers. Returning
-// distinct errors (e.g. bad padding vs. wrong key) creates an oracle that can
-// be exploited for chosen-ciphertext attacks. This matches the Rust reference
-// which maps all failures to DecryptionError::BadCiphertext("failed to decrypt").
-// Rust source: rust/crypto/src/aes_cbc.rs:52
+// Decrypt removes PKCS7 padding from AES-256-CBC ciphertext; callers must collapse all decrypt errors into one opaque failure to avoid a padding oracle.
 func Decrypt(iv, key, ciphertext []byte) ([]byte, error) {
 	if len(key) != 32 {
 		return nil, &ErrCipherInvalidKeySize{Got: len(key)}
@@ -31,11 +18,7 @@ func Decrypt(iv, key, ciphertext []byte) ([]byte, error) {
 	return AESCBCDecrypt(key, iv, ciphertext)
 }
 
-// Encrypt encrypts plaintext using AES-256-CBC with the given iv and key,
-// appending PKCS7 padding. The key must be exactly 32 bytes (AES-256).
-//
-// The argument order (iv, key) differs from AESCBCEncrypt (key, iv); both
-// delegate to the same underlying implementation.
+// Encrypt encrypts with AES-256-CBC and PKCS7 padding; note the (iv, key) argument order.
 func Encrypt(iv, key, plaintext []byte) ([]byte, error) {
 	if len(key) != 32 {
 		return nil, &ErrCipherInvalidKeySize{Got: len(key)}
@@ -43,10 +26,7 @@ func Encrypt(iv, key, plaintext []byte) ([]byte, error) {
 	return AESCBCEncrypt(key, iv, plaintext)
 }
 
-// pkcs7Pad right-pads the given byte slice with 1 to n bytes, where
-// n is the block size. The size of the result is x times n, where x
-// is at least 1. Empty input is valid per PKCS#7: it produces a full
-// block of padding bytes (e.g., 16 bytes of 0x10 for a 16-byte block).
+// pkcs7Pad appends 1 to n bytes of padding; empty input yields a full block.
 func pkcs7Pad(b []byte, blocksize int) ([]byte, error) {
 	if blocksize <= 0 {
 		return nil, &ErrCipherInvalidBlockSize{Got: blocksize}
@@ -58,11 +38,7 @@ func pkcs7Pad(b []byte, blocksize int) ([]byte, error) {
 	return pb, nil
 }
 
-// pkcs7Unpad validates and removes PKCS#7 padding from the given byte slice.
-// The validation is constant-time: all padding bytes are checked without
-// early return to prevent timing side-channels. The returned value will be
-// 1 to n bytes smaller depending on the amount of padding, where n is the
-// block size.
+// pkcs7Unpad validates and removes PKCS#7 padding in constant time.
 func pkcs7Unpad(b []byte, blocksize int) ([]byte, error) {
 	if blocksize <= 0 {
 		return nil, &ErrCipherInvalidBlockSize{Got: blocksize}
@@ -81,11 +57,7 @@ func pkcs7Unpad(b []byte, blocksize int) ([]byte, error) {
 	good := subtle.ConstantTimeLessOrEq(1, padLen) &
 		subtle.ConstantTimeLessOrEq(padLen, blocksize)
 
-	// Check all padding bytes match padByte in constant time.
-	// We always iterate over the last blocksize bytes to avoid
-	// leaking padLen through loop count. For each position, we
-	// conditionally include its comparison based on whether it
-	// falls within the padding region.
+	// Check the last blocksize bytes in constant time, masking positions outside the padding.
 	for i := 0; i < blocksize; i++ {
 		// isPad is 1 if position (len(b)-1-i) is in the padding region.
 		isPad := subtle.ConstantTimeLessOrEq(i+1, padLen)

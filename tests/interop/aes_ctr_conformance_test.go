@@ -1,14 +1,4 @@
-// Conformance test: AES-256-CTR-32-BE vs Rust signal_crypto::Aes256Ctr32.
-//
-// Mirrors the Rust test rust/crypto/tests/aes_ctr.rs::aes_ctr_smoke_test,
-// which is itself a NIST SP 800-38A reference vector. The fixture
-// at fixtures/crypto/aes_ctr_known_answers.json carries the same hex
-// constants; the manifest's upstream_must_contain check fails CI if any
-// of those hex literals disappear from the upstream source.
-//
-// The test drives pkg/cipher.NewAES256CTR, which mirrors Rust's
-// Aes256Ctr32::from_key(key, nonce, init_ctr).
-// Rust source: rust/crypto/src/aes_ctr.rs:35-45
+// Conformance: pkg/cipher.NewAES256CTR against Rust Aes256Ctr32 with the NIST SP 800-38A vector from fixtures/crypto/aes_ctr_known_answers.json.
 
 package interop
 

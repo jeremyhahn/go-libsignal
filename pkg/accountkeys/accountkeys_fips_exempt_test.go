@@ -1,13 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// MakeSalt feeds the username to HKDF as input key material, matching Rust
-// PinHash::make_salt (rust/account-keys/src/hash.rs); the known-answer vector
-// uses the eight-byte username "username". crypto/hkdf rejects keys shorter
-// than 112 bits under GODEBUG=fips140=only, so this test is excluded from the
-// FIPS gate by the fips140only build tag. Everything else in this package
-// stays gated.
+// FIPS 140-3 exemption (docs/FIPS.md): MakeSalt feeds an 8-byte username to HKDF, which fips140=only rejects.
 
 package accountkeys
 

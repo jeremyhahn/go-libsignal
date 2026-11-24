@@ -1,12 +1,4 @@
-// Interop tests for BackupReader.ValidatedReadAll against Rust-generated
-// fixtures.
-//
-// These tests wire the canonical fixture files under
-// tests/interop/fixtures/messagebackup/ into the full read-and-validate path
-// implemented by pkg/backup.BackupReader.ValidatedReadAll.
-//
-// Rust libsignal ref: rust/message-backup/src/backup.rs BackupReader::read_all
-// at Rust libsignal commit 98915c442d.
+// BackupReader.ValidatedReadAll against the Rust message-backup fixtures (Rust BackupReader::read_all).
 package interop
 
 import (
@@ -19,14 +11,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/tests/interop/loader"
 )
 
-// TestMessageBackup_ValidatedReadLegacy exercises ValidatedReadAll on the
-// Rust-generated legacy CBC+HMAC backup fixture. It verifies that:
-// 1. DecryptFrames succeeds (HMAC+CBC path).
-// 2. ValidatedReadAll parses the first frame as BackupInfo.
-// 3. The BackupInfo version is 1.
-//
-// Fixture: messagebackup/cases/valid/legacy_account_encrypted.json
-// Rust source: rust/message-backup/tests/res/test-cases/valid-encrypted/legacy-account.binproto.encrypted
+// TestMessageBackup_ValidatedReadLegacy checks the legacy CBC+HMAC fixture decrypts and its first frame is BackupInfo version 1.
 func TestMessageBackup_ValidatedReadLegacy(t *testing.T) {
 	raw := loader.MustRead("messagebackup/cases/valid/legacy_account_encrypted.json")
 	var fix mbCaseFixture
@@ -77,12 +62,7 @@ func TestMessageBackup_ValidatedReadLegacy(t *testing.T) {
 	t.Logf("ValidatedReadAll decoded %d frames from Rust legacy backup (source: %s)", len(result.Frames)+1, fix.Source)
 }
 
-// TestMessageBackup_ValidatedReadModernMagicCheck verifies that the modern
-// SBACKUP\x01 fixture is correctly identified as a modern format stream and
-// that DecryptFrames can decode it end-to-end via the modern header path.
-//
-// Fixture: messagebackup/cases/valid/new_account_encrypted.json
-// Rust source: rust/message-backup/tests/res/test-cases/valid-encrypted/new-account.binproto.encrypted
+// TestMessageBackup_ValidatedReadModernMagicCheck checks the SBACKUP\x01 fixture decrypts through the modern header path.
 func TestMessageBackup_ValidatedReadModernMagicCheck(t *testing.T) {
 	raw := loader.MustRead("messagebackup/cases/valid/new_account_encrypted.json")
 	var fix mbCaseFixture
@@ -100,8 +80,7 @@ func TestMessageBackup_ValidatedReadModernMagicCheck(t *testing.T) {
 		t.Fatalf("modern fixture does not start with SBACKUP\\x01 magic (got %x)", input[:8])
 	}
 
-	// The modern format: DecryptFrames must detect SBACKUP\x01, parse the
-	// metadata header, validate it, then decrypt the payload.
+	// DecryptFrames detects SBACKUP\x01, validates the metadata header, then decrypts.
 	key := mbKeyFromFixture(t, &fix)
 	defer key.Zeroize()
 

@@ -6,13 +6,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/mlkembraid/internal/polynomial"
 )
 
-// Decoder collects polynomial-encoded chunks and reconstructs the original
-// message once enough chunks have been received for interpolation. Chunks may
-// arrive in any order and duplicates are silently ignored.
-//
-// The wire format for each chunk matches the Rust SPQR reference:
-//
-//	[varint(index)] [data(32 bytes)]
+// Decoder reconstructs a message from polynomial chunks ([varint(index)][32 bytes], Rust SPQR) arriving in any order; duplicates are ignored.
 type Decoder struct {
 	inner *polynomial.PolyDecoder
 
@@ -21,13 +15,7 @@ type Decoder struct {
 	// padded by the Encoder.
 	originalLen int
 
-	// totalChunksNeeded is the number of distinct chunk indices required for
-	// reconstruction (ceil(originalLen/ChunkDataSize)). The decoder accepts
-	// polynomial redundancy chunks (indices ≥ totalChunksNeeded) because the
-	// Lagrange interpolation works with any N distinct x-values. At most
-	// 2*totalChunksNeeded unique indices are accepted per lifetime to bound
-	// memory use; any peer legitimately needs at most one first pass plus one
-	// redundancy pass worth of chunks.
+	// totalChunksNeeded is ceil(originalLen/ChunkDataSize); redundancy indices are accepted up to 2*totalChunksNeeded unique indices.
 	totalChunksNeeded int
 
 	// seenIndices tracks which chunk indices have been accepted, for duplicate
@@ -46,10 +34,7 @@ type Decoder struct {
 	complete bool
 }
 
-// NewDecoder creates a decoder expecting a message of originalLen bytes.
-//
-// The chunkSize parameter is accepted for API compatibility but has no effect;
-// the Rust SPQR wire format mandates fixed 32-byte chunk payloads.
+// NewDecoder returns a decoder for an originalLen-byte message; chunkSize is ignored, as the wire format fixes 32 bytes.
 func NewDecoder(originalLen, _ int) (*Decoder, error) {
 	if originalLen <= 0 {
 		return nil, &ErrInvalidInput{Field: "expectedSize", Reason: "must be positive"}
@@ -80,16 +65,7 @@ func NewDecoder(originalLen, _ int) (*Decoder, error) {
 	}, nil
 }
 
-// AddChunk parses a Rust-compatible wire chunk:
-//
-//	[varint(index)] [data(32 bytes)]
-//
-// The varint-encoded index is decoded first, then exactly 32 bytes of payload
-// data follow. Duplicate chunks for the same index are silently ignored.
-// Polynomial redundancy chunks (index ≥ TotalChunks) are accepted because the
-// Lagrange interpolation works with any N distinct x-values. A hard cap of
-// 2*TotalChunks unique indices per decoder lifetime bounds memory use against
-// DoS via index flooding.
+// AddChunk parses [varint(index)][32 bytes], ignoring duplicates and capping unique indices at 2*TotalChunks.
 func (d *Decoder) AddChunk(chunk []byte) error {
 	if len(chunk) == 0 {
 		return &ErrChunkFormat{Reason: "chunk is empty"}
@@ -118,11 +94,7 @@ func (d *Decoder) AddChunk(chunk []byte) error {
 		return nil
 	}
 
-	// Cap unique accepted indices at 2*totalChunksNeeded to bound memory use.
-	// An attacker can otherwise force up to 65536 distinct indices, bloating
-	// seenIndices and chunkLog to ~2 MB. Any legitimate peer needs at most one
-	// first pass (indices 0..N-1) plus one redundancy pass (indices N..2N-1);
-	// any index beyond 2N is spurious.
+	// Cap unique indices at 2*totalChunksNeeded to bound memory against index flooding.
 	if len(d.seenIndices) >= 2*d.totalChunksNeeded {
 		return &ErrChunkIndex{Index: index, Total: uint16(d.totalChunksNeeded)}
 	}
@@ -197,9 +169,7 @@ func (d *Decoder) TotalChunks() int {
 func (d *Decoder) Reset() {
 	inner, err := polynomial.NewPolyDecoder(d.inner.PtsNeeded * 2)
 	if err != nil {
-		// coverage-exempt: defensive invariant panic; parameters were validated at
-		// construction time so NewPolyDecoder cannot fail here. Cannot be unit-tested
-		// without corrupting internal state (see CLAUDE.md).
+		// coverage-exempt: parameters were validated at construction, so this invariant panic is unreachable.
 		panic("mlkembraid: decoder Reset: unexpected polynomial error: " + err.Error())
 	}
 	d.inner = inner
@@ -209,10 +179,7 @@ func (d *Decoder) Reset() {
 	d.complete = false
 }
 
-// NewDecoderFromInner creates a Decoder wrapping an already-constructed
-// PolyDecoder. The originalLen is the original (un-padded) message length in
-// bytes. This is used exclusively by the proto codec (Phase D) to reconstruct
-// a Decoder from a deserialized protobuf.
+// NewDecoderFromInner wraps a PolyDecoder for the proto codec; originalLen is the unpadded message length.
 func NewDecoderFromInner(inner *polynomial.PolyDecoder, originalLen int) *Decoder {
 	totalChunks := (originalLen + ChunkDataSize - 1) / ChunkDataSize
 	// Reconstruct seenIndices from the chunkLog (empty here — the proto decoder
@@ -226,9 +193,7 @@ func NewDecoderFromInner(inner *polynomial.PolyDecoder, originalLen int) *Decode
 	}
 }
 
-// InnerDecoder returns the underlying polynomial decoder. It is used by the
-// proto marshaling layer (Phase D). Callers outside the SPQR state serializer
-// should not call this directly.
+// InnerDecoder returns the polynomial decoder for the proto codec only.
 func (d *Decoder) InnerDecoder() *polynomial.PolyDecoder {
 	return d.inner
 }

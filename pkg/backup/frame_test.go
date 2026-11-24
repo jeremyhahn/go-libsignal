@@ -158,11 +158,7 @@ func TestVerifyHMAC(t *testing.T) {
 	}
 }
 
-// TestStripModernHeaderMetaLenOverflow is a regression test for the uint64
-// addition overflow in stripModernHeader. A maximal-varint metaLen
-// (0xFFFFFFFFFFFFFFFF) previously caused `uint64(off) + metaLen` to wrap
-// around and pass the bounds check, leading to a slice-bounds panic.
-// The fix uses `metaLen > uint64(len(data)-off)` which is overflow-safe.
+// TestStripModernHeaderMetaLenOverflow checks a maximal varint metaLen cannot wrap the bounds check.
 func TestStripModernHeaderMetaLenOverflow(t *testing.T) {
 	// Build a minimal modern header:
 	//   8-byte magic + 10-byte maximal varint (metaLen = 2^64-1) + no payload.

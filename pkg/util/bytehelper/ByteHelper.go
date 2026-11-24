@@ -56,10 +56,7 @@ func Split(input []byte, firstLength, secondLength int) ([][]byte, error) {
 	return parts, nil
 }
 
-// SplitThree will take the given byte array and split it into thirds,
-// with the first third being "firstLength" in size, the second third
-// being "secondLength" in size, and the last third being "thirdLength"
-// in size.
+// SplitThree splits value into parts of firstLength, secondLength and thirdLength bytes.
 func SplitThree(input []byte, firstLength, secondLength, thirdLength int) ([][]byte, error) {
 	if input == nil {
 		return nil, &ErrNilInput{}

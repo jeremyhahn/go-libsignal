@@ -11,36 +11,17 @@ import (
 // (60 * 60 * 24 * 30 seconds = 30 days).
 const maxUnacknowledgedSessionAge = 30 * 24 * time.Hour
 
-// SessionUsabilityRequirements is a bitflag type that specifies which properties
-// a session must satisfy to be considered usable. It mirrors Rust's
-// bitflags! SessionUsabilityRequirements struct in libsignal-protocol.
-//
-// Use bitwise OR to combine multiple requirements. Zero value means no
-// requirements beyond the presence of a sender chain.
+// SessionUsabilityRequirements are bitflags a usable session must meet beyond having a sender chain.
 type SessionUsabilityRequirements uint32
 
 const (
-	// SessionRequireNotStale requires that the session is not stale.
-	//
-	// A non-stale session is one of the following:
-	//   - "incoming", i.e. started by the peer (no pending pre-key)
-	//   - "acknowledged", i.e. started locally but received a response
-	//   - no more than 30 days old (matching Rust's MAX_UNACKNOWLEDGED_SESSION_AGE)
+	// SessionRequireNotStale requires an incoming or acknowledged session, or one at most 30 days old.
 	SessionRequireNotStale SessionUsabilityRequirements = 1 << iota
 
-	// SessionRequireEstablishedWithPqxdh requires that the session was established
-	// using PQXDH (version > PreKyberVersion) rather than X3DH/X4DH.
-	//
-	// This includes unacknowledged sessions that are using PQXDH, since if they
-	// get a response, the peer is confirmed to be using PQXDH as well.
+	// SessionRequireEstablishedWithPqxdh requires a PQXDH session, acknowledged or not.
 	SessionRequireEstablishedWithPqxdh
 
-	// SessionRequireSpqr requires that the session is using SPQR (post-quantum ratchet).
-	//
-	// Warning: This allows unacknowledged sessions that include SPQR in their PreKey
-	// messages. If the peer downgrades the session and the local client allows it,
-	// a session previously considered "usable" can become "not usable" upon receiving
-	// a response. Only use this flag when future downgrades will also be rejected.
+	// SessionRequireSpqr requires SPQR; an unacknowledged session may lose it if the peer downgrades, so use it only when downgrades are rejected.
 	SessionRequireSpqr
 )
 
@@ -54,16 +35,7 @@ func (r SessionUsabilityRequirements) Contains(flag SessionUsabilityRequirements
 	return r&flag == flag
 }
 
-// HasUsableSenderChain reports whether the session state has a usable sender
-// chain that satisfies all requirements in req.
-//
-// It mirrors Rust's SessionState::has_usable_sender_chain exactly:
-//   - If there is no sender chain, returns false.
-//   - If SessionRequireNotStale is set: an unacknowledged session older than
-//     maxUnacknowledgedSessionAge is considered stale and returns false.
-//   - If SessionRequireEstablishedWithPqxdh is set: sessions at or below
-//     protocol.PreKyberVersion (3) return false.
-//   - If SessionRequireSpqr is set: sessions without PQ ratchet state return false.
+// HasUsableSenderChain reports whether the state has a sender chain meeting every requirement in req, as Rust has_usable_sender_chain does.
 func (s *State) HasUsableSenderChain(now time.Time, req SessionUsabilityRequirements) (bool, error) {
 	if s.senderChain == nil {
 		return false, nil

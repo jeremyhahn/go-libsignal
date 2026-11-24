@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 10 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) requires X25519.
 
 package record
 
@@ -209,10 +204,7 @@ func TestAddSenderKeyState_ReinsertBecomesMostRecent(t *testing.T) {
 	}
 }
 
-// TestAddSenderKeyState_ExceedsMaxOldestEjected verifies FIFO eviction when
-// MAX_SENDER_KEY_STATES is exceeded, matching Rust's
-// when_exceed_maximum_states_then_oldest_is_ejected
-// (rust/protocol/src/sender_keys.rs:496-535).
+// TestAddSenderKeyState_ExceedsMaxOldestEjected checks FIFO eviction past MAX_SENDER_KEY_STATES (Rust sender_keys.rs).
 func TestAddSenderKeyState_ExceedsMaxOldestEjected(t *testing.T) {
 	if maxSenderKeyStates != 5 {
 		t.Fatalf("test written expecting maxSenderKeyStates=5, got %d", maxSenderKeyStates)

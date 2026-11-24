@@ -6,35 +6,19 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/mlkembraid"
 )
 
-// CompositeHeader carries the EC header, PQ counter, and SCKA message for
-// each Triple Ratchet message.
-//
-// Serialized format:
-//
-//	ecHeaderLen(4 BE) + ecHeader(N) + sckaWireMessage(M)
-//
-// The SCKA wire message uses the Rust-compatible format:
-//
-//	version(1) + varint(epoch) + varint(chain_index) + msg_type(1) + [chunk_data]
-//
-// where chain_index is encoded as PQCounter to support out-of-order delivery.
+// CompositeHeader is ecHeaderLen(4 BE) + ecHeader + SCKA message, whose chain_index is PQCounter.
 type CompositeHeader struct {
 	// ECHeader is the serialized EC Signal message header.
 	ECHeader []byte
 
-	// PQCounter is the SPQR chain counter for out-of-order support.
-	// This is the chain_index embedded in the SCKA wire message.
+	// PQCounter is the SPQR chain counter, sent as the SCKA chain_index.
 	PQCounter uint32
 
 	// SCKAMsg is the SCKA chunk from the Braid.
 	SCKAMsg *mlkembraid.Message
 }
 
-// marshalCompositeHeader serializes a CompositeHeader into:
-//
-//	ecHeaderLen(4 BE) + ecHeader(N) + sckaWireMsg(M)
-//
-// where the sckaWireMsg includes the PQCounter as the chain_index.
+// marshalCompositeHeader encodes h as ecHeaderLen(4 BE) + ecHeader + SCKA message.
 func marshalCompositeHeader(h *CompositeHeader) ([]byte, error) {
 	if h == nil {
 		return nil, &ErrInvalidInput{Field: "header", Reason: "must not be nil"}

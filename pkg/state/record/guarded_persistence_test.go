@@ -1,9 +1,4 @@
-// Guarded-persistence tests that stay inside the FIPS gate.
-//
-// These build their key material byte by byte, or use Kyber, and reach no
-// primitive the Go Cryptographic Module rejects. The seven tests whose
-// fixtures carry a real Curve25519 key pair live in
-// guarded_persistence_fips_exempt_test.go -- see docs/FIPS.md.
+// Guarded-persistence tests inside the FIPS gate; Curve25519 fixtures are in guarded_persistence_fips_exempt_test.go.
 
 package record_test
 
@@ -15,12 +10,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
 )
 
-// A record builds its serializable structure on demand and destroys its
-// guarded private key once the serializer is done with it. Serializing twice
-// therefore has to produce identical bytes: if a record ever went back to
-// sharing the guarded key with the structure it hands to the serializer, the
-// first Serialize would destroy the record's own key and the second would
-// return zeros or panic.
+// Serializing twice must give identical bytes, proving the structure does not share the record's guarded key.
 
 func TestKyberPreKeySerializeIsRepeatable(t *testing.T) {
 	keyPair, err := kem.NewGuardedKyber1024().Generate()
@@ -131,8 +121,7 @@ func TestKyberPreKeyGuardedKeyPairIsIndependent(t *testing.T) {
 	}
 }
 
-// TestKyberPreKeyDestroyReleasesSecret checks the record lifecycle: once the
-// record is destroyed its key material is gone and it can no longer be used.
+// TestKyberPreKeyDestroyReleasesSecret checks a destroyed record has no key material and cannot be used.
 func TestKyberPreKeyDestroyReleasesSecret(t *testing.T) {
 	keyPair, err := kem.NewGuardedKyber1024().Generate()
 	if err != nil {
@@ -190,9 +179,7 @@ func TestNewKyberPreKeyFromStructureRejectsAbsentPrivateKey(t *testing.T) {
 	}
 }
 
-// TestSetPqRatchetStateReplacesPreviousState checks the replacement path used
-// on every SPQR send and receive: the new state is readable and the old one is
-// gone rather than left behind.
+// TestSetPqRatchetStateReplacesPreviousState checks the new SPQR state is readable and the old one destroyed.
 func TestSetPqRatchetStateReplacesPreviousState(t *testing.T) {
 	s := newSerializer()
 	state := record.NewState(s.State)
@@ -209,8 +196,7 @@ func TestSetPqRatchetStateReplacesPreviousState(t *testing.T) {
 	}
 }
 
-// TestCopyFromKeepsPqRatchetStateOnSelfCopy checks that committing a state onto
-// itself does not destroy the guarded SPQR state it is about to keep.
+// TestCopyFromKeepsPqRatchetStateOnSelfCopy checks copying a state onto itself keeps its SPQR state.
 func TestCopyFromKeepsPqRatchetStateOnSelfCopy(t *testing.T) {
 	s := newSerializer()
 	state := record.NewState(s.State)

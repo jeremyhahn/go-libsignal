@@ -1,24 +1,4 @@
-// Package spqr: proto_codec.go — Phase D marshaling bridge.
-//
-// MarshalStateProto / UnmarshalStateProto convert a Go SPQR into/from the
-// Rust PqRatchetState protobuf wire format. The goal is byte-level parity
-// with Rust's PqRatchetState::encode_to_vec().
-//
-// Epoch convention: Rust stores epochs 1-indexed in the protobuf; Go uses
-// 0-indexed epochs internally. Add 1 when writing to proto; subtract 1 when
-// reading.
-//
-// NOTE: Three states (Ct1Sampled, EkReceivedCt1Sampled, Ct1Acknowledged)
-// expose a semantic gap: Rust's Unchunked.Ct1Sent stores hdr (64 B) and es
-// (2080 B — the intermediate EncapsulationState), but Go destroys those
-// fields immediately after encapsulation completes in bobCompleteEncapsulation.
-// When unmarshaling from Rust-produced bytes for these states, the hdr and es
-// bytes are stored back in bobEkSeed/bobHek (for hdr) and bobEncapSecret (for
-// es) so that a subsequent marshal round-trips identically. Callers that
-// attempt live protocol operation on unmarshaled states in these three variants
-// should call Braid.Send/Recv only after the braid has been freshly
-// re-initialized, because the Go runtime may not be able to resume crypto
-// operations on fields that were already consumed by the Rust peer.
+// MarshalStateProto and UnmarshalStateProto convert SPQR to Rust PqRatchetState bytes; proto epochs are 1-indexed, Go's 0-indexed; Ct1 states keep Rust's hdr and es only for round-trips.
 package spqr
 
 import (
@@ -94,18 +74,7 @@ func (e *ErrProtoChainUnderflow) Error() string {
 
 // ────────────────────────── public codec functions ───────────────────────────
 
-// MarshalStateProto serializes a Go SPQR into Rust's PqRatchetState wire
-// format. Round-trips with Rust's spqr::initial_state / spqr::send /
-// spqr::recv byte-for-byte when braid state is present.
-//
-// When s has no attached braid (s.braid == nil), the returned bytes encode
-// only the outer PqRatchetState envelope with version_negotiation and chain
-// fields; the inner V1State is omitted.
-//
-// V0-disabled states (negotiated to V0 / PQR absent) are serialized as empty
-// bytes, matching Rust's empty_state() / recv() V0 path which returns vec![].
-// This eliminates the Go-only VersionNegotiation{AuthKey:nil} sentinel that
-// was not compatible with Rust's proto decoder (lib.rs:470-473).
+// MarshalStateProto encodes s as Rust PqRatchetState bytes; without a braid only the envelope, and V0 states as empty bytes (Rust empty_state).
 func MarshalStateProto(s *SPQR) ([]byte, error) {
 	// V0-disabled: return empty bytes matching Rust's empty_state() (lib.rs:45-47).
 	if s.IsDisabled() {
@@ -133,12 +102,7 @@ var marshalStateMessage = func(pb *pqratchetpb.PqRatchetState) ([]byte, error) {
 	return proto.Marshal(pb)
 }
 
-// UnmarshalStateProto deserializes Rust-produced state bytes into a Go SPQR.
-// It performs the inverse of MarshalStateProto.
-//
-// Empty input is treated as V0-disabled (Rust's empty_state()), matching
-// Rust's decode_state (lib.rs:470-473) which interprets empty bytes as
-// PqRatchetState{inner:None, chain:None, version_negotiation:None}.
+// UnmarshalStateProto decodes Rust PqRatchetState bytes into an SPQR; empty input is V0 (Rust decode_state).
 func UnmarshalStateProto(data []byte) (*SPQR, error) {
 	// Empty bytes → V0-disabled, matching Rust's empty_state() convention.
 	if len(data) == 0 {
@@ -238,13 +202,7 @@ type skippedRecvRecord struct {
 	key     *secret.Secret
 }
 
-// spqrChainToProto converts Go SPQR chain state to proto Chain message.
-// Returns nil when no chain data exists.
-//
-// The recv.prev field is encoded as a concatenation of (be32 idx | 32 B key)
-// records, one per skipped recv key for that epoch, matching Rust's
-// KeyHistory.data layout (chain.rs:91-96). This allows full round-trip fidelity
-// of the skipped-key map across serialize/deserialize cycles.
+// spqrChainToProto returns the proto Chain, or nil without chain data; recv.prev holds (be32 idx | 32-byte key) records (Rust KeyHistory).
 func spqrChainToProto(s *SPQR) (*pqratchetpb.Chain, error) {
 	if s.rootKey == nil || s.rootKey.IsDestroyed() {
 		return nil, nil
@@ -280,10 +238,7 @@ func spqrChainToProto(s *SPQR) (*pqratchetpb.Chain, error) {
 	return pb, nil
 }
 
-// wipeChainProto zeroizes the secret copies spqrChainToProto made: the
-// next root and each link's send and receive keys, plus the receive
-// direction's skipped-key buffer. All of them are owned copies; nothing
-// in a Chain message aliases live state. It is nil-safe.
+// wipeChainProto zeroizes the secret copies spqrChainToProto made; it is nil-safe.
 func wipeChainProto(c *pqratchetpb.Chain) {
 	if c == nil {
 		return
@@ -304,10 +259,7 @@ func wipeChainProto(c *pqratchetpb.Chain) {
 	}
 }
 
-// braidCopies records the heap buffers the braid marshal helpers own: the
-// copies the mlkembraid Proto* accessors return and the temporaries built
-// from them. Only recorded buffers are wiped; fields that alias live state
-// are never recorded.
+// braidCopies records the heap buffers the braid marshal helpers own, so only those are wiped.
 type braidCopies struct{ bufs [][]byte }
 
 // keep records b as owned and returns it. It is nil-safe on both sides.
@@ -365,14 +317,7 @@ func chainSendDirToProto(chain *EpochChain) *pqratchetpb.Chain_Epoch_EpochDirect
 	}
 }
 
-// chainRecvDirToProto converts an EpochChain recv direction to proto,
-// encoding skipped recv keys as (be32 counter | 32 B key) records in the prev
-// field. This matches Rust's KeyHistory.data wire format exactly:
-//
-//	chain.rs ChainEpochDirection::into_pb → prev: self.prev.data
-//	chain.rs KeyHistory::add → data.extend(&k.0.to_be_bytes()); data.extend(&k.1)
-//
-// KEY_SIZE = 36 bytes per record (4-byte BE index + 32-byte key).
+// chainRecvDirToProto encodes a recv direction with skipped keys as 36-byte (be32 counter | key) records (Rust KeyHistory).
 func chainRecvDirToProto(chain *EpochChain, skipped []skippedRecvRecord) *pqratchetpb.Chain_Epoch_EpochDirection {
 	var next []byte
 	if chain.recvKey != nil && !chain.recvKey.IsDestroyed() {
@@ -413,14 +358,7 @@ func sortedEpochs(chains map[uint64]*EpochChain) []uint64 {
 	return epochs
 }
 
-// insertionSortEpochs sorts epochs ascending in place. Insertion sort — chain
-// maps are always tiny (≤ 3 epochs).
-//
-// Split out from sortedEpochs so it can be tested on input the test chooses.
-// Driven through the map, the shift loop below runs only when Go's randomised
-// iteration order happens to hand it unsorted keys, so its coverage varied
-// between runs on identical source and moved the repository total by 0.1pp at
-// random (measured 1 run in 12 on go1.26.6).
+// insertionSortEpochs sorts the few chain epochs ascending in place.
 func insertionSortEpochs(epochs []uint64) {
 	for i := 1; i < len(epochs); i++ {
 		key := epochs[i]
@@ -803,14 +741,7 @@ func marshalHeaderReceived(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Aut
 	}, nil
 }
 
-// marshalCt1Sampled builds the proto for StateCt1Sampled.
-// Unchunked: Rust Ct1Sent { epoch, auth, hdr, es, ct1 }
-// Chunked:   adds sending_ct1 + receiving_ek
-//
-// hdr = bobEkSeed||bobHek (64 B), es = bobEncapSecret, ct1 = bobCt1 (960 B).
-// After Go bobCompleteEncapsulation, bobEkSeed, bobHek, bobEncapSecret are
-// destroyed. When nil, zero bytes are emitted to keep the proto structurally
-// valid. See the package comment for the documented semantic gap.
+// marshalCt1Sampled builds the StateCt1Sampled proto (Rust Ct1Sent); destroyed hdr and es fields are written as zero bytes.
 func marshalCt1Sampled(s *mlkembraid.State, ep uint64, auth *pqratchetpb.Authenticator, o *braidCopies) (*pqratchetpb.V1State_Ct1Sampled, error) {
 	ekSeed := o.keep(s.ProtoBobEKSeed())
 	hek := o.keep(s.ProtoBobHek())
@@ -989,12 +920,7 @@ func protoToSPQR(pb *pqratchetpb.PqRatchetState) (*SPQR, error) {
 		maxJump:     maxJump,
 	}
 
-	// ── version negotiation ──
-	// Rust: version_negotiation is present only during pending negotiation;
-	// it always carries a non-empty auth_key (lib.rs:220-224).
-	// A VersionNegotiation with an empty AuthKey was a Go-only legacy sentinel
-	// for V0-disabled states. New code never writes it (V0 → empty bytes);
-	// we still handle it here for backward-compatibility with older persisted states.
+	// Version negotiation is present only while pending, with a non-empty auth_key (Rust lib.rs:220-224); an empty AuthKey is still read as V0.
 	if vn := pb.VersionNegotiation; vn != nil {
 		if len(vn.AuthKey) == 0 {
 			// Legacy Go-only V0-disabled sentinel: treat as resolved-to-V0.
@@ -1099,10 +1025,7 @@ func protoChainToSPQR(pb *pqratchetpb.Chain, s *SPQR) error {
 	if pb.CurrentEpoch < n-1 {
 		return &ErrProtoChainUnderflow{CurrentEpoch: pb.CurrentEpoch, NumLinks: n}
 	}
-	// Bound the number of epoch links processed to prevent CPU-DoS from a
-	// malformed proto carrying an unbounded pb.Links slice. The cap matches
-	// maxSkippedKeys: storing more epochs than can fit in the skipped-key map
-	// has no legitimate use, and each link iteration allocates key material.
+	// Cap links at maxSkippedKeys against CPU exhaustion from malformed input.
 	const maxEpochLinks = maxSkippedKeys
 	if n > maxEpochLinks {
 		return &ErrProtoChainUnderflow{CurrentEpoch: pb.CurrentEpoch, NumLinks: n}
@@ -1118,8 +1041,7 @@ func protoChainToSPQR(pb *pqratchetpb.Chain, s *SPQR) error {
 		s.chains[ep] = chain
 	}
 
-	// Rebuild the skippedKeysFIFO from the populated skippedKeys map so that
-	// subsequent evictions have a valid FIFO order without a live-receive pass.
+	// Rebuild skippedKeysFIFO from skippedKeys so eviction order is valid.
 	s.rebuildSkippedKeysFIFO()
 
 	// Enforce the live-session cap on skipped keys after deserialization.
@@ -1132,14 +1054,7 @@ func protoChainToSPQR(pb *pqratchetpb.Chain, s *SPQR) error {
 	return nil
 }
 
-// protoEpochLinkToChain reconstructs an EpochChain from a proto Epoch link and
-// populates the global skipped-key map from the recv.prev field.
-//
-// The recv.prev field is treated as a sequence of (be32 idx | 32 B key) records,
-// matching Rust's KeyHistory.data wire format (chain.rs:91-96, KEY_SIZE=36).
-// Any non-zero length that is NOT a multiple of 36 returns ErrInvalidPrevEncoding.
-// Each valid record is inserted into skippedKeys under SkippedKeyID{Epoch: ep,
-// Counter: idx}.
+// protoEpochLinkToChain rebuilds an EpochChain and adds recv.prev's 36-byte records to skippedKeys; other lengths return ErrInvalidPrevEncoding.
 func protoEpochLinkToChain(link *pqratchetpb.Chain_Epoch, ep uint64, skippedKeys map[SkippedKeyID]*secret.Secret) (*EpochChain, error) {
 	if link == nil {
 		return nil, &ErrProtoMissingField{Name: "chain link"}
@@ -1165,10 +1080,7 @@ func protoEpochLinkToChain(link *pqratchetpb.Chain_Epoch, ep uint64, skippedKeys
 			}
 			chain.recvKey = rk
 		}
-		// Parse recv.prev as a sequence of (be32 idx | 32 B key) records.
-		// This matches Rust's KeyHistory.data layout (chain.rs KeyHistory::KEY_SIZE=36).
-		// Each record is inserted into the global skipped-key map under the
-		// epoch and counter decoded from the record header.
+		// Parse recv.prev as (be32 idx | 32-byte key) records into skippedKeys (Rust KeyHistory).
 		if prev := link.Recv.Prev; len(prev) > 0 {
 			const recSize = 4 + keyLen // 36 bytes per KeyHistory record
 			if len(prev)%recSize != 0 {

@@ -1,23 +1,8 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 1 test in this file exercises HKDF-SHA256 under an eight-byte key. FIPS
-// 140-3 does not approve that, but the key is the username, which Rust
-// PinHash::make_salt (rust/account-keys/src/hash.rs) feeds to HKDF as input
-// key material, and the vector pins it to "username", so the fips140only
-// build tag drops this file from the FIPS gate. `make test` and `make
-// coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): Rust PinHash::make_salt uses the eight-byte username "username" as HKDF key material.
 
-// Conformance test: PIN hashing and salt derivation against Rust libsignal.
-//
-// Mirrors the inline tests in rust/account-keys/src/hash.rs:
-//   - known_hash, known_hash2 → PinHash::create (Argon2id 16MiB / t=32 / out=64)
-//   - known_salt              → PinHash::make_salt (HKDF-SHA-256 over username + group_id)
-//   - known_phc_string        → local_pin_hash_with_salt (Argon2i 512KiB / t=64 / out=32)
-//
-// All hex constants are tracked by MANIFEST.toml and the drift detector
-// fails CI if any literal disappears from the upstream Rust source.
+// Conformance: PIN hashing (Argon2id) and salt derivation (HKDF-SHA-256) against rust/account-keys/src/hash.rs, constants tracked in MANIFEST.toml.
 
 package interop
 
@@ -127,12 +112,7 @@ func TestAccountKeys_MakeSalt_KAT(t *testing.T) {
 func TestAccountKeys_LocalPinPHC_KAT(t *testing.T) {
 	fx := loadPinHashFixture(t)
 
-	// Go's accountkeys.LocalPinHash uses a random salt, so we cannot
-	// deterministically rebuild the exact PHC string from a public API.
-	// Instead, assert the *verifier* round-trips on the Rust-produced PHC
-	// string: a successful verify proves Go's Argon2i implementation
-	// (algorithm, version, m, t, p, output_len, salt encoding, hash
-	// encoding) is byte-compatible with Rust's.
+	// LocalPinHash uses a random salt, so verify the Rust PHC string instead.
 	ok, err := accountkeys.VerifyLocalPinHash(fx.LocalPinPHC.Pin, fx.LocalPinPHC.ExpectedPHC)
 	if err != nil {
 		t.Fatalf("VerifyLocalPinHash on Rust PHC: %v", err)

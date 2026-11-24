@@ -1,17 +1,4 @@
-// Conformance test: DecryptionErrorMessage wire-format parity vs Rust libsignal.
-//
-// Rust source: rust/protocol/src/protocol.rs:881 DecryptionErrorMessage::for_original
-// (libsignal v0.92.2)
-//
-// Loads the Rust-emitted wire/decryption_error_message.json fixture and verifies:
-//  1. DeserializeDecryptionErrorMessage parses dem_serialized without error.
-//  2. Timestamp matches the fixture expected.timestamp_ms.
-//  3. DeviceID matches the fixture expected.device_id.
-//  4. RatchetKey serializes byte-for-byte to expected.ratchet_key_public.
-//  5. Re-serializing produces the original dem_serialized bytes.
-//  6. PlaintextContent wrapping: NewPlaintextContentFromBytes parses
-//     expected.plaintext_content_serialized and ExtractDecryptionErrorMessageFromSerializedContent
-//     recovers the same DEM.
+// DecryptionErrorMessage wire parity with the Rust fixture (protocol.rs:881): parse, fields, re-serialization and PlaintextContent extraction.
 
 package interop
 

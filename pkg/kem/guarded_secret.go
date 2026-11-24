@@ -17,10 +17,7 @@ func (e *ErrGuardedKeyDestroyedType) Error() string {
 // destroyed GuardedSecretKey or GuardedSharedSecret.
 var ErrGuardedKeyDestroyed error = &ErrGuardedKeyDestroyedType{}
 
-// GuardedSecretKey holds a KEM secret key in locked memory.
-// Unlike SecretKey which stores key material in a regular byte slice,
-// GuardedSecretKey uses mlock'd, guard-page protected memory that is
-// zeroized on destruction.
+// GuardedSecretKey holds a KEM secret key in locked memory, zeroized on destruction.
 type GuardedSecretKey struct {
 	keyType KeyType
 	key     *secret.Secret
@@ -44,15 +41,7 @@ func NewGuardedSecretKey(keyType KeyType, data []byte) (k *GuardedSecretKey, err
 	return &GuardedSecretKey{keyType: keyType, key: s}, nil
 }
 
-// NewGuardedSecretKeyFromSecret creates a GuardedSecretKey by taking ownership
-// of an existing Secret, so that key material already in guarded memory never
-// has to transit the Go heap to become a KEM key. The caller must not use the
-// Secret after this call: it is owned by the returned key on success, and
-// destroyed before returning on failure.
-//
-// The key type and material length are validated exactly as NewSecretKey
-// validates them, so a guarded key cannot bypass the checks a heap-backed one
-// is subject to.
+// NewGuardedSecretKeyFromSecret takes ownership of a Secret as a KEM key, validating it as NewSecretKey does; the Secret is destroyed on failure.
 func NewGuardedSecretKeyFromSecret(keyType KeyType, s *secret.Secret) (*GuardedSecretKey, error) {
 	if err := validateSecretKeyMaterial(keyType, guardedLen(s)); err != nil {
 		s.Destroy()
@@ -81,10 +70,7 @@ func (g *GuardedSecretKey) Type() KeyType {
 	return g.keyType
 }
 
-// Data returns a copy of the key material, made inside the enclave borrow.
-// The caller owns the copy and should zeroize it after use.
-//
-// Panics if the key has been destroyed.
+// Data returns a copy of the key material that the caller should zeroize; it panics if the key was destroyed.
 func (g *GuardedSecretKey) Data() []byte {
 	return copyGuarded(g.key)
 }
@@ -147,13 +133,7 @@ func (g *GuardedSecretKey) Clone() (k *GuardedSecretKey, err error) {
 	return &GuardedSecretKey{keyType: g.keyType, key: cloned}, nil
 }
 
-// CloneSecret returns an independent guarded copy of the key material as a
-// secret.Secret, the inverse of NewGuardedSecretKeyFromSecret. Ownership of
-// the returned Secret transfers to the caller, which must destroy it; the
-// key material never transits the Go heap unguarded.
-//
-// It exists for the persisted-state structures, which hold their key material
-// as a secret.Secret so that it stays guarded across the storage boundary.
+// CloneSecret returns a guarded copy of the key material that the caller must destroy.
 func (g *GuardedSecretKey) CloneSecret() (*secret.Secret, error) {
 	if g.IsDestroyed() {
 		return nil, &GuardedKeyDestroyedError{}
@@ -214,18 +194,12 @@ func NewGuardedSharedSecretFromSecret32(s *secret.Secret32) *GuardedSharedSecret
 	return &GuardedSharedSecret{inner: s}
 }
 
-// Bytes returns a copy of the shared secret, made inside the enclave borrow.
-// The caller owns the copy and should zeroize it after use.
-//
-// Panics if the shared secret has been destroyed.
+// Bytes returns a copy of the shared secret that the caller should zeroize; it panics if destroyed.
 func (g *GuardedSharedSecret) Bytes() []byte {
 	return copyGuarded(g.inner)
 }
 
-// Array returns a copy of the shared secret as a fixed 32-byte array.
-// The caller is responsible for zeroizing the returned array when done.
-//
-// Panics if the shared secret has been destroyed.
+// Array returns a copy of the shared secret that the caller should zeroize; it panics if destroyed.
 func (g *GuardedSharedSecret) Array() [32]byte {
 	var out [32]byte
 	if err := g.inner.WithBytes(func(b []byte) error {
@@ -263,11 +237,7 @@ type GuardedKeyPair struct {
 	Secret *GuardedSecretKey
 }
 
-// GuardedFromPublicAndPrivate deserializes a public key and a raw secret key
-// and assembles them into a GuardedKeyPair, verifying that both carry the same
-// algorithm tag. It is the guarded counterpart of FromPublicAndPrivate, for
-// callers that load a stored key pair and must keep the secret half out of the
-// Go heap; secretData is zeroized as part of the move into guarded memory.
+// GuardedFromPublicAndPrivate builds a GuardedKeyPair from a public key and raw secret key of the same algorithm, zeroizing secretData.
 func GuardedFromPublicAndPrivate(publicSerialized []byte, secretData []byte) (*GuardedKeyPair, error) {
 	pk, err := DeserializePublicKey(publicSerialized)
 	if err != nil {

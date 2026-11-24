@@ -1,11 +1,4 @@
-// Conformance test: Curve25519 scalar-range checks against Rust libsignal_core.
-//
-// Mirrors the inline tests in rust/core/src/curve.rs:
-//   - keys_with_the_high_bit_set_are_out_of_range
-//   - keys_above_the_prime_modulus_are_out_of_range
-//
-// Validates Go's DjbECPublicKey.ScalarIsInRange against the boundary
-// cases that bracket the Curve25519 prime p = 2^255 - 19.
+// Conformance: DjbECPublicKey.ScalarIsInRange against the Rust curve.rs boundary tests around p = 2^255 - 19.
 
 package interop
 

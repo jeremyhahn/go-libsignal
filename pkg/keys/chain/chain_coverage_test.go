@@ -10,8 +10,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret/secrettest"
 )
 
-// TestMessageKeysWithSeed verifies that MessageKeysWithSeed returns valid message
-// keys with seed material attached for later SPQR re-derivation.
+// TestMessageKeysWithSeed checks the returned keys carry their seed.
 func TestMessageKeysWithSeed(t *testing.T) {
 	key := NewKey(kdf.DeriveSecrets, []byte("chain-key-for-seed-test-32bytes!"), 3)
 	keys, err := key.MessageKeysWithSeed()

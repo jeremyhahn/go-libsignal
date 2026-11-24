@@ -87,8 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `make trivy-image` now exit non-zero with an install hint when trivy is
   missing, instead of printing a skip and passing, so `make security` can no
   longer pass vacuously.
-- **CI tool pins moved to the upstream latest** (#53, owner ruling 2026-10-07:
-  never pin below latest): golangci-lint v2.12.2 → v2.14.0 (Makefile and the
+- **CI tool pins moved to the upstream latest** (#53): golangci-lint v2.12.2 → v2.14.0 (Makefile and the
   CI Lint job), Go 1.26.x → 1.27.1 (`go.mod`, workflows, devcontainer, interop
   Dockerfile; superseded by 1.27.2, see the first Changed entry above). staticcheck stays at v0.8.1 (2026.2.1), already the latest.
 
@@ -192,7 +191,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The pinned `golangci-lint` is installed to and executed from the repo-local
   `.tools/bin` instead of the shared `$(GOBIN)`. `make lint` verified the
   version of whatever `PATH` resolved and installed into a directory every
-  other agent lane on this host also writes to, so the pin held only until the
+  other build on this host also writes to, so the pin held only until the
   next neighbour installed there — and this repo's install changed what those
   neighbours ran. Not a hypothetical race: that shared binary drifted to
   v2.13.1 for part of 2026-08-21, which is precisely the release whose nilness
@@ -231,7 +230,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   testing that some staticcheck exists, pinned via `STATICCHECK_VERSION`
   (v0.8.1). It is the same defect fixed for golangci-lint, on the tool that
   actually reports the SA findings — `SA1019` and `SA6001` are what took `main`
-  red on 2026-08-20, and `$(GOBIN)` is shared across agent lanes, so a presence
+  red on 2026-08-20, and `$(GOBIN)` is shared with other builds, so a presence
   test ran whatever a neighbour last installed. Pinned for reproducibility
   rather than to dodge a bad release: CI's Security Scan job deliberately keeps
   `@latest` on a clean runner, because discovering new SA findings is its job.
@@ -239,7 +238,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   installed to a repo-local `.tools/bin` rather than the shared `$(GOBIN)`, and
   verified and executed in one shell against that path — a check in one recipe
   line and a bare `staticcheck` in the next is a time-of-check/time-of-use race
-  on a directory other lanes write to. CI's Security Scan calls a separate
+  on a directory other builds write to. CI's Security Scan calls a separate
   `make staticcheck-latest`, because a workflow that installs `@latest` and then
   calls the *pinned* target silently gets the pin, reporting success on the very
   version the discovery gate exists to improve on.

@@ -1,10 +1,6 @@
 name: Release
 
-# go-libsignal is a LIBRARY: no cmd/ directory, no package main outside
-# examples/, so a release ships no binaries. What a Go module release consists
-# of is the tag itself. This workflow validates that the tag is releasable,
-# generates an SBOM, and publishes the release to whichever host the tag was
-# pushed to (devops.md §3).
+# A library release is the tag: validate it, generate an SBOM and publish the release (devops.md §3).
 
 on:
   push:
@@ -24,22 +20,13 @@ env:
   GOWORK: off
 
 jobs:
-  # SBOM generation and publication were two jobs handing artifacts over with
-  # actions/upload-artifact + download-artifact. That pair refuses to run
-  # against anything but github.com ("not currently supported on GHES", which is
-  # how Gitea presents), so the handoff could never work on the dev remote. One
-  # job keeps the files in a single workspace and needs no artifact store.
+  # One job keeps the SBOM in one workspace; artifact upload/download is unsupported off github.com.
   release:
     name: Release
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      # Actions are referenced by tag, not by commit SHA. act_runner resolves a
-      # `uses:` ref by fetching that ref from github.com; a bare commit SHA that
-      # is not the tip of a branch or tag is not fetchable, so every SHA-pinned
-      # step failed the job before any of its own steps ran:
-      #     Unable to resolve d60b41a...: reference not found
-      # That is what killed run #114. Tags are also what devops.md §9 requires.
+      # Actions are pinned by tag: the runner cannot fetch a bare commit SHA (devops.md §9).
       - name: Checkout
         uses: actions/checkout@v6
         with:
@@ -93,10 +80,7 @@ jobs:
             exit 1
           fi
 
-      # Smoke check only. The full gate (lint, gosec, govulncheck, trivy, -race
-      # tests, coverage threshold) runs in ci.yml on the commit this tag points
-      # at; repeating it here would double an already long pipeline. What this
-      # catches is a tag placed on a commit that does not build.
+      # Smoke check that the tagged commit builds; the full gate runs in ci.yml.
       - name: Build
         run: go build ./...
 
@@ -143,9 +127,7 @@ jobs:
             dist/sbom.cdx.xml
             dist/checksums.txt
 
-      # softprops/action-gh-release talks to the GitHub Releases API, which
-      # Gitea does not serve. Gitea has its own equivalent under /api/v1, and
-      # the job's own token authenticates against it.
+      # Publishes through the forge's own releases API with the job token.
       - name: Create Gitea Release
         if: github.server_url != 'https://github.com'
         env:

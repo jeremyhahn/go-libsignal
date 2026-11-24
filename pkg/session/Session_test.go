@@ -1,12 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 72 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH specification (section 2.1) and the Double Ratchet
-// specification (section 5.2) require it, so the fips140only build tag drops
-// this file from the FIPS gate. `make test` and `make coverage` still run
-// it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH and the Double Ratchet require X25519, so the fips140only tag drops this file.
 
 package session_test
 
@@ -672,7 +666,7 @@ func TestProcessBundleExistingSessionNotFresh(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Process again -- session is no longer fresh, archives current state.
+	// Process again: the session is not fresh, so the current state is archived.
 	bundle2 := bob.kyberBundleWithPreKeyIndex(1)
 
 	err = alice.sessionBuilder.ProcessBundle(bundle2)
@@ -2548,9 +2542,7 @@ func TestErrorNoSessionSentinelMessage(t *testing.T) {
 // ============= DecryptWithState Skipped Message Keys Path =============
 
 func TestDecryptWithStateSkippedMessageKeys(t *testing.T) {
-	// Exercises the TrySkippedMessageKeys path inside DecryptWithState
-	// where sessionState.HasReceiverChain and HasMessageKeys both return
-	// true for a previously stored skipped key.
+	// Exercise TrySkippedMessageKeys in DecryptWithState with a stored skipped key.
 	serializer := serialize.NewJSONSerializer()
 	_, bob, aliceCipher, bobCipher := setupSessionPair(t, serializer)
 
@@ -2977,12 +2969,10 @@ func TestDecryptCounterTooFarIntoFuture(t *testing.T) {
 	}
 }
 
-// ============= Max Skipped Keys FIFO Eviction =============
+// Max skipped keys FIFO eviction.
 
 func TestDecryptMaxSkippedKeysExceeded(t *testing.T) {
-	// Verifies per-chain FIFO eviction behavior. With maxSkippedKeys=2000,
-	// when a chain would exceed the limit the oldest stored key is evicted
-	// silently (matching Rust reference behavior) rather than returning an error.
+	// Past maxSkippedKeys (2000) the oldest key on a chain is evicted silently, as Rust.
 	serializer := serialize.NewJSONSerializer()
 	_, _, aliceCipher, bobCipher := setupSessionPair(t, serializer)
 
@@ -2993,9 +2983,7 @@ func TestDecryptMaxSkippedKeysExceeded(t *testing.T) {
 	}
 	firstMsgBytes, _ := firstMsg.Serialize()
 
-	// Alice sends 2001 more messages without Bob decrypting any.
-	// Together with firstMsg this puts 2002 keys on Bob's receiver chain,
-	// triggering FIFO eviction of the oldest keys.
+	// 2001 more unread messages put 2002 keys on Bob's chain, triggering eviction.
 	var lastMsg *protocol.SignalMessage
 	for i := 0; i < 2001; i++ {
 		msg, err := aliceCipher.Encrypt([]byte("x"))
@@ -3006,8 +2994,7 @@ func TestDecryptMaxSkippedKeysExceeded(t *testing.T) {
 		lastMsg, _ = protocol.NewSignalMessageFromBytes(msgBytes, serializer.SignalMessage)
 	}
 
-	// Decrypt the last message. FIFO eviction allows this to succeed even
-	// though the chain has >2000 entries. This matches Rust reference behavior.
+	// The last message still decrypts after eviction.
 	_, err = bobCipher.Decrypt(lastMsg)
 	if err != nil {
 		t.Fatalf("expected FIFO eviction to allow decrypt beyond maxSkippedKeys, got: %v", err)
@@ -3647,12 +3634,7 @@ func TestProcessBundleKyberPreKeyWithValidSignatureSucceeds(t *testing.T) {
 // ============= Bug Fix: Ephemeral key zeroized after X3DH =============
 
 func TestProcessBundleZeroizesEphemeralKey(t *testing.T) {
-	// After ProcessBundle completes, the ephemeral base key's private
-	// key material should be zeroized per the X3DH/PQXDH spec.
-	// We verify this indirectly: after a successful ProcessBundle, the
-	// session is established and the protocol proceeds normally. The
-	// zeroization is structural -- we verify the code path executes
-	// without error and the session is valid.
+	// Ephemeral base key zeroization is structural; check the session works after ProcessBundle.
 	serializer := serialize.NewJSONSerializer()
 	alice := newTestUser(t, "Alice", 1, serializer)
 	bob := newTestUser(t, "Bob", 2, serializer)

@@ -1,13 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 5 tests in this file exercise AES-256-GCM under a caller-supplied nonce.
-// FIPS 140-3 does not approve that, but the nonce is derived by the protocol
-// and carried on the wire, so it cannot be replaced by the module-generated
-// nonce of NewGCMWithRandomNonce (rust/crypto/src/aes_gcm.rs), so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): AES-GCM with a protocol-supplied nonce, so the fips140only tag drops this file.
 
 package cipher
 

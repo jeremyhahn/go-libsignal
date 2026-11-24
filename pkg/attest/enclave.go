@@ -81,14 +81,7 @@ func ClaimsFromAttestationData(publicKey []byte, groupConfig *RaftConfig) (*Clai
 // This is a simplified decoder that reads the protobuf wire format directly.
 func decodeRaftGroupConfig(data []byte) (*RaftConfig, error) {
 	config := &RaftConfig{}
-	// Field numbers from the .proto file:
-	// 1: group_id (fixed64)
-	// 2: min_voting_replicas (uint32)
-	// 3: max_voting_replicas (uint32)
-	// 4: super_majority (uint32)
-	// 5: db_version (enum/int32)
-	// 6: attestation_timeout (uint32)
-	// 7: simulated (bool)
+	// Proto fields: 1 group_id, 2 min_voting_replicas, 3 max_voting_replicas, 4 super_majority, 5 db_version, 6 attestation_timeout, 7 simulated.
 	offset := 0
 	for offset < len(data) {
 		tag, n := binary.Uvarint(data[offset:])
@@ -151,14 +144,7 @@ func decodeRaftGroupConfig(data []byte) (*RaftConfig, error) {
 	return config, nil
 }
 
-// Handshake is a noise handshaker that can be used to build a ClientConnection.
-//
-// Callers provide an attestation that must contain the remote enclave's public key.
-// If the attestation is valid, this public key will be used to generate a noise NK
-// handshake (with the caller acting as the initiator) via Handshake.InitialRequest().
-// When a handshake response is received the handshake can be completed with
-// Handshake.Complete() to build a ClientConnection that can be used to exchange
-// arbitrary encrypted payloads with the remote enclave.
+// Handshake runs a Noise NK handshake to an attested enclave key: InitialRequest, then Complete builds a ClientConnection.
 type Handshake struct {
 	// hs is set for pre-quantum (NK) handshakes.
 	hs *noise.HandshakeState

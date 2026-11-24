@@ -19,33 +19,11 @@ type allocSlot struct{ a enclave.Allocator }
 var (
 	allocatorOnce sync.Once
 
-	// admission is nil until either the first locked allocation or a successful
-	// SetAllocator, whichever comes first. The first allocation seals it to
-	// unbudgeted; SetAllocator installs its Allocator only over nil. A single
-	// compare-and-swap therefore decides the race between the two: no
-	// allocation can run unbudgeted once SetAllocator has returned nil, and
-	// SetAllocator cannot succeed once any allocation has run without it.
+	// admission is set once by compare-and-swap, either to unbudgeted by the first allocation or by SetAllocator.
 	admission atomic.Pointer[allocSlot]
 )
 
-// SetAllocator bounds the locked memory held by every Secret and Secret32 the
-// package creates from now on to maxBytes, via an enclave.Allocator. Without it
-// the package allocates unbudgeted, limited only by RLIMIT_MEMLOCK.
-//
-// The budget is in locked bytes and every secret costs at least one whole page;
-// see enclave.NewAllocator for how to size it. An allocation the budget cannot
-// admit fails with ErrSecretAlloc wrapping enclave.ErrBudgetExhausted, and
-// Destroy returns a secret's reservation to the budget.
-//
-// SetAllocator takes effect once per process and must run before the package's
-// first locked allocation. It returns ErrInvalidBudget for a non-positive
-// maxBytes, ErrAllocatorAfterAllocation if a secret was already allocated
-// unbudgeted, and ErrAllocatorAlreadySet on any call after the first valid one.
-// The last two fail closed: the package stays as it was.
-//
-// Upstream: no Rust libsignal counterpart. Rust libsignal does not lock key
-// memory; this budget belongs to the go-enclave backing store. It was added by
-// go-libsignal#41 under the owner's Option (A) ruling.
+// SetAllocator caps locked memory for new secrets at maxBytes, before the first allocation and once per process; it returns ErrInvalidBudget, ErrAllocatorAfterAllocation or ErrAllocatorAlreadySet.
 func SetAllocator(maxBytes int64) error {
 	a, err := enclave.NewAllocator(maxBytes)
 	if err != nil {

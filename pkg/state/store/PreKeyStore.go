@@ -4,13 +4,7 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/state/record"
 )
 
-// PreKey store is an interface describing the local storage of PreKeyRecords.
-//
-// Every method returns an error so that storage backend failures propagate to
-// callers. A nil record with a nil error from LoadPreKey means "not found".
-//
-// Mirrors the Rust libsignal trait PreKeyStore at
-// rust/protocol/src/storage/traits.rs.
+// PreKey stores PreKeyRecords; LoadPreKey returns nil, nil when not found (Rust PreKeyStore).
 type PreKey interface {
 	// LoadPreKey loads a local PreKeyRecord, returning (nil, nil) if not found.
 	LoadPreKey(preKeyID uint32) (*record.PreKey, error)

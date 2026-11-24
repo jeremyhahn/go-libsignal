@@ -1,15 +1,6 @@
 package sesame
 
-// Store defines the persistence interface for Sesame session management.
-// Implementations must be safe for concurrent access if the Manager is
-// used from multiple goroutines.
-//
-// # Reentrancy constraint
-//
-// Store implementations MUST NOT call back into the Manager during any
-// Store method invocation. The Manager holds its internal lock for the
-// entire duration of each Store call; a reentrant Manager call from within
-// a Store method will deadlock.
+// Store persists Sesame sessions; it must be concurrency-safe if the Manager is shared and must never call back into the Manager, which holds its lock during every Store call.
 type Store interface {
 	// LoadUserRecord returns the UserRecord for the given user ID, or nil
 	// if no record exists. Returns an error if the record exists but cannot

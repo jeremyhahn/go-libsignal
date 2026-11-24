@@ -21,10 +21,7 @@ func zeroScalar(s *ristretto255.Scalar) {
 // This is 1 aggregate public + 3 two-point private = 7.
 const NumSupportedAttrs = 7
 
-// Credential is a credential created by the issuing server over a set of
-// attributes, consisting of a MAC.
-//
-// Defined in Chase-Perrin-Zaverucha section 3.1.
+// Credential is the issuing server's MAC over a set of attributes (Chase-Perrin-Zaverucha §3.1).
 type Credential struct {
 	T *ristretto255.Scalar
 	U *ristretto255.Element
@@ -71,9 +68,7 @@ func generateCredentialPrivateKey(randomness [RandomnessLen]byte) *CredentialPri
 	}
 }
 
-// Zeroize overwrites all private scalar fields with zeros.
-// This should be called when the key is no longer needed to prevent
-// sensitive key material from lingering in memory.
+// Zeroize overwrites the private scalars with zeros.
 func (pk *CredentialPrivateKey) Zeroize() {
 	zeroScalar(pk.W)
 	zeroScalar(pk.Wprime)
@@ -129,20 +124,12 @@ func (pk *CredentialPrivateKey) CredentialCore(
 	}, nil
 }
 
-// generateCredentialPrivateKeyFromSHO creates a new CredentialPrivateKey by
-// drawing scalars from an existing SHO instance. Unlike generateCredentialPrivateKey,
-// this does not create a new SHO — it consumes state from the provided one,
-// allowing multiple key pairs to be chained through a single SHO.
+// generateCredentialPrivateKeyFromSHO draws a CredentialPrivateKey from sho, so several keys can be chained through one SHO.
 func generateCredentialPrivateKeyFromSHO(sho *ShoExt) *CredentialPrivateKey {
 	return generateCredentialPrivateKeyFromSHOWithStorage(sho, NumSupportedAttrs)
 }
 
-// generateCredentialPrivateKeyFromSHOWithStorage creates a new CredentialPrivateKey
-// by drawing exactly storageLen y-scalars from the SHO. Legacy credential types
-// in zkgroup use fewer y-scalars than the modern zkcredential system (7). The
-// storageLen parameter controls how many scalars are drawn from the SHO, which
-// is critical for keeping the SHO state aligned with the Rust reference
-// implementation during chained key generation.
+// generateCredentialPrivateKeyFromSHOWithStorage draws exactly storageLen y-scalars, keeping the SHO aligned with Rust for legacy credential types.
 func generateCredentialPrivateKeyFromSHOWithStorage(sho *ShoExt, storageLen int) *CredentialPrivateKey {
 	system := GetSystemParams()
 	w := sho.MustGetScalar()
@@ -166,10 +153,7 @@ func generateCredentialPrivateKeyFromSHOWithStorage(sho *ShoExt, storageLen int)
 	}
 }
 
-// generateCredentialPrivateKeyFromSHOWithLegacyParams creates a new CredentialPrivateKey
-// using legacy system parameters for the W point computation. This matches the
-// Rust reference implementation where legacy credential key pairs use the
-// hardcoded legacy SystemParams generator points.
+// generateCredentialPrivateKeyFromSHOWithLegacyParams computes W from the legacy system parameters, as Rust does for legacy key pairs.
 func generateCredentialPrivateKeyFromSHOWithLegacyParams(sho *ShoExt, storageLen int, legacy *LegacySystemParams) *CredentialPrivateKey {
 	w := sho.MustGetScalar()
 	Wpoint := new(ristretto255.Element).ScalarMult(w, legacy.Gw)
@@ -192,10 +176,7 @@ func generateCredentialPrivateKeyFromSHOWithLegacyParams(sho *ShoExt, storageLen
 	}
 }
 
-// legacyCredentialPublicKeyFromPrivate derives a CredentialPublicKey from a
-// CredentialPrivateKey using the legacy hardcoded system parameters. This matches
-// the Rust reference implementation where legacy credential public keys are
-// computed using hardcoded generator points rather than SHO-derived ones.
+// legacyCredentialPublicKeyFromPrivate derives the public key from the legacy hardcoded system parameters.
 func legacyCredentialPublicKeyFromPrivate(priv *CredentialPrivateKey, numAttrs int, legacy *LegacySystemParams) *CredentialPublicKey {
 	// C_W = W + wprime * G_wprime  (using legacy G_wprime)
 	wprimeGwp := new(ristretto255.Element).ScalarMult(priv.Wprime, legacy.Gwprime)
@@ -229,23 +210,12 @@ func legacyCredentialPublicKeyFromPrivate(priv *CredentialPrivateKey, numAttrs i
 	}
 }
 
-// GenerateCredentialKeyPairFromSHO generates a new key pair by drawing
-// scalars from an existing SHO instance. This allows multiple key pair
-// generations to be chained through a single SHO, matching the Rust
-// reference implementation's ServerSecretParams::generate behavior.
+// GenerateCredentialKeyPairFromSHO draws a key pair from sho, as Rust ServerSecretParams::generate chains them.
 func GenerateCredentialKeyPairFromSHO(sho *ShoExt) *CredentialKeyPair {
 	return GenerateCredentialKeyPairFromSHOWithStorage(sho, NumSupportedAttrs, NumSupportedAttrs)
 }
 
-// GenerateCredentialKeyPairFromSHOWithStorage generates a key pair by drawing
-// exactly storageLen y-scalars from the SHO and computing the public key I
-// values using only numAttrs Gy points. This is required for legacy zkgroup
-// credential types which use fewer y-scalars and Gy points than the modern
-// zkcredential system.
-//
-// storageLen controls how many y-scalars are drawn from the SHO (affects SHO
-// state advancement). numAttrs controls how many Gy points are used in the
-// public key I computation.
+// GenerateCredentialKeyPairFromSHOWithStorage draws storageLen y-scalars from sho and computes I from numAttrs Gy points, for legacy zkgroup credential types.
 func GenerateCredentialKeyPairFromSHOWithStorage(sho *ShoExt, storageLen int, numAttrs int) *CredentialKeyPair {
 	if numAttrs <= LegacyNumSupportedAttrs {
 		legacy := GetLegacySystemParams()
@@ -264,10 +234,7 @@ func GenerateCredentialKeyPairFromSHOWithStorage(sho *ShoExt, storageLen int, nu
 	}
 }
 
-// CredentialPublicKey is a public key used by the client to receive and
-// verify credentials.
-//
-// Defined in Chase-Perrin-Zaverucha section 3.1.
+// CredentialPublicKey lets the client receive and verify credentials (Chase-Perrin-Zaverucha §3.1).
 type CredentialPublicKey struct {
 	CW *ristretto255.Element
 	// I[i] corresponds to I_{i+2} (we skip I_0 and I_1).
@@ -287,13 +254,7 @@ func CredentialPublicKeyFromPrivate(priv *CredentialPrivateKey) *CredentialPubli
 	return credentialPublicKeyFromPrivateWithAttrs(priv, NumSupportedAttrs)
 }
 
-// credentialPublicKeyFromPrivateWithAttrs derives a CredentialPublicKey from a
-// CredentialPrivateKey using only numAttrs Gy points for the I computation.
-// Legacy credential types use fewer Gy points than the modern system.
-//
-// The I array always has NumSupportedAttrs-1 slots, but only the first
-// numAttrs-1 entries are populated. Legacy credential consumers only access
-// the entries they need via GetI(totalAttrCount).
+// credentialPublicKeyFromPrivateWithAttrs computes I from numAttrs Gy points, filling only the first numAttrs-1 slots; legacy consumers read them through GetI.
 func credentialPublicKeyFromPrivateWithAttrs(priv *CredentialPrivateKey, numAttrs int) *CredentialPublicKey {
 	system := GetSystemParams()
 
@@ -337,8 +298,7 @@ type CredentialKeyPair struct {
 	publicKey  *CredentialPublicKey
 }
 
-// Zeroize overwrites the private key material and nils all references.
-// This should be called when the key pair is no longer needed.
+// Zeroize overwrites the private key and drops all references.
 func (ckp *CredentialKeyPair) Zeroize() {
 	if ckp.privateKey != nil {
 		ckp.privateKey.Zeroize()
@@ -367,10 +327,7 @@ func (ckp *CredentialKeyPair) PublicKey() *CredentialPublicKey {
 	return ckp.publicKey
 }
 
-// SystemParams contains parameters shared by the client and server.
-// User code never needs to explicitly reference these.
-//
-// Defined in Chase-Perrin-Zaverucha section 3.1.
+// SystemParams are the parameters shared by client and server (Chase-Perrin-Zaverucha §3.1).
 type SystemParams struct {
 	Gw      *ristretto255.Element
 	Gwprime *ristretto255.Element
@@ -421,16 +378,10 @@ func generateSystemParams() *SystemParams {
 	}
 }
 
-// LegacyNumSupportedAttrs is the number of attribute points supported by the
-// legacy zkgroup credential system. The Rust reference implementation uses 6
-// Gy points for legacy credentials, compared to 7 in the modern zkcredential
-// system.
+// LegacyNumSupportedAttrs is the 6 Gy points of legacy zkgroup credentials (7 in zkcredential).
 const LegacyNumSupportedAttrs = 6
 
-// legacyCredentialSystemHardcoded contains the hardcoded system parameters from
-// the Rust reference implementation. These are 17 Ristretto255 points (544 bytes)
-// serialized in bincode struct field order:
-// G_w, G_wprime, G_x0, G_x1, G_y1..G_y6, G_m1..G_m5, G_V, G_z
+// legacyCredentialSystemHardcoded is Rust's 544-byte blob of 17 Ristretto255 points in bincode order: G_w, G_wprime, G_x0, G_x1, G_y1..G_y6, G_m1..G_m5, G_V, G_z.
 var legacyCredentialSystemHardcoded = [544]byte{
 	// G_w (bytes 0-31)
 	0x9a, 0xe7, 0xc8, 0xe5, 0xed, 0x77, 0x9b, 0x11, 0x4a, 0xe7, 0x70, 0x8a, 0xa2, 0xf7, 0x94, 0x67,
@@ -485,10 +436,7 @@ var legacyCredentialSystemHardcoded = [544]byte{
 	0x6d, 0xf1, 0x2c, 0x2f, 0xb6, 0xf5, 0xd0, 0x63, 0x1f, 0x6f, 0x71, 0xe2, 0xc3, 0x19, 0x3f, 0x6d,
 }
 
-// LegacySystemParams contains the system parameters used by the legacy zkgroup
-// credential system. These are parsed from the hardcoded Rust reference
-// implementation blob, containing 17 Ristretto255 points in bincode struct
-// field order.
+// LegacySystemParams are the legacy zkgroup system parameters parsed from legacyCredentialSystemHardcoded.
 type LegacySystemParams struct {
 	Gw      *ristretto255.Element
 	Gwprime *ristretto255.Element

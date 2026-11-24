@@ -6,115 +6,35 @@
 # ==============================================================================
 
 MODULE := github.com/jeremyhahn/go-libsignal
-# Not VERSION: release-alpha takes the release tag as VERSION=vX.Y.Z-alpha, and
-# a Makefile definition would shadow it (make/release-alpha.mk, v2.3.6 (b)).
+# Not VERSION: release-alpha takes the tag as VERSION=vX.Y.Z-alpha and a definition here would shadow it.
 BUILD_VERSION := $(shell cat VERSION 2>/dev/null || echo "0.0.0")
-# Every test target carries an explicit -timeout. Go's default is 600s per test
-# binary, and pkg/session alone measured 178.7s on an idle CI runner -- only
-# 3.4x headroom on a host measured varying 2.9x-8.7x between runs. On
-# 2026-08-19 that cliff was hit: pkg/session died at 600s while every other
-# package, none of them touched, inflated 2.9x-8.7x from contention alone.
-#
-# 900s is the per-TEST-BINARY budget, not the job's. Measured on that run: the
-# job spent 777s of wall clock against ci.yml's 1800s cap, so letting a package
-# reach 900s still leaves the Go timeout -- which names the package and dumps
-# goroutines -- firing well before the job timeout, which reports nothing.
-#
-# GOTEST_TIMEOUT governs EVERY suite, the FIPS gate included. Overriding it, or
-# overriding GOTEST wholesale, relaxes the compliance gate along with the rest.
+# Per-test-binary timeout; it also governs the FIPS gate, so raising it relaxes that gate too.
 GOTEST_TIMEOUT := 900s
 GOTEST := go test -timeout=$(GOTEST_TIMEOUT)
 GOVET := go vet
 GOBUILD := go build
 
-# PINNED to the upstream latest (devops.md §9; owner ruling 2026-10-07: never
-# pin below latest), in step with the shared CI runner image. Keep this in
-# lockstep with the version the Lint job pins in .github/workflows/ci.yml —
-# lint-pin-selftest asserts they agree, because CI runs the action rather than
-# `make lint` and a drifted pin makes the two disagree about what a finding is.
-#
-# The pin is installed to $(GOLANGCI_LINT_BIN), NOT the shared $(GOBIN): the
-# whole point of pinning is undone if a neighbouring lane can install over the
-# binary this repo verified. It happened — the shared golangci-lint drifted
-# for part of 2026-08-21.
+# Pinned to upstream latest and kept equal to the Lint job pin in ci.yml (lint-pin-selftest checks); installed to a repo-local directory.
 GOLANGCI_LINT_VERSION := v2.14.0
 
-# PINNED for REPRODUCIBILITY, to the upstream latest (devops.md §9). v0.8.1 is
-# the latest. The reason to pin at all is
-# that $(GOBIN) is shared across every agent lane on this host: `which
-# staticcheck` answers perfectly well for whatever version a neighbour last
-# installed, so a presence test runs an analyser nobody chose. That is not
-# hypothetical -- the shared golangci-lint drifted for part of
-# 2026-08-21 by exactly that route.
-#
-# CI's Security Scan job deliberately installs @latest instead, on a clean
-# runner where drift cannot happen: discovery of NEW SA findings is its job.
-# When CI reports a finding a local run missed, bump this pin -- that is the
-# intended workflow, not a mystery.
-#
-# The verification and the run happen in ONE shell command against
-# $(STATICCHECK_BIN), so there is no window in which the checked binary and the
-# executed binary can differ -- a check in one recipe line and a bare
-# `staticcheck ./...` in the next is a TOCTOU race on a shared GOBIN.
-#
-# staticcheck reports two identities ("staticcheck 2026.2.1 (0.8.1)"): the
-# release name and the module version. The parenthesised one is the module
-# version, which is what `go install` takes.
+# Pinned staticcheck, installed and run from one repo-local path; CI's Security Scan runs staticcheck-latest for discovery.
 STATICCHECK_VERSION := v0.8.1
 COVERAGE_DIR := coverage
 COVERAGE_SELFTEST_DIR := $(COVERAGE_DIR)/gate-selftest
 COVERAGE_LOOP_SELFTEST_DIR := $(COVERAGE_DIR)/loop-selftest
 COVERAGE_MIN := 90
 
-# Per-package coverage minimums for packages with legitimately untestable branches.
-# These packages contain defensive OOM panic-recovery blocks wrapping locked-memory
-# allocations that cannot be triggered in unit tests without modifying OS mlock
-# limits (CLAUDE.md prohibits host modification). All other packages must meet
-# COVERAGE_MIN (90%).
-#
-#   pkg/groups/ratchet        87%  — OOM guards in NewSenderChainKey, Next,
-#                                    NewSenderMessageKey, NewSenderMessageKeyFromStruct
-#   pkg/mlkembraid            87%  — defensive invariant panics in Decoder.Reset /
-#                                    Encoder.Reset; broad state-machine gaps tracked
-#                                    separately; the package-total including sub-pkgs
-#                                    is ≥90%
-#   pkg/tripleratchet         87%  — multiple coverage-exempt paths:
-#                                    (1) locked-memory OOM paths in takeSnapshot, Encrypt,
-#                                    decryptWithSnapshot, kdf.go splitHybridOutput;
-#                                    (2) dead code: uint32 overflow guard in
-#                                    receivePQKey loop, KDFHybridECOnly branch;
-#                                    (3) braid.Send never returns OutputKey in current
-#                                    ML-KEM SCKA protocol;
-#                                    (4) outputKey != nil in decryptWithSnapshot only
-#                                    fires in fully synchronized bidirectional sessions
-#                                    requiring a complete braid SCKA handshake, which
-#                                    is not achievable with a simple symmetric EC cipher
-#   pkg/util/crypto/secret    95%  — raised from 88% by #41: a tiny SetAllocator budget
-#                                    now drives the allocation-failure branches of New,
-#                                    NewRandom, NewEmpty and Clone deterministically.
-#                                    Still uncovered: Clone's copy into a fresh enclave
-#                                    (cannot fail) and the CAS-lost branch of allocator()
-#                                    (hit only when SetAllocator wins a race)
+# Per-package coverage minimums where locked-memory OOM guards and dead branches cannot be reached in unit tests; all others use COVERAGE_MIN.
 COVERAGE_MIN_groups_ratchet := 87
 COVERAGE_MIN_mlkembraid := 87
 COVERAGE_MIN_tripleratchet := 87
 COVERAGE_MIN_util_crypto_secret := 95
 GOBIN := $(shell go env GOPATH)/bin
 
-# Analysers this repo pins live HERE, not in $(GOBIN). $(GOBIN) is shared across
-# every agent lane on this host, so a version verified there can be replaced by
-# a neighbour between the check and the run -- and installing into it makes this
-# repo the thing that changes other lanes' tools. A repo-local directory removes
-# both: nothing else writes to it, and the check and the run name the same path.
+# Pinned analysers live in a repo-local directory so the checked and the executed binary are the same path.
 TOOLS_BIN := $(CURDIR)/.tools/bin
 
-# The pinned analysers (gosec, staticcheck) are built from ONE committed tool
-# module, so they share one golang.org/x/tools. Each tool's own release is built
-# against an x/tools whose export-data reader can lag the Go toolchain ("export
-# data version 5 is greater than maximum supported version 4" under Go 1.27.2);
-# the module raises x/tools for both at once. It is separate from the main module
-# so none of it enters the package graph, and is not a releasable submodule (not
-# in SUBMODULE_TAGS).
+# gosec and staticcheck build from one committed tool module that raises golang.org/x/tools for the current Go toolchain.
 TOOLS_MODULE := tools
 CI_WORKFLOW := .github/workflows/ci.yml
 STATICCHECK_BIN := $(TOOLS_BIN)/staticcheck
@@ -122,16 +42,11 @@ STATICCHECK_LATEST_BIN := $(TOOLS_BIN)-latest/staticcheck
 GOLANGCI_LINT_BIN := $(TOOLS_BIN)/golangci-lint
 
 # actionlint validates the workflows (devops.md §4, the `make lint` row).
-# PINNED to the upstream latest (devops.md §9), the version the software
-# factory worker image bakes. It picks up .github/actionlint.yaml on its own
-# when the repo adds one (self-hosted runner labels).
+# Pinned to upstream latest; reads .github/actionlint.yaml when present.
 ACTIONLINT_VERSION := v1.7.12
 ACTIONLINT_BIN := $(TOOLS_BIN)/actionlint
 
-# The lint retry loop invokes $(LINT_CMD) rather than a bare `golangci-lint`,
-# so lint-retry-selftest can drive it with a stub by overriding this variable.
-# A stub planted on PATH would NOT work: the `export PATH` below prepends
-# $(GOBIN), the real linter wins, and the self-test passes against any recipe.
+# Lint runs through $(LINT_CMD) so lint-retry-selftest can substitute a stub.
 LINT_CMD := $(GOLANGCI_LINT_BIN) run ./...
 LINT_RETRY_MAX := 5
 LINT_RETRY_DELAY := 10
@@ -170,12 +85,7 @@ TESTABLE_PACKAGES := pkg/accountkeys pkg/attest pkg/backup pkg/cipher pkg/device
 	_pkg_min_pkg_groups_ratchet _pkg_min_pkg_mlkembraid \
 	_pkg_min_pkg_tripleratchet _pkg_min_pkg_util_crypto_secret
 
-# The generated per-package targets are actions, never files, so they have to
-# be .PHONY as well. `bench` above is the cautionary case rather than a
-# hypothetical: a `bench/` DIRECTORY exists in this repo, so without the
-# declaration make considered the target already satisfied and reported
-# "'bench' is up to date" while running no benchmarks at all. Any name below
-# acquires the same shadow the day someone adds a matching path.
+# The generated per-package targets are actions, never files, so they are .PHONY.
 .PHONY: $(addprefix test-,$(TESTABLE_PACKAGES)) \
 	$(addprefix coverage-,$(TESTABLE_PACKAGES)) \
 	$(addprefix bench-,$(TESTABLE_PACKAGES))
@@ -200,48 +110,15 @@ test:
 test-verbose:
 	$(GOTEST) -race -v ./...
 
-# No `| tee` here. A make recipe runs under /bin/sh without pipefail, so a
-# pipeline exits with tee's status (always 0) and the target could never fail —
-# `make integration-test` reported success on a failing suite. Callers that want
-# a log file tee at the call site with pipefail set; ci.yml does.
+# No | tee: without pipefail the pipeline would report tee's status.
 integration-test:
 	$(GOTEST) -race -v ./tests/...
 
-# Slow tests: marked //go:build slow; excluded from make test.
-# test_chain_jump_over_limit (rust/protocol/tests/session.rs:245):
-#   Alice sends 25,001 messages without Bob decrypting, then sends one more.
-#   Bob's decrypt must fail because the chain-key advance exceeds 25,000.
-#   Expected runtime: ~60-120 s.
+# Slow tests (build tag slow), e.g. the 25,001-message chain-jump limit; about 60-120 s.
 test-slow-session:
 	GOWORK=off $(GOTEST) -race -count=1 -tags=slow -run TestRust_ChainJumpOverLimit ./pkg/session/...
 
-# Property tests: marked //go:build proptest; excluded from make test.
-#
-# The four TestProptest_* cases are 167s of pkg/session's 213s -- 79% of the
-# package. That left the 900s per-binary cap only 4.4x above a host measured
-# varying 2.9x-8.7x between runs, and on 2026-08-21 the margin ran out: the
-# whole Test job died on a timeout none of the other 225 tests caused (#30).
-# They now run here, in their own CI job with their own budget. Raising
-# GOTEST_TIMEOUT was the alternative and is worse -- it governs every suite
-# including the FIPS gate.
-#
-# -run is a filter, not the selector: the build tag is what includes the file.
-# The count check below is why both are safe. `go test -run` that matches
-# nothing prints "ok ... [no tests to run]" and exits 0, so a target that only
-# ran the command would pass just as loudly after someone renamed a test or
-# dropped the tag. Deriving the expected count from the source means adding a
-# fifth property test cannot silently escape the job either.
-#
-# The whole point of isolating these is giving them their OWN budget, so the
-# target must not inherit GOTEST_TIMEOUT -- that is the 900s cap this split
-# exists because they outgrew. 167s at the worst observed contention (8.7x) is
-# ~1453s, which 900s does not cover; a separate job that still times out is
-# just a smaller blast radius for the same failure.
-#
-# 2400s is 14.4x the measured 167s and 1.65x that worst case, and sits BELOW
-# the job's 45-minute cap on purpose: Go's timeout has to fire first, because
-# it names the package and dumps goroutines where the job timeout reports
-# nothing. Keep that ordering if either number changes.
+# Property tests (build tag proptest) with their own 2400s budget, below the job cap; the expected test count comes from the source so a dropped tag fails.
 PROPTEST_TIMEOUT := 2400s
 PROPTEST_FILE := pkg/session/proptest_session_test.go
 PROPTEST_LOG := proptest.out
@@ -269,14 +146,7 @@ test-proptest:
 	fi; \
 	echo "PASS: all $$expected property tests ran"
 
-# Self-test for the property-test target, in the shape of
-# coverage-gate-selftest: check the properties that make the target worth
-# having, rather than trusting that it still has them.
-#
-# The timeout checks are static because that is what they are about -- which
-# timeout the recipe carries. The fail-closed check is behavioural and cheap:
-# pointed at a file declaring no property tests, the target must exit non-zero
-# without running anything.
+# Self-test for test-proptest: static timeout checks plus a fail-closed run on a file with no property tests.
 test-proptest-selftest:
 	@failures=0; \
 	recipe=$$($(MAKE) -n test-proptest 2>/dev/null); \
@@ -311,38 +181,7 @@ test-proptest-selftest:
 		exit 1; \
 	fi; \
 	echo "PASS: property-test target self-test"
-# Self-test for the pinned-TOOL property, in the shape of
-# coverage-gate-selftest. The concurrency Codex raised on #33 cannot be
-# reproduced by racing a real neighbour, so assert the two properties that make
-# the race impossible instead:
-#
-#   1. the recipe EXECUTES the pinned path rather than a bare tool name that
-#      PATH would resolve;
-#   2. that path lies OUTSIDE $(GOBIN), so no other lane writes to what was
-#      verified.
-#
-# Together those close the window: same path checked and run, on a directory
-# nobody else touches.
-#
-# An earlier draft tried to prove (1) behaviourally, by planting a hostile
-# `staticcheck` on PATH and checking the target ignored it. That check PASSED
-# against a deliberately broken recipe -- the `export PATH` above prepends
-# $(GOBIN) for every recipe, so the planted binary never won and the check could
-# not fail for the reason it claimed. It is gone rather than left looking
-# reassuring. lint-retry-selftest avoids the same trap by naming its stub through
-# $(LINT_CMD) instead of planting it on PATH.
-#
-#   3. the recipe INSTALLS into that directory rather than the shared one.
-#      Measured: without this, reverting `GOBIN=$(TOOLS_BIN) go install` to a
-#      bare `go install` passed every other check. It fails closed at runtime
-#      (the pinned path stays empty, so the version check exits 1), but it
-#      still writes this repo's pin over whatever the neighbouring lanes are
-#      using -- the second half of the property, and the half a self-test that
-#      only reads paths cannot see.
-#
-# $(call assert_pinned,<label>,<target>,<pinned-bin>,<expected-invocation>,<expected-install>).
-# Both pinned tools assert through this, so the property is defined once; a
-# third pinned tool gets it by adding two lines, not by copying thirty.
+# Self-test for pinned tools: the recipe runs and installs the pinned path, which lies outside $(GOBIN).
 define assert_pinned
 	case "$$($(MAKE) -n $(2) 2>/dev/null)" in \
 		*"$(4)"*) echo "ok:  $(1) recipe executes the pinned $(3)";; \
@@ -389,20 +228,7 @@ staticcheck-selftest:
 	fi; \
 	echo "PASS: pinned-analyser self-test"
 
-# The same two properties for golangci-lint. It carried the defect longest: the
-# version check ran against whatever PATH resolved and installed into the shared
-# $(GOBIN), so the pin was only as good as the last neighbour to install there.
-# Not hypothetical -- that binary drifted to v2.13.1 for part of 2026-08-21, and
-# v2.13.x is the release whose nilness pass panics on this tree.
-#
-# `make -n` runs recursive sub-makes, so asserting on `lint` sees the real
-# command line inside _lint-retry rather than the delegation to it.
-#
-# The expected invocation is spelled out from $(GOLANGCI_LINT_BIN) rather than
-# passed as $(LINT_CMD). Measured: with $(LINT_CMD) on both sides, reverting the
-# recipe to a bare PATH-resolved `golangci-lint run ./...` still PASSED -- the
-# expectation moved with the mutation, so the check compared LINT_CMD to itself.
-# $(LINT_CMD) is the thing under test here, not the yardstick.
+# The pinned-tool assertions for golangci-lint; the expected invocation is spelled from $(GOLANGCI_LINT_BIN), not $(LINT_CMD).
 lint-pin-selftest:
 	@failures=0; \
 	$(call assert_pinned,golangci-lint,lint,$(GOLANGCI_LINT_BIN),$(GOLANGCI_LINT_BIN) run ./...,GOBIN=$(TOOLS_BIN) go install github.com/golangci) \
@@ -423,16 +249,11 @@ lint-pin-selftest:
 test-interop:
 	GOWORK=off $(GOTEST) -race -v ./tests/interop/...
 
-# Verify every fixture under tests/interop/fixtures/ matches its sha256 in
-# MANIFEST.toml. With LIBSIGNAL_UPSTREAM=/path/to/libsignal-checkout the
-# script additionally diffs each fixture against the upstream tree at the
-# commit pinned in /RUST_REV. CI sets LIBSIGNAL_UPSTREAM.
+# Verify every fixture against MANIFEST.toml; with LIBSIGNAL_UPSTREAM set, also diff against the upstream tree at /RUST_REV.
 interop-fixtures-check:
 	tests/interop/scripts/check_fixtures.sh
 
-# Refresh static fixtures from a local upstream Rust libsignal checkout.
-# This is the only sanctioned way to update fixture bytes; after running it,
-# regenerate the sha256 entries in MANIFEST.toml and bump /RUST_REV.
+# Refresh fixtures from an upstream checkout; then regenerate MANIFEST.toml sha256 entries and bump /RUST_REV.
 interop-fixtures-refresh:
 	@if [ -z "$(LIBSIGNAL_UPSTREAM)" ]; then \
 		echo "LIBSIGNAL_UPSTREAM must point at a Rust libsignal checkout" >&2; \
@@ -493,20 +314,7 @@ $(addprefix test-,$(TESTABLE_PACKAGES)):
 # FIPS 140-3 gate
 # ==============================================================================
 
-# GODEBUG=fips140=only puts the Go Cryptographic Module in the mode where a
-# non-approved operation fails instead of quietly succeeding; fips140=on merely
-# loads the module and still permits MD5, SHA-1 and friends, so a gate built on
-# it cannot fail on the thing it exists to catch (configuration.md §5).
-#
-# These targets set GOFIPS140/GODEBUG themselves so a bare `make fips` locally
-# reproduces the CI job exactly. ci.yml also sets them at the job level to stay
-# aligned with the ci-template; the values are identical.
-#
-# The fips140only build tag excludes the tests listed in docs/FIPS.md -- the
-# exemption register -- from the gate. Each entry there exercises a primitive
-# that an external protocol or standard mandates and FIPS 140-3 does not
-# approve, and carries the citation that mandates it. Production code is never
-# tagged: `make fips-build` compiles the library exactly as it ships.
+# fips140=only makes non-approved operations fail; the fips140only tag excludes the exempt tests listed in docs/FIPS.md.
 FIPS_ENV := GOFIPS140=latest GODEBUG=fips140=only
 
 fips: fips-build fips-test
@@ -521,16 +329,7 @@ fips-test:
 # Code Coverage
 # ==============================================================================
 
-# Fail-closed coverage gate.
-#
-#   $(1) coverage profile   $(2) minimum percentage   $(3) report label
-#
-# The percentage is validated before it is compared: an empty or non-numeric
-# value means coverage could not be measured -- missing, empty or malformed
-# profile, or a `go tool cover` failure -- and is a hard failure, never a pass.
-# The comparison uses awk rather than bc so the gate carries no dependency
-# whose absence would silently disable it (`bc` is absent from many CI images,
-# and the previous `bc ... || echo 0` fallback turned that into a pass).
+# Fail-closed coverage gate: $(1) profile, $(2) minimum, $(3) label; an unmeasurable percentage fails.
 define coverage-gate
 PCT=$$(go tool cover -func=$(1) | awk '/^total:/ { print $$3 }' | tr -d '%'); \
 case "$$PCT" in \
@@ -545,20 +344,7 @@ awk -v pct="$$PCT" -v min="$(2)" 'BEGIN { \
 }'
 endef
 
-# Internal: runs the per-package collection over PKGS, appending each package's
-# profile to PROFILE and failing if any package did not run to completion.
-#
-# Parameterised so the self-test below exercises the REAL loop rather than a
-# copy of it -- the same arrangement _coverage-gate uses for the threshold.
-#
-# The two things this fixes are both fail-open holes, and they compound:
-# `go test`'s exit status was ignored and its diagnostics went to /dev/null, so
-# a package that failed, panicked or timed out contributed silently and the run
-# moved on. A failing test still WRITES its coverage profile, so the resulting
-# aggregate stayed perfectly well-formed and the threshold gate #13 added
-# passed it honestly. Measured on this tree before the fix: with one package
-# deliberately failing, `make coverage` exited 0 and reported the same 90.4% as
-# a clean run.
+# Per-package coverage collection over PKGS into PROFILE; fails if any package does not complete.
 _coverage-collect:
 	@rm -f $(COVERAGE_DIR)/pkg.out
 	@failed=""; \
@@ -594,19 +380,7 @@ _coverage-collect:
 		exit 1; \
 	fi
 
-# Self-test for the fail-closed collection loop, in the shape of
-# coverage-gate-selftest: drive the real recipe over inputs whose outcome is
-# known, and check the outcome. Two ways a package's coverage can go missing,
-# both of which used to be swallowed:
-#
-#   - the package does not run. An import path that cannot be loaded produces
-#     no profile and exits nonzero.
-#   - the package runs but its profile cannot be appended. A PROFILE that is a
-#     DIRECTORY makes the append fail deterministically, with no need to
-#     simulate a full disk or a quota.
-#
-# The third case is the positive control: a real package must still pass, so a
-# gate that fails everything cannot be mistaken for a gate that works.
+# Self-test for the collection loop: an unloadable package and an unwritable profile must fail, a real package must pass.
 coverage-loop-selftest:
 	@mkdir -p $(COVERAGE_DIR) $(COVERAGE_LOOP_SELFTEST_DIR)/unwritable
 	@failures=0; \
@@ -654,10 +428,7 @@ coverage:
 	@echo ""
 	@$(call coverage-gate,$(COVERAGE_DIR)/coverage.out,$(COVERAGE_MIN),TOTAL CODE)
 
-# Package-specific coverage targets, named for the package PATH:
-#   make coverage-pkg/cipher, make coverage-pkg/poksho
-# Uses COVERAGE_MIN_<pkg> when defined (for legitimately exempt packages), otherwise
-# falls back to COVERAGE_MIN (90%). Exempt packages are documented above.
+# Per-package coverage targets (make coverage-pkg/cipher); COVERAGE_MIN_<pkg> overrides COVERAGE_MIN.
 $(addprefix coverage-,$(TESTABLE_PACKAGES)):
 	@mkdir -p $(COVERAGE_DIR)
 	@$(GOTEST) -coverprofile=$(COVERAGE_DIR)/$(subst /,_,$(subst coverage-,,$@)).out \
@@ -678,15 +449,11 @@ _pkg_min_pkg_tripleratchet:
 _pkg_min_pkg_util_crypto_secret:
 	@echo $(COVERAGE_MIN_util_crypto_secret)
 
-# Internal: runs the fail-closed gate against PROFILE with minimum MIN, so the
-# self-test below exercises the real gate rather than a copy of it.
+# Runs the coverage gate against PROFILE with minimum MIN for the self-test.
 _coverage-gate:
 	@$(call coverage-gate,$(PROFILE),$(MIN),gate)
 
-# Self-test for the fail-closed coverage gate. Proves the gate FAILS when the
-# percentage cannot be measured at all -- a missing or malformed profile, the
-# case the previous `bc ... || echo 0` comparison waved through -- and when a
-# measured percentage is below the minimum, while still passing a good one.
+# Self-test: the gate fails on a missing or malformed profile and below the minimum, and passes a good one.
 coverage-gate-selftest:
 	@mkdir -p $(COVERAGE_SELFTEST_DIR)
 	@$(GOTEST) -coverprofile=$(COVERAGE_SELFTEST_DIR)/good.out -covermode=atomic . >/dev/null
@@ -746,17 +513,7 @@ fmtcheck:
 	fi
 	@echo "gofmt: all files formatted"
 
-# Checking the VERSION, not mere presence, is the point: an already-installed
-# golangci-lint of a different version answers `which` perfectly well, so a
-# presence test runs whatever the developer happens to have and the pin buys
-# nothing. That is not hypothetical -- @latest is how v2.13.1 got onto this
-# machine and into CI in the first place.
-#
-# Install on mismatch, then re-check and fail closed. The re-check should not
-# be reachable, because line 68 puts $(GOBIN) -- where `go install` writes --
-# at the front of PATH for every recipe. It is here so that if that ever stops
-# holding, or the install fails, the target says so instead of quietly linting
-# with the wrong analyser.
+# Check the pinned version, install on mismatch, then re-check and fail closed.
 lint:
 	@mkdir -p $(TOOLS_BIN)
 	@have=$$($(GOLANGCI_LINT_BIN) version 2>/dev/null | sed -nE 's/.*has version ([0-9]+\.[0-9]+\.[0-9]+).*/v\1/p'); \
@@ -774,11 +531,7 @@ lint:
 	@$(MAKE) --no-print-directory _lint-retry
 	@$(MAKE) --no-print-directory actionlint
 
-# Same version discipline as golangci-lint above: the pinned version or
-# nothing. The repo-local copy is preferred; an actionlint already on PATH at
-# exactly the pinned version is accepted too, so a host without network access
-# (the worker image bakes the pin) still lints. Anything else installs the pin,
-# then fails closed if the install did not produce it.
+# Pinned actionlint: the repo-local copy, or one on PATH at exactly the pin; otherwise install, then fail closed.
 actionlint:
 	@bin=$(ACTIONLINT_BIN); \
 	have=$$($$bin -version 2>/dev/null | head -n 1); \
@@ -800,16 +553,7 @@ actionlint:
 	fi; \
 	$$bin && echo "actionlint: workflows clean"
 
-# golangci-lint takes a global lock, and $(GOBIN) is shared across every agent
-# lane on this host. A concurrent run exits 3 with "parallel golangci-lint is
-# running" -- which reads exactly like a lint failure, and `make ci` includes
-# lint, so the phantom gets debugged. Observed 3 consecutive times on
-# 2026-08-21 before the 4th attempt worked.
-#
-# Retry ONLY that signature. A real finding must fail on the first attempt,
-# because a target that retries failures hides them. Split out of `lint` so
-# lint-retry-selftest can drive it with a stub $(LINT_CMD); the contract it
-# holds to is the four cases that self-test asserts.
+# Retry only golangci-lint's "parallel golangci-lint is running" exit; a real finding fails on the first attempt.
 _lint-retry:
 	@attempt=1; \
 	while :; do \
@@ -830,16 +574,7 @@ _lint-retry:
 		sleep $(LINT_RETRY_DELAY); \
 	done
 
-# Self-test for the retry contract Codex raised on #33: an untested retry loop
-# can start retrying genuine findings, or report success after exhausting its
-# attempts, with nothing failing. Four cases, each driven by a stub linter
-# passed as $(LINT_CMD) -- NOT planted on PATH, which $(GOBIN) would shadow.
-# `:=` rather than `?=` on those variables so a stray environment variable
-# cannot redirect what a real `make lint` executes; a command-line override,
-# which is how this target passes its stubs, still wins.
-#
-# LINT_RETRY_DELAY=0 keeps the exhaustion case from sleeping through its own
-# retries; the delay is not part of the contract being asserted.
+# Self-test for the lint retry contract with stub linters passed as $(LINT_CMD); LINT_RETRY_DELAY=0 skips the sleeps.
 lint-retry-selftest:
 	@dir=$$(mktemp -d); trap 'rm -rf "$$dir"' EXIT; failures=0; \
 	printf '#!/bin/sh\nn=$$(cat "$$1"); n=$$((n + 1)); echo "$$n" > "$$1"\n' > $$dir/count.sh; \
@@ -891,29 +626,10 @@ lint-retry-selftest:
 # Security Scanning
 # ==============================================================================
 
-# devops.md §8: every -exclude rule carries a written justification beside it.
-#
-#   G115  integer overflow conversion (int -> uint8/uint16/uint32).
-#         206 findings, and they are the rule's known false-positive mode
-#         rather than defects. A wire-format library length-prefixes almost
-#         every field, so `byte(len(b))` and `uint32(len(b))` appear on nearly
-#         every serializer; in each case the length is already bounded by a
-#         checked limit upstream (frame caps, MAX_* consts mirrored from Rust
-#         libsignal) that gosec's per-expression analysis cannot see. The
-#         conversions that are genuinely unbounded are guarded explicitly —
-#         see PaddedLength's saturating clamp in pkg/backup/backup.go and its
-#         regression tests. Narrowing this exclusion means annotating each of
-#         the 206 sites with #nosec plus the bound it relies on; that is worth
-#         doing and is tracked for the v1.0 audit pass, not achievable as a
-#         side effect of a CI fix.
+# G115 excluded: length conversions are bounded by checked limits gosec cannot see; unbounded ones are clamped explicitly.
 GOSEC_EXCLUDE := G115
 
-# gosec is built from the committed tool module in $(GOSEC_MODULE), never taken
-# from PATH or `go install ...@latest`. Stock gosec v2.29.0 is built against
-# x/tools v0.49.0, whose export-data reader fails every package under Go 1.27.2;
-# the tool module ($(TOOLS_MODULE), see above) raises x/tools to v0.51.0. A source
-# build carries no version stamp, so the pin is verified from the build info
-# embedded in the binary.
+# gosec is built from the committed tool module and verified from the binary's build info.
 GOSEC_VERSION := v2.29.0
 GOSEC_XTOOLS_VERSION := v0.51.0
 GOSEC_MODULE := $(TOOLS_MODULE)
@@ -944,39 +660,7 @@ govulncheck:
 		go install golang.org/x/vuln/cmd/govulncheck@latest)
 	govulncheck ./...
 
-# Checking the VERSION, not mere presence -- the same defect fixed for
-# golangci-lint in #17, on the tool that actually reports the SA findings.
-# SA1019 and SA6001 are what took main red on 2026-08-20, so an analyser nobody
-# chose can both miss findings and invent them.
-#
-# Install on mismatch, then re-check and fail closed. The re-check should not be
-# reachable, because $(GOBIN) -- where `go install` writes -- is at the front of
-# PATH for every recipe. It is here so that if that stops holding, the target
-# says so instead of quietly analysing with the wrong version.
-# Two targets because there are two policies, and collapsing them loses one.
-#
-#   staticcheck        pinned, reproducible -- what a local run and `make
-#                      security` use, so a neighbour's install cannot change
-#                      the answer.
-#   staticcheck-latest DISCOVERY -- what CI's Security Scan runs. Pinning this
-#                      one too would mean no new SA rule is ever found, and
-#                      SA1019/SA6001 taking main red on 2026-08-20 is what that
-#                      would have cost.
-#
-# The pinned target ignores whatever is in $(GOBIN), so a workflow that installs
-# @latest there and then calls `make staticcheck` silently gets the pin -- the
-# discovery gate reporting success while running the version it was meant to
-# improve on. That is why CI calls this target by name.
-#
-# It installs into its own directory rather than $(GOBIN) for the same reason
-# the pinned one does: this repo should not decide which staticcheck other lanes
-# get. On a clean CI runner that costs one download.
-#
-# staticcheck@latest alone is built against the x/tools it was released with,
-# which lags the Go toolchain. So it is built from a throwaway module that takes
-# BOTH staticcheck@latest and x/tools@latest: discovery means the latest analyser
-# on the latest export-data reader. This needs the network; the pinned target
-# builds from the committed $(TOOLS_MODULE) and works offline.
+# staticcheck is pinned and reproducible; staticcheck-latest is CI discovery, built with x/tools@latest into its own directory.
 staticcheck-latest:
 	@mkdir -p $(dir $(STATICCHECK_LATEST_BIN))
 	@dir=$$(mktemp -d) && \
@@ -1030,13 +714,7 @@ nilcheck:
 modverify:
 	go mod verify
 
-# Filesystem CVE/secret scan, gated on CRITICAL/HIGH. tests/, examples/ and
-# bench/ are skipped: none of them ship to a consumer of the library, and
-# tests/interop/rust carries the upstream Rust reference crate purely to diff
-# wire bytes against.
-#
-# A missing trivy FAILS: a gate that passes because its scanner is absent is
-# worse than no gate (devops.md §8). CI installs the CLI before calling this.
+# Filesystem CVE and secret scan gated on CRITICAL/HIGH, skipping tests/, examples/ and bench/; a missing trivy fails.
 TRIVY_INSTALL_HINT := install trivy: https://trivy.dev/latest/getting-started/installation/
 trivy:
 	@command -v trivy >/dev/null 2>&1 || { \
@@ -1045,33 +723,7 @@ trivy:
 	}; \
 	trivy fs --scanners vuln,secret --severity CRITICAL,HIGH --exit-code 1 --skip-dirs tests,examples,bench .
 
-# Image scan of the only container this repo builds: the Rust<->Go interop
-# test harness (`make interop-docker`), which is never pushed to a registry.
-#
-# NOT a prerequisite of `security`, and deliberately so. tests/interop/rust/
-# Cargo.toml carries path dependencies on ../../../../libsignal/rust/{protocol,
-# zkgroup,core} — a sibling checkout of upstream Rust libsignal that the
-# Dockerfile never provides, so the rust-builder stage fails at `cargo build`
-# with "failed to read /libsignal/rust/core/Cargo.toml". That is a pre-existing
-# defect in the harness Dockerfile, not a security finding, and chaining it
-# into `security` would give this repo a gate that fails for an unrelated
-# reason. Wire it into `security` (and add the matching CI job) once the
-# Dockerfile clones upstream at /RUST_REV the way the conformance-fixtures CI
-# job already does.
-#
-# Two scoping decisions, both deliberate:
-#
-#   --ignore-unfixed  The final stage is golang:<stable>-bookworm, so its
-#                     Debian package set is upstream's. A CVE with no released
-#                     fix cannot be actioned by rebuilding and would pin this
-#                     gate permanently red; a CVE that HAS a fix means the
-#                     base is stale, which is a real finding.
-#   --skip-dirs       usr/local/go and go/pkg/mod are the toolchain and module
-#                     cache the image carries so it can run `go test` inside.
-#                     Their contents are upstream release artifacts, not
-#                     go-libsignal code.
-#
-# The Go module tree is gated unconditionally by `make trivy` and govulncheck.
+# Image scan of the interop harness image; not part of security until its Dockerfile provides the upstream checkout.
 trivy-image:
 	@command -v docker >/dev/null 2>&1 || { echo "FAIL: docker not installed, so the image cannot be built and scanned"; exit 1; }; \
 	command -v trivy >/dev/null 2>&1 || { echo "FAIL: trivy not installed, so the image scan cannot run ($(TRIVY_INSTALL_HINT))"; exit 1; }; \
@@ -1174,9 +826,7 @@ help:
 	@echo "    make clean              - Clean coverage files and test cache"
 	@echo "    make help               - Show this help"
 
-# ---- release-alpha (handbook software/templates/make, vendored unchanged) ----
-# One module, so LOCKSTEP_MODULES stays empty. Cut with
-# `make release-alpha VERSION=vX.Y.Z-alpha` from main; pushes to dev only.
+# release-alpha (handbook template); cut with make release-alpha VERSION=vX.Y.Z-alpha from main.
 AGENT_GIT ?= agent-git.sh
 REPO_NAME ?= go-libsignal
 RELEASE_REMOTE ?= dev
@@ -1186,10 +836,7 @@ include make/release-alpha.mk
 test-release-alpha:
 	bash make/testdata/release-alpha-tests.sh
 
-# ---- dependency-resolution.md targets (2026-08-13 cutover) ----
-# deps-latest runs before compiling in a consumer repo.
-# deps-latest picks the highest tag INCLUDING -alpha prereleases — bare
-# 'go get @latest' ignores prereleases and would downgrade to legacy v0.0.0.
+# deps-latest picks the highest tag including -alpha prereleases.
 
 .PHONY: release-alpha test-release-alpha deps-latest
 

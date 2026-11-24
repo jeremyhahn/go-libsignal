@@ -26,19 +26,11 @@ const (
 	// malicious or corrupted stream from exhausting memory.
 	maxBackupSize = 100 * 1024 * 1024 * 1024 // 100 GiB
 
-	// maxDecompressedSize is the cumulative budget for decompressed frame
-	// bytes across a single backup stream. A gzip decompression bomb can
-	// expand far beyond the encrypted payload size; this cap limits the
-	// total cleartext accumulated in memory after HMAC verification.
-	// The check fires only for authenticated data (i.e., the caller holds
-	// the key) but guards against corrupt or adversarial backup generators.
+	// maxDecompressedSize caps the decompressed bytes of one backup stream against gzip bombs.
 	maxDecompressedSize = maxBackupSize // 100 GiB
 )
 
-// HMACMismatchError indicates that the expected HMAC did not match the
-// computed HMAC over the backup ciphertext. The actual HMAC values are
-// kept unexported to prevent accidental leakage through logging or
-// error inspection.
+// HMACMismatchError reports an HMAC mismatch; the HMAC values stay unexported so they cannot leak.
 type HMACMismatchError struct {
 	expected [HMACLen]byte
 	found    [HMACLen]byte
@@ -60,14 +52,7 @@ func NewFrameEncryptor(key *MessageBackupKey) *FrameEncryptor {
 	return &FrameEncryptor{key: key}
 }
 
-// EncryptFrames encrypts a sequence of raw protobuf frame bytes and writes
-// the complete encrypted backup to w. The output consists of:
-//   - A random 16-byte IV
-//   - AES-256-CBC encrypted gzip-compressed frames (varint-delimited)
-//   - A 32-byte HMAC-SHA256 over the IV and ciphertext
-//
-// Each frame in the frames slice should be the raw serialized protobuf bytes
-// of a backup Frame message.
+// EncryptFrames writes a random IV, AES-256-CBC of the gzipped varint-delimited frames, and an HMAC-SHA256 over IV and ciphertext.
 func (fe *FrameEncryptor) EncryptFrames(w io.Writer, frames [][]byte) error {
 	// Compress frames with varint delimiters.
 	var plaintext bytes.Buffer
@@ -135,27 +120,7 @@ func NewFrameDecryptor(key *MessageBackupKey) *FrameDecryptor {
 	return &FrameDecryptor{key: key}
 }
 
-// DecryptFrames reads an encrypted backup from r and returns the decrypted
-// frames. The input may be in either the legacy format or the modern format:
-//
-// Legacy format:
-//   - A 16-byte IV
-//   - AES-256-CBC encrypted gzip-compressed varint-delimited frames
-//   - A 32-byte HMAC-SHA256 over the IV and ciphertext
-//
-// Modern format (Rust libsignal ref: rust/message-backup/src/frame.rs:92-117):
-//   - "SBACKUP\x01" magic (8 bytes)
-//   - varint-length-delimited MetadataPb protobuf
-//   - A 16-byte IV
-//   - AES-256-CBC encrypted gzip-compressed varint-delimited frames
-//   - A 32-byte HMAC-SHA256 over the IV and ciphertext only (not the magic or metadata)
-//
-// The format is detected by peeking the first 8 bytes. If they match
-// MagicNumber, the metadata is parsed and validated via ValidateMetadata
-// before the payload is decrypted using the standard CBC+HMAC path.
-//
-// Reads are bounded to maxBackupSize bytes; larger streams are rejected with
-// ErrBackupTooLarge to prevent memory exhaustion from malicious input.
+// DecryptFrames decrypts a legacy or modern (SBACKUP\x01 plus metadata) backup, reading at most maxBackupSize bytes.
 func (fd *FrameDecryptor) DecryptFrames(r io.Reader) (_ [][]byte, err error) {
 	// Read all data, bounded to prevent unbounded allocation.
 	// We read one byte beyond the limit so we can distinguish "exactly at
@@ -252,12 +217,7 @@ func (fd *FrameDecryptor) decryptPayloadWithBudget(content []byte, budget int64)
 	if err != nil {
 		return nil, &ErrCreatingGzipReader{Err: err}
 	}
-	// Rust libsignal's pad_gzipped_bucketed (rust/message-backup/src/export.rs:26)
-	// appends zero bytes after the gzip stream to round the encrypted region up
-	// to a bucketed length, then PKCS7-pads the result for AES-CBC. After
-	// decrypt+unpad those trailing zeros remain. Disable multistream so the
-	// reader returns EOF at the end of the first gzip stream rather than
-	// trying to parse the trailing zeros as a second gzip header.
+	// Single-stream gzip: Rust pads the gzip stream with zeros, which must not be parsed as a second header.
 	gzr.Multistream(false)
 	defer func() {
 		if cerr := gzr.Close(); cerr != nil && err == nil {
@@ -287,11 +247,7 @@ func (fd *FrameDecryptor) decryptPayloadWithBudget(content []byte, budget int64)
 	return frames, nil
 }
 
-// stripModernHeader parses the modern SBACKUP\x01 header from data. It
-// returns the payload (IV||ciphertext||HMAC) and any error. ValidateMetadata
-// is called on the parsed metadata before returning.
-//
-// Rust libsignal ref: rust/message-backup/src/frame/forward_secrecy.rs verify_metadata
+// stripModernHeader parses and validates the SBACKUP\x01 header and returns IV||ciphertext||HMAC.
 func stripModernHeader(data []byte) (payload []byte, err error) {
 	// Skip the 8-byte magic; it was already verified by the caller.
 	off := MagicNumberLen
@@ -327,21 +283,7 @@ func stripModernHeader(data []byte) (payload []byte, err error) {
 	return data[off:], nil
 }
 
-// decodeMetadataPb decodes a MetadataPb protobuf wire-format byte slice into
-// a BackupMetadata struct. It implements the minimal protobuf wire-format
-// decoder needed for this specific message type without requiring a generated
-// .pb.go file.
-//
-// MetadataPb wire format (rust/svrb/src/proto/backup_metadata.proto):
-//
-//	message MetadataPb {
-//	  repeated Pair pair = 1; // field 1, wire type 2 (LEN)
-//	  bytes iv = 2;           // field 2, wire type 2 (LEN)
-//	  message Pair {
-//	    bytes ct = 1;         // field 1, wire type 2 (LEN)
-//	    bytes pw_salt = 2;    // field 2, wire type 2 (LEN)
-//	  }
-//	}
+// decodeMetadataPb decodes a MetadataPb message (rust/svrb/src/proto/backup_metadata.proto).
 func decodeMetadataPb(b []byte) (*BackupMetadata, error) {
 	var meta BackupMetadata
 	for len(b) > 0 {
@@ -476,19 +418,7 @@ func skipProtoField(b []byte, wireType uint64) ([]byte, error) {
 	}
 }
 
-// EncryptFramesModern encrypts a sequence of raw protobuf frame bytes and
-// writes a modern-format backup to w. The output consists of:
-//   - "SBACKUP\x01" magic (8 bytes)
-//   - varint-length-delimited encoded BackupMetadata
-//   - A random 16-byte IV
-//   - AES-256-CBC encrypted gzip-compressed frames (varint-delimited)
-//   - A 32-byte HMAC-SHA256 over the IV and ciphertext only
-//
-// The metadata is validated by ValidateMetadata before encoding. The HMAC
-// covers only the post-metadata payload, matching the Rust libsignal
-// modern-format specification.
-//
-// Rust libsignal ref: rust/message-backup/src/frame.rs:92-117
+// EncryptFramesModern writes a modern backup: magic, validated metadata, IV, ciphertext and an HMAC over IV and ciphertext only.
 func (fe *FrameEncryptor) EncryptFramesModern(w io.Writer, frames [][]byte, meta *BackupMetadata) error {
 	if err := ValidateMetadata(meta); err != nil {
 		return &ErrMetadataValidation{Err: err}
@@ -563,10 +493,7 @@ func (fe *FrameEncryptor) EncryptFramesModern(w io.Writer, frames [][]byte, meta
 	return nil
 }
 
-// encodeMetadataPb encodes a BackupMetadata into MetadataPb protobuf
-// wire format bytes. This is the inverse of decodeMetadataPb.
-//
-// Rust libsignal ref: rust/svrb/src/proto/backup_metadata.proto
+// encodeMetadataPb is the inverse of decodeMetadataPb.
 func encodeMetadataPb(meta *BackupMetadata) ([]byte, error) {
 	var buf bytes.Buffer
 	for _, pair := range meta.Pairs {
@@ -596,10 +523,7 @@ func writeProtoLenField(buf *bytes.Buffer, fieldNum uint64, val []byte) {
 	buf.Write(val)
 }
 
-// VerifyHMAC checks the HMAC of encrypted backup data without decrypting it.
-// The input r should contain the full encrypted backup (IV + ciphertext + HMAC).
-// Reads are bounded to maxBackupSize to prevent an unauthenticated reader from
-// triggering unbounded memory allocation (OOM DoS).
+// VerifyHMAC checks the HMAC of an encrypted backup without decrypting it, reading at most maxBackupSize bytes.
 func VerifyHMAC(key *MessageBackupKey, r io.Reader) error {
 	limited := io.LimitReader(r, maxBackupSize+1)
 	data, err := io.ReadAll(limited)

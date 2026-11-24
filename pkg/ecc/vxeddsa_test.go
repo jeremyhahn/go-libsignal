@@ -1,11 +1,6 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 14 tests in this file exercise X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) requires X25519.
 
 package ecc
 
@@ -432,24 +427,7 @@ func TestVXEdDSARejectsAllZeroSignature(t *testing.T) {
 	}
 }
 
-// TestVXEdDSA_CLibraryTestVector exercises VXEdDSA against the known test vector
-// from libsignal-protocol-c (commit 6e8b5b4).
-//
-// The C library uses a different diversifier convention for its hash functions
-// than the VXEdDSA spec (Section 2.5). Specifically, the spec defines:
-//
-//	hash_i(X) = hash(2^b - 1 - i || X)
-//
-// which gives 32-byte diversifier prefixes like 0xFD FF...FF for hash_2.
-// The C library instead uses single-byte diversifier prefixes (0xFD, 0xFC, etc.).
-// This means the VRF output from the C library will differ from a spec-conformant
-// implementation even with the same key material and message.
-//
-// This test verifies:
-//  1. Our implementation can sign with the given key pair and the signature
-//     round-trips through verify.
-//  2. The VRF output is deterministic for the same (key, message) pair.
-//  3. The VRF output is logged so it can be compared against the C library value.
+// TestVXEdDSA_CLibraryTestVector signs and verifies with the libsignal-protocol-c vector; that library uses single-byte diversifiers.
 func TestVXEdDSA_CLibraryTestVector(t *testing.T) {
 	// Private key from C library test vector (32 bytes, already clamped by GenerateKeyPair
 	// convention but we apply clamping via SetBytesWithClamping internally).
@@ -550,16 +528,7 @@ func TestVXEdDSA_CLibraryTestVector(t *testing.T) {
 	t.Logf("VRF output (32 bytes, hex): %x", vrf1)
 	t.Logf("VRF output length: %d bytes", len(vrf1))
 
-	// The C library test vector lists a VRF output of:
-	//   75ad49bc955f38dcf65fb672086bd509cb4b4c41047db17efdafeebce330371e6
-	// This value is 33 bytes (66 hex chars), which appears to be a transcription
-	// error (extra nibble 'e' inserted). Our 32-byte VRF output (the first 32
-	// bytes of SHA-512 of the cofactored VRF point, per spec Section 4:
-	// v = hash_5(cV) (mod 2^b) where b=256) is:
-	//   75ad49bc955f38dcf65fb672086bd509cb4b4c41047db17efdafeebc330371e6
-	// which matches the C library value when the spurious nibble is removed.
-	//
-	// Verify VRF output matches the (corrected) C library value.
+	// The C vector's 33-byte VRF output carries one stray nibble; without it, it matches this 32-byte output.
 	cLibVRF := "75ad49bc955f38dcf65fb672086bd509cb4b4c41047db17efdafeebc330371e6"
 	ourVRF := hex.EncodeToString(vrf1)
 	if ourVRF == cLibVRF {
@@ -672,13 +641,7 @@ func TestXEdDSA_RatchetingSessionKeyVector(t *testing.T) {
 	})
 }
 
-// TestHashToPoint_NeverReturnsError documents ECC-11: per the Elligator 2 spec
-// the constructed y-coordinate is always a valid Edwards point, so the error
-// branch inside hashToPoint (vxeddsa.go:187-190) is unreachable in practice.
-// This test exercises a wide range of inputs and asserts no error is returned,
-// validating the contract.  A future regression that breaks the algorithm
-// (producing an off-curve y) would surface here rather than silently swallowing
-// the failure as a "hash to point failed" error downstream.
+// TestHashToPoint_NeverReturnsError checks hashToPoint's error branch is unreachable over many inputs.
 func TestHashToPoint_NeverReturnsError(t *testing.T) {
 	inputs := [][]byte{
 		{},

@@ -161,12 +161,7 @@ func TestCreateRSAPrivateKey_InvalidFormat(t *testing.T) {
 	}
 }
 
-// TestCreateSelfSignedCert_RDNOrder is the regression test for finding #32.
-// The Rust device-transfer build_self_signed_name appends RDNs in order CN, O, OU.
-// This test verifies the Go implementation produces the same OID sequence in the
-// Subject (and Issuer) of the DER-encoded certificate.
-//
-// Rust reference: rust/device-transfer/src/lib.rs build_self_signed_name
+// TestCreateSelfSignedCert_RDNOrder checks Subject and Issuer RDNs are ordered CN, O, OU as in Rust.
 func TestCreateSelfSignedCert_RDNOrder(t *testing.T) {
 	keyDER, err := CreateRSAPrivateKey(2048, KeyFormatPKCS8)
 	if err != nil {

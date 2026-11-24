@@ -153,10 +153,7 @@ func (b *IssuanceProofBuilder) preparePointArgs(
 	return args
 }
 
-// Issue generates a new credential and proof over the accumulated attributes.
-//
-// It is critical that different randomness is used each time a credential
-// is issued. Failing to do so effectively reveals the server's private key.
+// Issue returns a credential and proof over the attributes; reusing randomness reveals the server's private key.
 func (b *IssuanceProofBuilder) Issue(
 	keyPair *CredentialKeyPair,
 	randomness [RandomnessLen]byte,

@@ -1,26 +1,4 @@
-// Conformance test: ExpiringProfileKeyCredential V3 and V4 end-to-end
-// byte-identical to Rust.
-//
-// Mirrors rust/zkgroup/tests/integration_tests.rs::test_integration_expiring_profile:
-//
-//   1. server_secret = ServerSecretParams::generate(TEST_ARRAY_32).
-//   2. master_key    = GroupMasterKey::new(TEST_ARRAY_32_1).
-//   3. group         = GroupSecretParams::derive_from_master_key(master_key).
-//   4. aci           = Aci::from_uuid_bytes(TEST_ARRAY_16).
-//   5. profile_key   = ProfileKey::create(TEST_ARRAY_32_1).
-//   6. context       = create_profile_key_credential_request_context(
-//                          TEST_ARRAY_32_3, aci, profile_key).
-//   7. response      = issue_expiring_profile_key_credential(
-//                          TEST_ARRAY_32_4, request, aci, commitment, expiration=17d).
-//   8. credential    = receive_expiring_profile_key_credential(ctx, response, current=15d).
-//   9. presentation  = create_expiring_profile_key_credential_presentation(
-//                          TEST_ARRAY_32_5, group, credential, V).
-//  10. bincode::serialize(&presentation) == PROFILE_KEY_CREDENTIAL_PRESENTATION_V{3,4}_RESULT.
-//
-// V3 and V4 share the issuance + ciphertexts but differ in the underlying
-// PoKShO statement (V4 binds the C_y5 commitment with an extra clause).
-// Without this KAT the V4 path would silently produce bytes that fail
-// verification on the Rust server.
+// Conformance: the ExpiringProfileKeyCredential flow with Rust test_integration_expiring_profile inputs serializes to the V3 and V4 presentation results; V4 adds the C_y5 clause.
 
 package interop
 

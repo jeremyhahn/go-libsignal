@@ -1,22 +1,7 @@
-// Package mlkembraid implements the ML-KEM Braid SCKA protocol.
-//
-// Use IncrementalMLKEM768KEM (via NewIncrementalMLKEM768KEM) as the KEM
-// implementation. It uses internal/incremental_mlkem768 which is a pure-Go,
-// byte-wire-compatible port of the Rust libcrux-ml-kem incremental API.
-// The incremental split (Encaps1/Encaps2) is fully implemented: Encaps1
-// persists a 2080-byte EncapsulationState and Encaps2 completes encapsulation,
-// producing wire-compatible ct1 (960 bytes) and ct2 (128 bytes).
-//
-// The legacy MLKEM768IncrementalKEM is retained for backward compatibility.
+// Package mlkembraid implements the ML-KEM Braid SCKA protocol; use IncrementalMLKEM768KEM, which is wire-compatible with libcrux-ml-kem.
 package mlkembraid
 
-// Braid is the top-level ML-KEM Braid SCKA protocol instance. It manages
-// the internal state machine and provides Send/Receive operations for
-// exchanging post-quantum key agreement messages.
-//
-// Braid is NOT safe for concurrent use by multiple goroutines.
-// The session-level serialization (load -> mutate -> store) provides
-// implicit synchronization when used through the session cipher.
+// Braid is an ML-KEM Braid SCKA instance with Send and Receive; it is not safe for concurrent use.
 type Braid struct {
 	state     *State
 	kem       IncrementalKEM
@@ -127,9 +112,7 @@ func (b *Braid) State() *State {
 	return b.state
 }
 
-// BraidFromState constructs a Braid from a previously deserialized State.
-// This is the inverse of Braid.State(), used by UnmarshalStateProto to
-// reconstruct a Braid from a proto-decoded State.
+// BraidFromState constructs a Braid from a deserialized State, the inverse of Braid.State.
 func BraidFromState(state *State, kemImpl IncrementalKEM, chunkSize int) *Braid {
 	return &Braid{
 		state:     state,

@@ -1,32 +1,8 @@
 //go:build !fips140only
 
-// FIPS 140-3 exemption -- see docs/FIPS.md.
-//
-// 1 test in this file exercises X25519. FIPS 140-3 does not approve that,
-// but the X3DH key agreement specification (section 2.1) requires it, so the
-// fips140only build tag drops this file from the FIPS gate. `make test` and
-// `make coverage` still run it.
+// FIPS 140-3 exemption (docs/FIPS.md): X3DH (section 2.1) requires X25519.
 
-// Conformance test: Sealed Sender v1 wire-format parity vs Rust libsignal.
-//
-// The Rust emitter (tests/interop/rust/src/bin/wire_emitter.rs) produced the
-// fixture by calling sealed_sender_encrypt with a seeded ephemeral key pair.
-// The ephemeral private key is NOT exposed in the fixture inputs, so we cannot
-// reproduce the ciphertext bytes in Go.
-//
-// Assertion strategy: DECRYPT-AND-MATCH.
-//   Load the Rust-emitted ciphertext, decrypt it with Go's
-//   SealedSenderDecryptToUSMC using Bob's identity key pair, and assert:
-//     1. The sender UUID, E164, and device ID match Alice's fixture values.
-//     2. The sender certificate bytes are byte-identical to the fixture's
-//        sender_cert_serialized (strongest structural check available).
-//     3. The sender certificate validates against the trust root.
-//
-// Full ciphertext bytes-equal would require the Rust emitter to expose the
-// ephemeral private key; if added in a future RUST_REV bump, upgrade to
-// that stronger assertion.
-//
-// Rust upstream: rust/protocol/src/sealed_sender.rs (libsignal v0.92.2)
+// Conformance: Go decrypts the Rust-emitted Sealed Sender v1 message and matches the sender UUID, E164, device, certificate bytes and trust-root validation; the fixture omits the ephemeral key, so ciphertext bytes are not compared.
 
 package interop
 

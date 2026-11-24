@@ -11,16 +11,11 @@ import (
 	"github.com/jeremyhahn/go-libsignal/pkg/util/crypto/secret"
 )
 
-// OPRFBackup4 represents a v4 SVR backup using the OPRF protocol. It generates
-// per-server secret shares for the OPRF key, encryption key, and zero key,
-// along with authentication commitments, then produces serialized protobuf
-// requests to send to each server.
+// OPRFBackup4 is an SVR4 OPRF backup: per-server shares and commitments serialized as requests.
 type OPRFBackup4 struct {
 	// Requests contains one serialized Request4 per server.
 	Requests [][]byte
-	// Output is the derived encryption key that the client uses to encrypt
-	// its secret before storing it. It is held in guarded memory and must be
-	// destroyed by the caller via Zeroize() when no longer needed.
+	// Output is the derived encryption key in guarded memory; the caller must Zeroize it.
 	Output *secret.Secret
 }
 
@@ -31,9 +26,7 @@ func (b *OPRFBackup4) Zeroize() {
 	}
 }
 
-// NewOPRFBackup4 creates a new OPRF-based backup request set for the given
-// servers. The password is used to derive the OPRF input, and maxTries sets
-// the server-side rate limit for restore attempts.
+// NewOPRFBackup4 returns backup requests for servers from password, with maxTries restore attempts.
 func NewOPRFBackup4(serverIDs []uint64, password []byte, maxTries uint32) (*OPRFBackup4, error) {
 	if len(serverIDs) == 0 {
 		return nil, ErrBadData

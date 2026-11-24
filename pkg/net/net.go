@@ -1,16 +1,7 @@
 // Copyright 2024 Signal Messenger, LLC.
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Package net provides the networking layer for the Signal protocol library.
-//
-// It defines types and interfaces for communicating with Signal's backend
-// services including the chat service, Contact Discovery Service (CDSI),
-// and Secure Value Recovery (SVR). The package handles environment
-// configuration (production vs staging), authentication, WebSocket transport,
-// enclave attestation, and certificate pinning.
-//
-// This is primarily an interface layer. Concrete transport implementations
-// are expected to be provided by callers.
+// Package net defines the interfaces and configuration for Signal's chat, CDSI and SVR services; callers supply the transports.
 package net
 
 import "fmt"

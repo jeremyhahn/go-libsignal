@@ -25,12 +25,7 @@ func NewPreKeySignalMessageFromBytes(serialized []byte, serializer PreKeySignalM
 		return nil, err
 	}
 
-	// For version 4+ (PQXDH), Kyber pre-key payload MUST be present on incoming messages.
-	// This matches Rust's PreKeySignalMessage::try_from which requires kyber_payload
-	// for versions above CIPHERTEXT_MESSAGE_PRE_KYBER_VERSION.
-	// This check is NOT in the constructor path (NewPreKeySignalMessageWithKyber) because
-	// Rust's PreKeySignalMessage::new() does not enforce this — it is only validated on
-	// deserialization of received messages.
+	// Version 4+ messages must carry a Kyber payload on receipt, as Rust PreKeySignalMessage::try_from.
 	if signalMessageStructure.Version > PreKyberVersion {
 		if signalMessageStructure.KyberPreKeyID == nil || signalMessageStructure.KyberCiphertext == nil {
 			return nil, newMissingKyberPayloadError(signalMessageStructure.Version)

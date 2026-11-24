@@ -420,11 +420,7 @@ func SerializeCreateCallLinkCredentialRequest(r *CreateCallLinkCredentialRequest
 	return Serialize(inner)
 }
 
-// DeserializeCreateCallLinkCredentialRequest deserializes a
-// CreateCallLinkCredentialRequest from raw bytes.
-// The serialized form is BlindedRoomID (64 bytes: D1+D2) + BlindingPublicKey (32 bytes).
-// Rust oracle: bincode reject_trailing_bytes() — exactly 96 bytes are accepted.
-// rust/zkgroup/src/common/serialization.rs zkgroup_bincode_options().
+// DeserializeCreateCallLinkCredentialRequest decodes exactly 96 bytes: blinded room ID and blinding public key.
 func DeserializeCreateCallLinkCredentialRequest(data []byte) (*CreateCallLinkCredentialRequest, error) {
 	if len(data) != 96 {
 		return nil, &ZkGroupDeserializationFailure{TypeName: "CreateCallLinkCredentialRequest"}
@@ -446,15 +442,7 @@ func DeserializeCreateCallLinkCredentialRequest(data []byte) (*CreateCallLinkCre
 	}, nil
 }
 
-// EncodeCreateCallLinkCredentialResponse serializes a CreateCallLinkCredentialResponse
-// to the Rust bincode wire format.
-//
-// Layout (matches Rust CreateCallLinkCredentialResponse bincode/serde at
-// rust/zkgroup/src/api/call_links/create_credential.rs:115-121):
-//
-//	[0x00]          reserved byte
-//	[8 bytes LE]    timestamp (u64, little-endian per bincode with_fixint_encoding)
-//	[variable]      BlindedIssuanceProof
+// EncodeCreateCallLinkCredentialResponse encodes r as Rust bincode: reserved byte, u64 LE timestamp, BlindedIssuanceProof.
 func EncodeCreateCallLinkCredentialResponse(r *CreateCallLinkCredentialResponse) []byte {
 	tsBytes := r.Timestamp.ToLeBytes()
 	proof := zkcredential.EncodeBlindedIssuanceProof(r.BlindedCredential)

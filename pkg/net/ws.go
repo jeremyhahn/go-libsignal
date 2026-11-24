@@ -58,10 +58,7 @@ type WebSocketConnection interface {
 	// SendMessage sends a binary WebSocket message.
 	SendMessage(ctx context.Context, data []byte) error
 
-	// ReceiveMessage blocks until a message is received, the connection
-	// is closed, or the context is canceled.
-	// Returns the message data, or an error if the connection closed
-	// or the context was canceled.
+	// ReceiveMessage blocks until a message arrives, the connection closes or ctx is canceled.
 	ReceiveMessage(ctx context.Context) ([]byte, error)
 
 	// Close sends a close frame and closes the connection.
