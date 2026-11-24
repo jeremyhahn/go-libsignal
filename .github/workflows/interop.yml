@@ -42,7 +42,7 @@ jobs:
     steps:
       # Checked out under a subdirectory so the upstream tree can sit beside it
       # — see the layout note in interop-live below, which depends on it.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           path: go-libsignal
 
@@ -76,7 +76,7 @@ jobs:
       # sibling, and failed everywhere else. Checking out under go-libsignal/
       # and cloning upstream to libsignal/ reproduces that layout from the
       # pinned commit, deterministically.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           path: go-libsignal
 
